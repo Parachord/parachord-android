@@ -1,164 +1,188 @@
 package com.parachord.android.playback.handlers
 
-import android.content.Context
-import android.content.pm.PackageManager
 import android.util.Log
-import com.parachord.android.BuildConfig
+import com.parachord.android.auth.OAuthManager
+import com.parachord.android.data.api.SpPlaybackRequest
+import com.parachord.android.data.api.SpPlaybackState
+import com.parachord.android.data.api.SpTransferRequest
+import com.parachord.android.data.api.SpotifyApi
 import com.parachord.android.data.db.entity.TrackEntity
-import com.spotify.android.appremote.api.ConnectionParams
-import com.spotify.android.appremote.api.Connector
-import com.spotify.android.appremote.api.SpotifyAppRemote
-import com.spotify.protocol.types.PlayerState
-import dagger.hilt.android.qualifiers.ApplicationContext
-import kotlinx.coroutines.TimeoutCancellationException
-import kotlinx.coroutines.flow.MutableStateFlow
-import kotlinx.coroutines.flow.StateFlow
-import kotlinx.coroutines.flow.asStateFlow
-import kotlinx.coroutines.suspendCancellableCoroutine
-import kotlinx.coroutines.withTimeout
+import com.parachord.android.data.store.SettingsStore
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.Job
+import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.isActive
+import kotlinx.coroutines.launch
+import retrofit2.HttpException
 import javax.inject.Inject
 import javax.inject.Singleton
-import kotlin.coroutines.resume
-import kotlin.coroutines.resumeWithException
 
 /**
- * Handles Spotify playback through the Spotify App Remote SDK.
+ * Handles Spotify playback via the Web API (Spotify Connect).
  *
- * This mirrors the desktop app's Spotify Connect approach but uses the Android-native
- * App Remote SDK instead, which controls the Spotify app running on the same device.
- * Requires the Spotify app to be installed.
+ * Matches the desktop app's approach: uses the Spotify Web API to control
+ * playback on an active Spotify device (phone, desktop, etc.), rather than
+ * embedding a player. Requires an active Spotify device and Premium account.
  */
 @Singleton
 class SpotifyPlaybackHandler @Inject constructor(
-    @ApplicationContext private val context: Context,
+    private val spotifyApi: SpotifyApi,
+    private val settingsStore: SettingsStore,
+    private val oAuthManager: OAuthManager,
 ) : SourceHandler, ExternalPlaybackHandler {
 
     companion object {
         private const val TAG = "SpotifyPlayback"
     }
 
-    private var appRemote: SpotifyAppRemote? = null
+    private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Main)
+    private var statePollingJob: Job? = null
 
-    private val _playerState = MutableStateFlow<PlayerState?>(null)
-    val playerState: StateFlow<PlayerState?> = _playerState.asStateFlow()
+    // Cached playback state from Web API polling
+    private var cachedIsPlaying = false
+    private var cachedPosition = 0L
+    private var cachedDuration = 0L
+    private var _isConnected = false
 
-    override val isConnected: Boolean
-        get() = appRemote?.isConnected == true
+    override val isConnected: Boolean get() = _isConnected
 
     override fun canHandle(track: TrackEntity): Boolean =
         track.resolver == "spotify" && track.spotifyUri != null
 
-    override suspend fun createMediaItem(track: TrackEntity): Nothing? {
-        // Spotify playback is external — not through ExoPlayer
-        return null
-    }
-
-    /** Connect to Spotify App Remote. Must be called before playback. */
-    suspend fun connect(): Boolean {
-        if (appRemote?.isConnected == true) return true
-
-        val clientId = BuildConfig.SPOTIFY_CLIENT_ID
-        if (clientId.isBlank()) {
-            Log.e(TAG, "No Spotify client ID configured")
-            return false
-        }
-
-        if (!isSpotifyInstalled()) {
-            Log.e(TAG, "Spotify app is not installed — App Remote requires it")
-            return false
-        }
-
-        return try {
-            val params = ConnectionParams.Builder(clientId)
-                .setRedirectUri("parachord://auth/callback/spotify")
-                .showAuthView(true)
-                .build()
-
-            Log.d(TAG, "Connecting to Spotify App Remote...")
-            appRemote = withTimeout(10_000L) {
-                suspendCancellableCoroutine { cont ->
-                    SpotifyAppRemote.connect(context, params, object : Connector.ConnectionListener {
-                        override fun onConnected(remote: SpotifyAppRemote) {
-                            Log.d(TAG, "Connected to Spotify App Remote")
-                            cont.resume(remote)
-                        }
-
-                        override fun onFailure(error: Throwable) {
-                            Log.e(TAG, "Spotify App Remote connection failed", error)
-                            cont.resumeWithException(error)
-                        }
-                    })
-                }
-            }
-
-            // Subscribe to player state updates
-            appRemote?.playerApi?.subscribeToPlayerState()?.setEventCallback { state ->
-                _playerState.value = state
-            }
-
-            true
-        } catch (e: TimeoutCancellationException) {
-            Log.e(TAG, "Spotify App Remote connection timed out (10s)")
-            false
-        } catch (e: Exception) {
-            Log.e(TAG, "Failed to connect to Spotify", e)
-            false
-        }
-    }
-
-    private fun isSpotifyInstalled(): Boolean =
-        try {
-            context.packageManager.getPackageInfo("com.spotify.music", 0)
-            true
-        } catch (_: PackageManager.NameNotFoundException) {
-            false
-        }
-
-    fun disconnect() {
-        appRemote?.let { SpotifyAppRemote.disconnect(it) }
-        appRemote = null
-        _playerState.value = null
-    }
+    override suspend fun createMediaItem(track: TrackEntity): Nothing? = null
 
     override suspend fun play(track: TrackEntity) {
         val uri = track.spotifyUri
         if (uri == null) {
-            Log.w(TAG, "No spotifyUri on track '${track.title}' — cannot play")
+            Log.w(TAG, "No spotifyUri on track '${track.title}'")
             return
         }
-        Log.d(TAG, "play() called for '${track.title}' uri=$uri connected=$isConnected")
-        if (!isConnected) {
-            if (!connect()) {
-                Log.e(TAG, "Cannot play: not connected to Spotify")
-                return
+        Log.d(TAG, "play() via Web API for '${track.title}' uri=$uri")
+
+        val success = withAuth { auth ->
+            // Check for available devices
+            val devicesResponse = spotifyApi.getDevices(auth)
+            val devices = devicesResponse.devices
+            Log.d(TAG, "Devices: ${devices.map { "${it.name}(active=${it.isActive}, type=${it.type})" }}")
+
+            if (devices.isEmpty()) {
+                Log.e(TAG, "No Spotify devices available — open Spotify app first")
+                return@withAuth false
+            }
+
+            // If no active device, transfer to the first phone/computer
+            if (devices.none { it.isActive }) {
+                val device = devices.first()
+                Log.d(TAG, "Transferring playback to '${device.name}'")
+                spotifyApi.transferPlayback(auth, SpTransferRequest(deviceIds = listOf(device.id)))
+                delay(500) // Give Spotify a moment to activate the device
+            }
+
+            // Start playback
+            val response = spotifyApi.startPlayback(auth, SpPlaybackRequest(uris = listOf(uri)))
+            if (response.isSuccessful) {
+                Log.d(TAG, "Playback started for $uri")
+                true
+            } else {
+                Log.e(TAG, "Start playback failed: ${response.code()} ${response.errorBody()?.string()}")
+                false
             }
         }
-        Log.d(TAG, "Playing Spotify URI: $uri")
-        appRemote?.playerApi?.play(uri)
+
+        if (success == true) {
+            _isConnected = true
+            cachedIsPlaying = true
+            cachedPosition = 0L
+            cachedDuration = track.duration ?: 0L
+            startStatePolling()
+        }
     }
 
     override suspend fun pause() {
-        appRemote?.playerApi?.pause()
+        withAuth { auth -> spotifyApi.pausePlayback(auth) }
+        cachedIsPlaying = false
     }
 
     override suspend fun resume() {
-        appRemote?.playerApi?.resume()
+        withAuth { auth -> spotifyApi.resumePlayback(auth) }
+        cachedIsPlaying = true
     }
 
     override suspend fun seekTo(positionMs: Long) {
-        appRemote?.playerApi?.seekTo(positionMs)
+        withAuth { auth -> spotifyApi.seekPlayback(auth, positionMs) }
+        cachedPosition = positionMs
     }
 
     override suspend fun stop() {
-        appRemote?.playerApi?.pause()
+        pause()
+        stopStatePolling()
     }
 
     /** Get current playback position from Spotify. */
-    fun getPosition(): Long = _playerState.value?.playbackPosition ?: 0L
+    fun getPosition(): Long = cachedPosition
 
     /** Get current track duration from Spotify. */
-    fun getDuration(): Long = _playerState.value?.track?.duration ?: 0L
+    fun getDuration(): Long = cachedDuration
 
     /** Whether Spotify is currently playing. */
-    fun isPlaying(): Boolean = _playerState.value?.isPaused == false
+    fun isPlaying(): Boolean = cachedIsPlaying
+
+    fun disconnect() {
+        stopStatePolling()
+        _isConnected = false
+    }
+
+    /** Poll Spotify Web API for playback state, cached for the PlaybackController. */
+    private fun startStatePolling() {
+        statePollingJob?.cancel()
+        statePollingJob = scope.launch {
+            while (isActive) {
+                try {
+                    val state = fetchPlaybackState()
+                    if (state != null) {
+                        cachedIsPlaying = state.isPlaying
+                        cachedPosition = state.progressMs ?: 0L
+                        cachedDuration = state.item?.durationMs ?: 0L
+                    }
+                } catch (_: Exception) {
+                    // Ignore polling errors
+                }
+                delay(1000)
+            }
+        }
+    }
+
+    private fun stopStatePolling() {
+        statePollingJob?.cancel()
+    }
+
+    private suspend fun fetchPlaybackState(): SpPlaybackState? =
+        withAuth { auth ->
+            val response = spotifyApi.getPlaybackState(auth)
+            if (response.isSuccessful) response.body() else null
+        }
+
+    /**
+     * Execute a block with a valid Spotify access token.
+     * On HTTP 401, refreshes the token and retries once.
+     */
+    private suspend fun <T> withAuth(block: suspend (auth: String) -> T): T? {
+        val token = settingsStore.getSpotifyAccessToken() ?: return null
+        return try {
+            block("Bearer $token")
+        } catch (e: HttpException) {
+            if (e.code() == 401 && oAuthManager.refreshSpotifyToken()) {
+                val newToken = settingsStore.getSpotifyAccessToken() ?: return null
+                block("Bearer $newToken")
+            } else {
+                Log.e(TAG, "Spotify API error: ${e.code()}")
+                null
+            }
+        } catch (e: Exception) {
+            Log.e(TAG, "Spotify API error", e)
+            null
+        }
+    }
 }

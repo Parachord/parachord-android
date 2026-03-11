@@ -2,17 +2,22 @@ package com.parachord.android.data.api
 
 import kotlinx.serialization.SerialName
 import kotlinx.serialization.Serializable
+import retrofit2.Response
+import retrofit2.http.Body
 import retrofit2.http.GET
 import retrofit2.http.Header
+import retrofit2.http.PUT
 import retrofit2.http.Path
 import retrofit2.http.Query
 
 /**
- * Spotify Web API — search endpoints.
+ * Spotify Web API — search + playback control endpoints.
  * Requires Bearer token in Authorization header.
  * https://developer.spotify.com/documentation/web-api
  */
 interface SpotifyApi {
+
+    // --- Search ---
 
     @GET("v1/search")
     suspend fun search(
@@ -36,6 +41,46 @@ interface SpotifyApi {
         @Path("id") albumId: String,
         @Query("limit") limit: Int = 50,
     ): SpPaginated<SpSimpleTrack>
+
+    // --- Playback Control (Spotify Connect) ---
+
+    @GET("v1/me/player/devices")
+    suspend fun getDevices(
+        @Header("Authorization") auth: String,
+    ): SpDevicesResponse
+
+    @PUT("v1/me/player")
+    suspend fun transferPlayback(
+        @Header("Authorization") auth: String,
+        @Body body: SpTransferRequest,
+    ): Response<Unit>
+
+    @PUT("v1/me/player/play")
+    suspend fun startPlayback(
+        @Header("Authorization") auth: String,
+        @Body body: SpPlaybackRequest,
+    ): Response<Unit>
+
+    @PUT("v1/me/player/play")
+    suspend fun resumePlayback(
+        @Header("Authorization") auth: String,
+    ): Response<Unit>
+
+    @PUT("v1/me/player/pause")
+    suspend fun pausePlayback(
+        @Header("Authorization") auth: String,
+    ): Response<Unit>
+
+    @PUT("v1/me/player/seek")
+    suspend fun seekPlayback(
+        @Header("Authorization") auth: String,
+        @Query("position_ms") positionMs: Long,
+    ): Response<Unit>
+
+    @GET("v1/me/player")
+    suspend fun getPlaybackState(
+        @Header("Authorization") auth: String,
+    ): Response<SpPlaybackState>
 }
 
 // --- Response models ---
@@ -124,3 +169,38 @@ data class SpImage(
 fun List<SpImage>.bestImageUrl(): String? =
     sortedBy { it.width ?: 0 }.firstOrNull { (it.width ?: 0) >= 300 }?.url
         ?: firstOrNull()?.url
+
+// --- Playback Control models ---
+
+@Serializable
+data class SpDevicesResponse(
+    val devices: List<SpDevice> = emptyList(),
+)
+
+@Serializable
+data class SpDevice(
+    val id: String,
+    val name: String,
+    @SerialName("is_active") val isActive: Boolean = false,
+    val type: String = "",
+)
+
+@Serializable
+data class SpTransferRequest(
+    @SerialName("device_ids") val deviceIds: List<String>,
+    val play: Boolean = true,
+)
+
+@Serializable
+data class SpPlaybackRequest(
+    val uris: List<String>? = null,
+    @SerialName("context_uri") val contextUri: String? = null,
+)
+
+@Serializable
+data class SpPlaybackState(
+    @SerialName("is_playing") val isPlaying: Boolean = false,
+    @SerialName("progress_ms") val progressMs: Long? = null,
+    val item: SpTrack? = null,
+    val device: SpDevice? = null,
+)
