@@ -8,6 +8,10 @@ import androidx.browser.customtabs.CustomTabsIntent
 import com.parachord.android.BuildConfig
 import com.parachord.android.data.store.SettingsStore
 import dagger.hilt.android.qualifiers.ApplicationContext
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.sync.Mutex
+import kotlinx.coroutines.sync.withLock
+import kotlinx.coroutines.withContext
 import kotlinx.serialization.SerialName
 import kotlinx.serialization.Serializable
 import kotlinx.serialization.json.Json
@@ -34,43 +38,61 @@ class OAuthManager @Inject constructor(
     // PKCE state for Spotify
     private var codeVerifier: String? = null
 
+    /** Mutex to prevent concurrent refresh attempts. */
+    private val refreshMutex = Mutex()
+
     /**
      * Refresh the Spotify access token using the stored refresh token.
      * Returns true if the token was refreshed successfully.
      * Called automatically by SpotifyProvider and ResolverManager on HTTP 401.
+     * Uses Dispatchers.IO since OkHttp execute() is a blocking call.
      */
-    suspend fun refreshSpotifyToken(): Boolean {
-        val refreshToken = settingsStore.getSpotifyRefreshToken() ?: return false
+    suspend fun refreshSpotifyToken(): Boolean = refreshMutex.withLock {
+        val refreshToken = settingsStore.getSpotifyRefreshToken()
+        if (refreshToken == null) {
+            Log.w(TAG, "No refresh token stored — re-auth required")
+            return false
+        }
         val clientId = BuildConfig.SPOTIFY_CLIENT_ID
-        if (clientId.isBlank()) return false
+        if (clientId.isBlank()) {
+            Log.w(TAG, "No Spotify client ID configured")
+            return false
+        }
 
         return try {
-            val body = FormBody.Builder()
-                .add("grant_type", "refresh_token")
-                .add("refresh_token", refreshToken)
-                .add("client_id", clientId)
-                .build()
+            withContext(Dispatchers.IO) {
+                val body = FormBody.Builder()
+                    .add("grant_type", "refresh_token")
+                    .add("refresh_token", refreshToken)
+                    .add("client_id", clientId)
+                    .build()
 
-            val request = Request.Builder()
-                .url("https://accounts.spotify.com/api/token")
-                .post(body)
-                .build()
+                val request = Request.Builder()
+                    .url("https://accounts.spotify.com/api/token")
+                    .post(body)
+                    .build()
 
-            val response = okHttpClient.newCall(request).execute()
-            val responseBody = response.body?.string() ?: return false
+                val response = okHttpClient.newCall(request).execute()
+                val responseBody = response.body?.string()
 
-            if (!response.isSuccessful) {
-                Log.e(TAG, "Spotify token refresh failed: $responseBody")
-                return false
+                if (responseBody == null) {
+                    Log.e(TAG, "Spotify token refresh: empty response body")
+                    return@withContext false
+                }
+
+                if (!response.isSuccessful) {
+                    Log.e(TAG, "Spotify token refresh failed (${response.code}): $responseBody")
+                    return@withContext false
+                }
+
+                val tokenResponse = json.decodeFromString<SpotifyRefreshResponse>(responseBody)
+                settingsStore.setSpotifyTokens(
+                    tokenResponse.accessToken,
+                    tokenResponse.refreshToken ?: refreshToken, // keep old if not returned
+                )
+                Log.d(TAG, "Spotify token refreshed successfully")
+                true
             }
-
-            val tokenResponse = json.decodeFromString<SpotifyRefreshResponse>(responseBody)
-            settingsStore.setSpotifyTokens(
-                tokenResponse.accessToken,
-                tokenResponse.refreshToken ?: refreshToken, // keep old if not returned
-            )
-            Log.d(TAG, "Spotify token refreshed successfully")
-            true
         } catch (e: Exception) {
             Log.e(TAG, "Spotify token refresh error", e)
             false
