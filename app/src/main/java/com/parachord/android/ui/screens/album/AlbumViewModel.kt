@@ -8,6 +8,7 @@ import com.parachord.android.data.metadata.AlbumDetail
 import com.parachord.android.data.metadata.MetadataService
 import com.parachord.android.data.metadata.TrackSearchResult
 import com.parachord.android.playback.PlaybackController
+import com.parachord.android.resolver.ResolverManager
 import dagger.hilt.android.lifecycle.HiltViewModel
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
@@ -20,6 +21,7 @@ import javax.inject.Inject
 class AlbumViewModel @Inject constructor(
     savedStateHandle: SavedStateHandle,
     private val metadataService: MetadataService,
+    private val resolverManager: ResolverManager,
     private val playbackController: PlaybackController,
 ) : ViewModel() {
 
@@ -64,15 +66,17 @@ class AlbumViewModel @Inject constructor(
         viewModelScope.launch {
             _isResolving.value = true
             try {
-                val resolvedTracks = tracks.map { it.toTrackEntity(detail) }
-                playbackController.playQueue(resolvedTracks, startIndex = index)
-            } catch (_: Exception) {
-                // Failed to resolve — try single track
+                // Resolve the clicked track through the .axe resolver pipeline
                 val track = tracks[index]
-                val resolved = metadataService.resolveTrack(track.title, track.artist)
-                if (resolved != null) {
-                    playbackController.playTrack(resolved.toTrackEntity(detail))
-                }
+                val query = "${track.artist} - ${track.title}"
+                val sources = resolverManager.resolve(query)
+                val best = sources.firstOrNull() ?: return@launch
+
+                // Build the full queue with this resolved source for the clicked track
+                val entity = track.toTrackEntity(detail, best.url, best.sourceType)
+                playbackController.playTrack(entity)
+            } catch (_: Exception) {
+                // resolution failed
             } finally {
                 _isResolving.value = false
             }
@@ -80,17 +84,43 @@ class AlbumViewModel @Inject constructor(
     }
 
     fun playAll() {
-        playTrack(0)
+        val detail = _albumDetail.value ?: return
+        val tracks = detail.tracks
+        if (tracks.isEmpty()) return
+
+        viewModelScope.launch {
+            _isResolving.value = true
+            try {
+                // Resolve all tracks through the .axe resolver pipeline
+                val entities = tracks.mapNotNull { track ->
+                    val query = "${track.artist} - ${track.title}"
+                    val sources = resolverManager.resolve(query)
+                    val best = sources.firstOrNull() ?: return@mapNotNull null
+                    track.toTrackEntity(detail, best.url, best.sourceType)
+                }
+                if (entities.isNotEmpty()) {
+                    playbackController.playQueue(entities, startIndex = 0)
+                }
+            } catch (_: Exception) {
+                // resolution failed
+            } finally {
+                _isResolving.value = false
+            }
+        }
     }
 }
 
-private fun TrackSearchResult.toTrackEntity(album: AlbumDetail) = TrackEntity(
-    id = spotifyId ?: "resolved-${title.hashCode()}-${artist.hashCode()}",
+private fun TrackSearchResult.toTrackEntity(
+    album: AlbumDetail,
+    resolvedUrl: String,
+    sourceType: String,
+) = TrackEntity(
+    id = "resolved-${title.hashCode()}-${artist.hashCode()}-${album.title.hashCode()}",
     title = title,
     artist = artist,
     album = album.title,
     duration = duration,
     artworkUrl = artworkUrl ?: album.artworkUrl,
-    sourceType = if (spotifyId != null) "spotify" else null,
-    sourceUrl = previewUrl,
+    sourceType = sourceType,
+    sourceUrl = resolvedUrl,
 )

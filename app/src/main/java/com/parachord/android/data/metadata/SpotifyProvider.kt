@@ -159,32 +159,6 @@ class SpotifyProvider @Inject constructor(
             null
         }
 
-    /** Resolve a single track to its Spotify preview URL. */
-    suspend fun resolveTrack(title: String, artist: String): TrackSearchResult? =
-        try {
-            val token = getAccessToken() ?: return null
-            val response = api.search(
-                auth = "Bearer $token",
-                query = "track:$title artist:$artist",
-                type = "track",
-                limit = 1,
-            )
-            response.tracks?.items?.firstOrNull()?.let { t ->
-                TrackSearchResult(
-                    title = t.name,
-                    artist = t.artistName,
-                    album = t.album?.name,
-                    duration = t.durationMs,
-                    artworkUrl = t.album?.images?.bestImageUrl(),
-                    previewUrl = t.previewUrl,
-                    spotifyId = t.id,
-                    provider = name,
-                )
-            }
-        } catch (_: Exception) {
-            null
-        }
-
     private suspend fun getAccessToken(): String? =
         settingsStore.getSpotifyAccessTokenFlow().firstOrNull()
 }

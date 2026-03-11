@@ -100,10 +100,6 @@ class MetadataService @Inject constructor(
         results.maxByOrNull { it.tracks.size }
     }
 
-    /** Resolve a track to a playable source via Spotify. */
-    suspend fun resolveTrack(title: String, artist: String): TrackSearchResult? =
-        if (spotify.isAvailable()) spotify.resolveTrack(title, artist) else null
-
     private suspend fun availableProviders(): List<MetadataProvider> =
         providers.filter { it.isAvailable() }
 
