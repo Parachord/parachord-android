@@ -18,7 +18,7 @@ import com.parachord.android.data.db.entity.PlaylistEntity
         PlaylistEntity::class,
     ],
     version = 1,
-    exportSchema = true,
+    exportSchema = false,
 )
 abstract class ParachordDatabase : RoomDatabase() {
     abstract fun trackDao(): TrackDao
