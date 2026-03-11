@@ -3,6 +3,7 @@ package com.parachord.android.data.api
 import kotlinx.serialization.SerialName
 import kotlinx.serialization.Serializable
 import retrofit2.http.GET
+import retrofit2.http.Path
 import retrofit2.http.Query
 
 /**
@@ -32,6 +33,14 @@ interface MusicBrainzApi {
         @Query("limit") limit: Int = 10,
         @Query("fmt") fmt: String = "json",
     ): MbArtistSearchResponse
+
+    /** Look up a release by MBID with recordings included for tracklist. */
+    @GET("release/{id}")
+    suspend fun getRelease(
+        @Path("id") releaseId: String,
+        @Query("inc") inc: String = "recordings+artist-credits",
+        @Query("fmt") fmt: String = "json",
+    ): MbReleaseDetail
 }
 
 // --- Response models ---
@@ -105,4 +114,48 @@ data class MbArtist(
 data class MbTag(
     val name: String,
     val count: Int = 0,
+)
+
+// --- Release detail (lookup with inc=recordings) ---
+
+@Serializable
+data class MbReleaseDetail(
+    val id: String,
+    val title: String,
+    @SerialName("artist-credit") val artistCredit: List<MbArtistCredit> = emptyList(),
+    val date: String? = null,
+    val media: List<MbMedia> = emptyList(),
+) {
+    val artistName: String get() = artistCredit.joinToString(", ") { it.name }
+    val year: Int? get() = date?.take(4)?.toIntOrNull()
+}
+
+@Serializable
+data class MbMedia(
+    val position: Int? = null,
+    val format: String? = null,
+    val tracks: List<MbTrack> = emptyList(),
+)
+
+@Serializable
+data class MbTrack(
+    val id: String,
+    val number: String? = null,
+    val title: String,
+    val length: Long? = null,
+    val position: Int? = null,
+    @SerialName("artist-credit") val artistCredit: List<MbArtistCredit> = emptyList(),
+    val recording: MbTrackRecording? = null,
+) {
+    val artistName: String
+        get() = artistCredit.ifEmpty { recording?.artistCredit ?: emptyList() }
+            .joinToString(", ") { it.name }
+}
+
+@Serializable
+data class MbTrackRecording(
+    val id: String,
+    val title: String,
+    val length: Long? = null,
+    @SerialName("artist-credit") val artistCredit: List<MbArtistCredit> = emptyList(),
 )

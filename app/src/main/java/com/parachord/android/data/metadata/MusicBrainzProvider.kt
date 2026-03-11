@@ -80,6 +80,38 @@ class MusicBrainzProvider @Inject constructor(
             null
         }
 
+    override suspend fun getAlbumTracks(albumTitle: String, artistName: String): AlbumDetail? =
+        try {
+            // Search for the release to get its MBID
+            val query = "release:\"$albumTitle\" AND artist:\"$artistName\""
+            val results = api.searchReleases(query, limit = 1)
+            val release = results.releases.firstOrNull() ?: return null
+
+            // Look up the release with recordings included
+            val detail = api.getRelease(release.id)
+            val tracks = detail.media.flatMap { it.tracks }
+            if (tracks.isEmpty()) return null
+
+            AlbumDetail(
+                title = detail.title,
+                artist = detail.artistName,
+                year = detail.year,
+                tracks = tracks.map { t ->
+                    TrackSearchResult(
+                        title = t.recording?.title ?: t.title,
+                        artist = t.artistName.ifBlank { detail.artistName },
+                        album = detail.title,
+                        duration = t.length ?: t.recording?.length,
+                        mbid = t.recording?.id ?: t.id,
+                        provider = name,
+                    )
+                },
+                provider = name,
+            )
+        } catch (_: Exception) {
+            null
+        }
+
     override suspend fun getArtistAlbums(artistName: String, limit: Int): List<AlbumSearchResult> =
         try {
             api.searchReleases("artist:\"$artistName\"", limit).releases.map { rel ->
