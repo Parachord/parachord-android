@@ -15,15 +15,21 @@ import androidx.compose.material3.Text
 import androidx.compose.material3.TopAppBar
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
-import androidx.compose.runtime.mutableStateOf
-import androidx.compose.runtime.remember
-import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.dp
+import androidx.hilt.navigation.compose.hiltViewModel
+import androidx.lifecycle.compose.collectAsStateWithLifecycle
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-fun SettingsScreen(modifier: Modifier = Modifier) {
+fun SettingsScreen(
+    modifier: Modifier = Modifier,
+    viewModel: SettingsViewModel = hiltViewModel(),
+) {
+    val scrobbling by viewModel.scrobblingEnabled.collectAsStateWithLifecycle()
+    val spotifyConnected by viewModel.spotifyConnected.collectAsStateWithLifecycle()
+    val lastFmConnected by viewModel.lastFmConnected.collectAsStateWithLifecycle()
+
     Column(modifier = modifier.fillMaxSize()) {
         TopAppBar(
             title = { Text("Settings") },
@@ -40,15 +46,31 @@ fun SettingsScreen(modifier: Modifier = Modifier) {
             item {
                 ListItem(
                     headlineContent = { Text("Spotify") },
-                    supportingContent = { Text("Not connected") },
-                    modifier = Modifier.clickable { /* TODO: OAuth flow */ },
+                    supportingContent = {
+                        Text(if (spotifyConnected) "Connected" else "Not connected")
+                    },
+                    modifier = Modifier.clickable {
+                        if (spotifyConnected) {
+                            viewModel.disconnectSpotify()
+                        } else {
+                            viewModel.connectSpotify("YOUR_SPOTIFY_CLIENT_ID")
+                        }
+                    },
                 )
             }
             item {
                 ListItem(
                     headlineContent = { Text("Last.fm") },
-                    supportingContent = { Text("Not connected") },
-                    modifier = Modifier.clickable { /* TODO: OAuth flow */ },
+                    supportingContent = {
+                        Text(if (lastFmConnected) "Connected" else "Not connected")
+                    },
+                    modifier = Modifier.clickable {
+                        if (lastFmConnected) {
+                            viewModel.disconnectLastFm()
+                        } else {
+                            viewModel.connectLastFm("YOUR_LASTFM_API_KEY")
+                        }
+                    },
                 )
             }
             item { HorizontalDivider() }
@@ -61,14 +83,13 @@ fun SettingsScreen(modifier: Modifier = Modifier) {
                 )
             }
             item {
-                var scrobbling by remember { mutableStateOf(false) }
                 ListItem(
                     headlineContent = { Text("Scrobbling") },
                     supportingContent = { Text("Send listening history to Last.fm") },
                     trailingContent = {
                         Switch(
                             checked = scrobbling,
-                            onCheckedChange = { scrobbling = it },
+                            onCheckedChange = { viewModel.setScrobbling(it) },
                         )
                     },
                 )

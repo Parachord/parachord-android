@@ -1,0 +1,28 @@
+package com.parachord.android.ui.screens.nowplaying
+
+import androidx.lifecycle.ViewModel
+import com.parachord.android.playback.PlaybackState
+import com.parachord.android.playback.PlaybackStateHolder
+import dagger.hilt.android.lifecycle.HiltViewModel
+import kotlinx.coroutines.flow.StateFlow
+import javax.inject.Inject
+
+@HiltViewModel
+class NowPlayingViewModel @Inject constructor(
+    private val playbackStateHolder: PlaybackStateHolder,
+) : ViewModel() {
+
+    val playbackState: StateFlow<PlaybackState> = playbackStateHolder.state
+
+    fun togglePlayPause() {
+        playbackStateHolder.togglePlayPause()
+    }
+
+    fun skipNext() {
+        playbackStateHolder.skipNext()
+    }
+
+    fun skipPrevious() {
+        playbackStateHolder.skipPrevious()
+    }
+}

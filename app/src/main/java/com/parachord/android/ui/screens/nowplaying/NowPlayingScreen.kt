@@ -25,12 +25,15 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.material3.TopAppBar
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.getValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
+import androidx.hilt.navigation.compose.hiltViewModel
+import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import coil.compose.AsyncImage
 
 @OptIn(ExperimentalMaterial3Api::class)
@@ -38,7 +41,11 @@ import coil.compose.AsyncImage
 fun NowPlayingScreen(
     onBack: () -> Unit,
     modifier: Modifier = Modifier,
+    viewModel: NowPlayingViewModel = hiltViewModel(),
 ) {
+    val playbackState by viewModel.playbackState.collectAsStateWithLifecycle()
+    val track = playbackState.currentTrack
+
     Column(
         modifier = modifier.fillMaxSize(),
         horizontalAlignment = Alignment.CenterHorizontally,
@@ -54,9 +61,8 @@ fun NowPlayingScreen(
 
         Spacer(modifier = Modifier.height(32.dp))
 
-        // Album artwork placeholder
         AsyncImage(
-            model = null,
+            model = track?.artworkUrl,
             contentDescription = "Album artwork",
             modifier = Modifier
                 .fillMaxWidth(0.7f)
@@ -67,27 +73,25 @@ fun NowPlayingScreen(
 
         Spacer(modifier = Modifier.height(32.dp))
 
-        // Track info
         Text(
-            text = "No track playing",
+            text = track?.title ?: "No track playing",
             style = MaterialTheme.typography.headlineSmall,
             textAlign = TextAlign.Center,
             modifier = Modifier.padding(horizontal = 32.dp),
         )
         Text(
-            text = "",
+            text = track?.artist ?: "",
             style = MaterialTheme.typography.bodyLarge,
             color = MaterialTheme.colorScheme.onSurfaceVariant,
         )
 
         Spacer(modifier = Modifier.height(48.dp))
 
-        // Playback controls
         Row(
             horizontalArrangement = Arrangement.spacedBy(24.dp),
             verticalAlignment = Alignment.CenterVertically,
         ) {
-            IconButton(onClick = { /* Previous */ }) {
+            IconButton(onClick = { viewModel.skipPrevious() }) {
                 Icon(
                     Icons.Default.SkipPrevious,
                     contentDescription = "Previous",
@@ -95,16 +99,16 @@ fun NowPlayingScreen(
                 )
             }
             FilledIconButton(
-                onClick = { /* Play/Pause */ },
+                onClick = { viewModel.togglePlayPause() },
                 modifier = Modifier.size(64.dp),
             ) {
                 Icon(
-                    Icons.Default.PlayArrow,
-                    contentDescription = "Play",
+                    imageVector = if (playbackState.isPlaying) Icons.Default.Pause else Icons.Default.PlayArrow,
+                    contentDescription = if (playbackState.isPlaying) "Pause" else "Play",
                     modifier = Modifier.size(36.dp),
                 )
             }
-            IconButton(onClick = { /* Next */ }) {
+            IconButton(onClick = { viewModel.skipNext() }) {
                 Icon(
                     Icons.Default.SkipNext,
                     contentDescription = "Next",
