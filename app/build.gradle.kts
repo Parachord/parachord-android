@@ -21,6 +21,10 @@ android {
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
 
         manifestPlaceholders["appAuthRedirectScheme"] = "parachord"
+
+        // API keys — override via local.properties or CI env vars
+        buildConfigField("String", "LASTFM_API_KEY", "\"${project.findProperty("LASTFM_API_KEY") ?: ""}\"")
+        buildConfigField("String", "SPOTIFY_CLIENT_ID", "\"${project.findProperty("SPOTIFY_CLIENT_ID") ?: ""}\"")
     }
 
     buildTypes {

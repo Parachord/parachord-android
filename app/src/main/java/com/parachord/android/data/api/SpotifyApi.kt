@@ -1,0 +1,98 @@
+package com.parachord.android.data.api
+
+import kotlinx.serialization.SerialName
+import kotlinx.serialization.Serializable
+import retrofit2.http.GET
+import retrofit2.http.Header
+import retrofit2.http.Query
+
+/**
+ * Spotify Web API — search endpoints.
+ * Requires Bearer token in Authorization header.
+ * https://developer.spotify.com/documentation/web-api
+ */
+interface SpotifyApi {
+
+    @GET("v1/search")
+    suspend fun search(
+        @Header("Authorization") auth: String,
+        @Query("q") query: String,
+        @Query("type") type: String,
+        @Query("limit") limit: Int = 20,
+    ): SpSearchResponse
+}
+
+// --- Response models ---
+
+@Serializable
+data class SpSearchResponse(
+    val tracks: SpPaginated<SpTrack>? = null,
+    val albums: SpPaginated<SpAlbum>? = null,
+    val artists: SpPaginated<SpArtist>? = null,
+)
+
+@Serializable
+data class SpPaginated<T>(
+    val items: List<T> = emptyList(),
+    val total: Int = 0,
+)
+
+@Serializable
+data class SpTrack(
+    val id: String,
+    val name: String,
+    val artists: List<SpArtistRef> = emptyList(),
+    val album: SpAlbumRef? = null,
+    @SerialName("duration_ms") val durationMs: Long? = null,
+    @SerialName("preview_url") val previewUrl: String? = null,
+) {
+    val artistName: String get() = artists.joinToString(", ") { it.name }
+}
+
+@Serializable
+data class SpArtistRef(
+    val id: String,
+    val name: String,
+)
+
+@Serializable
+data class SpAlbumRef(
+    val id: String,
+    val name: String,
+    val images: List<SpImage> = emptyList(),
+    @SerialName("release_date") val releaseDate: String? = null,
+    @SerialName("total_tracks") val totalTracks: Int? = null,
+)
+
+@Serializable
+data class SpAlbum(
+    val id: String,
+    val name: String,
+    val artists: List<SpArtistRef> = emptyList(),
+    val images: List<SpImage> = emptyList(),
+    @SerialName("release_date") val releaseDate: String? = null,
+    @SerialName("total_tracks") val totalTracks: Int? = null,
+) {
+    val artistName: String get() = artists.joinToString(", ") { it.name }
+    val year: Int? get() = releaseDate?.take(4)?.toIntOrNull()
+}
+
+@Serializable
+data class SpArtist(
+    val id: String,
+    val name: String,
+    val genres: List<String> = emptyList(),
+    val images: List<SpImage> = emptyList(),
+)
+
+@Serializable
+data class SpImage(
+    val url: String,
+    val height: Int? = null,
+    val width: Int? = null,
+)
+
+/** Get the best image URL (prefer medium ~300px, fall back to first available). */
+fun List<SpImage>.bestImageUrl(): String? =
+    sortedBy { it.width ?: 0 }.firstOrNull { (it.width ?: 0) >= 300 }?.url
+        ?: firstOrNull()?.url
