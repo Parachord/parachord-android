@@ -1,0 +1,24 @@
+<?xml version="1.0" encoding="utf-8"?>
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="108dp"
+    android:height="108dp"
+    android:viewportWidth="108"
+    android:viewportHeight="108">
+    <!-- Musical note / parachute cord icon -->
+    <path
+        android:fillColor="#E0E0FF"
+        android:pathData="M54,28
+            C54,28 42,34 42,44
+            C42,50 46,54 54,54
+            C62,54 66,50 66,44
+            C66,34 54,28 54,28z"
+        android:strokeWidth="0" />
+    <path
+        android:fillColor="#E0E0FF"
+        android:pathData="M64,44 L64,76"
+        android:strokeColor="#E0E0FF"
+        android:strokeWidth="3" />
+    <path
+        android:fillColor="#E0E0FF"
+        android:pathData="M60,76 A4,4 0 1,1 68,76 A4,4 0 1,1 60,76z" />
+</vector>
