@@ -9,7 +9,10 @@ import javax.inject.Singleton
 
 /**
  * Shared holder for playback state, observable by ViewModels and updated
- * by PlaybackService. Acts as the single source of truth for UI playback state.
+ * by PlaybackController. Acts as the single source of truth for UI playback state.
+ *
+ * ViewModels should call PlaybackController for actions (play, pause, skip).
+ * PlaybackController calls [update] to push ExoPlayer state back here.
  */
 @Singleton
 class PlaybackStateHolder @Inject constructor() {
@@ -19,31 +22,5 @@ class PlaybackStateHolder @Inject constructor() {
 
     fun update(transform: PlaybackState.() -> PlaybackState) {
         _state.update { it.transform() }
-    }
-
-    fun togglePlayPause() {
-        _state.update { it.copy(isPlaying = !it.isPlaying) }
-    }
-
-    fun skipNext() {
-        _state.update { current ->
-            val nextIndex = (current.queueIndex + 1).coerceAtMost(current.queue.lastIndex.coerceAtLeast(0))
-            current.copy(
-                queueIndex = nextIndex,
-                currentTrack = current.queue.getOrNull(nextIndex) ?: current.currentTrack,
-                position = 0L,
-            )
-        }
-    }
-
-    fun skipPrevious() {
-        _state.update { current ->
-            val prevIndex = (current.queueIndex - 1).coerceAtLeast(0)
-            current.copy(
-                queueIndex = prevIndex,
-                currentTrack = current.queue.getOrNull(prevIndex) ?: current.currentTrack,
-                position = 0L,
-            )
-        }
     }
 }

@@ -1,5 +1,6 @@
 package com.parachord.android.ui.screens.library
 
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.padding
@@ -64,6 +65,7 @@ fun LibraryScreen(
                                 supportingContent = {
                                     Text(track.artist, maxLines = 1, overflow = TextOverflow.Ellipsis)
                                 },
+                                modifier = Modifier.clickable { viewModel.playTrack(track) },
                             )
                         }
                     }

@@ -6,6 +6,7 @@ import com.parachord.android.data.db.entity.AlbumEntity
 import com.parachord.android.data.db.entity.PlaylistEntity
 import com.parachord.android.data.db.entity.TrackEntity
 import com.parachord.android.data.repository.LibraryRepository
+import com.parachord.android.playback.PlaybackController
 import dagger.hilt.android.lifecycle.HiltViewModel
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
@@ -15,6 +16,7 @@ import javax.inject.Inject
 @HiltViewModel
 class LibraryViewModel @Inject constructor(
     repository: LibraryRepository,
+    private val playbackController: PlaybackController,
 ) : ViewModel() {
 
     val tracks: StateFlow<List<TrackEntity>> = repository.getAllTracks()
@@ -25,4 +27,10 @@ class LibraryViewModel @Inject constructor(
 
     val playlists: StateFlow<List<PlaylistEntity>> = repository.getAllPlaylists()
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), emptyList())
+
+    fun playTrack(track: TrackEntity) {
+        val allTracks = tracks.value
+        val index = allTracks.indexOf(track).coerceAtLeast(0)
+        playbackController.playQueue(allTracks, startIndex = index)
+    }
 }

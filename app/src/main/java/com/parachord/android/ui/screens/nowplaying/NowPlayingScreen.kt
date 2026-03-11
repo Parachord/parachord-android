@@ -22,6 +22,7 @@ import androidx.compose.material3.FilledIconButton
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.Slider
 import androidx.compose.material3.Text
 import androidx.compose.material3.TopAppBar
 import androidx.compose.runtime.Composable
@@ -35,6 +36,7 @@ import androidx.compose.ui.unit.dp
 import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import coil.compose.AsyncImage
+import java.util.Locale
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -85,7 +87,37 @@ fun NowPlayingScreen(
             color = MaterialTheme.colorScheme.onSurfaceVariant,
         )
 
-        Spacer(modifier = Modifier.height(48.dp))
+        Spacer(modifier = Modifier.height(24.dp))
+
+        // Seek bar
+        val duration = playbackState.duration.coerceAtLeast(1L)
+        val position = playbackState.position
+
+        Column(modifier = Modifier.padding(horizontal = 32.dp)) {
+            Slider(
+                value = position.toFloat(),
+                onValueChange = { viewModel.seekTo(it.toLong()) },
+                valueRange = 0f..duration.toFloat(),
+                modifier = Modifier.fillMaxWidth(),
+            )
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween,
+            ) {
+                Text(
+                    text = formatDuration(position),
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+                Text(
+                    text = formatDuration(duration),
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+            }
+        }
+
+        Spacer(modifier = Modifier.height(24.dp))
 
         Row(
             horizontalArrangement = Arrangement.spacedBy(24.dp),
@@ -117,4 +149,11 @@ fun NowPlayingScreen(
             }
         }
     }
+}
+
+private fun formatDuration(ms: Long): String {
+    val totalSeconds = ms / 1000
+    val minutes = totalSeconds / 60
+    val seconds = totalSeconds % 60
+    return String.format(Locale.US, "%d:%02d", minutes, seconds)
 }
