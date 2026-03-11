@@ -16,7 +16,6 @@ import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.launch
-import java.net.URLDecoder
 import javax.inject.Inject
 
 @HiltViewModel
@@ -28,10 +27,9 @@ class AlbumViewModel @Inject constructor(
     private val playbackController: PlaybackController,
 ) : ViewModel() {
 
-    private val albumTitle: String =
-        URLDecoder.decode(savedStateHandle.get<String>("albumTitle") ?: "", "UTF-8")
-    private val artistName: String =
-        URLDecoder.decode(savedStateHandle.get<String>("artistName") ?: "", "UTF-8")
+    // Navigation already decodes URI path segments — do not double-decode
+    private val albumTitle: String = savedStateHandle.get<String>("albumTitle") ?: ""
+    private val artistName: String = savedStateHandle.get<String>("artistName") ?: ""
 
     private val _albumDetail = MutableStateFlow<AlbumDetail?>(null)
     val albumDetail: StateFlow<AlbumDetail?> = _albumDetail.asStateFlow()
@@ -69,13 +67,15 @@ class AlbumViewModel @Inject constructor(
         viewModelScope.launch {
             _isResolving.value = true
             try {
-                // Resolve the clicked track through the .axe resolver pipeline
                 val track = tracks[index]
                 val query = "${track.artist} - ${track.title}"
-                val sources = resolverManager.resolve(query)
+                // Use hints when we already have a spotifyId from metadata
+                val sources = resolverManager.resolveWithHints(
+                    query = query,
+                    spotifyId = track.spotifyId,
+                )
                 val best = resolverScoring.selectBest(sources) ?: return@launch
 
-                // Build the full queue with this resolved source for the clicked track
                 val entity = track.toTrackEntity(detail, best)
                 playbackController.playTrack(entity)
             } catch (_: Exception) {
@@ -94,10 +94,12 @@ class AlbumViewModel @Inject constructor(
         viewModelScope.launch {
             _isResolving.value = true
             try {
-                // Resolve all tracks through the .axe resolver pipeline
                 val entities = tracks.mapNotNull { track ->
                     val query = "${track.artist} - ${track.title}"
-                    val sources = resolverManager.resolve(query)
+                    val sources = resolverManager.resolveWithHints(
+                        query = query,
+                        spotifyId = track.spotifyId,
+                    )
                     val best = resolverScoring.selectBest(sources) ?: return@mapNotNull null
                     track.toTrackEntity(detail, best)
                 }

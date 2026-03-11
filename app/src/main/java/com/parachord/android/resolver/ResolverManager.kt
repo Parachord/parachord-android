@@ -1,47 +1,106 @@
 package com.parachord.android.resolver
 
-import com.parachord.android.bridge.JsBridge
+import android.util.Log
+import com.parachord.android.data.api.SpotifyApi
+import com.parachord.android.data.store.SettingsStore
+import kotlinx.coroutines.async
+import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.firstOrNull
 import kotlinx.serialization.Serializable
-import kotlinx.serialization.json.Json
 import javax.inject.Inject
 import javax.inject.Singleton
 
 /**
- * Manages .axe resolver plugins by delegating to the JavaScript resolver-loader
- * running inside the JS bridge. Resolvers are loaded unchanged from the desktop app.
+ * Manages track resolution using native Kotlin resolvers.
+ *
+ * Replaces the JS bridge approach with direct API calls. Each resolver
+ * searches its source for a matching track and returns a [ResolvedSource]
+ * with the playback URI/URL and metadata needed by the playback handlers.
  */
 @Singleton
 class ResolverManager @Inject constructor(
-    private val jsBridge: JsBridge,
-    private val json: Json,
+    private val spotifyApi: SpotifyApi,
+    private val settingsStore: SettingsStore,
 ) {
-    private val _resolvers = MutableStateFlow<List<ResolverInfo>>(emptyList())
-    val resolvers: StateFlow<List<ResolverInfo>> = _resolvers.asStateFlow()
-
-    /** Load all .axe resolver files from assets and register them in the JS runtime. */
-    suspend fun loadResolvers() {
-        // The JS resolver-loader handles parsing .axe files
-        val result = jsBridge.evaluate("JSON.stringify(resolverLoader.getResolvers())")
-        if (result != null && result != "null") {
-            val cleaned = result.trim('"').replace("\\\"", "\"")
-            _resolvers.value = json.decodeFromString<List<ResolverInfo>>(cleaned)
-        }
+    companion object {
+        private const val TAG = "ResolverManager"
     }
 
-    /** Resolve a track query through all available resolvers. */
-    suspend fun resolve(query: String): List<ResolvedSource> {
-        val escaped = query.replace("'", "\\'")
-        val result = jsBridge.evaluate(
-            "JSON.stringify(await resolverLoader.resolve('$escaped'))"
+    private val _resolvers = MutableStateFlow(
+        listOf(
+            ResolverInfo(id = "spotify", name = "Spotify", enabled = true),
         )
-        if (result != null && result != "null") {
-            val cleaned = result.trim('"').replace("\\\"", "\"")
-            return json.decodeFromString<List<ResolvedSource>>(cleaned)
+    )
+    val resolvers: StateFlow<List<ResolverInfo>> = _resolvers.asStateFlow()
+
+    /** Resolve a track query through all available native resolvers in parallel. */
+    suspend fun resolve(query: String): List<ResolvedSource> = coroutineScope {
+        val results = listOf(
+            async { resolveSpotify(query) },
+        ).mapNotNull { it.await() }
+
+        Log.d(TAG, "Resolved '$query' → ${results.size} sources: ${results.map { it.resolver }}")
+        results
+    }
+
+    /**
+     * Resolve using a pre-existing spotifyId (from metadata providers).
+     * This avoids a redundant search when we already have the Spotify track ID.
+     */
+    suspend fun resolveWithHints(
+        query: String,
+        spotifyId: String? = null,
+    ): List<ResolvedSource> = coroutineScope {
+        val results = mutableListOf<ResolvedSource>()
+
+        // If we have a Spotify ID from metadata, use it directly
+        if (spotifyId != null) {
+            results.add(
+                ResolvedSource(
+                    url = "spotify:track:$spotifyId",
+                    sourceType = "spotify",
+                    resolver = "spotify",
+                    spotifyUri = "spotify:track:$spotifyId",
+                    spotifyId = spotifyId,
+                    confidence = 0.95, // High confidence — direct ID match
+                )
+            )
         }
-        return emptyList()
+
+        // Also run the regular resolve pipeline for other sources
+        val others = resolve(query).filter { it.resolver !in results.map { r -> r.resolver } }
+        results.addAll(others)
+
+        results
+    }
+
+    private suspend fun resolveSpotify(query: String): ResolvedSource? {
+        val token = settingsStore.getSpotifyAccessTokenFlow().firstOrNull()
+        if (token.isNullOrBlank()) return null
+
+        return try {
+            val response = spotifyApi.search(
+                auth = "Bearer $token",
+                query = query,
+                type = "track",
+                limit = 1,
+            )
+            val track = response.tracks?.items?.firstOrNull() ?: return null
+            ResolvedSource(
+                url = "spotify:track:${track.id}",
+                sourceType = "spotify",
+                resolver = "spotify",
+                spotifyUri = "spotify:track:${track.id}",
+                spotifyId = track.id,
+                confidence = 0.9,
+            )
+        } catch (e: Exception) {
+            Log.w(TAG, "Spotify resolve failed for '$query': ${e.message}")
+            null
+        }
     }
 }
 

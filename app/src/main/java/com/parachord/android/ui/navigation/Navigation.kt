@@ -7,8 +7,7 @@ import androidx.navigation.NavType
 import androidx.navigation.compose.NavHost
 import androidx.navigation.compose.composable
 import androidx.navigation.navArgument
-import java.net.URLDecoder
-import java.net.URLEncoder
+import android.net.Uri
 
 /** Top-level route definitions. */
 object Routes {
@@ -21,10 +20,10 @@ object Routes {
     const val ALBUM = "album/{albumTitle}/{artistName}"
 
     fun artist(name: String): String =
-        "artist/${URLEncoder.encode(name, "UTF-8")}"
+        "artist/${Uri.encode(name)}"
 
     fun album(albumTitle: String, artistName: String): String =
-        "album/${URLEncoder.encode(albumTitle, "UTF-8")}/${URLEncoder.encode(artistName, "UTF-8")}"
+        "album/${Uri.encode(albumTitle)}/${Uri.encode(artistName)}"
 }
 
 @Composable

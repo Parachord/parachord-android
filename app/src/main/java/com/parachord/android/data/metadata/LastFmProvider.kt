@@ -73,6 +73,33 @@ class LastFmProvider @Inject constructor(
             emptyList()
         }
 
+    override suspend fun getAlbumTracks(albumTitle: String, artistName: String): AlbumDetail? =
+        try {
+            val info = api.getAlbumInfo(album = albumTitle, artist = artistName, apiKey = apiKey)
+            val detail = info.album ?: return null
+            val tracks = detail.tracks?.track?.items ?: emptyList()
+            if (tracks.isEmpty()) return null
+
+            AlbumDetail(
+                title = detail.name,
+                artist = detail.artist,
+                artworkUrl = detail.image.bestImageUrl(),
+                tracks = tracks.map { t ->
+                    TrackSearchResult(
+                        title = t.name,
+                        artist = t.artist?.name ?: detail.artist,
+                        album = detail.name,
+                        duration = t.duration?.toLongOrNull()?.let { it * 1000 }, // Last.fm returns seconds
+                        artworkUrl = detail.image.bestImageUrl(),
+                        provider = name,
+                    )
+                },
+                provider = name,
+            )
+        } catch (_: Exception) {
+            null
+        }
+
     override suspend fun getArtistInfo(artistName: String): ArtistInfo? =
         try {
             val detail = api.getArtistInfo(artist = artistName, apiKey = apiKey).artist

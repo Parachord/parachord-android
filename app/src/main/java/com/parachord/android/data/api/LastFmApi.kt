@@ -1,7 +1,17 @@
 package com.parachord.android.data.api
 
+import kotlinx.serialization.KSerializer
 import kotlinx.serialization.SerialName
 import kotlinx.serialization.Serializable
+import kotlinx.serialization.builtins.ListSerializer
+import kotlinx.serialization.descriptors.SerialDescriptor
+import kotlinx.serialization.descriptors.buildClassSerialDescriptor
+import kotlinx.serialization.encoding.Decoder
+import kotlinx.serialization.encoding.Encoder
+import kotlinx.serialization.json.JsonArray
+import kotlinx.serialization.json.JsonDecoder
+import kotlinx.serialization.json.JsonObject
+import kotlinx.serialization.json.jsonObject
 import retrofit2.http.GET
 import retrofit2.http.Query
 
@@ -46,6 +56,15 @@ interface LastFmApi {
         @Query("api_key") apiKey: String,
         @Query("format") format: String = "json",
     ): LfmArtistInfoResponse
+
+    @GET(".")
+    suspend fun getAlbumInfo(
+        @Query("method") method: String = "album.getinfo",
+        @Query("album") album: String,
+        @Query("artist") artist: String,
+        @Query("api_key") apiKey: String,
+        @Query("format") format: String = "json",
+    ): LfmAlbumInfoResponse
 }
 
 // --- Response models ---
@@ -167,6 +186,49 @@ data class LfmSimilarArtist(
 )
 
 @Serializable
+data class LfmAlbumInfoResponse(
+    val album: LfmAlbumDetail? = null,
+)
+
+@Serializable
+data class LfmAlbumDetail(
+    val name: String,
+    val artist: String,
+    val image: List<LfmImage> = emptyList(),
+    val tracks: LfmAlbumTracks? = null,
+    val mbid: String? = null,
+    val wiki: LfmBio? = null,
+)
+
+@Serializable
+data class LfmAlbumTracks(
+    val track: LfmAlbumTrackList = LfmAlbumTrackList(),
+)
+
+@Serializable(with = LfmAlbumTrackListSerializer::class)
+data class LfmAlbumTrackList(
+    val items: List<LfmAlbumTrack> = emptyList(),
+)
+
+@Serializable
+data class LfmAlbumTrack(
+    val name: String,
+    val duration: String? = null,
+    val artist: LfmAlbumTrackArtist? = null,
+    @SerialName("@attr") val attr: LfmTrackAttr? = null,
+)
+
+@Serializable
+data class LfmAlbumTrackArtist(
+    val name: String,
+)
+
+@Serializable
+data class LfmTrackAttr(
+    val rank: Int? = null,
+)
+
+@Serializable
 data class LfmImage(
     @SerialName("#text") val url: String = "",
     val size: String = "",
@@ -177,3 +239,33 @@ data class LfmImage(
 /** Get the best available image URL from a list of Last.fm images. */
 fun List<LfmImage>.bestImageUrl(): String? =
     lastOrNull { it.isUsable }?.url
+
+/**
+ * Last.fm returns `track` as either a single object (1 track) or an array (multiple tracks).
+ * This serializer handles both cases.
+ */
+object LfmAlbumTrackListSerializer : KSerializer<LfmAlbumTrackList> {
+    override val descriptor: SerialDescriptor = buildClassSerialDescriptor("LfmAlbumTrackList")
+
+    override fun serialize(encoder: Encoder, value: LfmAlbumTrackList) {
+        encoder.encodeSerializableValue(
+            ListSerializer(LfmAlbumTrack.serializer()),
+            value.items,
+        )
+    }
+
+    override fun deserialize(decoder: Decoder): LfmAlbumTrackList {
+        val jsonDecoder = decoder as JsonDecoder
+        return when (val element = jsonDecoder.decodeJsonElement()) {
+            is JsonArray -> {
+                val items = element.map { jsonDecoder.json.decodeFromJsonElement(LfmAlbumTrack.serializer(), it) }
+                LfmAlbumTrackList(items)
+            }
+            is JsonObject -> {
+                val item = jsonDecoder.json.decodeFromJsonElement(LfmAlbumTrack.serializer(), element)
+                LfmAlbumTrackList(listOf(item))
+            }
+            else -> LfmAlbumTrackList()
+        }
+    }
+}
