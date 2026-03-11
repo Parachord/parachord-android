@@ -1,5 +1,6 @@
 package com.parachord.android.ui
 
+import android.content.Intent
 import android.os.Bundle
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
@@ -20,21 +21,45 @@ import androidx.navigation.NavDestination.Companion.hierarchy
 import androidx.navigation.NavGraph.Companion.findStartDestination
 import androidx.navigation.compose.currentBackStackEntryAsState
 import androidx.navigation.compose.rememberNavController
+import com.parachord.android.auth.OAuthManager
 import com.parachord.android.ui.components.MiniPlayer
 import com.parachord.android.ui.navigation.BottomNavItem
 import com.parachord.android.ui.navigation.ParachordNavHost
 import com.parachord.android.ui.navigation.Routes
 import com.parachord.android.ui.theme.ParachordTheme
 import dagger.hilt.android.AndroidEntryPoint
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.launch
+import javax.inject.Inject
 
 @AndroidEntryPoint
 class MainActivity : ComponentActivity() {
+
+    @Inject
+    lateinit var oAuthManager: OAuthManager
+
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         enableEdgeToEdge()
+        handleOAuthIntent(intent)
         setContent {
             ParachordTheme {
                 ParachordApp()
+            }
+        }
+    }
+
+    override fun onNewIntent(intent: Intent) {
+        super.onNewIntent(intent)
+        handleOAuthIntent(intent)
+    }
+
+    private fun handleOAuthIntent(intent: Intent?) {
+        val uri = intent?.data ?: return
+        if (uri.scheme == "parachord" && uri.host == "auth") {
+            CoroutineScope(Dispatchers.IO).launch {
+                oAuthManager.handleRedirect(uri)
             }
         }
     }

@@ -4,6 +4,7 @@
 
 # Last.fm — get yours at https://www.last.fm/api/account/create
 LASTFM_API_KEY=
+LASTFM_SHARED_SECRET=
 
 # Spotify — get yours at https://developer.spotify.com/dashboard
 SPOTIFY_CLIENT_ID=

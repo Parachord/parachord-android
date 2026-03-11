@@ -3,36 +3,51 @@ package com.parachord.android.auth
 import android.content.Context
 import android.content.Intent
 import android.net.Uri
+import android.util.Log
 import androidx.browser.customtabs.CustomTabsIntent
+import com.parachord.android.BuildConfig
 import com.parachord.android.data.store.SettingsStore
 import dagger.hilt.android.qualifiers.ApplicationContext
+import kotlinx.serialization.SerialName
+import kotlinx.serialization.Serializable
+import kotlinx.serialization.json.Json
+import okhttp3.FormBody
+import okhttp3.OkHttpClient
+import okhttp3.Request
+import java.security.MessageDigest
+import java.security.SecureRandom
 import javax.inject.Inject
 import javax.inject.Singleton
 
-/**
- * Manages OAuth authentication flows using Android Custom Tabs.
- * Replaces the Express server OAuth approach from the desktop Electron app.
- *
- * Deep-link callbacks are handled via the parachord://auth/ intent filter
- * declared in AndroidManifest.xml.
- */
 @Singleton
 class OAuthManager @Inject constructor(
     @ApplicationContext private val context: Context,
     private val settingsStore: SettingsStore,
+    private val okHttpClient: OkHttpClient,
+    private val json: Json,
 ) {
     companion object {
+        private const val TAG = "OAuthManager"
         private const val REDIRECT_URI = "parachord://auth/callback"
     }
 
-    /** Launch Spotify OAuth flow in a Custom Tab. */
+    // PKCE state for Spotify
+    private var codeVerifier: String? = null
+
+    /** Launch Spotify OAuth flow with PKCE in a Custom Tab. */
     fun launchSpotifyAuth(clientId: String) {
+        val verifier = generateCodeVerifier()
+        codeVerifier = verifier
+        val challenge = generateCodeChallenge(verifier)
+
         val uri = Uri.parse("https://accounts.spotify.com/authorize")
             .buildUpon()
             .appendQueryParameter("client_id", clientId)
             .appendQueryParameter("response_type", "code")
             .appendQueryParameter("redirect_uri", "$REDIRECT_URI/spotify")
             .appendQueryParameter("scope", "user-read-playback-state user-modify-playback-state user-library-read")
+            .appendQueryParameter("code_challenge_method", "S256")
+            .appendQueryParameter("code_challenge", challenge)
             .build()
 
         launchCustomTab(uri)
@@ -49,7 +64,7 @@ class OAuthManager @Inject constructor(
         launchCustomTab(uri)
     }
 
-    /** Handle the OAuth redirect deep link and extract tokens. */
+    /** Handle the OAuth redirect deep link and exchange for tokens. */
     suspend fun handleRedirect(uri: Uri): Boolean {
         val path = uri.path ?: return false
         return when {
@@ -61,14 +76,79 @@ class OAuthManager @Inject constructor(
 
     private suspend fun handleSpotifyCallback(uri: Uri): Boolean {
         val code = uri.getQueryParameter("code") ?: return false
-        // TODO: Exchange code for tokens via Spotify token endpoint
-        return true
+        val verifier = codeVerifier ?: return false
+        codeVerifier = null
+
+        return try {
+            val body = FormBody.Builder()
+                .add("grant_type", "authorization_code")
+                .add("code", code)
+                .add("redirect_uri", "$REDIRECT_URI/spotify")
+                .add("client_id", BuildConfig.SPOTIFY_CLIENT_ID)
+                .add("code_verifier", verifier)
+                .build()
+
+            val request = Request.Builder()
+                .url("https://accounts.spotify.com/api/token")
+                .post(body)
+                .build()
+
+            val response = okHttpClient.newCall(request).execute()
+            val responseBody = response.body?.string() ?: return false
+
+            if (!response.isSuccessful) {
+                Log.e(TAG, "Spotify token exchange failed: $responseBody")
+                return false
+            }
+
+            val tokenResponse = json.decodeFromString<SpotifyTokenResponse>(responseBody)
+            settingsStore.setSpotifyTokens(tokenResponse.accessToken, tokenResponse.refreshToken)
+            Log.d(TAG, "Spotify auth successful")
+            true
+        } catch (e: Exception) {
+            Log.e(TAG, "Spotify token exchange error", e)
+            false
+        }
     }
 
     private suspend fun handleLastFmCallback(uri: Uri): Boolean {
         val token = uri.getQueryParameter("token") ?: return false
-        // TODO: Exchange token for session key via Last.fm API
-        return true
+
+        return try {
+            val apiKey = BuildConfig.LASTFM_API_KEY
+            val secret = BuildConfig.LASTFM_SHARED_SECRET
+
+            // Build the API signature: md5(api_key{val}method{val}token{val}{secret})
+            val sigInput = "api_key${apiKey}methodauth.getSessiontoken${token}${secret}"
+            val apiSig = md5(sigInput)
+
+            val url = Uri.parse("https://ws.audioscrobbler.com/2.0/")
+                .buildUpon()
+                .appendQueryParameter("method", "auth.getSession")
+                .appendQueryParameter("api_key", apiKey)
+                .appendQueryParameter("token", token)
+                .appendQueryParameter("api_sig", apiSig)
+                .appendQueryParameter("format", "json")
+                .build()
+
+            val request = Request.Builder().url(url.toString()).get().build()
+            val response = okHttpClient.newCall(request).execute()
+            val responseBody = response.body?.string() ?: return false
+
+            if (!response.isSuccessful) {
+                Log.e(TAG, "Last.fm session exchange failed: $responseBody")
+                return false
+            }
+
+            val sessionResponse = json.decodeFromString<LastFmSessionResponse>(responseBody)
+            val sessionKey = sessionResponse.session?.key ?: return false
+            settingsStore.setLastFmSession(sessionKey)
+            Log.d(TAG, "Last.fm auth successful")
+            true
+        } catch (e: Exception) {
+            Log.e(TAG, "Last.fm session exchange error", e)
+            false
+        }
     }
 
     private fun launchCustomTab(uri: Uri) {
@@ -76,4 +156,37 @@ class OAuthManager @Inject constructor(
         intent.intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
         intent.launchUrl(context, uri)
     }
+
+    private fun generateCodeVerifier(): String {
+        val bytes = ByteArray(32)
+        SecureRandom().nextBytes(bytes)
+        return bytes.joinToString("") { "%02x".format(it) }
+    }
+
+    private fun generateCodeChallenge(verifier: String): String {
+        val digest = MessageDigest.getInstance("SHA-256").digest(verifier.toByteArray())
+        return android.util.Base64.encodeToString(digest, android.util.Base64.URL_SAFE or android.util.Base64.NO_WRAP or android.util.Base64.NO_PADDING)
+    }
+
+    private fun md5(input: String): String {
+        val digest = MessageDigest.getInstance("MD5").digest(input.toByteArray())
+        return digest.joinToString("") { "%02x".format(it) }
+    }
 }
+
+@Serializable
+private data class SpotifyTokenResponse(
+    @SerialName("access_token") val accessToken: String,
+    @SerialName("refresh_token") val refreshToken: String,
+)
+
+@Serializable
+private data class LastFmSessionResponse(
+    val session: LastFmSession? = null,
+)
+
+@Serializable
+private data class LastFmSession(
+    val key: String,
+    val name: String? = null,
+)

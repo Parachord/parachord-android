@@ -57,6 +57,10 @@ class SettingsStore @Inject constructor(
         }
     }
 
+    suspend fun setLastFmSession(sessionKey: String) {
+        dataStore.edit { it[LASTFM_SESSION_KEY] = sessionKey }
+    }
+
     suspend fun clearLastFmSession() {
         dataStore.edit { it.remove(LASTFM_SESSION_KEY) }
     }

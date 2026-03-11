@@ -34,6 +34,7 @@ android {
 
         // API keys — loaded from local.properties or environment variables
         buildConfigField("String", "LASTFM_API_KEY", "\"${localProp("LASTFM_API_KEY")}\"")
+        buildConfigField("String", "LASTFM_SHARED_SECRET", "\"${localProp("LASTFM_SHARED_SECRET")}\"")
         buildConfigField("String", "SPOTIFY_CLIENT_ID", "\"${localProp("SPOTIFY_CLIENT_ID")}\"")
     }
 
