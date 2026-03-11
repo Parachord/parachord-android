@@ -27,9 +27,9 @@ import javax.inject.Singleton
  * Bridges the UI layer to the PlaybackService via MediaController, and routes
  * playback through the PlaybackRouter for multi-source support.
  *
- * Handles three playback modes:
+ * Handles two playback modes:
  * - ExoPlayer: local files, direct streams, SoundCloud (all via MediaController)
- * - External: Spotify App Remote (manages its own playback lifecycle)
+ * - External: Spotify Connect via Web API (manages its own playback lifecycle)
  */
 @Singleton
 class PlaybackController @Inject constructor(
@@ -50,7 +50,7 @@ class PlaybackController @Inject constructor(
     /** Current queue of TrackEntity objects, kept in sync with MediaController's playlist. */
     private var currentQueue: List<TrackEntity> = emptyList()
 
-    /** Whether playback is currently managed externally (e.g. Spotify App Remote). */
+    /** Whether playback is currently managed externally (e.g. Spotify Connect). */
     private var isExternalPlayback = false
 
     fun connect() {
@@ -124,12 +124,14 @@ class PlaybackController @Inject constructor(
             }
 
             is PlaybackAction.ExternalPlayback -> {
-                // Stop ExoPlayer if it was playing
-                controller?.stop()
+                // Set flag BEFORE stopping ExoPlayer so the Player.Listener
+                // ignores the state change and doesn't overwrite our update.
                 isExternalPlayback = true
+                stopPositionUpdates()
+                controller?.stop()
 
-                action.handler.play(track)
-
+                // Update UI immediately so the player bar appears while the
+                // Web API call is in flight.
                 stateHolder.update {
                     copy(
                         currentTrack = track,
@@ -141,7 +143,11 @@ class PlaybackController @Inject constructor(
                     )
                 }
 
-                // Start polling Spotify state for position updates
+                // Start playback via Spotify Connect (may take a moment for
+                // device transfer + API call).
+                action.handler.play(track)
+
+                // Start polling Spotify for position/duration updates
                 startSpotifyStatePolling()
             }
         }
@@ -307,7 +313,7 @@ class PlaybackController @Inject constructor(
         positionUpdateJob?.cancel()
     }
 
-    /** Poll Spotify App Remote for position/state when playing externally. */
+    /** Poll Spotify Web API for position/state when playing externally. */
     private fun startSpotifyStatePolling() {
         spotifyStateJob?.cancel()
         spotifyStateJob = scope.launch {
