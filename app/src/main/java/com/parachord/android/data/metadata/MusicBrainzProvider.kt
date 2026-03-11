@@ -80,8 +80,8 @@ class MusicBrainzProvider @Inject constructor(
             null
         }
 
-    override suspend fun getAlbumTracks(albumTitle: String, artistName: String): AlbumDetail? =
-        try {
+    override suspend fun getAlbumTracks(albumTitle: String, artistName: String): AlbumDetail? {
+        return try {
             // Search for the release to get its MBID
             val query = "release:\"$albumTitle\" AND artist:\"$artistName\""
             val results = api.searchReleases(query, limit = 1)
@@ -111,6 +111,7 @@ class MusicBrainzProvider @Inject constructor(
         } catch (_: Exception) {
             null
         }
+    }
 
     override suspend fun getArtistAlbums(artistName: String, limit: Int): List<AlbumSearchResult> =
         try {

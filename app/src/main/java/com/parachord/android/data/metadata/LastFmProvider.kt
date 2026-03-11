@@ -73,8 +73,8 @@ class LastFmProvider @Inject constructor(
             emptyList()
         }
 
-    override suspend fun getAlbumTracks(albumTitle: String, artistName: String): AlbumDetail? =
-        try {
+    override suspend fun getAlbumTracks(albumTitle: String, artistName: String): AlbumDetail? {
+        return try {
             val info = api.getAlbumInfo(album = albumTitle, artist = artistName, apiKey = apiKey)
             val detail = info.album ?: return null
             val tracks = detail.tracks?.track?.items ?: emptyList()
@@ -99,6 +99,7 @@ class LastFmProvider @Inject constructor(
         } catch (_: Exception) {
             null
         }
+    }
 
     override suspend fun getArtistInfo(artistName: String): ArtistInfo? =
         try {
