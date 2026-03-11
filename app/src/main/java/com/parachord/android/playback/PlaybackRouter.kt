@@ -16,7 +16,7 @@ import javax.inject.Singleton
  * Routes tracks to the appropriate playback handler based on resolver type.
  *
  * The routing order matches the desktop app's logic:
- * 1. Spotify tracks → Spotify App Remote (external playback)
+ * 1. Spotify tracks → Web API / Spotify Connect (external playback)
  * 2. SoundCloud tracks → Stream URL resolution + ExoPlayer
  * 3. Local files → ExoPlayer with content:// URI
  * 4. Direct streams → ExoPlayer with HTTP URL
@@ -52,7 +52,7 @@ class PlaybackRouter @Inject constructor(
 
             Log.d(TAG, "Routing '${track.title}' to ${handler::class.simpleName}")
 
-            // Spotify is external playback (App Remote controls Spotify app)
+            // Spotify is external playback (Web API / Spotify Connect)
             if (handler is SpotifyPlaybackHandler) {
                 // Stop any previous external handler
                 stopExternalPlayback()

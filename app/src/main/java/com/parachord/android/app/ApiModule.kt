@@ -11,8 +11,11 @@ import kotlinx.serialization.json.Json
 import okhttp3.Interceptor
 import okhttp3.MediaType.Companion.toMediaType
 import okhttp3.OkHttpClient
+import okhttp3.ResponseBody
+import retrofit2.Converter
 import retrofit2.Retrofit
 import retrofit2.converter.kotlinx.serialization.asConverterFactory
+import java.lang.reflect.Type
 import javax.inject.Named
 import javax.inject.Singleton
 
@@ -62,6 +65,7 @@ object ApiModule {
         Retrofit.Builder()
             .baseUrl("https://api.spotify.com/")
             .client(client)
+            .addConverterFactory(UnitConverterFactory)
             .addConverterFactory(json.asConverterFactory("application/json".toMediaType()))
             .build()
 
@@ -76,5 +80,18 @@ object ApiModule {
                 .header("User-Agent", userAgent)
                 .build()
         )
+    }
+
+    /** Handles Response<Unit> for Spotify PUT endpoints that return 204 No Content. */
+    private object UnitConverterFactory : Converter.Factory() {
+        override fun responseBodyConverter(
+            type: Type,
+            annotations: Array<out Annotation>,
+            retrofit: Retrofit,
+        ): Converter<ResponseBody, *>? {
+            return if (type == Unit::class.java) {
+                Converter<ResponseBody, Unit> { it.close() }
+            } else null
+        }
     }
 }

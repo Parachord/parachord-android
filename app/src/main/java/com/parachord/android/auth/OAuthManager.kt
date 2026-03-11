@@ -167,7 +167,7 @@ class OAuthManager @Inject constructor(
             }
 
             val tokenResponse = json.decodeFromString<SpotifyTokenResponse>(responseBody)
-            settingsStore.setSpotifyTokens(tokenResponse.accessToken, tokenResponse.refreshToken)
+            settingsStore.setSpotifyTokens(tokenResponse.accessToken, tokenResponse.refreshToken ?: "")
             Log.d(TAG, "Spotify auth successful")
             true
         } catch (e: Exception) {
@@ -216,6 +216,40 @@ class OAuthManager @Inject constructor(
         }
     }
 
+    /** Refresh the Spotify access token using the stored refresh token. Returns true on success. */
+    suspend fun refreshSpotifyToken(): Boolean {
+        val refreshToken = settingsStore.getSpotifyRefreshToken() ?: return false
+        return try {
+            val body = FormBody.Builder()
+                .add("grant_type", "refresh_token")
+                .add("refresh_token", refreshToken)
+                .add("client_id", BuildConfig.SPOTIFY_CLIENT_ID)
+                .build()
+
+            val request = Request.Builder()
+                .url("https://accounts.spotify.com/api/token")
+                .post(body)
+                .build()
+
+            val response = okHttpClient.newCall(request).execute()
+            val responseBody = response.body?.string() ?: return false
+
+            if (!response.isSuccessful) {
+                Log.e(TAG, "Spotify token refresh failed: $responseBody")
+                return false
+            }
+
+            val tokenResponse = json.decodeFromString<SpotifyTokenResponse>(responseBody)
+            val newRefresh = tokenResponse.refreshToken ?: refreshToken
+            settingsStore.setSpotifyTokens(tokenResponse.accessToken, newRefresh)
+            Log.d(TAG, "Spotify token refreshed")
+            true
+        } catch (e: Exception) {
+            Log.e(TAG, "Spotify token refresh error", e)
+            false
+        }
+    }
+
     private fun launchCustomTab(uri: Uri) {
         val intent = CustomTabsIntent.Builder().build()
         intent.intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
@@ -242,7 +276,7 @@ class OAuthManager @Inject constructor(
 @Serializable
 private data class SpotifyTokenResponse(
     @SerialName("access_token") val accessToken: String,
-    @SerialName("refresh_token") val refreshToken: String,
+    @SerialName("refresh_token") val refreshToken: String? = null,
 )
 
 @Serializable

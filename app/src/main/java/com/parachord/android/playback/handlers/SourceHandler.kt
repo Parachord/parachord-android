@@ -10,7 +10,7 @@ import com.parachord.android.data.db.entity.TrackEntity
  * for its source type:
  * - DirectStreamHandler: ExoPlayer with URL + headers
  * - LocalFileHandler: ExoPlayer with content:// URI
- * - SpotifyPlaybackHandler: Spotify App Remote SDK
+ * - SpotifyPlaybackHandler: Spotify Web API (Spotify Connect)
  * - SoundCloudPlaybackHandler: SoundCloud stream API + ExoPlayer
  */
 interface SourceHandler {

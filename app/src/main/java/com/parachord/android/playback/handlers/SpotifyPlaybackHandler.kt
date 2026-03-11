@@ -4,6 +4,7 @@ import android.util.Log
 import com.parachord.android.auth.OAuthManager
 import com.parachord.android.data.api.SpPlaybackRequest
 import com.parachord.android.data.api.SpPlaybackState
+import com.parachord.android.data.api.SpDevice
 import com.parachord.android.data.api.SpTransferRequest
 import com.parachord.android.data.api.SpotifyApi
 import com.parachord.android.data.db.entity.TrackEntity
@@ -22,9 +23,11 @@ import javax.inject.Singleton
 /**
  * Handles Spotify playback via the Web API (Spotify Connect).
  *
- * Matches the desktop app's approach: uses the Spotify Web API to control
- * playback on an active Spotify device (phone, desktop, etc.), rather than
- * embedding a player. Requires an active Spotify device and Premium account.
+ * Matches the desktop app's approach: uses the Web API to control playback on
+ * an active Spotify device rather than embedding a player. Prefers the local
+ * phone device (type "Smartphone") over TVs and computers.
+ *
+ * Requires an active Spotify device and Premium account.
  */
 @Singleton
 class SpotifyPlaybackHandler @Inject constructor(
@@ -35,6 +38,8 @@ class SpotifyPlaybackHandler @Inject constructor(
 
     companion object {
         private const val TAG = "SpotifyPlayback"
+        /** Device type priority — prefer phone, then computer, then anything else. */
+        private val DEVICE_TYPE_PRIORITY = listOf("Smartphone", "Computer")
     }
 
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Main)
@@ -62,9 +67,7 @@ class SpotifyPlaybackHandler @Inject constructor(
         Log.d(TAG, "play() via Web API for '${track.title}' uri=$uri")
 
         val success = withAuth { auth ->
-            // Check for available devices
-            val devicesResponse = spotifyApi.getDevices(auth)
-            val devices = devicesResponse.devices
+            val devices = spotifyApi.getDevices(auth).devices
             Log.d(TAG, "Devices: ${devices.map { "${it.name}(active=${it.isActive}, type=${it.type})" }}")
 
             if (devices.isEmpty()) {
@@ -72,21 +75,23 @@ class SpotifyPlaybackHandler @Inject constructor(
                 return@withAuth false
             }
 
-            // If no active device, transfer to the first phone/computer
-            if (devices.none { it.isActive }) {
-                val device = devices.first()
-                Log.d(TAG, "Transferring playback to '${device.name}'")
-                spotifyApi.transferPlayback(auth, SpTransferRequest(deviceIds = listOf(device.id)))
-                delay(500) // Give Spotify a moment to activate the device
+            // Pick the best device: prefer Smartphone, then Computer, then first available
+            val targetDevice = pickDevice(devices)
+            Log.d(TAG, "Target device: '${targetDevice.name}' (type=${targetDevice.type})")
+
+            // Transfer playback to the target device if it's not already active
+            if (!targetDevice.isActive) {
+                Log.d(TAG, "Transferring playback to '${targetDevice.name}'")
+                spotifyApi.transferPlayback(auth, SpTransferRequest(deviceIds = listOf(targetDevice.id)))
+                delay(500) // Give Spotify a moment to switch
             }
 
-            // Start playback
             val response = spotifyApi.startPlayback(auth, SpPlaybackRequest(uris = listOf(uri)))
             if (response.isSuccessful) {
-                Log.d(TAG, "Playback started for $uri")
+                Log.d(TAG, "Playback started on '${targetDevice.name}' for $uri")
                 true
             } else {
-                Log.e(TAG, "Start playback failed: ${response.code()} ${response.errorBody()?.string()}")
+                Log.e(TAG, "Start playback failed: ${response.code()}")
                 false
             }
         }
@@ -134,7 +139,22 @@ class SpotifyPlaybackHandler @Inject constructor(
         _isConnected = false
     }
 
-    /** Poll Spotify Web API for playback state, cached for the PlaybackController. */
+    /**
+     * Pick the best device to play on.
+     * Priority: active Smartphone > inactive Smartphone > active Computer > first available.
+     */
+    private fun pickDevice(devices: List<SpDevice>): SpDevice {
+        // If a Smartphone is available, always prefer it (user is on their phone)
+        for (type in DEVICE_TYPE_PRIORITY) {
+            val active = devices.firstOrNull { it.type == type && it.isActive }
+            if (active != null) return active
+            val inactive = devices.firstOrNull { it.type == type }
+            if (inactive != null) return inactive
+        }
+        // Fall back to whatever is active, or first available
+        return devices.firstOrNull { it.isActive } ?: devices.first()
+    }
+
     private fun startStatePolling() {
         statePollingJob?.cancel()
         statePollingJob = scope.launch {
@@ -146,9 +166,7 @@ class SpotifyPlaybackHandler @Inject constructor(
                         cachedPosition = state.progressMs ?: 0L
                         cachedDuration = state.item?.durationMs ?: 0L
                     }
-                } catch (_: Exception) {
-                    // Ignore polling errors
-                }
+                } catch (_: Exception) { /* ignore polling errors */ }
                 delay(1000)
             }
         }
@@ -165,8 +183,8 @@ class SpotifyPlaybackHandler @Inject constructor(
         }
 
     /**
-     * Execute a block with a valid Spotify access token.
-     * On HTTP 401, refreshes the token and retries once.
+     * Execute a block with a valid Spotify Bearer token.
+     * On 401, refreshes the token and retries once.
      */
     private suspend fun <T> withAuth(block: suspend (auth: String) -> T): T? {
         val token = settingsStore.getSpotifyAccessToken() ?: return null
