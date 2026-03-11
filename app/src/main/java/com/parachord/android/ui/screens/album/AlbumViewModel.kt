@@ -1,5 +1,6 @@
 package com.parachord.android.ui.screens.album
 
+import android.util.Log
 import androidx.lifecycle.SavedStateHandle
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
@@ -26,6 +27,10 @@ class AlbumViewModel @Inject constructor(
     private val resolverScoring: ResolverScoring,
     private val playbackController: PlaybackController,
 ) : ViewModel() {
+
+    companion object {
+        private const val TAG = "AlbumViewModel"
+    }
 
     // Navigation already decodes URI path segments — do not double-decode
     private val albumTitle: String = savedStateHandle.get<String>("albumTitle") ?: ""
@@ -69,17 +74,25 @@ class AlbumViewModel @Inject constructor(
             try {
                 val track = tracks[index]
                 val query = "${track.artist} - ${track.title}"
-                // Use hints when we already have a spotifyId from metadata
+                Log.d(TAG, "Playing track: '$query' (spotifyId=${track.spotifyId})")
+
                 val sources = resolverManager.resolveWithHints(
                     query = query,
                     spotifyId = track.spotifyId,
                 )
-                val best = resolverScoring.selectBest(sources) ?: return@launch
+                Log.d(TAG, "Resolved ${sources.size} sources: ${sources.map { "${it.resolver}(${it.confidence})" }}")
+
+                val best = resolverScoring.selectBest(sources)
+                if (best == null) {
+                    Log.w(TAG, "No playable source found for '$query'")
+                    return@launch
+                }
+                Log.d(TAG, "Selected: ${best.resolver} uri=${best.spotifyUri}")
 
                 val entity = track.toTrackEntity(detail, best)
                 playbackController.playTrack(entity)
-            } catch (_: Exception) {
-                // resolution failed
+            } catch (e: Exception) {
+                Log.e(TAG, "Playback failed", e)
             } finally {
                 _isResolving.value = false
             }

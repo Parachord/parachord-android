@@ -87,7 +87,14 @@ class MetadataService @Inject constructor(
         deduplicateAlbums(results).take(limit)
     }
 
-    /** Get album tracklist, trying Spotify first (our primary resolver). */
+    /**
+     * Get album tracklist from all providers and merge.
+     *
+     * Picks the result with the most tracks as the base, then enriches
+     * each track with metadata from other providers (spotifyId, artworkUrl, etc.)
+     * using normalized title matching. This ensures MusicBrainz tracklists
+     * get Spotify IDs for playback resolution.
+     */
     suspend fun getAlbumTracks(albumTitle: String, artistName: String): AlbumDetail? = coroutineScope {
         val results = availableProviders()
             .map { provider -> async { provider.getAlbumTracks(albumTitle, artistName) } }
@@ -96,8 +103,29 @@ class MetadataService @Inject constructor(
 
         if (results.isEmpty()) return@coroutineScope null
 
-        // Prefer the result with the most tracks (usually Spotify)
-        results.maxByOrNull { it.tracks.size }
+        // Use the result with the most tracks as base
+        val base = results.maxByOrNull { it.tracks.size } ?: return@coroutineScope null
+        val others = results.filter { it !== base }
+
+        if (others.isEmpty()) return@coroutineScope base
+
+        // Build a lookup of tracks from other providers by normalized title
+        val otherTracksByTitle = others
+            .flatMap { it.tracks }
+            .groupBy { it.title.lowercase().trim() }
+
+        // Enrich base tracks with data from other providers
+        val enrichedTracks = base.tracks.map { track ->
+            val matches = otherTracksByTitle[track.title.lowercase().trim()] ?: emptyList()
+            matches.fold(track) { acc, other -> acc.mergeWith(other) }
+        }
+
+        base.copy(
+            tracks = enrichedTracks,
+            artworkUrl = base.artworkUrl ?: others.firstNotNullOfOrNull { it.artworkUrl },
+            year = base.year ?: others.firstNotNullOfOrNull { it.year },
+            provider = results.joinToString("+") { it.provider },
+        )
     }
 
     private suspend fun availableProviders(): List<MetadataProvider> =
