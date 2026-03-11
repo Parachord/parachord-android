@@ -71,7 +71,7 @@ fun ParachordApp() {
     val navBackStackEntry by navController.currentBackStackEntryAsState()
     val currentDestination = navBackStackEntry?.destination
 
-    val fullScreenRoutes = setOf(Routes.NOW_PLAYING, Routes.ARTIST)
+    val fullScreenRoutes = setOf(Routes.NOW_PLAYING, Routes.ARTIST, Routes.ALBUM)
     val showBottomBar = currentDestination?.route !in fullScreenRoutes
 
     val mainViewModel: MainViewModel = hiltViewModel()

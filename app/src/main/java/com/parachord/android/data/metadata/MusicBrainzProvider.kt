@@ -79,4 +79,20 @@ class MusicBrainzProvider @Inject constructor(
         } catch (_: Exception) {
             null
         }
+
+    override suspend fun getArtistAlbums(artistName: String, limit: Int): List<AlbumSearchResult> =
+        try {
+            api.searchReleases("artist:\"$artistName\"", limit).releases.map { rel ->
+                AlbumSearchResult(
+                    title = rel.title,
+                    artist = rel.artistName,
+                    year = rel.year,
+                    trackCount = rel.trackCount,
+                    mbid = rel.id,
+                    provider = name,
+                )
+            }
+        } catch (_: Exception) {
+            emptyList()
+        }
 }

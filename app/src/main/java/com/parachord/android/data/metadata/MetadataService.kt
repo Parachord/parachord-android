@@ -77,6 +77,33 @@ class MetadataService @Inject constructor(
         results.reduce { acc, info -> acc.mergeWith(info) }
     }
 
+    /** Get an artist's discography from all available providers. */
+    suspend fun getArtistAlbums(artistName: String, limit: Int = 50): List<AlbumSearchResult> = coroutineScope {
+        val results = availableProviders()
+            .map { provider -> async { provider.getArtistAlbums(artistName, limit) } }
+            .awaitAll()
+            .flatten()
+
+        deduplicateAlbums(results).take(limit)
+    }
+
+    /** Get album tracklist, trying Spotify first (our primary resolver). */
+    suspend fun getAlbumTracks(albumTitle: String, artistName: String): AlbumDetail? = coroutineScope {
+        val results = availableProviders()
+            .map { provider -> async { provider.getAlbumTracks(albumTitle, artistName) } }
+            .awaitAll()
+            .filterNotNull()
+
+        if (results.isEmpty()) return@coroutineScope null
+
+        // Prefer the result with the most tracks (usually Spotify)
+        results.maxByOrNull { it.tracks.size }
+    }
+
+    /** Resolve a track to a playable source via Spotify. */
+    suspend fun resolveTrack(title: String, artist: String): TrackSearchResult? =
+        if (spotify.isAvailable()) spotify.resolveTrack(title, artist) else null
+
     private suspend fun availableProviders(): List<MetadataProvider> =
         providers.filter { it.isAvailable() }
 
@@ -117,6 +144,7 @@ private fun TrackSearchResult.mergeWith(other: TrackSearchResult) = TrackSearchR
     duration = duration ?: other.duration,
     artworkUrl = artworkUrl ?: other.artworkUrl,
     previewUrl = previewUrl ?: other.previewUrl,
+    spotifyId = spotifyId ?: other.spotifyId,
     mbid = mbid ?: other.mbid,
     provider = "$provider+${other.provider}",
 )
@@ -128,5 +156,6 @@ private fun AlbumSearchResult.mergeWith(other: AlbumSearchResult) = AlbumSearchR
     year = year ?: other.year,
     trackCount = trackCount ?: other.trackCount,
     mbid = mbid ?: other.mbid,
+    spotifyId = spotifyId ?: other.spotifyId,
     provider = "$provider+${other.provider}",
 )

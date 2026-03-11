@@ -4,6 +4,7 @@ import kotlinx.serialization.SerialName
 import kotlinx.serialization.Serializable
 import retrofit2.http.GET
 import retrofit2.http.Header
+import retrofit2.http.Path
 import retrofit2.http.Query
 
 /**
@@ -20,6 +21,21 @@ interface SpotifyApi {
         @Query("type") type: String,
         @Query("limit") limit: Int = 20,
     ): SpSearchResponse
+
+    @GET("v1/artists/{id}/albums")
+    suspend fun getArtistAlbums(
+        @Header("Authorization") auth: String,
+        @Path("id") artistId: String,
+        @Query("include_groups") includeGroups: String = "album,single",
+        @Query("limit") limit: Int = 50,
+    ): SpPaginated<SpAlbum>
+
+    @GET("v1/albums/{id}/tracks")
+    suspend fun getAlbumTracks(
+        @Header("Authorization") auth: String,
+        @Path("id") albumId: String,
+        @Query("limit") limit: Int = 50,
+    ): SpPaginated<SpSimpleTrack>
 }
 
 // --- Response models ---
@@ -75,6 +91,18 @@ data class SpAlbum(
 ) {
     val artistName: String get() = artists.joinToString(", ") { it.name }
     val year: Int? get() = releaseDate?.take(4)?.toIntOrNull()
+}
+
+@Serializable
+data class SpSimpleTrack(
+    val id: String,
+    val name: String,
+    val artists: List<SpArtistRef> = emptyList(),
+    @SerialName("duration_ms") val durationMs: Long? = null,
+    @SerialName("track_number") val trackNumber: Int? = null,
+    @SerialName("preview_url") val previewUrl: String? = null,
+) {
+    val artistName: String get() = artists.joinToString(", ") { it.name }
 }
 
 @Serializable

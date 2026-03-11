@@ -1,5 +1,6 @@
 package com.parachord.android.ui.screens.artist
 
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -42,11 +43,14 @@ import coil.compose.AsyncImage
 @Composable
 fun ArtistScreen(
     onBack: () -> Unit,
+    onNavigateToAlbum: (albumTitle: String, artistName: String) -> Unit = { _, _ -> },
+    onNavigateToArtist: (String) -> Unit = {},
     modifier: Modifier = Modifier,
     viewModel: ArtistViewModel = hiltViewModel(),
 ) {
     val artistInfo by viewModel.artistInfo.collectAsStateWithLifecycle()
     val topTracks by viewModel.topTracks.collectAsStateWithLifecycle()
+    val albums by viewModel.albums.collectAsStateWithLifecycle()
     val isLoading by viewModel.isLoading.collectAsStateWithLifecycle()
 
     Column(modifier = modifier.fillMaxSize()) {
@@ -134,11 +138,59 @@ fun ArtistScreen(
                         ) {
                             similar.forEach { name ->
                                 AssistChip(
-                                    onClick = {},
+                                    onClick = { onNavigateToArtist(name) },
                                     label = { Text(name) },
                                 )
                             }
                         }
+                    }
+                }
+
+                // Discography
+                if (albums.isNotEmpty()) {
+                    item {
+                        HorizontalDivider()
+                        Text(
+                            text = "Discography",
+                            style = MaterialTheme.typography.titleSmall,
+                            color = MaterialTheme.colorScheme.primary,
+                            modifier = Modifier.padding(horizontal = 16.dp, vertical = 8.dp),
+                        )
+                    }
+                    items(albums, key = { "album-${it.title}-${it.artist}" }) { album ->
+                        ListItem(
+                            headlineContent = {
+                                Text(album.title, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                            },
+                            supportingContent = {
+                                val info = buildString {
+                                    album.year?.let { append("$it") }
+                                    album.trackCount?.let {
+                                        if (isNotEmpty()) append(" \u2022 ")
+                                        append("$it tracks")
+                                    }
+                                }
+                                if (info.isNotEmpty()) {
+                                    Text(info, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                                }
+                            },
+                            leadingContent = album.artworkUrl?.let { url ->
+                                {
+                                    AsyncImage(
+                                        model = url,
+                                        contentDescription = null,
+                                        modifier = Modifier
+                                            .height(56.dp)
+                                            .aspectRatio(1f)
+                                            .clip(RoundedCornerShape(4.dp)),
+                                        contentScale = ContentScale.Crop,
+                                    )
+                                }
+                            },
+                            modifier = Modifier.clickable {
+                                onNavigateToAlbum(album.title, album.artist)
+                            },
+                        )
                     }
                 }
 

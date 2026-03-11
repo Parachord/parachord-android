@@ -3,6 +3,7 @@ package com.parachord.android.ui.screens.artist
 import androidx.lifecycle.SavedStateHandle
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
+import com.parachord.android.data.metadata.AlbumSearchResult
 import com.parachord.android.data.metadata.ArtistInfo
 import com.parachord.android.data.metadata.MetadataService
 import com.parachord.android.data.metadata.TrackSearchResult
@@ -27,6 +28,9 @@ class ArtistViewModel @Inject constructor(
     private val _topTracks = MutableStateFlow<List<TrackSearchResult>>(emptyList())
     val topTracks: StateFlow<List<TrackSearchResult>> = _topTracks.asStateFlow()
 
+    private val _albums = MutableStateFlow<List<AlbumSearchResult>>(emptyList())
+    val albums: StateFlow<List<AlbumSearchResult>> = _albums.asStateFlow()
+
     private val _isLoading = MutableStateFlow(true)
     val isLoading: StateFlow<Boolean> = _isLoading.asStateFlow()
 
@@ -40,10 +44,9 @@ class ArtistViewModel @Inject constructor(
         viewModelScope.launch {
             _isLoading.value = true
             try {
-                // Cascading artist info lookup
                 _artistInfo.value = metadataService.getArtistInfo(artistName)
-                // Also search for their tracks
                 _topTracks.value = metadataService.searchTracks(artistName, limit = 10)
+                _albums.value = metadataService.getArtistAlbums(artistName)
             } catch (_: Exception) {
                 // partial results still shown
             } finally {

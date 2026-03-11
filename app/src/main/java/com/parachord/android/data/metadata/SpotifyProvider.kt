@@ -95,6 +95,96 @@ class SpotifyProvider @Inject constructor(
     override suspend fun getArtistInfo(artistName: String): ArtistInfo? =
         searchArtists(artistName, limit = 1).firstOrNull()
 
+    override suspend fun getArtistAlbums(artistName: String, limit: Int): List<AlbumSearchResult> =
+        try {
+            val token = getAccessToken() ?: return emptyList()
+            // First find the artist's Spotify ID
+            val response = api.search(
+                auth = "Bearer $token",
+                query = artistName,
+                type = "artist",
+                limit = 1,
+            )
+            val artistId = response.artists?.items?.firstOrNull()?.id ?: return emptyList()
+            // Then fetch their albums
+            val albums = api.getArtistAlbums(auth = "Bearer $token", artistId = artistId, limit = limit)
+            albums.items.map { a ->
+                AlbumSearchResult(
+                    title = a.name,
+                    artist = a.artistName,
+                    artworkUrl = a.images.bestImageUrl(),
+                    year = a.year,
+                    trackCount = a.totalTracks,
+                    spotifyId = a.id,
+                    provider = name,
+                )
+            }
+        } catch (_: Exception) {
+            emptyList()
+        }
+
+    override suspend fun getAlbumTracks(albumTitle: String, artistName: String): AlbumDetail? =
+        try {
+            val token = getAccessToken() ?: return null
+            // Search for the album to get its Spotify ID and artwork
+            val response = api.search(
+                auth = "Bearer $token",
+                query = "album:$albumTitle artist:$artistName",
+                type = "album",
+                limit = 1,
+            )
+            val album = response.albums?.items?.firstOrNull() ?: return null
+            // Fetch the tracklist
+            val tracksResponse = api.getAlbumTracks(auth = "Bearer $token", albumId = album.id)
+            AlbumDetail(
+                title = album.name,
+                artist = album.artistName,
+                artworkUrl = album.images.bestImageUrl(),
+                year = album.year,
+                tracks = tracksResponse.items.map { t ->
+                    TrackSearchResult(
+                        title = t.name,
+                        artist = t.artistName,
+                        album = album.name,
+                        duration = t.durationMs,
+                        artworkUrl = album.images.bestImageUrl(),
+                        previewUrl = t.previewUrl,
+                        spotifyId = t.id,
+                        provider = name,
+                    )
+                },
+                provider = name,
+            )
+        } catch (_: Exception) {
+            null
+        }
+
+    /** Resolve a single track to its Spotify preview URL. */
+    suspend fun resolveTrack(title: String, artist: String): TrackSearchResult? =
+        try {
+            val token = getAccessToken() ?: return null
+            val response = api.search(
+                auth = "Bearer $token",
+                query = "track:$title artist:$artist",
+                type = "track",
+                limit = 1,
+            )
+            response.tracks?.items?.firstOrNull()?.let { t ->
+                TrackSearchResult(
+                    title = t.name,
+                    artist = t.artistName,
+                    album = t.album?.name,
+                    duration = t.durationMs,
+                    artworkUrl = t.album?.images?.bestImageUrl(),
+                    previewUrl = t.previewUrl,
+                    spotifyId = t.id,
+                    provider = name,
+                )
+            }
+        } catch (_: Exception) {
+            null
+        }
+
     private suspend fun getAccessToken(): String? =
         settingsStore.getSpotifyAccessTokenFlow().firstOrNull()
 }

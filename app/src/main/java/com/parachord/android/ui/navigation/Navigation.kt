@@ -18,9 +18,13 @@ object Routes {
     const val NOW_PLAYING = "now_playing"
     const val SETTINGS = "settings"
     const val ARTIST = "artist/{artistName}"
+    const val ALBUM = "album/{albumTitle}/{artistName}"
 
     fun artist(name: String): String =
         "artist/${URLEncoder.encode(name, "UTF-8")}"
+
+    fun album(albumTitle: String, artistName: String): String =
+        "album/${URLEncoder.encode(albumTitle, "UTF-8")}/${URLEncoder.encode(artistName, "UTF-8")}"
 }
 
 @Composable
@@ -44,6 +48,9 @@ fun ParachordNavHost(
         composable(Routes.SEARCH) {
             com.parachord.android.ui.screens.search.SearchScreen(
                 onNavigateToArtist = { name -> navController.navigate(Routes.artist(name)) },
+                onNavigateToAlbum = { albumTitle, artistName ->
+                    navController.navigate(Routes.album(albumTitle, artistName))
+                },
             )
         }
         composable(Routes.NOW_PLAYING) {
@@ -59,6 +66,21 @@ fun ParachordNavHost(
             arguments = listOf(navArgument("artistName") { type = NavType.StringType }),
         ) {
             com.parachord.android.ui.screens.artist.ArtistScreen(
+                onBack = { navController.popBackStack() },
+                onNavigateToAlbum = { albumTitle, artistName ->
+                    navController.navigate(Routes.album(albumTitle, artistName))
+                },
+                onNavigateToArtist = { name -> navController.navigate(Routes.artist(name)) },
+            )
+        }
+        composable(
+            route = Routes.ALBUM,
+            arguments = listOf(
+                navArgument("albumTitle") { type = NavType.StringType },
+                navArgument("artistName") { type = NavType.StringType },
+            ),
+        ) {
+            com.parachord.android.ui.screens.album.AlbumScreen(
                 onBack = { navController.popBackStack() },
             )
         }

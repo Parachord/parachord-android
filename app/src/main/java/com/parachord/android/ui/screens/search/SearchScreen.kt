@@ -42,6 +42,7 @@ import coil.compose.AsyncImage
 @Composable
 fun SearchScreen(
     onNavigateToArtist: (String) -> Unit = {},
+    onNavigateToAlbum: (albumTitle: String, artistName: String) -> Unit = { _, _ -> },
     modifier: Modifier = Modifier,
     viewModel: SearchViewModel = hiltViewModel(),
 ) {
@@ -177,7 +178,7 @@ fun SearchScreen(
                             supportingContent = {
                                 val info = buildString {
                                     append(album.artist)
-                                    album.year?.let { append(" • $it") }
+                                    album.year?.let { append(" \u2022 $it") }
                                 }
                                 Text(info, maxLines = 1, overflow = TextOverflow.Ellipsis)
                             },
@@ -193,6 +194,9 @@ fun SearchScreen(
                                         contentScale = ContentScale.Crop,
                                     )
                                 }
+                            },
+                            modifier = Modifier.clickable {
+                                onNavigateToAlbum(album.title, album.artist)
                             },
                         )
                     }

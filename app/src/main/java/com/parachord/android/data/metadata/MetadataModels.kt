@@ -26,6 +26,7 @@ data class TrackSearchResult(
     val duration: Long? = null,
     val artworkUrl: String? = null,
     val previewUrl: String? = null,
+    val spotifyId: String? = null,
     val mbid: String? = null,
     val provider: String = "",
 )
@@ -38,5 +39,16 @@ data class AlbumSearchResult(
     val year: Int? = null,
     val trackCount: Int? = null,
     val mbid: String? = null,
+    val spotifyId: String? = null,
+    val provider: String = "",
+)
+
+@Serializable
+data class AlbumDetail(
+    val title: String,
+    val artist: String,
+    val artworkUrl: String? = null,
+    val year: Int? = null,
+    val tracks: List<TrackSearchResult> = emptyList(),
     val provider: String = "",
 )
