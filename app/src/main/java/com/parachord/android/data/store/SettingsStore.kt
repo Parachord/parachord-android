@@ -26,6 +26,12 @@ class SettingsStore @Inject constructor(
         val SPOTIFY_ACCESS_TOKEN = stringPreferencesKey("spotify_access_token")
         val SPOTIFY_REFRESH_TOKEN = stringPreferencesKey("spotify_refresh_token")
         val SOUNDCLOUD_ACCESS_TOKEN = stringPreferencesKey("soundcloud_access_token")
+        val RESOLVER_ORDER = stringPreferencesKey("resolver_order")
+        val ACTIVE_RESOLVERS = stringPreferencesKey("active_resolvers")
+        val RESOLVER_VOLUME_OFFSETS = stringPreferencesKey("resolver_volume_offsets")
+
+        /** Default canonical order matching the desktop app. */
+        private const val DEFAULT_RESOLVER_ORDER = "spotify,applemusic,bandcamp,soundcloud,localfiles,youtube"
     }
 
     val themeMode: Flow<String> = dataStore.data.map { it[THEME_MODE] ?: "system" }
@@ -86,4 +92,74 @@ class SettingsStore @Inject constructor(
 
     suspend fun getSpotifyRefreshToken(): String? =
         dataStore.data.first()[SPOTIFY_REFRESH_TOKEN]
+
+    // --- Resolver order and active resolvers ---
+
+    /**
+     * Get the user's resolver priority order.
+     * Stored as comma-separated IDs, matching the desktop's resolverOrder array.
+     */
+    suspend fun getResolverOrder(): List<String> {
+        val raw = dataStore.data.first()[RESOLVER_ORDER] ?: DEFAULT_RESOLVER_ORDER
+        return raw.split(",").filter { it.isNotBlank() }
+    }
+
+    fun getResolverOrderFlow(): Flow<List<String>> =
+        dataStore.data.map { prefs ->
+            (prefs[RESOLVER_ORDER] ?: DEFAULT_RESOLVER_ORDER)
+                .split(",").filter { it.isNotBlank() }
+        }
+
+    suspend fun setResolverOrder(order: List<String>) {
+        dataStore.edit { it[RESOLVER_ORDER] = order.joinToString(",") }
+    }
+
+    /**
+     * Get the list of active (enabled) resolver IDs.
+     * Empty list means all resolvers are active (no filtering).
+     */
+    suspend fun getActiveResolvers(): List<String> {
+        val raw = dataStore.data.first()[ACTIVE_RESOLVERS] ?: return emptyList()
+        return raw.split(",").filter { it.isNotBlank() }
+    }
+
+    fun getActiveResolversFlow(): Flow<List<String>> =
+        dataStore.data.map { prefs ->
+            val raw = prefs[ACTIVE_RESOLVERS] ?: return@map emptyList()
+            raw.split(",").filter { it.isNotBlank() }
+        }
+
+    suspend fun setActiveResolvers(resolvers: List<String>) {
+        dataStore.edit { it[ACTIVE_RESOLVERS] = resolvers.joinToString(",") }
+    }
+
+    // --- Per-resolver volume offsets (dB) ---
+
+    /**
+     * Per-resolver volume offsets matching the desktop's resolverVolumeOffsets.
+     * Stored as "resolverId:offset,resolverId:offset" pairs.
+     * Default offsets: bandcamp=-3, youtube=-6, others=0.
+     */
+    suspend fun getResolverVolumeOffsets(): Map<String, Int> {
+        val raw = dataStore.data.first()[RESOLVER_VOLUME_OFFSETS] ?: return defaultVolumeOffsets()
+        return raw.split(",").associate { entry ->
+            val parts = entry.split(":")
+            parts[0] to (parts.getOrNull(1)?.toIntOrNull() ?: 0)
+        }
+    }
+
+    suspend fun setResolverVolumeOffsets(offsets: Map<String, Int>) {
+        dataStore.edit {
+            it[RESOLVER_VOLUME_OFFSETS] = offsets.entries.joinToString(",") { (k, v) -> "$k:$v" }
+        }
+    }
+
+    private fun defaultVolumeOffsets(): Map<String, Int> = mapOf(
+        "spotify" to 0,
+        "applemusic" to 0,
+        "localfiles" to 0,
+        "soundcloud" to 0,
+        "bandcamp" to -3,
+        "youtube" to -6,
+    )
 }

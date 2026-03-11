@@ -10,6 +10,7 @@ import com.parachord.android.data.metadata.TrackSearchResult
 import com.parachord.android.playback.PlaybackController
 import com.parachord.android.resolver.ResolvedSource
 import com.parachord.android.resolver.ResolverManager
+import com.parachord.android.resolver.ResolverScoring
 import dagger.hilt.android.lifecycle.HiltViewModel
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
@@ -23,6 +24,7 @@ class AlbumViewModel @Inject constructor(
     savedStateHandle: SavedStateHandle,
     private val metadataService: MetadataService,
     private val resolverManager: ResolverManager,
+    private val resolverScoring: ResolverScoring,
     private val playbackController: PlaybackController,
 ) : ViewModel() {
 
@@ -71,7 +73,7 @@ class AlbumViewModel @Inject constructor(
                 val track = tracks[index]
                 val query = "${track.artist} - ${track.title}"
                 val sources = resolverManager.resolve(query)
-                val best = sources.firstOrNull() ?: return@launch
+                val best = resolverScoring.selectBest(sources) ?: return@launch
 
                 // Build the full queue with this resolved source for the clicked track
                 val entity = track.toTrackEntity(detail, best)
@@ -96,7 +98,7 @@ class AlbumViewModel @Inject constructor(
                 val entities = tracks.mapNotNull { track ->
                     val query = "${track.artist} - ${track.title}"
                     val sources = resolverManager.resolve(query)
-                    val best = sources.firstOrNull() ?: return@mapNotNull null
+                    val best = resolverScoring.selectBest(sources) ?: return@mapNotNull null
                     track.toTrackEntity(detail, best)
                 }
                 if (entities.isNotEmpty()) {
