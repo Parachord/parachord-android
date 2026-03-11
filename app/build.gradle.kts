@@ -1,3 +1,5 @@
+import java.util.Properties
+
 plugins {
     alias(libs.plugins.android.application)
     alias(libs.plugins.kotlin.android)
@@ -6,6 +8,14 @@ plugins {
     alias(libs.plugins.hilt)
     alias(libs.plugins.kotlin.serialization)
 }
+
+val localProps = Properties().apply {
+    val file = rootProject.file("local.properties")
+    if (file.exists()) file.inputStream().use { load(it) }
+}
+
+fun localProp(key: String): String =
+    localProps.getProperty(key) ?: System.getenv(key) ?: ""
 
 android {
     namespace = "com.parachord.android"
@@ -22,9 +32,9 @@ android {
 
         manifestPlaceholders["appAuthRedirectScheme"] = "parachord"
 
-        // API keys — override via local.properties or CI env vars
-        buildConfigField("String", "LASTFM_API_KEY", "\"${project.findProperty("LASTFM_API_KEY") ?: ""}\"")
-        buildConfigField("String", "SPOTIFY_CLIENT_ID", "\"${project.findProperty("SPOTIFY_CLIENT_ID") ?: ""}\"")
+        // API keys — loaded from local.properties or environment variables
+        buildConfigField("String", "LASTFM_API_KEY", "\"${localProp("LASTFM_API_KEY")}\"")
+        buildConfigField("String", "SPOTIFY_CLIENT_ID", "\"${localProp("SPOTIFY_CLIENT_ID")}\"")
     }
 
     buildTypes {

@@ -1,0 +1,9 @@
+# Parachord API keys
+# Copy this file to local.properties and fill in your values.
+# local.properties is gitignored and will never be committed.
+
+# Last.fm — get yours at https://www.last.fm/api/account/create
+LASTFM_API_KEY=
+
+# Spotify — get yours at https://developer.spotify.com/dashboard
+SPOTIFY_CLIENT_ID=
