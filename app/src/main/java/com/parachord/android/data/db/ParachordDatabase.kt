@@ -17,7 +17,7 @@ import com.parachord.android.data.db.entity.PlaylistEntity
         AlbumEntity::class,
         PlaylistEntity::class,
     ],
-    version = 1,
+    version = 2,
     exportSchema = false,
 )
 abstract class ParachordDatabase : RoomDatabase() {
@@ -31,6 +31,6 @@ abstract class ParachordDatabase : RoomDatabase() {
                 context,
                 ParachordDatabase::class.java,
                 "parachord.db"
-            ).build()
+            ).fallbackToDestructiveMigration().build()
     }
 }

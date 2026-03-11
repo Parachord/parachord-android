@@ -27,6 +27,10 @@ retrofit = "2.11.0"
 kotlinx-serialization = "1.7.3"
 retrofit-kotlinx-serialization = "1.0.0"
 
+# Spotify App Remote SDK
+spotify-app-remote = "0.8.0-appremote_v2.1.0-auth"
+gson = "2.11.0"
+
 # Image loading
 coil = "2.7.0"
 
@@ -87,6 +91,10 @@ okhttp-logging = { group = "com.squareup.okhttp3", name = "logging-interceptor",
 retrofit = { group = "com.squareup.retrofit2", name = "retrofit", version.ref = "retrofit" }
 retrofit-kotlinx-serialization = { group = "com.squareup.retrofit2", name = "converter-kotlinx-serialization", version.ref = "retrofit" }
 kotlinx-serialization-json = { group = "org.jetbrains.kotlinx", name = "kotlinx-serialization-json", version.ref = "kotlinx-serialization" }
+
+# Spotify
+spotify-auth = { group = "com.spotify.android", name = "auth", version = "2.1.1" }
+gson = { group = "com.google.code.gson", name = "gson", version.ref = "gson" }
 
 # Image Loading
 coil-compose = { group = "io.coil-kt", name = "coil-compose", version.ref = "coil" }

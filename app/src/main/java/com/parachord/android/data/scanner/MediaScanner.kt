@@ -105,6 +105,7 @@ class MediaScanner @Inject constructor(
                         artworkUrl = artworkUri,
                         sourceType = "local",
                         sourceUrl = contentUri.toString(),
+                        resolver = "localfiles",
                     )
                 )
 

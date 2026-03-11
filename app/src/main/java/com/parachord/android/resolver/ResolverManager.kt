@@ -60,4 +60,8 @@ data class ResolvedSource(
     val resolver: String,
     val quality: Int? = null,
     val headers: Map<String, String>? = null,
+    val spotifyUri: String? = null,
+    val spotifyId: String? = null,
+    val soundcloudId: String? = null,
+    val soundcloudUrl: String? = null,
 )

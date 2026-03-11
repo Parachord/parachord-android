@@ -8,6 +8,7 @@ import com.parachord.android.data.metadata.AlbumDetail
 import com.parachord.android.data.metadata.MetadataService
 import com.parachord.android.data.metadata.TrackSearchResult
 import com.parachord.android.playback.PlaybackController
+import com.parachord.android.resolver.ResolvedSource
 import com.parachord.android.resolver.ResolverManager
 import dagger.hilt.android.lifecycle.HiltViewModel
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -73,7 +74,7 @@ class AlbumViewModel @Inject constructor(
                 val best = sources.firstOrNull() ?: return@launch
 
                 // Build the full queue with this resolved source for the clicked track
-                val entity = track.toTrackEntity(detail, best.url, best.sourceType)
+                val entity = track.toTrackEntity(detail, best)
                 playbackController.playTrack(entity)
             } catch (_: Exception) {
                 // resolution failed
@@ -96,7 +97,7 @@ class AlbumViewModel @Inject constructor(
                     val query = "${track.artist} - ${track.title}"
                     val sources = resolverManager.resolve(query)
                     val best = sources.firstOrNull() ?: return@mapNotNull null
-                    track.toTrackEntity(detail, best.url, best.sourceType)
+                    track.toTrackEntity(detail, best)
                 }
                 if (entities.isNotEmpty()) {
                     playbackController.playQueue(entities, startIndex = 0)
@@ -112,8 +113,7 @@ class AlbumViewModel @Inject constructor(
 
 private fun TrackSearchResult.toTrackEntity(
     album: AlbumDetail,
-    resolvedUrl: String,
-    sourceType: String,
+    source: ResolvedSource,
 ) = TrackEntity(
     id = "resolved-${title.hashCode()}-${artist.hashCode()}-${album.title.hashCode()}",
     title = title,
@@ -121,6 +121,9 @@ private fun TrackSearchResult.toTrackEntity(
     album = album.title,
     duration = duration,
     artworkUrl = artworkUrl ?: album.artworkUrl,
-    sourceType = sourceType,
-    sourceUrl = resolvedUrl,
+    sourceType = source.sourceType,
+    sourceUrl = source.url,
+    resolver = source.resolver,
+    spotifyUri = source.spotifyUri,
+    soundcloudId = source.soundcloudId,
 )

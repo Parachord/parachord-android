@@ -6,6 +6,7 @@ import androidx.datastore.preferences.core.booleanPreferencesKey
 import androidx.datastore.preferences.core.edit
 import androidx.datastore.preferences.core.stringPreferencesKey
 import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.map
 import javax.inject.Inject
 import javax.inject.Singleton
@@ -24,6 +25,7 @@ class SettingsStore @Inject constructor(
         val LASTFM_SESSION_KEY = stringPreferencesKey("lastfm_session_key")
         val SPOTIFY_ACCESS_TOKEN = stringPreferencesKey("spotify_access_token")
         val SPOTIFY_REFRESH_TOKEN = stringPreferencesKey("spotify_refresh_token")
+        val SOUNDCLOUD_ACCESS_TOKEN = stringPreferencesKey("soundcloud_access_token")
     }
 
     val themeMode: Flow<String> = dataStore.data.map { it[THEME_MODE] ?: "system" }
@@ -64,4 +66,24 @@ class SettingsStore @Inject constructor(
     suspend fun clearLastFmSession() {
         dataStore.edit { it.remove(LASTFM_SESSION_KEY) }
     }
+
+    suspend fun setSoundCloudToken(token: String) {
+        dataStore.edit { it[SOUNDCLOUD_ACCESS_TOKEN] = token }
+    }
+
+    fun getSoundCloudTokenFlow(): Flow<String?> =
+        dataStore.data.map { it[SOUNDCLOUD_ACCESS_TOKEN] }
+
+    suspend fun getSoundCloudToken(): String? =
+        dataStore.data.first()[SOUNDCLOUD_ACCESS_TOKEN]
+
+    suspend fun clearSoundCloudToken() {
+        dataStore.edit { it.remove(SOUNDCLOUD_ACCESS_TOKEN) }
+    }
+
+    suspend fun getSpotifyAccessToken(): String? =
+        dataStore.data.first()[SPOTIFY_ACCESS_TOKEN]
+
+    suspend fun getSpotifyRefreshToken(): String? =
+        dataStore.data.first()[SPOTIFY_REFRESH_TOKEN]
 }

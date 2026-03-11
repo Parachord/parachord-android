@@ -15,4 +15,10 @@ data class TrackEntity(
     val sourceType: String? = null,
     val sourceUrl: String? = null,
     val addedAt: Long = System.currentTimeMillis(),
+    /** Resolver that produced this source (e.g. "spotify", "soundcloud", "localfiles"). */
+    val resolver: String? = null,
+    /** Spotify URI for App Remote playback (e.g. "spotify:track:6rqhFgbbKwnb9MLmUQDhG6"). */
+    val spotifyUri: String? = null,
+    /** SoundCloud track ID for streaming via their API. */
+    val soundcloudId: String? = null,
 )

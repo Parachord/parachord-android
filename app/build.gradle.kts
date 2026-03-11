@@ -108,6 +108,11 @@ dependencies {
     implementation(libs.androidx.media3.session)
     implementation(libs.androidx.media3.ui)
 
+    // Spotify App Remote SDK (AAR from GitHub releases)
+    implementation(files("libs/spotify-app-remote-release-0.8.0.aar"))
+    implementation(libs.spotify.auth)
+    implementation(libs.gson)
+
     // Hilt DI
     implementation(libs.hilt.android)
     ksp(libs.hilt.compiler)

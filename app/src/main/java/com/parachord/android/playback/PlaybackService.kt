@@ -1,18 +1,23 @@
 package com.parachord.android.playback
 
-import androidx.media3.common.MediaItem
-import androidx.media3.common.Player
 import androidx.media3.exoplayer.ExoPlayer
 import androidx.media3.session.MediaSession
 import androidx.media3.session.MediaSessionService
+import com.parachord.android.playback.handlers.SpotifyPlaybackHandler
 import dagger.hilt.android.AndroidEntryPoint
+import javax.inject.Inject
 
 /**
  * Foreground service that manages audio playback via ExoPlayer and exposes a
  * MediaSession for lock-screen controls, Bluetooth, and Android Auto.
+ *
+ * Also manages the Spotify App Remote connection lifecycle — connecting when
+ * the service starts and disconnecting on destroy.
  */
 @AndroidEntryPoint
 class PlaybackService : MediaSessionService() {
+
+    @Inject lateinit var spotifyHandler: SpotifyPlaybackHandler
 
     private var mediaSession: MediaSession? = null
     private var player: ExoPlayer? = null
@@ -30,6 +35,7 @@ class PlaybackService : MediaSessionService() {
         mediaSession
 
     override fun onDestroy() {
+        spotifyHandler.disconnect()
         mediaSession?.run {
             player.release()
             release()
