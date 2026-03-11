@@ -1,6 +1,7 @@
 package com.parachord.android.resolver
 
 import android.util.Log
+import com.parachord.android.auth.OAuthManager
 import com.parachord.android.data.api.SpotifyApi
 import com.parachord.android.data.store.SettingsStore
 import kotlinx.coroutines.async
@@ -8,8 +9,8 @@ import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
-import kotlinx.coroutines.flow.firstOrNull
 import kotlinx.serialization.Serializable
+import retrofit2.HttpException
 import javax.inject.Inject
 import javax.inject.Singleton
 
@@ -24,6 +25,7 @@ import javax.inject.Singleton
 class ResolverManager @Inject constructor(
     private val spotifyApi: SpotifyApi,
     private val settingsStore: SettingsStore,
+    private val oAuthManager: OAuthManager,
 ) {
     companion object {
         private const val TAG = "ResolverManager"
@@ -78,29 +80,46 @@ class ResolverManager @Inject constructor(
     }
 
     private suspend fun resolveSpotify(query: String): ResolvedSource? {
-        val token = settingsStore.getSpotifyAccessTokenFlow().firstOrNull()
+        val token = settingsStore.getSpotifyAccessToken()
         if (token.isNullOrBlank()) return null
 
         return try {
-            val response = spotifyApi.search(
-                auth = "Bearer $token",
-                query = query,
-                type = "track",
-                limit = 1,
-            )
-            val track = response.tracks?.items?.firstOrNull() ?: return null
-            ResolvedSource(
-                url = "spotify:track:${track.id}",
-                sourceType = "spotify",
-                resolver = "spotify",
-                spotifyUri = "spotify:track:${track.id}",
-                spotifyId = track.id,
-                confidence = 0.9,
-            )
+            searchSpotifyTrack(query, token)
+        } catch (e: HttpException) {
+            if (e.code() == 401 && oAuthManager.refreshSpotifyToken()) {
+                val newToken = settingsStore.getSpotifyAccessToken() ?: return null
+                try {
+                    searchSpotifyTrack(query, newToken)
+                } catch (e2: Exception) {
+                    Log.w(TAG, "Spotify resolve failed after refresh for '$query': ${e2.message}")
+                    null
+                }
+            } else {
+                Log.w(TAG, "Spotify resolve failed for '$query': ${e.message}")
+                null
+            }
         } catch (e: Exception) {
             Log.w(TAG, "Spotify resolve failed for '$query': ${e.message}")
             null
         }
+    }
+
+    private suspend fun searchSpotifyTrack(query: String, token: String): ResolvedSource? {
+        val response = spotifyApi.search(
+            auth = "Bearer $token",
+            query = query,
+            type = "track",
+            limit = 1,
+        )
+        val track = response.tracks?.items?.firstOrNull() ?: return null
+        return ResolvedSource(
+            url = "spotify:track:${track.id}",
+            sourceType = "spotify",
+            resolver = "spotify",
+            spotifyUri = "spotify:track:${track.id}",
+            spotifyId = track.id,
+            confidence = 0.9,
+        )
     }
 }
 

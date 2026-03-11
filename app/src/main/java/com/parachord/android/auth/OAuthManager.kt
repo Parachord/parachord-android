@@ -34,6 +34,49 @@ class OAuthManager @Inject constructor(
     // PKCE state for Spotify
     private var codeVerifier: String? = null
 
+    /**
+     * Refresh the Spotify access token using the stored refresh token.
+     * Returns true if the token was refreshed successfully.
+     * Called automatically by SpotifyProvider and ResolverManager on HTTP 401.
+     */
+    suspend fun refreshSpotifyToken(): Boolean {
+        val refreshToken = settingsStore.getSpotifyRefreshToken() ?: return false
+        val clientId = BuildConfig.SPOTIFY_CLIENT_ID
+        if (clientId.isBlank()) return false
+
+        return try {
+            val body = FormBody.Builder()
+                .add("grant_type", "refresh_token")
+                .add("refresh_token", refreshToken)
+                .add("client_id", clientId)
+                .build()
+
+            val request = Request.Builder()
+                .url("https://accounts.spotify.com/api/token")
+                .post(body)
+                .build()
+
+            val response = okHttpClient.newCall(request).execute()
+            val responseBody = response.body?.string() ?: return false
+
+            if (!response.isSuccessful) {
+                Log.e(TAG, "Spotify token refresh failed: $responseBody")
+                return false
+            }
+
+            val tokenResponse = json.decodeFromString<SpotifyRefreshResponse>(responseBody)
+            settingsStore.setSpotifyTokens(
+                tokenResponse.accessToken,
+                tokenResponse.refreshToken ?: refreshToken, // keep old if not returned
+            )
+            Log.d(TAG, "Spotify token refreshed successfully")
+            true
+        } catch (e: Exception) {
+            Log.e(TAG, "Spotify token refresh error", e)
+            false
+        }
+    }
+
     /** Launch Spotify OAuth flow with PKCE in a Custom Tab. */
     fun launchSpotifyAuth(clientId: String) {
         val verifier = generateCodeVerifier()
@@ -178,6 +221,12 @@ class OAuthManager @Inject constructor(
 private data class SpotifyTokenResponse(
     @SerialName("access_token") val accessToken: String,
     @SerialName("refresh_token") val refreshToken: String,
+)
+
+@Serializable
+private data class SpotifyRefreshResponse(
+    @SerialName("access_token") val accessToken: String,
+    @SerialName("refresh_token") val refreshToken: String? = null,
 )
 
 @Serializable
