@@ -31,6 +31,8 @@ android {
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
 
         manifestPlaceholders["appAuthRedirectScheme"] = "parachord"
+        manifestPlaceholders["redirectSchemeName"] = "parachord"
+        manifestPlaceholders["redirectHostName"] = "auth"
 
         // API keys — loaded from local.properties or environment variables
         buildConfigField("String", "LASTFM_API_KEY", "\"${localProp("LASTFM_API_KEY")}\"")
