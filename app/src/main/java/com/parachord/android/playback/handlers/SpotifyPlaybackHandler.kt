@@ -1,6 +1,7 @@
 package com.parachord.android.playback.handlers
 
 import android.content.Context
+import android.content.pm.PackageManager
 import android.util.Log
 import com.parachord.android.BuildConfig
 import com.parachord.android.data.db.entity.TrackEntity
@@ -9,10 +10,12 @@ import com.spotify.android.appremote.api.Connector
 import com.spotify.android.appremote.api.SpotifyAppRemote
 import com.spotify.protocol.types.PlayerState
 import dagger.hilt.android.qualifiers.ApplicationContext
+import kotlinx.coroutines.TimeoutCancellationException
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.suspendCancellableCoroutine
+import kotlinx.coroutines.withTimeout
 import javax.inject.Inject
 import javax.inject.Singleton
 import kotlin.coroutines.resume
@@ -60,24 +63,32 @@ class SpotifyPlaybackHandler @Inject constructor(
             return false
         }
 
+        if (!isSpotifyInstalled()) {
+            Log.e(TAG, "Spotify app is not installed — App Remote requires it")
+            return false
+        }
+
         return try {
             val params = ConnectionParams.Builder(clientId)
                 .setRedirectUri("parachord://auth/callback/spotify")
                 .showAuthView(true)
                 .build()
 
-            appRemote = suspendCancellableCoroutine { cont ->
-                SpotifyAppRemote.connect(context, params, object : Connector.ConnectionListener {
-                    override fun onConnected(remote: SpotifyAppRemote) {
-                        Log.d(TAG, "Connected to Spotify App Remote")
-                        cont.resume(remote)
-                    }
+            Log.d(TAG, "Connecting to Spotify App Remote...")
+            appRemote = withTimeout(10_000L) {
+                suspendCancellableCoroutine { cont ->
+                    SpotifyAppRemote.connect(context, params, object : Connector.ConnectionListener {
+                        override fun onConnected(remote: SpotifyAppRemote) {
+                            Log.d(TAG, "Connected to Spotify App Remote")
+                            cont.resume(remote)
+                        }
 
-                    override fun onFailure(error: Throwable) {
-                        Log.e(TAG, "Spotify App Remote connection failed", error)
-                        cont.resumeWithException(error)
-                    }
-                })
+                        override fun onFailure(error: Throwable) {
+                            Log.e(TAG, "Spotify App Remote connection failed", error)
+                            cont.resumeWithException(error)
+                        }
+                    })
+                }
             }
 
             // Subscribe to player state updates
@@ -86,11 +97,22 @@ class SpotifyPlaybackHandler @Inject constructor(
             }
 
             true
+        } catch (e: TimeoutCancellationException) {
+            Log.e(TAG, "Spotify App Remote connection timed out (10s)")
+            false
         } catch (e: Exception) {
             Log.e(TAG, "Failed to connect to Spotify", e)
             false
         }
     }
+
+    private fun isSpotifyInstalled(): Boolean =
+        try {
+            context.packageManager.getPackageInfo("com.spotify.music", 0)
+            true
+        } catch (_: PackageManager.NameNotFoundException) {
+            false
+        }
 
     fun disconnect() {
         appRemote?.let { SpotifyAppRemote.disconnect(it) }
@@ -99,7 +121,12 @@ class SpotifyPlaybackHandler @Inject constructor(
     }
 
     override suspend fun play(track: TrackEntity) {
-        val uri = track.spotifyUri ?: return
+        val uri = track.spotifyUri
+        if (uri == null) {
+            Log.w(TAG, "No spotifyUri on track '${track.title}' — cannot play")
+            return
+        }
+        Log.d(TAG, "play() called for '${track.title}' uri=$uri connected=$isConnected")
         if (!isConnected) {
             if (!connect()) {
                 Log.e(TAG, "Cannot play: not connected to Spotify")
