@@ -1,0 +1,38 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <meta charset="utf-8">
+    <title>Parachord JS Runtime</title>
+</head>
+<body>
+<script>
+    // Polyfill console to route through NativeBridge
+    const _console = {
+        log: (...args) => NativeBridge.log('debug', args.join(' ')),
+        info: (...args) => NativeBridge.log('info', args.join(' ')),
+        warn: (...args) => NativeBridge.log('warn', args.join(' ')),
+        error: (...args) => NativeBridge.log('error', args.join(' ')),
+    };
+    window.console = _console;
+
+    // Polyfill fetch to route through NativeBridge
+    window.nativeFetch = async function(url, options = {}) {
+        const headers = JSON.stringify(options.headers || {});
+        const result = NativeBridge.fetch(url, headers);
+        return {
+            ok: true,
+            text: () => Promise.resolve(result),
+            json: () => Promise.resolve(JSON.parse(result)),
+        };
+    };
+
+    // Storage API for resolvers
+    window.nativeStorage = {
+        get: (key) => NativeBridge.storageGet(key),
+        set: (key, value) => NativeBridge.storageSet(key, value),
+    };
+
+    console.log('Parachord JS runtime initialized');
+</script>
+</body>
+</html>
