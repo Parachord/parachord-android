@@ -13,7 +13,7 @@ import javax.inject.Singleton
  * Manages OAuth authentication flows using Android Custom Tabs.
  * Replaces the Express server OAuth approach from the desktop Electron app.
  *
- * Deep-link callbacks are handled via the parachord://auth/* intent filter
+ * Deep-link callbacks are handled via the parachord://auth/ intent filter
  * declared in AndroidManifest.xml.
  */
 @Singleton
