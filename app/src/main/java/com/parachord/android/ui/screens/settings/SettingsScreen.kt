@@ -19,6 +19,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.dp
 import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import com.parachord.android.BuildConfig
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -53,7 +54,7 @@ fun SettingsScreen(
                         if (spotifyConnected) {
                             viewModel.disconnectSpotify()
                         } else {
-                            viewModel.connectSpotify("YOUR_SPOTIFY_CLIENT_ID")
+                            viewModel.connectSpotify(BuildConfig.SPOTIFY_CLIENT_ID)
                         }
                     },
                 )
@@ -68,7 +69,7 @@ fun SettingsScreen(
                         if (lastFmConnected) {
                             viewModel.disconnectLastFm()
                         } else {
-                            viewModel.connectLastFm("YOUR_LASTFM_API_KEY")
+                            viewModel.connectLastFm(BuildConfig.LASTFM_API_KEY)
                         }
                     },
                 )
