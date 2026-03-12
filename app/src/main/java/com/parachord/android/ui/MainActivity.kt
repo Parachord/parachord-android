@@ -6,6 +6,7 @@ import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
 import androidx.compose.foundation.background
+import androidx.compose.foundation.isSystemInDarkTheme
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.fillMaxWidth
@@ -23,7 +24,6 @@ import androidx.compose.material3.NavigationBar
 import androidx.compose.material3.NavigationBarItem
 import androidx.compose.material3.NavigationBarItemDefaults
 import androidx.compose.material3.Scaffold
-import androidx.compose.material3.Text
 import androidx.compose.material3.rememberDrawerState
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
@@ -35,7 +35,6 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
@@ -68,9 +67,7 @@ class MainActivity : ComponentActivity() {
         enableEdgeToEdge()
         handleOAuthIntent(intent)
         setContent {
-            ParachordTheme {
-                ParachordApp()
-            }
+            ParachordApp()
         }
     }
 
@@ -91,6 +88,21 @@ class MainActivity : ComponentActivity() {
 
 @Composable
 fun ParachordApp() {
+    val mainViewModel: MainViewModel = hiltViewModel()
+    val themeMode by mainViewModel.themeMode.collectAsStateWithLifecycle()
+    val darkTheme = when (themeMode) {
+        "dark" -> true
+        "light" -> false
+        else -> isSystemInDarkTheme()
+    }
+
+    ParachordTheme(darkTheme = darkTheme) {
+        ParachordAppContent(mainViewModel)
+    }
+}
+
+@Composable
+private fun ParachordAppContent(mainViewModel: MainViewModel) {
     val navController = rememberNavController()
     val navBackStackEntry by navController.currentBackStackEntryAsState()
     val currentDestination = navBackStackEntry?.destination
@@ -98,7 +110,6 @@ fun ParachordApp() {
     val fullScreenRoutes = setOf(Routes.NOW_PLAYING)
     val showBottomBar = currentDestination?.route !in fullScreenRoutes
 
-    val mainViewModel: MainViewModel = hiltViewModel()
     val playbackState by mainViewModel.playbackState.collectAsStateWithLifecycle()
     val currentTrack = playbackState.currentTrack
 
@@ -178,19 +189,14 @@ fun ParachordApp() {
                                                     )
                                                 }
                                             } else {
-                                                Icon(item.icon, contentDescription = item.label)
-                                            }
-                                        },
-                                        label = if (item.isAction) null else {
-                                            {
-                                                Text(
-                                                    item.label,
-                                                    maxLines = 1,
-                                                    softWrap = false,
-                                                    overflow = TextOverflow.Ellipsis,
+                                                Icon(
+                                                    item.icon,
+                                                    contentDescription = item.label,
+                                                    modifier = Modifier.size(26.dp),
                                                 )
                                             }
                                         },
+                                        label = null,
                                         selected = selected,
                                         onClick = {
                                             if (item.isAction) {

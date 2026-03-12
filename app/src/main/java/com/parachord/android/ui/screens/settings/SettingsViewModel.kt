@@ -18,6 +18,9 @@ class SettingsViewModel @Inject constructor(
     private val oAuthManager: OAuthManager,
 ) : ViewModel() {
 
+    val themeMode: StateFlow<String> = settingsStore.themeMode
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), "system")
+
     val scrobblingEnabled: StateFlow<Boolean> = settingsStore.scrobblingEnabled
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), false)
 
@@ -28,6 +31,10 @@ class SettingsViewModel @Inject constructor(
     val lastFmConnected: StateFlow<Boolean> = settingsStore.getLastFmSessionKeyFlow()
         .map { it != null }
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), false)
+
+    fun setThemeMode(mode: String) {
+        viewModelScope.launch { settingsStore.setThemeMode(mode) }
+    }
 
     fun setScrobbling(enabled: Boolean) {
         viewModelScope.launch { settingsStore.setScrobblingEnabled(enabled) }

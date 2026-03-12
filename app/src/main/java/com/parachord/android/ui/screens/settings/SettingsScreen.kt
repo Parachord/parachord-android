@@ -2,7 +2,9 @@ package com.parachord.android.ui.screens.settings
 
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
@@ -10,6 +12,8 @@ import androidx.compose.foundation.layout.WindowInsets
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.ExperimentalMaterial3Api
+import androidx.compose.material3.FilterChip
+import androidx.compose.material3.FilterChipDefaults
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.ListItem
 import androidx.compose.material3.MaterialTheme
@@ -33,6 +37,7 @@ fun SettingsScreen(
     modifier: Modifier = Modifier,
     viewModel: SettingsViewModel = hiltViewModel(),
 ) {
+    val themeMode by viewModel.themeMode.collectAsStateWithLifecycle()
     val scrobbling by viewModel.scrobblingEnabled.collectAsStateWithLifecycle()
     val spotifyConnected by viewModel.spotifyConnected.collectAsStateWithLifecycle()
     val lastFmConnected by viewModel.lastFmConnected.collectAsStateWithLifecycle()
@@ -43,6 +48,28 @@ fun SettingsScreen(
             windowInsets = WindowInsets(0),
         )
         LazyColumn(modifier = Modifier.fillMaxWidth()) {
+            item { SectionHeader("Appearance") }
+            item {
+                ListItem(
+                    headlineContent = { Text("Dark Mode") },
+                    supportingContent = {
+                        Text(
+                            when (themeMode) {
+                                "light" -> "Always light"
+                                "dark" -> "Always dark"
+                                else -> "Follow system"
+                            },
+                        )
+                    },
+                    trailingContent = {
+                        ThemeModeSelector(
+                            currentMode = themeMode,
+                            onModeChanged = { viewModel.setThemeMode(it) },
+                        )
+                    },
+                )
+            }
+            item { HorizontalDivider() }
             item { SectionHeader("Accounts") }
             item {
                 ListItem(
@@ -122,6 +149,27 @@ fun SettingsScreen(
                     supportingContent = { Text("0.1.0") },
                 )
             }
+        }
+    }
+}
+
+@Composable
+private fun ThemeModeSelector(
+    currentMode: String,
+    onModeChanged: (String) -> Unit,
+) {
+    val modes = listOf("system" to "Auto", "light" to "Light", "dark" to "Dark")
+    Row(horizontalArrangement = Arrangement.spacedBy(4.dp)) {
+        modes.forEach { (value, label) ->
+            FilterChip(
+                selected = currentMode == value,
+                onClick = { onModeChanged(value) },
+                label = { Text(label, style = MaterialTheme.typography.labelSmall) },
+                colors = FilterChipDefaults.filterChipColors(
+                    selectedContainerColor = MaterialTheme.colorScheme.primary.copy(alpha = 0.15f),
+                    selectedLabelColor = MaterialTheme.colorScheme.primary,
+                ),
+            )
         }
     }
 }

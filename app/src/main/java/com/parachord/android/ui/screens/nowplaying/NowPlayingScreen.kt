@@ -22,6 +22,7 @@ import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.IconButtonDefaults
+import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Slider
 import androidx.compose.material3.SliderDefaults
 import androidx.compose.material3.Text
@@ -44,7 +45,6 @@ import com.parachord.android.ui.theme.PlayerSurface
 import com.parachord.android.ui.theme.PlayerTextPrimary
 import com.parachord.android.ui.theme.PlayerTextSecondary
 import com.parachord.android.ui.theme.PurpleDark
-import com.parachord.android.ui.theme.PurpleLight
 import java.util.Locale
 
 @OptIn(ExperimentalMaterial3Api::class)
@@ -192,7 +192,7 @@ fun NowPlayingScreen(
                 modifier = Modifier
                     .size(72.dp)
                     .clip(CircleShape)
-                    .background(PurpleLight),
+                    .background(MaterialTheme.colorScheme.primary),
                 colors = IconButtonDefaults.iconButtonColors(
                     contentColor = Color.White,
                 ),
