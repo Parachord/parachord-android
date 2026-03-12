@@ -6,10 +6,15 @@ import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
 import androidx.compose.foundation.background
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.isSystemInDarkTheme
+import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.fillMaxSize
@@ -20,9 +25,6 @@ import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.ModalDrawerSheet
 import androidx.compose.material3.ModalNavigationDrawer
-import androidx.compose.material3.NavigationBar
-import androidx.compose.material3.NavigationBarItem
-import androidx.compose.material3.NavigationBarItemDefaults
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.rememberDrawerState
 import androidx.compose.runtime.Composable
@@ -165,64 +167,67 @@ private fun ParachordAppContent(mainViewModel: MainViewModel) {
                                     .height(0.5.dp)
                                     .background(MaterialTheme.colorScheme.outlineVariant),
                             )
-                            NavigationBar(
-                                containerColor = if (isSystemInDarkTheme()) Color(0xFF262626) else Color(0xFF1F2937),
+                            val navBarBg = if (isSystemInDarkTheme()) Color(0xFF262626) else Color(0xFF1F2937)
+                            val selectedTabBg = Color.White.copy(alpha = 0.12f)
+                            Row(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .background(navBarBg)
+                                    .navigationBarsPadding()
+                                    .height(56.dp),
+                                horizontalArrangement = Arrangement.SpaceEvenly,
+                                verticalAlignment = Alignment.CenterVertically,
                             ) {
                                 BottomNavItem.entries.forEach { item ->
                                     val selected = item.route != null &&
                                         currentDestination?.hierarchy?.any { it.route == item.route } == true
 
-                                    NavigationBarItem(
-                                        icon = {
-                                            if (item.isAction) {
-                                                // Circular purple background for the "+" action
-                                                Box(
-                                                    modifier = Modifier
-                                                        .size(32.dp)
-                                                        .clip(CircleShape)
-                                                        .background(MaterialTheme.colorScheme.primary),
-                                                    contentAlignment = Alignment.Center,
-                                                ) {
-                                                    Icon(
-                                                        item.icon,
-                                                        contentDescription = item.label,
-                                                        tint = Color.White,
-                                                        modifier = Modifier.size(20.dp),
-                                                    )
+                                    Box(
+                                        modifier = Modifier
+                                            .weight(1f)
+                                            .fillMaxHeight()
+                                            .background(if (selected) selectedTabBg else Color.Transparent)
+                                            .clickable {
+                                                if (item.isAction) {
+                                                    showActionOverlay = !showActionOverlay
+                                                } else {
+                                                    item.route?.let { route ->
+                                                        navController.navigate(route) {
+                                                            popUpTo(navController.graph.findStartDestination().id) {
+                                                                saveState = true
+                                                            }
+                                                            launchSingleTop = true
+                                                            restoreState = true
+                                                        }
+                                                    }
                                                 }
-                                            } else {
+                                            },
+                                        contentAlignment = Alignment.Center,
+                                    ) {
+                                        if (item.isAction) {
+                                            Box(
+                                                modifier = Modifier
+                                                    .size(32.dp)
+                                                    .clip(CircleShape)
+                                                    .background(MaterialTheme.colorScheme.primary),
+                                                contentAlignment = Alignment.Center,
+                                            ) {
                                                 Icon(
                                                     item.icon,
                                                     contentDescription = item.label,
-                                                    modifier = Modifier.size(26.dp),
+                                                    tint = Color.White,
+                                                    modifier = Modifier.size(20.dp),
                                                 )
                                             }
-                                        },
-                                        label = null,
-                                        selected = selected,
-                                        onClick = {
-                                            if (item.isAction) {
-                                                showActionOverlay = !showActionOverlay
-                                            } else {
-                                                item.route?.let { route ->
-                                                    navController.navigate(route) {
-                                                        popUpTo(navController.graph.findStartDestination().id) {
-                                                            saveState = true
-                                                        }
-                                                        launchSingleTop = true
-                                                        restoreState = true
-                                                    }
-                                                }
-                                            }
-                                        },
-                                        colors = NavigationBarItemDefaults.colors(
-                                            selectedIconColor = Color.White,
-                                            unselectedIconColor = Color.White.copy(alpha = 0.55f),
-                                            selectedTextColor = Color.White,
-                                            unselectedTextColor = Color.White.copy(alpha = 0.55f),
-                                            indicatorColor = Color.White.copy(alpha = 0.12f),
-                                        ),
-                                    )
+                                        } else {
+                                            Icon(
+                                                item.icon,
+                                                contentDescription = item.label,
+                                                tint = if (selected) Color.White else Color.White.copy(alpha = 0.55f),
+                                                modifier = Modifier.size(26.dp),
+                                            )
+                                        }
+                                    }
                                 }
                             }
                         }

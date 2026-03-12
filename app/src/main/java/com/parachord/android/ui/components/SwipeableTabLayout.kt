@@ -1,8 +1,8 @@
 package com.parachord.android.ui.components
 
-import androidx.compose.foundation.isSystemInDarkTheme
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.pager.HorizontalPager
 import androidx.compose.foundation.pager.rememberPagerState
 import androidx.compose.material3.MaterialTheme
@@ -16,7 +16,9 @@ import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.em
 import androidx.compose.ui.unit.sp
 import kotlinx.coroutines.launch
@@ -30,10 +32,9 @@ fun SwipeableTabLayout(
     val pagerState = rememberPagerState(pageCount = { tabs.size })
     val scope = rememberCoroutineScope()
 
-    // Dark blue-gray background matching desktop playbar, white text
-    val tabBarBackground = if (isSystemInDarkTheme()) Color(0xFF262626) else Color(0xFF1F2937)
-    val activeColor = Color.White
-    val inactiveColor = Color.White.copy(alpha = 0.55f)
+    val tabBarBackground = MaterialTheme.colorScheme.surface
+    val activeColor = MaterialTheme.colorScheme.onSurface
+    val inactiveColor = MaterialTheme.colorScheme.onSurfaceVariant
 
     Column(modifier = modifier) {
         TabRow(
@@ -44,7 +45,7 @@ fun SwipeableTabLayout(
                 if (pagerState.currentPage < tabPositions.size) {
                     TabRowDefaults.PrimaryIndicator(
                         modifier = Modifier.tabIndicatorOffset(tabPositions[pagerState.currentPage]),
-                        color = activeColor,
+                        color = MaterialTheme.colorScheme.primary,
                     )
                 }
             },
@@ -54,6 +55,7 @@ fun SwipeableTabLayout(
                 Tab(
                     selected = selected,
                     onClick = { scope.launch { pagerState.animateScrollToPage(index) } },
+                    modifier = Modifier.height(48.dp),
                     text = {
                         Text(
                             text = title.uppercase(),
@@ -63,8 +65,8 @@ fun SwipeableTabLayout(
                                 fontSize = 11.sp,
                             ),
                             color = if (selected) activeColor else inactiveColor,
-                            maxLines = 1,
-                            overflow = TextOverflow.Ellipsis,
+                            textAlign = TextAlign.Center,
+                            maxLines = 2,
                         )
                     },
                 )
