@@ -26,6 +26,7 @@ import androidx.compose.material.icons.filled.FileDownload
 import androidx.compose.material.icons.filled.PersonAdd
 import androidx.compose.material3.Icon
 import androidx.compose.material3.Text
+import com.parachord.android.ui.icons.ParachordIcons
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
@@ -49,6 +50,7 @@ fun ActionOverlay(
     onCreatePlaylist: () -> Unit,
     onImportPlaylist: () -> Unit,
     onAddFriend: () -> Unit,
+    onChatWithShuffleupagus: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
     AnimatedVisibility(
@@ -80,6 +82,11 @@ fun ActionOverlay(
                     verticalArrangement = Arrangement.spacedBy(16.dp),
                     horizontalAlignment = Alignment.End,
                 ) {
+                    ActionRow(
+                        label = "Chat with Shuffleupagus",
+                        icon = ParachordIcons.Shuffleupagus,
+                        onClick = onChatWithShuffleupagus,
+                    )
                     ActionRow(
                         label = "Create Playlist",
                         icon = Icons.AutoMirrored.Filled.PlaylistAdd,

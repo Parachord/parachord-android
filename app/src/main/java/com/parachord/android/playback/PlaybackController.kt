@@ -211,6 +211,14 @@ class PlaybackController @Inject constructor(
         }
     }
 
+    fun toggleShuffle() {
+        val current = stateHolder.state.value.shuffleEnabled
+        stateHolder.update { copy(shuffleEnabled = !current) }
+        if (!isExternalPlayback) {
+            controller?.shuffleModeEnabled = !current
+        }
+    }
+
     fun seekTo(positionMs: Long) {
         if (isExternalPlayback) {
             scope.launch {

@@ -240,6 +240,7 @@ private fun ParachordAppContent(mainViewModel: MainViewModel) {
             onCreatePlaylist = { showActionOverlay = false },
             onImportPlaylist = { showActionOverlay = false },
             onAddFriend = { showActionOverlay = false },
+            onChatWithShuffleupagus = { showActionOverlay = false },
         )
     }
 }

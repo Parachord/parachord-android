@@ -31,4 +31,8 @@ class NowPlayingViewModel @Inject constructor(
     fun seekTo(positionMs: Long) {
         playbackController.seekTo(positionMs)
     }
+
+    fun toggleShuffle() {
+        playbackController.toggleShuffle()
+    }
 }
