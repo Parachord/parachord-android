@@ -20,7 +20,8 @@ import java.util.Locale
  * Custom track list item replacing generic Material ListItem.
  *
  * Shows album art (48dp), title/artist, optional track number,
- * optional resolver badge, and optional duration.
+ * resolver icon squares (colored squares with white logos matching desktop),
+ * and optional duration.
  */
 @Composable
 fun TrackRow(
@@ -28,12 +29,19 @@ fun TrackRow(
     artist: String,
     artworkUrl: String? = null,
     resolver: String? = null,
+    resolvers: List<String>? = null,
     duration: Long? = null,
     trackNumber: Int? = null,
     isPlaying: Boolean = false,
     onClick: () -> Unit = {},
     modifier: Modifier = Modifier,
 ) {
+    // Combine single resolver with list of resolvers, deduplicating
+    val allResolvers = buildList {
+        resolvers?.let { addAll(it) }
+        if (resolver != null && !contains(resolver)) add(resolver)
+    }
+
     Row(
         modifier = modifier
             .fillMaxWidth()
@@ -94,10 +102,10 @@ fun TrackRow(
             )
         }
 
-        // Resolver badge
-        if (resolver != null) {
+        // Resolver icon squares (colored squares with white logos)
+        if (allResolvers.isNotEmpty()) {
             Spacer(modifier = Modifier.width(8.dp))
-            ResolverBadge(resolver = resolver)
+            ResolverIconRow(resolvers = allResolvers, size = 20.dp)
         }
     }
 }

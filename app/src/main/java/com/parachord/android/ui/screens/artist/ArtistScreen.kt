@@ -35,8 +35,10 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.em
 import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.compose.ui.platform.LocalContext
@@ -66,7 +68,15 @@ fun ArtistScreen(
 
     Column(modifier = modifier.fillMaxSize()) {
         TopAppBar(
-            title = { Text(artistInfo?.name ?: "Artist") },
+            title = {
+                Text(
+                    text = (artistInfo?.name ?: "Artist").uppercase(),
+                    style = MaterialTheme.typography.titleLarge.copy(
+                        fontWeight = FontWeight.Light,
+                        letterSpacing = 0.2.em,
+                    ),
+                )
+            },
             navigationIcon = {
                 IconButton(onClick = onBack) {
                     Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Back")
@@ -120,15 +130,6 @@ fun ArtistScreen(
                     },
                 )
             }
-
-            // Artist name
-            Text(
-                text = artistInfo?.name ?: "",
-                style = MaterialTheme.typography.headlineMedium,
-                modifier = Modifier.padding(horizontal = 16.dp, vertical = 8.dp),
-                maxLines = 1,
-                overflow = TextOverflow.Ellipsis,
-            )
 
             // Tabs + pager
             SwipeableTabLayout(

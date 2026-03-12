@@ -7,12 +7,15 @@ import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.WindowInsets
 import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.statusBars
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.layout.windowInsetsPadding
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
@@ -90,7 +93,8 @@ fun DrawerContent(
             .fillMaxHeight()
             .width(280.dp)
             .background(MaterialTheme.colorScheme.surface)
-            .padding(top = 48.dp),
+            .windowInsetsPadding(WindowInsets.statusBars)
+            .padding(top = 12.dp),
     ) {
         // ── Parachord wordmark at top ──
         Icon(
@@ -100,7 +104,7 @@ fun DrawerContent(
             modifier = Modifier
                 .padding(horizontal = 24.dp)
                 .padding(bottom = 24.dp)
-                .height(28.dp),
+                .height(35.dp),
         )
 
         // ── Scrollable content (everything except Settings) ──

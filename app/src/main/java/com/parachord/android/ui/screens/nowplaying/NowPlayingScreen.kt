@@ -37,12 +37,14 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.em
 import androidx.compose.ui.unit.sp
 import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.parachord.android.ui.components.AlbumArtCardFill
-import com.parachord.android.ui.components.ResolverBadge
+import com.parachord.android.ui.components.ResolverIconSquare
 import com.parachord.android.ui.icons.ParachordIcons
 import com.parachord.android.ui.theme.PlayerSurface
 import com.parachord.android.ui.theme.PlayerTextPrimary
@@ -76,7 +78,11 @@ fun NowPlayingScreen(
             TopAppBar(
                 title = {
                     Text(
-                        text = "Now Playing",
+                        text = "NOW PLAYING",
+                        style = MaterialTheme.typography.titleLarge.copy(
+                            fontWeight = FontWeight.Light,
+                            letterSpacing = 0.2.em,
+                        ),
                         color = PlayerTextSecondary,
                     )
                 },
@@ -133,10 +139,10 @@ fun NowPlayingScreen(
                     overflow = TextOverflow.Ellipsis,
                 )
 
-                // Resolver badge
+                // Resolver icon
                 if (track?.resolver != null) {
                     Spacer(modifier = Modifier.height(8.dp))
-                    ResolverBadge(resolver = track.resolver!!)
+                    ResolverIconSquare(resolver = track.resolver!!, size = 24.dp)
                 }
             }
 

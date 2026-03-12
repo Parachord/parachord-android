@@ -165,7 +165,9 @@ private fun ParachordAppContent(mainViewModel: MainViewModel) {
                                     .height(0.5.dp)
                                     .background(MaterialTheme.colorScheme.outlineVariant),
                             )
-                            NavigationBar {
+                            NavigationBar(
+                                containerColor = if (isSystemInDarkTheme()) Color(0xFF262626) else Color(0xFF1F2937),
+                            ) {
                                 BottomNavItem.entries.forEach { item ->
                                     val selected = item.route != null &&
                                         currentDestination?.hierarchy?.any { it.route == item.route } == true
@@ -214,9 +216,11 @@ private fun ParachordAppContent(mainViewModel: MainViewModel) {
                                             }
                                         },
                                         colors = NavigationBarItemDefaults.colors(
-                                            selectedIconColor = MaterialTheme.colorScheme.primary,
-                                            selectedTextColor = MaterialTheme.colorScheme.primary,
-                                            indicatorColor = MaterialTheme.colorScheme.primary.copy(alpha = 0.12f),
+                                            selectedIconColor = Color.White,
+                                            unselectedIconColor = Color.White.copy(alpha = 0.55f),
+                                            selectedTextColor = Color.White,
+                                            unselectedTextColor = Color.White.copy(alpha = 0.55f),
+                                            indicatorColor = Color.White.copy(alpha = 0.12f),
                                         ),
                                     )
                                 }
