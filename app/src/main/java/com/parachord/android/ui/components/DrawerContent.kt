@@ -1,25 +1,38 @@
 package com.parachord.android.ui.components
 
+import androidx.compose.foundation.background
+import androidx.compose.foundation.clickable
+import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.fillMaxHeight
+import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
-import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.filled.BarChart
-import androidx.compose.material.icons.filled.ConfirmationNumber
-import androidx.compose.material.icons.filled.EmojiEvents
-import androidx.compose.material.icons.filled.History
-import androidx.compose.material.icons.filled.People
-import androidx.compose.material.icons.filled.Settings
-import androidx.compose.material.icons.filled.Star
-import androidx.compose.material.icons.filled.WaterDrop
+import androidx.compose.material.icons.outlined.BarChart
+import androidx.compose.material.icons.outlined.ConfirmationNumber
+import androidx.compose.material.icons.outlined.EmojiEvents
+import androidx.compose.material.icons.outlined.History
+import androidx.compose.material.icons.outlined.People
+import androidx.compose.material.icons.outlined.Settings
+import androidx.compose.material.icons.outlined.Star
+import androidx.compose.material.icons.outlined.WaterDrop
+import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.NavigationDrawerItem
-import androidx.compose.material3.NavigationDrawerItemDefaults
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.text.font.FontWeight
@@ -40,15 +53,25 @@ data class DrawerMenuItem(
 // ── Drawer Item Definitions ─────────────────────────────────────────
 
 private val yourMusicItems = listOf(
-    DrawerMenuItem(Routes.HISTORY, "History", Icons.Filled.History, Color(0xFF06B6D4)),
+    DrawerMenuItem(Routes.HISTORY, "History", Icons.Outlined.History, Color(0xFF06B6D4)),
 )
 
 private val discoverItems = listOf(
-    DrawerMenuItem(Routes.FRESH_DROPS, "Fresh Drops", Icons.Filled.WaterDrop, Color(0xFF10B981)),
-    DrawerMenuItem(Routes.RECOMMENDATIONS, "Recommendations", Icons.Filled.Star, Color(0xFFF59E0B)),
-    DrawerMenuItem(Routes.POP_OF_THE_TOPS, "Pop of the Tops", Icons.Filled.BarChart, Color(0xFFF97316)),
-    DrawerMenuItem(Routes.CRITICAL_DARLINGS, "Critical Darlings", Icons.Filled.EmojiEvents, Color(0xFFEF4444)),
-    DrawerMenuItem(Routes.CONCERTS, "Concerts", Icons.Filled.ConfirmationNumber, Color(0xFF14B8A6)),
+    DrawerMenuItem(Routes.FRESH_DROPS, "Fresh Drops", Icons.Outlined.WaterDrop, Color(0xFF10B981)),
+    DrawerMenuItem(Routes.RECOMMENDATIONS, "Recommendations", Icons.Outlined.Star, Color(0xFFF59E0B)),
+    DrawerMenuItem(Routes.POP_OF_THE_TOPS, "Pop of the Tops", Icons.Outlined.BarChart, Color(0xFFF97316)),
+    DrawerMenuItem(Routes.CRITICAL_DARLINGS, "Critical Darlings", Icons.Outlined.EmojiEvents, Color(0xFFEF4444)),
+    DrawerMenuItem(Routes.CONCERTS, "Concerts", Icons.Outlined.ConfirmationNumber, Color(0xFF14B8A6)),
+)
+
+// Friends would show actual friend entries in the future;
+// for now it navigates to the Friends screen
+private val friendsItem = DrawerMenuItem(
+    Routes.FRIENDS, "Friends", Icons.Outlined.People, Color(0xFF7C3AED),
+)
+
+private val settingsItem = DrawerMenuItem(
+    Routes.SETTINGS, "Settings", Icons.Outlined.Settings, Color(0xFF9CA3AF),
 )
 
 @Composable
@@ -57,77 +80,67 @@ fun DrawerContent(
     onItemClick: (String) -> Unit,
     modifier: Modifier = Modifier,
 ) {
-    LazyColumn(modifier = modifier.padding(horizontal = 12.dp)) {
-        // ── Branded Header ──
-        item {
-            Spacer(modifier = Modifier.height(24.dp))
-            Text(
-                text = "PARACHORD",
-                style = MaterialTheme.typography.titleLarge.copy(
-                    fontWeight = FontWeight.Bold,
-                    letterSpacing = 2.sp,
-                ),
-                color = MaterialTheme.colorScheme.primary,
-                modifier = Modifier.padding(horizontal = 16.dp, vertical = 16.dp),
-            )
-            Spacer(modifier = Modifier.height(8.dp))
-        }
-
-        // ── YOUR MUSIC Section ──
-        item {
+    Column(
+        modifier = modifier
+            .fillMaxHeight()
+            .width(280.dp)
+            .background(MaterialTheme.colorScheme.surface)
+            .padding(top = 48.dp),
+    ) {
+        // ── Scrollable content (everything except Settings) ──
+        Column(
+            modifier = Modifier
+                .weight(1f)
+                .verticalScroll(rememberScrollState())
+                .padding(horizontal = 12.dp),
+        ) {
+            // ── YOUR MUSIC Section ──
             DrawerSectionHeader("YOUR MUSIC")
-        }
-        yourMusicItems.forEach { item ->
-            item {
+            yourMusicItems.forEach { item ->
                 DrawerNavItem(
                     item = item,
                     selected = currentRoute == item.route,
                     onClick = { onItemClick(item.route) },
                 )
             }
-        }
 
-        // ── DISCOVER Section ──
-        item {
-            Spacer(modifier = Modifier.height(8.dp))
+            Spacer(modifier = Modifier.height(16.dp))
+
+            // ── DISCOVER Section ──
             DrawerSectionHeader("DISCOVER")
-        }
-        discoverItems.forEach { item ->
-            item {
+            discoverItems.forEach { item ->
                 DrawerNavItem(
                     item = item,
                     selected = currentRoute == item.route,
                     onClick = { onItemClick(item.route) },
                 )
             }
-        }
 
-        // ── Bottom Items (no section header) ──
-        item {
-            Spacer(modifier = Modifier.height(8.dp))
-        }
-        item {
+            Spacer(modifier = Modifier.height(16.dp))
+
+            // ── FRIENDS Section ──
+            DrawerSectionHeader("FRIENDS")
+            // Placeholder: single item to navigate to Friends screen
+            // In the future, this would show actual friend avatars + names
             DrawerNavItem(
-                item = DrawerMenuItem(
-                    Routes.FRIENDS,
-                    "Friends",
-                    Icons.Filled.People,
-                    MaterialTheme.colorScheme.primary,
-                ),
-                selected = currentRoute == Routes.FRIENDS,
-                onClick = { onItemClick(Routes.FRIENDS) },
+                item = friendsItem,
+                selected = currentRoute == friendsItem.route,
+                onClick = { onItemClick(friendsItem.route) },
             )
         }
-        item {
+
+        // ── Settings pinned to bottom ──
+        HorizontalDivider(
+            color = MaterialTheme.colorScheme.outlineVariant,
+            thickness = 1.dp,
+        )
+        Box(
+            modifier = Modifier.padding(horizontal = 12.dp, vertical = 12.dp),
+        ) {
             DrawerNavItem(
-                item = DrawerMenuItem(
-                    Routes.SETTINGS,
-                    "Settings",
-                    Icons.Filled.Settings,
-                    MaterialTheme.colorScheme.onSurfaceVariant,
-                ),
-                selected = currentRoute == Routes.SETTINGS,
-                onClick = { onItemClick(Routes.SETTINGS) },
+                item = settingsItem,
+                selected = currentRoute == settingsItem.route,
+                onClick = { onItemClick(settingsItem.route) },
             )
         }
     }
@@ -137,12 +150,11 @@ fun DrawerContent(
 private fun DrawerSectionHeader(title: String) {
     Text(
         text = title,
-        style = MaterialTheme.typography.labelSmall.copy(
-            letterSpacing = 1.5.sp,
-            fontWeight = FontWeight.SemiBold,
-        ),
+        fontSize = 11.sp,
+        fontWeight = FontWeight.SemiBold,
+        letterSpacing = 0.88.sp, // ~0.08em at 11sp
         color = MaterialTheme.colorScheme.onSurfaceVariant,
-        modifier = Modifier.padding(horizontal = 16.dp, vertical = 8.dp),
+        modifier = Modifier.padding(horizontal = 12.dp, vertical = 8.dp),
     )
 }
 
@@ -152,28 +164,37 @@ private fun DrawerNavItem(
     selected: Boolean,
     onClick: () -> Unit,
 ) {
-    NavigationDrawerItem(
-        icon = {
-            Icon(
-                imageVector = item.icon,
-                contentDescription = item.label,
-                tint = item.activeColor,
-            )
-        },
-        label = {
-            Text(
-                text = item.label,
-                style = MaterialTheme.typography.bodyLarge,
-            )
-        },
-        selected = selected,
-        onClick = onClick,
-        colors = NavigationDrawerItemDefaults.colors(
-            selectedContainerColor = item.activeColor.copy(alpha = 0.12f),
-            selectedTextColor = MaterialTheme.colorScheme.onSurface,
-            selectedIconColor = item.activeColor,
-            unselectedTextColor = MaterialTheme.colorScheme.onSurface,
-            unselectedIconColor = item.activeColor,
-        ),
-    )
+    val shape = RoundedCornerShape(6.dp)
+    val backgroundColor = if (selected) item.activeColor.copy(alpha = 0.10f) else Color.Transparent
+    val textColor = if (selected) {
+        MaterialTheme.colorScheme.onSurface
+    } else {
+        MaterialTheme.colorScheme.onSurface.copy(alpha = 0.8f)
+    }
+    val fontWeight = if (selected) FontWeight.Medium else FontWeight.Normal
+
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .clip(shape)
+            .background(backgroundColor)
+            .clickable(onClick = onClick)
+            .padding(horizontal = 12.dp, vertical = 8.dp),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.Start,
+    ) {
+        Icon(
+            imageVector = item.icon,
+            contentDescription = item.label,
+            tint = item.activeColor,
+            modifier = Modifier.size(20.dp),
+        )
+        Spacer(modifier = Modifier.width(12.dp))
+        Text(
+            text = item.label,
+            fontSize = 14.sp,
+            fontWeight = fontWeight,
+            color = textColor,
+        )
+    }
 }
