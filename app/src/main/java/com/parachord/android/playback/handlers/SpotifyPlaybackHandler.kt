@@ -38,8 +38,6 @@ class SpotifyPlaybackHandler @Inject constructor(
 
     companion object {
         private const val TAG = "SpotifyPlayback"
-        /** Device type priority — prefer phone, then computer, then anything else. */
-        private val DEVICE_TYPE_PRIORITY = listOf("Smartphone", "Computer")
     }
 
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Main)
@@ -75,7 +73,7 @@ class SpotifyPlaybackHandler @Inject constructor(
                 return@withAuth false
             }
 
-            // Pick the best device: prefer Smartphone, then Computer, then first available
+            // Pick the best device using the desktop app's cascading logic
             val targetDevice = pickDevice(devices)
             Log.d(TAG, "Target device: '${targetDevice.name}' (type=${targetDevice.type})")
 
@@ -86,7 +84,14 @@ class SpotifyPlaybackHandler @Inject constructor(
                 delay(500) // Give Spotify a moment to switch
             }
 
-            val response = spotifyApi.startPlayback(auth, SpPlaybackRequest(uris = listOf(uri)))
+            // Force device_id in the play call itself — this is the key mechanism
+            // from the desktop app that ensures playback goes to the right device
+            // even if the transfer hasn't fully settled.
+            val response = spotifyApi.startPlayback(
+                auth,
+                SpPlaybackRequest(uris = listOf(uri)),
+                deviceId = targetDevice.id,
+            )
             if (response.isSuccessful) {
                 Log.d(TAG, "Playback started on '${targetDevice.name}' for $uri")
                 true
@@ -141,18 +146,28 @@ class SpotifyPlaybackHandler @Inject constructor(
 
     /**
      * Pick the best device to play on.
-     * Priority: active Smartphone > inactive Smartphone > active Computer > first available.
+     *
+     * Matches the desktop app's cascading approach:
+     * 1. Filter out restricted devices
+     * 2. Prefer Smartphone > Computer > Speaker (on Android, phone comes first)
+     * 3. Fall back to active non-web device, then any non-web device
+     * 4. Last resort: first available device
      */
     private fun pickDevice(devices: List<SpDevice>): SpDevice {
-        // If a Smartphone is available, always prefer it (user is on their phone)
-        for (type in DEVICE_TYPE_PRIORITY) {
-            val active = devices.firstOrNull { it.type == type && it.isActive }
-            if (active != null) return active
-            val inactive = devices.firstOrNull { it.type == type }
-            if (inactive != null) return inactive
-        }
-        // Fall back to whatever is active, or first available
-        return devices.firstOrNull { it.isActive } ?: devices.first()
+        val controllable = devices.filter { !it.isRestricted }
+        val available = controllable.ifEmpty { devices }
+
+        // Type-based priority (Smartphone first on Android, then Computer, then Speaker)
+        available.firstOrNull { it.type == "Smartphone" }?.let { return it }
+        available.firstOrNull { it.type == "Computer" }?.let { return it }
+        available.firstOrNull { it.type == "Speaker" }?.let { return it }
+
+        // Avoid web-based players (like Spotify Web Player)
+        val isWeb: (SpDevice) -> Boolean = { it.name.contains("web", ignoreCase = true) }
+        available.firstOrNull { it.isActive && !isWeb(it) }?.let { return it }
+        available.firstOrNull { !isWeb(it) }?.let { return it }
+
+        return available.first()
     }
 
     private fun startStatePolling() {

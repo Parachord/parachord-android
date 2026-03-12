@@ -65,6 +65,7 @@ interface SpotifyApi {
     suspend fun startPlayback(
         @Header("Authorization") auth: String,
         @Body body: SpPlaybackRequest,
+        @Query("device_id") deviceId: String? = null,
     ): Response<Unit>
 
     @PUT("v1/me/player/play")
@@ -188,6 +189,7 @@ data class SpDevice(
     val id: String,
     val name: String,
     @SerialName("is_active") val isActive: Boolean = false,
+    @SerialName("is_restricted") val isRestricted: Boolean = false,
     val type: String = "",
 )
 
