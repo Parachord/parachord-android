@@ -5,8 +5,14 @@ import android.os.Bundle
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
+import androidx.compose.foundation.background
+import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.NavigationBar
@@ -16,7 +22,14 @@ import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.saveable.rememberSaveable
+import androidx.compose.runtime.setValue
+import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
+import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.unit.dp
 import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.navigation.NavDestination.Companion.hierarchy
@@ -80,6 +93,8 @@ fun ParachordApp() {
     val playbackState by mainViewModel.playbackState.collectAsStateWithLifecycle()
     val currentTrack = playbackState.currentTrack
 
+    var showActionOverlay by rememberSaveable { mutableStateOf(false) }
+
     Scaffold(
         bottomBar = {
             if (showBottomBar) {
@@ -99,20 +114,55 @@ fun ParachordApp() {
                             onClick = { navController.navigate(Routes.NOW_PLAYING) },
                         )
                     }
+                    // Subtle top border
+                    Box(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .height(0.5.dp)
+                            .background(MaterialTheme.colorScheme.outlineVariant),
+                    )
                     NavigationBar {
                         BottomNavItem.entries.forEach { item ->
-                            val selected = currentDestination?.hierarchy?.any { it.route == item.route } == true
+                            val selected = item.route != null &&
+                                currentDestination?.hierarchy?.any { it.route == item.route } == true
+
                             NavigationBarItem(
-                                icon = { Icon(item.icon, contentDescription = item.label) },
-                                label = { Text(item.label) },
+                                icon = {
+                                    if (item.isAction) {
+                                        // Circular purple background for the "+" action
+                                        Box(
+                                            modifier = Modifier
+                                                .size(32.dp)
+                                                .clip(CircleShape)
+                                                .background(MaterialTheme.colorScheme.primary),
+                                            contentAlignment = Alignment.Center,
+                                        ) {
+                                            Icon(
+                                                item.icon,
+                                                contentDescription = item.label,
+                                                tint = Color.White,
+                                                modifier = Modifier.size(20.dp),
+                                            )
+                                        }
+                                    } else {
+                                        Icon(item.icon, contentDescription = item.label)
+                                    }
+                                },
+                                label = if (item.isAction) null else {{ Text(item.label) }},
                                 selected = selected,
                                 onClick = {
-                                    navController.navigate(item.route) {
-                                        popUpTo(navController.graph.findStartDestination().id) {
-                                            saveState = true
+                                    if (item.isAction) {
+                                        showActionOverlay = !showActionOverlay
+                                    } else {
+                                        item.route?.let { route ->
+                                            navController.navigate(route) {
+                                                popUpTo(navController.graph.findStartDestination().id) {
+                                                    saveState = true
+                                                }
+                                                launchSingleTop = true
+                                                restoreState = true
+                                            }
                                         }
-                                        launchSingleTop = true
-                                        restoreState = true
                                     }
                                 },
                                 colors = NavigationBarItemDefaults.colors(

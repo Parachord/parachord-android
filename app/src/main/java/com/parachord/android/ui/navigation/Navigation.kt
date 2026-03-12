@@ -20,8 +20,9 @@ import androidx.navigation.navArgument
 /** Top-level route definitions. */
 object Routes {
     const val HOME = "home"
-    const val LIBRARY = "library"
+    const val COLLECTION = "collection"
     const val SEARCH = "search"
+    const val PLAYLISTS = "playlists"
     const val NOW_PLAYING = "now_playing"
     const val SETTINGS = "settings"
     const val ARTIST = "artist/{artistName}"
@@ -70,8 +71,11 @@ fun ParachordNavHost(
                 onNavigateToNowPlaying = { navController.navigate(Routes.NOW_PLAYING) },
             )
         }
-        composable(Routes.LIBRARY) {
+        composable(Routes.COLLECTION) {
             com.parachord.android.ui.screens.library.LibraryScreen()
+        }
+        composable(Routes.PLAYLISTS) {
+            com.parachord.android.ui.screens.playlists.PlaylistsScreen()
         }
         composable(Routes.SEARCH) {
             com.parachord.android.ui.screens.search.SearchScreen(

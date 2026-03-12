@@ -54,7 +54,7 @@ fun LibraryScreen(
 
     Column(modifier = modifier.fillMaxSize()) {
         TopAppBar(
-            title = { Text("Library") },
+            title = { Text("Collection") },
         )
         TabRow(
             selectedTabIndex = selectedTab,
