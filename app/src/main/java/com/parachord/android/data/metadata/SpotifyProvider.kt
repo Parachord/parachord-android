@@ -71,7 +71,18 @@ class SpotifyProvider @Inject constructor(
         } ?: emptyList()
 
     override suspend fun getArtistInfo(artistName: String): ArtistInfo? =
-        searchArtists(artistName, limit = 1).firstOrNull()
+        withAuth { auth ->
+            // Search to find artist ID, then fetch full artist for reliable images
+            val response = api.search(auth = auth, query = artistName, type = "artist", limit = 1)
+            val searchArtist = response.artists?.items?.firstOrNull() ?: return@withAuth null
+            val fullArtist = api.getArtist(auth = auth, artistId = searchArtist.id)
+            ArtistInfo(
+                name = fullArtist.name,
+                imageUrl = fullArtist.images.bestImageUrl(),
+                tags = fullArtist.genres,
+                provider = name,
+            )
+        }
 
     override suspend fun getArtistAlbums(artistName: String, limit: Int): List<AlbumSearchResult> =
         withAuth { auth ->

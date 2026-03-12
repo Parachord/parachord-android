@@ -47,8 +47,8 @@ class ArtistViewModel @Inject constructor(
                 _artistInfo.value = metadataService.getArtistInfo(artistName)
                 _topTracks.value = metadataService.searchTracks(artistName, limit = 10)
                 _albums.value = metadataService.getArtistAlbums(artistName)
-            } catch (_: Exception) {
-                // partial results still shown
+            } catch (e: Exception) {
+                Log.e("ArtistVM", "Failed loading artist '$artistName'", e)
             } finally {
                 _isLoading.value = false
             }

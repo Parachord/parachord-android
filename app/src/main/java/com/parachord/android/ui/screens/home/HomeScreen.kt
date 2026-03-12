@@ -4,19 +4,18 @@ import android.Manifest
 import android.os.Build
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
-import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.material3.Button
-import androidx.compose.material3.CircularProgressIndicator
+import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.ExperimentalMaterial3Api
-import androidx.compose.material3.ListItem
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.material3.TopAppBar
@@ -24,10 +23,14 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.unit.dp
 import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import com.parachord.android.ui.components.ParachordCard
+import com.parachord.android.ui.components.SectionHeader
+import com.parachord.android.ui.components.ShimmerTrackRow
+import com.parachord.android.ui.components.TrackRow
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -65,54 +68,67 @@ fun HomeScreen(
                 verticalArrangement = Arrangement.spacedBy(16.dp),
                 horizontalAlignment = Alignment.CenterHorizontally,
             ) {
-                Text(
-                    text = "Welcome to Parachord",
-                    style = MaterialTheme.typography.headlineMedium,
-                )
-                Text(
-                    text = "Your music, unified.",
-                    style = MaterialTheme.typography.bodyLarge,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                )
+                Spacer(modifier = Modifier.height(32.dp))
 
-                Spacer(modifier = Modifier.height(16.dp))
-
-                if (scanProgress.isScanning) {
-                    CircularProgressIndicator()
+                ParachordCard(
+                    modifier = Modifier.fillMaxWidth(),
+                ) {
                     Text(
-                        text = "Found ${scanProgress.tracksFound} tracks, ${scanProgress.albumsFound} albums...",
-                        style = MaterialTheme.typography.bodyMedium,
+                        text = "Welcome to Parachord",
+                        style = MaterialTheme.typography.headlineMedium,
+                    )
+                    Spacer(modifier = Modifier.height(8.dp))
+                    Text(
+                        text = "Your music, unified.",
+                        style = MaterialTheme.typography.bodyLarge,
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                     )
-                } else {
-                    Button(onClick = { permissionLauncher.launch(audioPermission) }) {
-                        Text("Scan Local Music")
+
+                    Spacer(modifier = Modifier.height(24.dp))
+
+                    if (scanProgress.isScanning) {
+                        // Shimmer loading rows
+                        repeat(3) {
+                            ShimmerTrackRow()
+                        }
+                        Spacer(modifier = Modifier.height(8.dp))
+                        Text(
+                            text = "Found ${scanProgress.tracksFound} tracks, ${scanProgress.albumsFound} albums...",
+                            style = MaterialTheme.typography.bodyMedium,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        )
+                    } else {
+                        Button(
+                            onClick = { permissionLauncher.launch(audioPermission) },
+                            colors = ButtonDefaults.buttonColors(
+                                containerColor = MaterialTheme.colorScheme.primary,
+                                contentColor = Color.White,
+                            ),
+                        ) {
+                            Text("Scan Local Music")
+                        }
+                        Spacer(modifier = Modifier.height(8.dp))
+                        Text(
+                            text = "Or connect your accounts in Settings",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        )
                     }
-                    Text(
-                        text = "Or connect your accounts in Settings",
-                        style = MaterialTheme.typography.bodySmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    )
                 }
             }
         } else {
             LazyColumn(modifier = Modifier.fillMaxSize()) {
                 item {
-                    Text(
-                        text = "Recently Added",
-                        style = MaterialTheme.typography.titleMedium,
-                        modifier = Modifier.padding(16.dp),
-                    )
+                    SectionHeader("Recently Added")
                 }
                 items(recentTracks, key = { it.id }) { track ->
-                    ListItem(
-                        headlineContent = {
-                            Text(track.title, maxLines = 1, overflow = TextOverflow.Ellipsis)
-                        },
-                        supportingContent = {
-                            Text(track.artist, maxLines = 1, overflow = TextOverflow.Ellipsis)
-                        },
-                        modifier = Modifier.clickable {
+                    TrackRow(
+                        title = track.title,
+                        artist = track.artist,
+                        artworkUrl = track.artworkUrl,
+                        resolver = track.resolver,
+                        duration = track.duration,
+                        onClick = {
                             viewModel.playTrack(track)
                             onNavigateToNowPlaying()
                         },

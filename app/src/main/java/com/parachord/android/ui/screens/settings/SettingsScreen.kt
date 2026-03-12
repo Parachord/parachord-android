@@ -1,11 +1,13 @@
 package com.parachord.android.ui.screens.settings
 
+import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.ListItem
@@ -16,10 +18,13 @@ import androidx.compose.material3.TopAppBar
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
 import androidx.compose.ui.unit.dp
 import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.parachord.android.BuildConfig
+import com.parachord.android.ui.components.SectionHeader
+import com.parachord.android.ui.theme.Success
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -36,20 +41,26 @@ fun SettingsScreen(
             title = { Text("Settings") },
         )
         LazyColumn(modifier = Modifier.fillMaxWidth()) {
-            item {
-                Text(
-                    text = "Accounts",
-                    style = MaterialTheme.typography.titleSmall,
-                    color = MaterialTheme.colorScheme.primary,
-                    modifier = Modifier.padding(horizontal = 16.dp, vertical = 8.dp),
-                )
-            }
+            item { SectionHeader("Accounts") }
             item {
                 ListItem(
                     headlineContent = { Text("Spotify") },
                     supportingContent = {
                         Text(if (spotifyConnected) "Connected" else "Not connected")
                     },
+                    trailingContent = if (spotifyConnected) {
+                        {
+                            Text(
+                                text = "CONNECTED",
+                                style = MaterialTheme.typography.labelSmall,
+                                color = Success,
+                                modifier = Modifier
+                                    .clip(RoundedCornerShape(4.dp))
+                                    .background(Success.copy(alpha = 0.15f))
+                                    .padding(horizontal = 6.dp, vertical = 2.dp),
+                            )
+                        }
+                    } else null,
                     modifier = Modifier.clickable {
                         if (spotifyConnected) {
                             viewModel.disconnectSpotify()
@@ -65,6 +76,19 @@ fun SettingsScreen(
                     supportingContent = {
                         Text(if (lastFmConnected) "Connected" else "Not connected")
                     },
+                    trailingContent = if (lastFmConnected) {
+                        {
+                            Text(
+                                text = "CONNECTED",
+                                style = MaterialTheme.typography.labelSmall,
+                                color = Success,
+                                modifier = Modifier
+                                    .clip(RoundedCornerShape(4.dp))
+                                    .background(Success.copy(alpha = 0.15f))
+                                    .padding(horizontal = 6.dp, vertical = 2.dp),
+                            )
+                        }
+                    } else null,
                     modifier = Modifier.clickable {
                         if (lastFmConnected) {
                             viewModel.disconnectLastFm()
@@ -75,14 +99,7 @@ fun SettingsScreen(
                 )
             }
             item { HorizontalDivider() }
-            item {
-                Text(
-                    text = "Playback",
-                    style = MaterialTheme.typography.titleSmall,
-                    color = MaterialTheme.colorScheme.primary,
-                    modifier = Modifier.padding(horizontal = 16.dp, vertical = 8.dp),
-                )
-            }
+            item { SectionHeader("Playback") }
             item {
                 ListItem(
                     headlineContent = { Text("Scrobbling") },
@@ -96,14 +113,7 @@ fun SettingsScreen(
                 )
             }
             item { HorizontalDivider() }
-            item {
-                Text(
-                    text = "About",
-                    style = MaterialTheme.typography.titleSmall,
-                    color = MaterialTheme.colorScheme.primary,
-                    modifier = Modifier.padding(horizontal = 16.dp, vertical = 8.dp),
-                )
-            }
+            item { SectionHeader("About") }
             item {
                 ListItem(
                     headlineContent = { Text("Version") },

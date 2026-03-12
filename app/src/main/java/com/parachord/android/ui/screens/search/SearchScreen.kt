@@ -2,24 +2,22 @@ package com.parachord.android.ui.screens.search
 
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Column
-import androidx.compose.foundation.layout.aspectRatio
+import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
-import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.CircleShape
-import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Person
 import androidx.compose.material.icons.filled.Search
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
-import androidx.compose.material3.LinearProgressIndicator
-import androidx.compose.material3.ListItem
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.SearchBar
 import androidx.compose.material3.SearchBarDefaults
@@ -29,6 +27,7 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
+import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.layout.ContentScale
@@ -37,6 +36,10 @@ import androidx.compose.ui.unit.dp
 import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import coil.compose.AsyncImage
+import com.parachord.android.ui.components.AlbumArtCard
+import com.parachord.android.ui.components.SectionHeader
+import com.parachord.android.ui.components.ShimmerTrackRow
+import com.parachord.android.ui.components.TrackRow
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -74,8 +77,9 @@ fun SearchScreen(
                 .fillMaxWidth()
                 .padding(horizontal = if (!active) 16.dp else 0.dp),
         ) {
-            if (isSearchingRemote) {
-                LinearProgressIndicator(modifier = Modifier.fillMaxWidth())
+            // Shimmer loading when searching remote
+            if (isSearchingRemote && localTracks.isEmpty() && artists.isEmpty()) {
+                repeat(4) { ShimmerTrackRow() }
             }
 
             LazyColumn {
@@ -83,14 +87,13 @@ fun SearchScreen(
                 if (localTracks.isNotEmpty()) {
                     item { SectionHeader("Library") }
                     items(localTracks.take(5), key = { "local-track-${it.id}" }) { track ->
-                        ListItem(
-                            headlineContent = {
-                                Text(track.title, maxLines = 1, overflow = TextOverflow.Ellipsis)
-                            },
-                            supportingContent = {
-                                Text(track.artist, maxLines = 1, overflow = TextOverflow.Ellipsis)
-                            },
-                            modifier = Modifier.clickable { viewModel.playLocalTrack(track) },
+                        TrackRow(
+                            title = track.title,
+                            artist = track.artist,
+                            artworkUrl = track.artworkUrl,
+                            resolver = track.resolver,
+                            duration = track.duration,
+                            onClick = { viewModel.playLocalTrack(track) },
                         )
                     }
                 }
@@ -102,34 +105,49 @@ fun SearchScreen(
                         SectionHeader("Artists")
                     }
                     items(artists, key = { "artist-${it.name}" }) { artist ->
-                        ListItem(
-                            headlineContent = {
-                                Text(artist.name, maxLines = 1, overflow = TextOverflow.Ellipsis)
-                            },
-                            supportingContent = artist.tags.takeIf { it.isNotEmpty() }?.let { tags ->
-                                { Text(tags.joinToString(", "), maxLines = 1, overflow = TextOverflow.Ellipsis) }
-                            },
-                            leadingContent = {
-                                if (artist.imageUrl != null) {
-                                    AsyncImage(
-                                        model = artist.imageUrl,
-                                        contentDescription = null,
-                                        modifier = Modifier
-                                            .size(40.dp)
-                                            .clip(CircleShape),
-                                        contentScale = ContentScale.Crop,
-                                    )
-                                } else {
-                                    Icon(
-                                        Icons.Default.Person,
-                                        contentDescription = null,
-                                        modifier = Modifier.size(40.dp),
-                                        tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                        Row(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .clickable { onNavigateToArtist(artist.name) }
+                                .padding(horizontal = 16.dp, vertical = 10.dp),
+                            verticalAlignment = Alignment.CenterVertically,
+                        ) {
+                            if (artist.imageUrl != null) {
+                                AsyncImage(
+                                    model = artist.imageUrl,
+                                    contentDescription = null,
+                                    modifier = Modifier
+                                        .size(40.dp)
+                                        .clip(CircleShape),
+                                    contentScale = ContentScale.Crop,
+                                )
+                            } else {
+                                Icon(
+                                    Icons.Default.Person,
+                                    contentDescription = null,
+                                    modifier = Modifier.size(40.dp),
+                                    tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                                )
+                            }
+                            Spacer(modifier = Modifier.width(12.dp))
+                            Column(modifier = Modifier.weight(1f)) {
+                                Text(
+                                    text = artist.name,
+                                    style = MaterialTheme.typography.bodyLarge,
+                                    maxLines = 1,
+                                    overflow = TextOverflow.Ellipsis,
+                                )
+                                artist.tags.takeIf { it.isNotEmpty() }?.let { tags ->
+                                    Text(
+                                        text = tags.joinToString(", "),
+                                        style = MaterialTheme.typography.bodySmall,
+                                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                        maxLines = 1,
+                                        overflow = TextOverflow.Ellipsis,
                                     )
                                 }
-                            },
-                            modifier = Modifier.clickable { onNavigateToArtist(artist.name) },
-                        )
+                            }
+                        }
                     }
                 }
 
@@ -140,26 +158,10 @@ fun SearchScreen(
                         SectionHeader("Tracks")
                     }
                     items(remoteTracks, key = { "remote-track-${it.title}-${it.artist}" }) { track ->
-                        ListItem(
-                            headlineContent = {
-                                Text(track.title, maxLines = 1, overflow = TextOverflow.Ellipsis)
-                            },
-                            supportingContent = {
-                                Text(track.artist, maxLines = 1, overflow = TextOverflow.Ellipsis)
-                            },
-                            leadingContent = track.artworkUrl?.let { url ->
-                                {
-                                    AsyncImage(
-                                        model = url,
-                                        contentDescription = null,
-                                        modifier = Modifier
-                                            .height(48.dp)
-                                            .aspectRatio(1f)
-                                            .clip(RoundedCornerShape(4.dp)),
-                                        contentScale = ContentScale.Crop,
-                                    )
-                                }
-                            },
+                        TrackRow(
+                            title = track.title,
+                            artist = track.artist,
+                            artworkUrl = track.artworkUrl,
                         )
                     }
                 }
@@ -171,34 +173,39 @@ fun SearchScreen(
                         SectionHeader("Albums")
                     }
                     items(remoteAlbums, key = { "remote-album-${it.title}-${it.artist}" }) { album ->
-                        ListItem(
-                            headlineContent = {
-                                Text(album.title, maxLines = 1, overflow = TextOverflow.Ellipsis)
-                            },
-                            supportingContent = {
-                                val info = buildString {
-                                    append(album.artist)
-                                    album.year?.let { append(" \u2022 $it") }
-                                }
-                                Text(info, maxLines = 1, overflow = TextOverflow.Ellipsis)
-                            },
-                            leadingContent = album.artworkUrl?.let { url ->
-                                {
-                                    AsyncImage(
-                                        model = url,
-                                        contentDescription = null,
-                                        modifier = Modifier
-                                            .height(48.dp)
-                                            .aspectRatio(1f)
-                                            .clip(RoundedCornerShape(4.dp)),
-                                        contentScale = ContentScale.Crop,
-                                    )
-                                }
-                            },
-                            modifier = Modifier.clickable {
-                                onNavigateToAlbum(album.title, album.artist)
-                            },
-                        )
+                        Row(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .clickable { onNavigateToAlbum(album.title, album.artist) }
+                                .padding(horizontal = 16.dp, vertical = 10.dp),
+                            verticalAlignment = Alignment.CenterVertically,
+                        ) {
+                            AlbumArtCard(
+                                artworkUrl = album.artworkUrl,
+                                size = 48.dp,
+                                cornerRadius = 4.dp,
+                                elevation = 1.dp,
+                            )
+                            Spacer(modifier = Modifier.width(12.dp))
+                            Column(modifier = Modifier.weight(1f)) {
+                                Text(
+                                    text = album.title,
+                                    style = MaterialTheme.typography.bodyLarge,
+                                    maxLines = 1,
+                                    overflow = TextOverflow.Ellipsis,
+                                )
+                                Text(
+                                    text = buildString {
+                                        append(album.artist)
+                                        album.year?.let { append(" \u2022 $it") }
+                                    },
+                                    style = MaterialTheme.typography.bodySmall,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                    maxLines = 1,
+                                    overflow = TextOverflow.Ellipsis,
+                                )
+                            }
+                        }
                     }
                 }
 
@@ -218,14 +225,4 @@ fun SearchScreen(
             }
         }
     }
-}
-
-@Composable
-private fun SectionHeader(title: String) {
-    Text(
-        text = title,
-        style = MaterialTheme.typography.titleSmall,
-        color = MaterialTheme.colorScheme.primary,
-        modifier = Modifier.padding(horizontal = 16.dp, vertical = 8.dp),
-    )
 }

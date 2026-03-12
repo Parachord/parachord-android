@@ -1,5 +1,14 @@
 package com.parachord.android.ui.navigation
 
+import android.net.Uri
+import androidx.compose.animation.AnimatedContentTransitionScope
+import androidx.compose.animation.core.tween
+import androidx.compose.animation.fadeIn
+import androidx.compose.animation.fadeOut
+import androidx.compose.animation.slideInHorizontally
+import androidx.compose.animation.slideInVertically
+import androidx.compose.animation.slideOutHorizontally
+import androidx.compose.animation.slideOutVertically
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Modifier
 import androidx.navigation.NavHostController
@@ -7,7 +16,6 @@ import androidx.navigation.NavType
 import androidx.navigation.compose.NavHost
 import androidx.navigation.compose.composable
 import androidx.navigation.navArgument
-import android.net.Uri
 
 /** Top-level route definitions. */
 object Routes {
@@ -35,6 +43,27 @@ fun ParachordNavHost(
         navController = navController,
         startDestination = Routes.HOME,
         modifier = modifier,
+        enterTransition = {
+            fadeIn(animationSpec = tween(300)) + slideInHorizontally(
+                initialOffsetX = { it / 4 },
+                animationSpec = tween(300),
+            )
+        },
+        exitTransition = {
+            fadeOut(animationSpec = tween(300))
+        },
+        popEnterTransition = {
+            fadeIn(animationSpec = tween(300)) + slideInHorizontally(
+                initialOffsetX = { -it / 4 },
+                animationSpec = tween(300),
+            )
+        },
+        popExitTransition = {
+            fadeOut(animationSpec = tween(300)) + slideOutHorizontally(
+                targetOffsetX = { it / 4 },
+                animationSpec = tween(300),
+            )
+        },
     ) {
         composable(Routes.HOME) {
             com.parachord.android.ui.screens.home.HomeScreen(
@@ -52,7 +81,33 @@ fun ParachordNavHost(
                 },
             )
         }
-        composable(Routes.NOW_PLAYING) {
+        composable(
+            Routes.NOW_PLAYING,
+            enterTransition = {
+                slideInVertically(
+                    initialOffsetY = { it },
+                    animationSpec = tween(400),
+                )
+            },
+            exitTransition = {
+                slideOutVertically(
+                    targetOffsetY = { it },
+                    animationSpec = tween(400),
+                )
+            },
+            popEnterTransition = {
+                slideInVertically(
+                    initialOffsetY = { it },
+                    animationSpec = tween(400),
+                )
+            },
+            popExitTransition = {
+                slideOutVertically(
+                    targetOffsetY = { it },
+                    animationSpec = tween(400),
+                )
+            },
+        ) {
             com.parachord.android.ui.screens.nowplaying.NowPlayingScreen(
                 onBack = { navController.popBackStack() },
             )

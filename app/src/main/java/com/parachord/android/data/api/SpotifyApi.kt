@@ -27,6 +27,12 @@ interface SpotifyApi {
         @Query("limit") limit: Int = 20,
     ): SpSearchResponse
 
+    @GET("v1/artists/{id}")
+    suspend fun getArtist(
+        @Header("Authorization") auth: String,
+        @Path("id") artistId: String,
+    ): SpArtist
+
     @GET("v1/artists/{id}/albums")
     suspend fun getArtistAlbums(
         @Header("Authorization") auth: String,

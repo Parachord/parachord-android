@@ -33,7 +33,9 @@ class MetadataService @Inject constructor(
     /** Search tracks across all available providers in parallel, merge and deduplicate. */
     suspend fun searchTracks(query: String, limit: Int = 20): List<TrackSearchResult> = coroutineScope {
         val results = availableProviders()
-            .map { provider -> async { provider.searchTracks(query, limit) } }
+            .map { provider -> async {
+                try { provider.searchTracks(query, limit) } catch (_: Exception) { emptyList() }
+            } }
             .awaitAll()
             .flatten()
 
@@ -43,7 +45,9 @@ class MetadataService @Inject constructor(
     /** Search albums across all available providers in parallel, merge and deduplicate. */
     suspend fun searchAlbums(query: String, limit: Int = 10): List<AlbumSearchResult> = coroutineScope {
         val results = availableProviders()
-            .map { provider -> async { provider.searchAlbums(query, limit) } }
+            .map { provider -> async {
+                try { provider.searchAlbums(query, limit) } catch (_: Exception) { emptyList() }
+            } }
             .awaitAll()
             .flatten()
 
@@ -53,7 +57,9 @@ class MetadataService @Inject constructor(
     /** Search artists across all available providers in parallel, merge and deduplicate. */
     suspend fun searchArtists(query: String, limit: Int = 10): List<ArtistInfo> = coroutineScope {
         val results = availableProviders()
-            .map { provider -> async { provider.searchArtists(query, limit) } }
+            .map { provider -> async {
+                try { provider.searchArtists(query, limit) } catch (_: Exception) { emptyList() }
+            } }
             .awaitAll()
             .flatten()
 
@@ -67,7 +73,9 @@ class MetadataService @Inject constructor(
      */
     suspend fun getArtistInfo(artistName: String): ArtistInfo? = coroutineScope {
         val results = availableProviders()
-            .map { provider -> async { provider.getArtistInfo(artistName) } }
+            .map { provider -> async {
+                try { provider.getArtistInfo(artistName) } catch (_: Exception) { null }
+            } }
             .awaitAll()
             .filterNotNull()
 
@@ -80,7 +88,13 @@ class MetadataService @Inject constructor(
     /** Get an artist's discography from all available providers. */
     suspend fun getArtistAlbums(artistName: String, limit: Int = 50): List<AlbumSearchResult> = coroutineScope {
         val results = availableProviders()
-            .map { provider -> async { provider.getArtistAlbums(artistName, limit) } }
+            .map { provider -> async {
+                try {
+                    provider.getArtistAlbums(artistName, limit)
+                } catch (_: Exception) {
+                    emptyList()
+                }
+            } }
             .awaitAll()
             .flatten()
 
@@ -97,7 +111,9 @@ class MetadataService @Inject constructor(
      */
     suspend fun getAlbumTracks(albumTitle: String, artistName: String): AlbumDetail? = coroutineScope {
         val results = availableProviders()
-            .map { provider -> async { provider.getAlbumTracks(albumTitle, artistName) } }
+            .map { provider -> async {
+                try { provider.getAlbumTracks(albumTitle, artistName) } catch (_: Exception) { null }
+            } }
             .awaitAll()
             .filterNotNull()
 
@@ -120,9 +136,16 @@ class MetadataService @Inject constructor(
             matches.fold(track) { acc, other -> acc.mergeWith(other) }
         }
 
+        val mergedArtwork = base.artworkUrl ?: others.firstNotNullOfOrNull { it.artworkUrl }
+
+        // Propagate album artwork to tracks that don't have their own
+        val tracksWithArt = if (mergedArtwork != null) {
+            enrichedTracks.map { t -> t.copy(artworkUrl = t.artworkUrl ?: mergedArtwork) }
+        } else enrichedTracks
+
         base.copy(
-            tracks = enrichedTracks,
-            artworkUrl = base.artworkUrl ?: others.firstNotNullOfOrNull { it.artworkUrl },
+            tracks = tracksWithArt,
+            artworkUrl = mergedArtwork,
             year = base.year ?: others.firstNotNullOfOrNull { it.year },
             provider = results.joinToString("+") { it.provider },
         )

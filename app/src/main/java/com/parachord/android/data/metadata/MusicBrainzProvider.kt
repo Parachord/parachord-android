@@ -41,6 +41,7 @@ class MusicBrainzProvider @Inject constructor(
                 AlbumSearchResult(
                     title = rel.title,
                     artist = rel.artistName,
+                    artworkUrl = coverArtUrl(rel.id),
                     year = rel.year,
                     trackCount = rel.trackCount,
                     mbid = rel.id,
@@ -92,9 +93,12 @@ class MusicBrainzProvider @Inject constructor(
             val tracks = detail.media.flatMap { it.tracks }
             if (tracks.isEmpty()) return null
 
+            val artwork = coverArtUrl(detail.id)
+
             AlbumDetail(
                 title = detail.title,
                 artist = detail.artistName,
+                artworkUrl = artwork,
                 year = detail.year,
                 tracks = tracks.map { t ->
                     TrackSearchResult(
@@ -102,6 +106,7 @@ class MusicBrainzProvider @Inject constructor(
                         artist = t.artistName.ifBlank { detail.artistName },
                         album = detail.title,
                         duration = t.length ?: t.recording?.length,
+                        artworkUrl = artwork,
                         mbid = t.recording?.id ?: t.id,
                         provider = name,
                     )
@@ -119,6 +124,7 @@ class MusicBrainzProvider @Inject constructor(
                 AlbumSearchResult(
                     title = rel.title,
                     artist = rel.artistName,
+                    artworkUrl = coverArtUrl(rel.id),
                     year = rel.year,
                     trackCount = rel.trackCount,
                     mbid = rel.id,
@@ -128,4 +134,10 @@ class MusicBrainzProvider @Inject constructor(
         } catch (_: Exception) {
             emptyList()
         }
+
+    companion object {
+        /** Cover Art Archive front cover URL. Returns 404 if no art exists (handled by Coil). */
+        fun coverArtUrl(mbid: String): String =
+            "https://coverartarchive.org/release/$mbid/front-250"
+    }
 }

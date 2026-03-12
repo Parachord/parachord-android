@@ -24,6 +24,10 @@ class MainViewModel @Inject constructor(
         playbackController.togglePlayPause()
     }
 
+    fun skipNext() {
+        playbackController.skipNext()
+    }
+
     override fun onCleared() {
         super.onCleared()
         playbackController.release()

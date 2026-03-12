@@ -5,39 +5,29 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.darkColorScheme
 import androidx.compose.material3.lightColorScheme
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.CompositionLocalProvider
+import androidx.compose.runtime.Immutable
+import androidx.compose.runtime.staticCompositionLocalOf
 import androidx.compose.ui.graphics.Color
 
 /**
- * Parachord color palette — matches the desktop app's CSS design tokens.
- *
- * Desktop uses purple (#7c3aed light / #a78bfa dark) as the primary accent,
- * NOT blue. See CLAUDE.md for the full color reference.
+ * Parachord Material 3 color schemes — maps the desktop CSS tokens
+ * into Material 3 color slots. Dynamic color is intentionally disabled.
  */
-
-// Accent purple
-private val PurpleLight = Color(0xFF7C3AED)   // --accent-primary (light)
-private val PurpleDark = Color(0xFFA78BFA)     // --accent-primary (dark)
-private val PurpleHoverLight = Color(0xFF6D28D9)
-private val PurpleHoverDark = Color(0xFF8B5CF6)
-
-// Semantic
-private val Success = Color(0xFF10B981)
-private val Warning = Color(0xFFF59E0B)
-private val Error = Color(0xFFEF4444)
-
 private val DarkColorScheme = darkColorScheme(
     primary = PurpleDark,
     onPrimary = Color.White,
     primaryContainer = PurpleHoverDark,
-    secondary = Color(0xFF9CA3AF),             // --text-secondary (dark)
-    tertiary = Color(0xFF6B7280),              // --text-tertiary (dark)
-    background = Color(0xFF161616),            // --bg-primary (dark)
-    onBackground = Color(0xFFF3F4F6),          // --text-primary (dark)
-    surface = Color(0xFF1E1E1E),               // --bg-secondary (dark)
-    onSurface = Color(0xFFF3F4F6),             // --text-primary (dark)
-    surfaceVariant = Color(0xFF252525),         // --bg-elevated (dark)
-    onSurfaceVariant = Color(0xFF9CA3AF),       // --text-secondary (dark)
-    outline = Color(0xFF6B7280),               // --text-tertiary (dark)
+    secondary = TextSecondaryDark,
+    tertiary = TextTertiaryDark,
+    background = BgPrimaryDark,
+    onBackground = TextPrimaryDark,
+    surface = BgSecondaryDark,
+    onSurface = TextPrimaryDark,
+    surfaceVariant = BgElevatedDark,
+    onSurfaceVariant = TextSecondaryDark,
+    outline = TextTertiaryDark,
+    outlineVariant = BorderDefaultDark,
     error = Error,
 )
 
@@ -45,29 +35,91 @@ private val LightColorScheme = lightColorScheme(
     primary = PurpleLight,
     onPrimary = Color.White,
     primaryContainer = PurpleHoverLight,
-    secondary = Color(0xFF6B7280),             // --text-secondary (light)
-    tertiary = Color(0xFF9CA3AF),              // --text-tertiary (light)
-    background = Color(0xFFFFFFFF),            // --bg-primary (light)
-    onBackground = Color(0xFF111827),          // --text-primary (light)
-    surface = Color(0xFFF9FAFB),               // --bg-secondary (light)
-    onSurface = Color(0xFF111827),             // --text-primary (light)
-    surfaceVariant = Color(0xFFF3F4F6),        // --bg-inset (light)
-    onSurfaceVariant = Color(0xFF6B7280),       // --text-secondary (light)
-    outline = Color(0xFFE5E7EB),               // --border-default (light)
-    outlineVariant = Color(0xFFF3F4F6),        // --border-light (light)
+    secondary = TextSecondaryLight,
+    tertiary = TextTertiaryLight,
+    background = BgPrimaryLight,
+    onBackground = TextPrimaryLight,
+    surface = BgSecondaryLight,
+    onSurface = TextPrimaryLight,
+    surfaceVariant = BgInsetLight,
+    onSurfaceVariant = TextSecondaryLight,
+    outline = BorderDefaultLight,
+    outlineVariant = BorderLightLight,
     error = Error,
 )
+
+// ── Extended Colors ──────────────────────────────────────────────────
+// Colors that don't map to Material 3 slots (alpha variants, resolver
+// colors, always-dark player surfaces, card-specific styles).
+
+@Immutable
+data class ParachordExtendedColors(
+    // Accent alpha variants
+    val accentAlpha06: Color,
+    val accentAlpha10: Color,
+    val accentAlpha20: Color,
+    val accentAlpha40: Color,
+    val accentAlpha60: Color,
+    val accentSurface: Color,
+
+    // Card styling
+    val cardBackground: Color,
+    val cardBorder: Color,
+
+    // Always-dark player surfaces (same in both themes)
+    val playerSurface: Color = PlayerSurface,
+    val playerSurfaceElevated: Color = PlayerSurfaceElevated,
+    val playerTextPrimary: Color = PlayerTextPrimary,
+    val playerTextSecondary: Color = PlayerTextSecondary,
+)
+
+private val LightExtendedColors = ParachordExtendedColors(
+    accentAlpha06 = PurpleAlpha06,
+    accentAlpha10 = PurpleAlpha10,
+    accentAlpha20 = PurpleAlpha20,
+    accentAlpha40 = PurpleAlpha40,
+    accentAlpha60 = PurpleAlpha60,
+    accentSurface = PurpleSurface,
+    cardBackground = CardBgLight,
+    cardBorder = CardBorderLight,
+)
+
+private val DarkExtendedColors = ParachordExtendedColors(
+    accentAlpha06 = PurpleDarkAlpha10,
+    accentAlpha10 = PurpleDarkAlpha10,
+    accentAlpha20 = PurpleDarkAlpha20,
+    accentAlpha40 = PurpleAlpha40,
+    accentAlpha60 = PurpleAlpha60,
+    accentSurface = Color(0xFF1E1E2E),
+    cardBackground = CardBgDark,
+    cardBorder = CardBorderDark,
+)
+
+val LocalParachordColors = staticCompositionLocalOf { LightExtendedColors }
+
+// ── Theme Accessor ───────────────────────────────────────────────────
+
+object ParachordTheme {
+    val colors: ParachordExtendedColors
+        @Composable get() = LocalParachordColors.current
+}
+
+// ── Theme Composable ─────────────────────────────────────────────────
 
 @Composable
 fun ParachordTheme(
     darkTheme: Boolean = isSystemInDarkTheme(),
-    // Disable dynamic color — use the Parachord brand palette
     content: @Composable () -> Unit,
 ) {
     val colorScheme = if (darkTheme) DarkColorScheme else LightColorScheme
+    val extendedColors = if (darkTheme) DarkExtendedColors else LightExtendedColors
 
-    MaterialTheme(
-        colorScheme = colorScheme,
-        content = content,
-    )
+    CompositionLocalProvider(LocalParachordColors provides extendedColors) {
+        MaterialTheme(
+            colorScheme = colorScheme,
+            typography = ParachordTypography,
+            shapes = ParachordShapes,
+            content = content,
+        )
+    }
 }

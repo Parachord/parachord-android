@@ -8,8 +8,10 @@ import androidx.activity.enableEdgeToEdge
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.padding
 import androidx.compose.material3.Icon
+import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.NavigationBar
 import androidx.compose.material3.NavigationBarItem
+import androidx.compose.material3.NavigationBarItemDefaults
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
@@ -83,20 +85,27 @@ fun ParachordApp() {
             if (showBottomBar) {
                 Column {
                     if (currentTrack != null) {
+                        val progress = if (playbackState.duration > 0) {
+                            playbackState.position.toFloat() / playbackState.duration.toFloat()
+                        } else 0f
                         MiniPlayer(
                             trackTitle = currentTrack.title,
                             artistName = currentTrack.artist,
+                            artworkUrl = currentTrack.artworkUrl,
                             isPlaying = playbackState.isPlaying,
+                            progress = progress,
                             onPlayPause = { mainViewModel.togglePlayPause() },
+                            onSkipNext = { mainViewModel.skipNext() },
                             onClick = { navController.navigate(Routes.NOW_PLAYING) },
                         )
                     }
                     NavigationBar {
                         BottomNavItem.entries.forEach { item ->
+                            val selected = currentDestination?.hierarchy?.any { it.route == item.route } == true
                             NavigationBarItem(
                                 icon = { Icon(item.icon, contentDescription = item.label) },
                                 label = { Text(item.label) },
-                                selected = currentDestination?.hierarchy?.any { it.route == item.route } == true,
+                                selected = selected,
                                 onClick = {
                                     navController.navigate(item.route) {
                                         popUpTo(navController.graph.findStartDestination().id) {
@@ -106,6 +115,11 @@ fun ParachordApp() {
                                         restoreState = true
                                     }
                                 },
+                                colors = NavigationBarItemDefaults.colors(
+                                    selectedIconColor = MaterialTheme.colorScheme.primary,
+                                    selectedTextColor = MaterialTheme.colorScheme.primary,
+                                    indicatorColor = MaterialTheme.colorScheme.primary.copy(alpha = 0.12f),
+                                ),
                             )
                         }
                     }

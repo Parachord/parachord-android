@@ -18,14 +18,13 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.PlayArrow
-import androidx.compose.material3.CircularProgressIndicator
+import androidx.compose.material3.Button
+import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.ExperimentalMaterial3Api
-import androidx.compose.material3.FilledTonalButton
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.LinearProgressIndicator
-import androidx.compose.material3.ListItem
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.material3.TopAppBar
@@ -37,9 +36,12 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.graphics.Color
 import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
-import coil.compose.AsyncImage
+import com.parachord.android.ui.components.AlbumArtCard
+import com.parachord.android.ui.components.ShimmerTrackRow
+import com.parachord.android.ui.components.TrackRow
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -67,11 +69,9 @@ fun AlbumScreen(
         }
 
         if (isLoading) {
-            Box(
-                modifier = Modifier.fillMaxSize(),
-                contentAlignment = Alignment.Center,
-            ) {
-                CircularProgressIndicator()
+            // Shimmer loading skeleton
+            Column(modifier = Modifier.fillMaxSize().padding(16.dp)) {
+                repeat(6) { ShimmerTrackRow() }
             }
         } else {
             val detail = albumDetail
@@ -96,17 +96,13 @@ fun AlbumScreen(
                                 .padding(16.dp),
                             verticalAlignment = Alignment.Top,
                         ) {
-                            detail.artworkUrl?.let { url ->
-                                AsyncImage(
-                                    model = url,
-                                    contentDescription = "Album artwork",
-                                    modifier = Modifier
-                                        .size(160.dp)
-                                        .clip(RoundedCornerShape(8.dp)),
-                                    contentScale = ContentScale.Crop,
-                                )
-                                Spacer(modifier = Modifier.width(16.dp))
-                            }
+                            AlbumArtCard(
+                                artworkUrl = detail.artworkUrl,
+                                size = 160.dp,
+                                cornerRadius = 8.dp,
+                                elevation = 4.dp,
+                            )
+                            Spacer(modifier = Modifier.width(16.dp))
                             Column {
                                 Text(
                                     text = detail.title,
@@ -128,8 +124,12 @@ fun AlbumScreen(
                                     )
                                 }
                                 Spacer(modifier = Modifier.height(12.dp))
-                                FilledTonalButton(
+                                Button(
                                     onClick = { viewModel.playAll() },
+                                    colors = ButtonDefaults.buttonColors(
+                                        containerColor = MaterialTheme.colorScheme.primary,
+                                        contentColor = Color.White,
+                                    ),
                                 ) {
                                     Icon(
                                         Icons.Default.PlayArrow,
@@ -150,32 +150,13 @@ fun AlbumScreen(
                         detail.tracks,
                         key = { idx, t -> "track-$idx-${t.title}" },
                     ) { index, track ->
-                        ListItem(
-                            headlineContent = {
-                                Text(
-                                    track.title,
-                                    maxLines = 1,
-                                    overflow = TextOverflow.Ellipsis,
-                                )
-                            },
-                            supportingContent = {
-                                val info = buildString {
-                                    append(track.artist)
-                                    track.duration?.let {
-                                        append(" \u2022 ${formatDuration(it)}")
-                                    }
-                                }
-                                Text(info, maxLines = 1, overflow = TextOverflow.Ellipsis)
-                            },
-                            leadingContent = {
-                                Text(
-                                    text = "${index + 1}",
-                                    style = MaterialTheme.typography.bodyMedium,
-                                    color = MaterialTheme.colorScheme.outline,
-                                    modifier = Modifier.width(28.dp),
-                                )
-                            },
-                            modifier = Modifier.clickable { viewModel.playTrack(index) },
+                        TrackRow(
+                            title = track.title,
+                            artist = track.artist,
+                            artworkUrl = track.artworkUrl ?: detail.artworkUrl,
+                            duration = track.duration,
+                            trackNumber = index + 1,
+                            onClick = { viewModel.playTrack(index) },
                         )
                     }
 
