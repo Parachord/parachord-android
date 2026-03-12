@@ -78,6 +78,7 @@ fun MiniPlayer(
                 size = 40.dp,
                 cornerRadius = 4.dp,
                 elevation = 0.dp,
+                placeholderName = artistName.ifBlank { trackTitle },
             )
 
             Spacer(modifier = Modifier.width(12.dp))

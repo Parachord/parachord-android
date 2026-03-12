@@ -38,6 +38,7 @@ import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import com.parachord.android.ui.icons.parachordWordmark
 import com.parachord.android.ui.navigation.Routes
 
 /**
@@ -80,6 +81,10 @@ fun DrawerContent(
     onItemClick: (String) -> Unit,
     modifier: Modifier = Modifier,
 ) {
+    // Wordmark color adapts to theme: dark text on light bg, light text on dark bg
+    val wordmarkFill = MaterialTheme.colorScheme.onSurface
+    val wordmarkIcon = parachordWordmark(wordmarkFill)
+
     Column(
         modifier = modifier
             .fillMaxHeight()
@@ -87,6 +92,17 @@ fun DrawerContent(
             .background(MaterialTheme.colorScheme.surface)
             .padding(top = 48.dp),
     ) {
+        // ── Parachord wordmark at top ──
+        Icon(
+            imageVector = wordmarkIcon,
+            contentDescription = "Parachord",
+            tint = Color.Unspecified, // colors are baked into the vector (fill param + red accent)
+            modifier = Modifier
+                .padding(horizontal = 24.dp)
+                .padding(bottom = 24.dp)
+                .height(28.dp),
+        )
+
         // ── Scrollable content (everything except Settings) ──
         Column(
             modifier = Modifier

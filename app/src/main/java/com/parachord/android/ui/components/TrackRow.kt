@@ -51,12 +51,13 @@ fun TrackRow(
             )
         }
 
-        // Album art
+        // Album art with gradient placeholder
         AlbumArtCard(
             artworkUrl = artworkUrl,
             size = 48.dp,
             cornerRadius = 4.dp,
             elevation = 1.dp,
+            placeholderName = artist.ifBlank { title },
         )
 
         Spacer(modifier = Modifier.width(12.dp))

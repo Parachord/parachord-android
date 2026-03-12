@@ -105,6 +105,7 @@ fun NowPlayingScreen(
                     .padding(horizontal = 8.dp),
                 cornerRadius = 12.dp,
                 elevation = 8.dp,
+                placeholderName = track?.artist ?: track?.title,
             )
 
             Spacer(modifier = Modifier.height(32.dp))

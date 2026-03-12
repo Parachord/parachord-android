@@ -18,12 +18,17 @@ import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
 import coil.compose.SubcomposeAsyncImage
 import coil.request.ImageRequest
 
 /**
  * Reusable album art image composable with rounded corners, shadow,
- * and a placeholder when no artwork URL is available.
+ * and a gradient placeholder when no artwork URL is available.
+ *
+ * When [placeholderName] is provided, uses a deterministic gradient
+ * with initials (matching the desktop app's behavior). Otherwise falls
+ * back to a simple music note placeholder.
  */
 @Composable
 fun AlbumArtCard(
@@ -32,6 +37,7 @@ fun AlbumArtCard(
     size: Dp = 48.dp,
     cornerRadius: Dp = 8.dp,
     elevation: Dp = 2.dp,
+    placeholderName: String? = null,
     contentDescription: String? = "Album artwork",
 ) {
     val shape = RoundedCornerShape(cornerRadius)
@@ -50,14 +56,38 @@ fun AlbumArtCard(
             modifier = commonModifier,
             contentScale = ContentScale.Crop,
             loading = {
-                ArtPlaceholder(Modifier.size(size), size)
+                if (placeholderName != null) {
+                    GradientPlaceholder(
+                        name = placeholderName,
+                        modifier = Modifier.size(size),
+                        fontSize = (size.value * 0.35f).sp,
+                    )
+                } else {
+                    ArtPlaceholderSimple(Modifier.size(size), size)
+                }
             },
             error = {
-                ArtPlaceholder(Modifier.size(size), size)
+                if (placeholderName != null) {
+                    GradientPlaceholder(
+                        name = placeholderName,
+                        modifier = Modifier.size(size),
+                        fontSize = (size.value * 0.35f).sp,
+                    )
+                } else {
+                    ArtPlaceholderSimple(Modifier.size(size), size)
+                }
             },
         )
     } else {
-        ArtPlaceholder(commonModifier, size)
+        if (placeholderName != null) {
+            GradientPlaceholder(
+                name = placeholderName,
+                modifier = commonModifier,
+                fontSize = (size.value * 0.35f).sp,
+            )
+        } else {
+            ArtPlaceholderSimple(commonModifier, size)
+        }
     }
 }
 
@@ -71,6 +101,7 @@ fun AlbumArtCardFill(
     modifier: Modifier = Modifier,
     cornerRadius: Dp = 12.dp,
     elevation: Dp = 4.dp,
+    placeholderName: String? = null,
     contentDescription: String? = "Album artwork",
 ) {
     val shape = RoundedCornerShape(cornerRadius)
@@ -89,19 +120,46 @@ fun AlbumArtCardFill(
             modifier = commonModifier,
             contentScale = ContentScale.Crop,
             loading = {
-                ArtPlaceholder(Modifier.aspectRatio(1f), 48.dp)
+                if (placeholderName != null) {
+                    GradientPlaceholder(
+                        name = placeholderName,
+                        modifier = Modifier.aspectRatio(1f),
+                        fontSize = 32.sp,
+                    )
+                } else {
+                    ArtPlaceholderSimple(Modifier.aspectRatio(1f), 48.dp)
+                }
             },
             error = {
-                ArtPlaceholder(Modifier.aspectRatio(1f), 48.dp)
+                if (placeholderName != null) {
+                    GradientPlaceholder(
+                        name = placeholderName,
+                        modifier = Modifier.aspectRatio(1f),
+                        fontSize = 32.sp,
+                    )
+                } else {
+                    ArtPlaceholderSimple(Modifier.aspectRatio(1f), 48.dp)
+                }
             },
         )
     } else {
-        ArtPlaceholder(commonModifier, 48.dp)
+        if (placeholderName != null) {
+            GradientPlaceholder(
+                name = placeholderName,
+                modifier = commonModifier,
+                fontSize = 32.sp,
+            )
+        } else {
+            ArtPlaceholderSimple(commonModifier, 48.dp)
+        }
     }
 }
 
+/**
+ * Simple music note placeholder (fallback when no name is available).
+ */
 @Composable
-private fun ArtPlaceholder(modifier: Modifier, iconSize: Dp) {
+private fun ArtPlaceholderSimple(modifier: Modifier, iconSize: Dp) {
     Box(
         modifier = modifier.background(MaterialTheme.colorScheme.surfaceVariant),
         contentAlignment = Alignment.Center,
