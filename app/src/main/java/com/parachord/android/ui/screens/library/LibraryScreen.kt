@@ -16,23 +16,17 @@ import androidx.compose.foundation.lazy.items
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Menu
 import androidx.compose.material.icons.filled.MusicNote
-import androidx.compose.material.icons.automirrored.filled.QueueMusic
+import androidx.compose.material.icons.filled.People
+import androidx.compose.material.icons.filled.Person
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
-import androidx.compose.material3.ListItem
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.Tab
-import androidx.compose.material3.TabRow
-import androidx.compose.material3.TabRowDefaults
-import androidx.compose.material3.TabRowDefaults.tabIndicatorOffset
 import androidx.compose.material3.Text
 import androidx.compose.material3.TopAppBar
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
-import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.remember
-import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
@@ -40,6 +34,7 @@ import androidx.compose.ui.Alignment
 import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.parachord.android.ui.components.AlbumArtCard
+import com.parachord.android.ui.components.SwipeableTabLayout
 import com.parachord.android.ui.components.TrackRow
 
 @OptIn(ExperimentalMaterial3Api::class)
@@ -49,12 +44,8 @@ fun CollectionScreen(
     modifier: Modifier = Modifier,
     viewModel: LibraryViewModel = hiltViewModel(),
 ) {
-    var selectedTab by remember { mutableIntStateOf(0) }
-    val tabs = listOf("Tracks", "Albums", "Playlists")
-
     val tracks by viewModel.tracks.collectAsStateWithLifecycle()
     val albums by viewModel.albums.collectAsStateWithLifecycle()
-    val playlists by viewModel.playlists.collectAsStateWithLifecycle()
 
     Column(modifier = modifier.fillMaxSize()) {
         TopAppBar(
@@ -66,76 +57,37 @@ fun CollectionScreen(
             },
             windowInsets = WindowInsets(0),
         )
-        TabRow(
-            selectedTabIndex = selectedTab,
-            indicator = { tabPositions ->
-                if (selectedTab < tabPositions.size) {
-                    TabRowDefaults.PrimaryIndicator(
-                        modifier = Modifier.tabIndicatorOffset(tabPositions[selectedTab]),
-                        color = MaterialTheme.colorScheme.primary,
-                    )
-                }
-            },
-        ) {
-            tabs.forEachIndexed { index, title ->
-                Tab(
-                    selected = selectedTab == index,
-                    onClick = { selectedTab = index },
-                    text = { Text(title) },
-                )
-            }
-        }
-
-        when (selectedTab) {
-            0 -> {
-                if (tracks.isEmpty()) {
-                    EmptyState("No tracks yet", Icons.Default.MusicNote)
-                } else {
-                    LazyColumn(modifier = Modifier.fillMaxSize()) {
-                        items(tracks, key = { it.id }) { track ->
-                            TrackRow(
-                                title = track.title,
-                                artist = track.artist,
-                                artworkUrl = track.artworkUrl,
-                                resolver = track.resolver,
-                                duration = track.duration,
-                                onClick = { viewModel.playTrack(track) },
-                            )
-                        }
+        SwipeableTabLayout(
+            tabs = listOf("Artists", "Albums", "Songs", "Friends"),
+            modifier = Modifier.fillMaxSize(),
+        ) { page ->
+            when (page) {
+                0 -> {
+                    val artists = remember(tracks) {
+                        tracks.map { it.artist }.distinct().sorted()
                     }
-                }
-            }
-            1 -> {
-                if (albums.isEmpty()) {
-                    EmptyState("No albums yet", Icons.Default.MusicNote)
-                } else {
-                    LazyColumn(modifier = Modifier.fillMaxSize()) {
-                        items(albums, key = { it.id }) { album ->
-                            Row(
-                                modifier = Modifier
-                                    .fillMaxWidth()
-                                    .clickable { }
-                                    .padding(horizontal = 16.dp, vertical = 10.dp),
-                                verticalAlignment = Alignment.CenterVertically,
-                            ) {
-                                AlbumArtCard(
-                                    artworkUrl = null,
-                                    size = 48.dp,
-                                    cornerRadius = 4.dp,
-                                    elevation = 1.dp,
-                                )
-                                Spacer(modifier = Modifier.width(12.dp))
-                                Column(modifier = Modifier.weight(1f)) {
-                                    Text(
-                                        text = album.title,
-                                        style = MaterialTheme.typography.bodyLarge,
-                                        maxLines = 1,
-                                        overflow = TextOverflow.Ellipsis,
+                    if (artists.isEmpty()) {
+                        EmptyState("No artists yet", Icons.Default.Person)
+                    } else {
+                        LazyColumn(modifier = Modifier.fillMaxSize()) {
+                            items(artists, key = { it }) { artist ->
+                                Row(
+                                    modifier = Modifier
+                                        .fillMaxWidth()
+                                        .clickable { }
+                                        .padding(horizontal = 16.dp, vertical = 14.dp),
+                                    verticalAlignment = Alignment.CenterVertically,
+                                ) {
+                                    Icon(
+                                        imageVector = Icons.Default.Person,
+                                        contentDescription = null,
+                                        modifier = Modifier.size(40.dp),
+                                        tint = MaterialTheme.colorScheme.onSurfaceVariant,
                                     )
+                                    Spacer(modifier = Modifier.width(12.dp))
                                     Text(
-                                        text = album.artist,
-                                        style = MaterialTheme.typography.bodySmall,
-                                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                        text = artist,
+                                        style = MaterialTheme.typography.bodyLarge,
                                         maxLines = 1,
                                         overflow = TextOverflow.Ellipsis,
                                     )
@@ -144,23 +96,66 @@ fun CollectionScreen(
                         }
                     }
                 }
-            }
-            2 -> {
-                if (playlists.isEmpty()) {
-                    EmptyState("No playlists yet", Icons.AutoMirrored.Filled.QueueMusic)
-                } else {
-                    LazyColumn(modifier = Modifier.fillMaxSize()) {
-                        items(playlists, key = { it.id }) { playlist ->
-                            ListItem(
-                                headlineContent = {
-                                    Text(playlist.name, maxLines = 1, overflow = TextOverflow.Ellipsis)
-                                },
-                                supportingContent = playlist.description?.let { desc ->
-                                    { Text(desc, maxLines = 1, overflow = TextOverflow.Ellipsis) }
-                                },
-                            )
+                1 -> {
+                    if (albums.isEmpty()) {
+                        EmptyState("No albums yet", Icons.Default.MusicNote)
+                    } else {
+                        LazyColumn(modifier = Modifier.fillMaxSize()) {
+                            items(albums, key = { it.id }) { album ->
+                                Row(
+                                    modifier = Modifier
+                                        .fillMaxWidth()
+                                        .clickable { }
+                                        .padding(horizontal = 16.dp, vertical = 10.dp),
+                                    verticalAlignment = Alignment.CenterVertically,
+                                ) {
+                                    AlbumArtCard(
+                                        artworkUrl = null,
+                                        size = 48.dp,
+                                        cornerRadius = 4.dp,
+                                        elevation = 1.dp,
+                                    )
+                                    Spacer(modifier = Modifier.width(12.dp))
+                                    Column(modifier = Modifier.weight(1f)) {
+                                        Text(
+                                            text = album.title,
+                                            style = MaterialTheme.typography.bodyLarge,
+                                            maxLines = 1,
+                                            overflow = TextOverflow.Ellipsis,
+                                        )
+                                        Text(
+                                            text = album.artist,
+                                            style = MaterialTheme.typography.bodySmall,
+                                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                            maxLines = 1,
+                                            overflow = TextOverflow.Ellipsis,
+                                        )
+                                    }
+                                }
+                            }
                         }
                     }
+                }
+                2 -> {
+                    if (tracks.isEmpty()) {
+                        EmptyState("No songs yet", Icons.Default.MusicNote)
+                    } else {
+                        LazyColumn(modifier = Modifier.fillMaxSize()) {
+                            items(tracks, key = { it.id }) { track ->
+                                TrackRow(
+                                    title = track.title,
+                                    artist = track.artist,
+                                    artworkUrl = track.artworkUrl,
+                                    resolver = track.resolver,
+                                    duration = track.duration,
+                                    onClick = { viewModel.playTrack(track) },
+                                )
+                            }
+                        }
+                    }
+                }
+                3 -> {
+                    EmptyState("Coming soon", Icons.Default.People)
                 }
             }
         }
