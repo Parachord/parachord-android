@@ -45,7 +45,10 @@ import coil.request.ImageRequest
 import com.parachord.android.ui.components.AlbumArtCard
 import com.parachord.android.ui.components.SectionHeader
 import com.parachord.android.ui.components.ShimmerTrackRow
+import com.parachord.android.ui.components.SwipeableTabLayout
 import com.parachord.android.ui.components.TrackRow
+import com.parachord.android.data.metadata.AlbumSearchResult
+import com.parachord.android.data.metadata.TrackSearchResult
 
 @OptIn(ExperimentalMaterial3Api::class, ExperimentalLayoutApi::class)
 @Composable
@@ -75,7 +78,6 @@ fun ArtistScreen(
         if (isLoading) {
             // Shimmer loading skeleton
             Column(modifier = Modifier.fillMaxSize()) {
-                // Image placeholder
                 Box(
                     modifier = Modifier
                         .fillMaxWidth()
@@ -86,172 +88,257 @@ fun ArtistScreen(
                 repeat(5) { ShimmerTrackRow() }
             }
         } else {
-            LazyColumn(modifier = Modifier.fillMaxSize()) {
-                // Artist hero image
-                item {
-                    val imageUrl = artistInfo?.imageUrl
-                    if (!imageUrl.isNullOrBlank()) {
-                        SubcomposeAsyncImage(
-                            model = ImageRequest.Builder(LocalContext.current)
-                                .data(imageUrl)
-                                .crossfade(true)
-                                .build(),
-                            contentDescription = "Artist image",
+            // Hero image (above tabs)
+            val imageUrl = artistInfo?.imageUrl
+            if (!imageUrl.isNullOrBlank()) {
+                SubcomposeAsyncImage(
+                    model = ImageRequest.Builder(LocalContext.current)
+                        .data(imageUrl)
+                        .crossfade(true)
+                        .build(),
+                    contentDescription = "Artist image",
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .aspectRatio(21f / 9f)
+                        .clip(RoundedCornerShape(bottomStart = 16.dp, bottomEnd = 16.dp)),
+                    contentScale = ContentScale.Crop,
+                    loading = {
+                        Box(
                             modifier = Modifier
                                 .fillMaxWidth()
-                                .aspectRatio(16f / 9f)
-                                .clip(RoundedCornerShape(bottomStart = 16.dp, bottomEnd = 16.dp)),
-                            contentScale = ContentScale.Crop,
-                            loading = {
-                                Box(
-                                    modifier = Modifier
-                                        .fillMaxWidth()
-                                        .aspectRatio(16f / 9f)
-                                        .background(MaterialTheme.colorScheme.surfaceVariant),
-                                )
-                            },
-                            error = {
-                                Box(
-                                    modifier = Modifier
-                                        .fillMaxWidth()
-                                        .aspectRatio(16f / 9f)
-                                        .background(MaterialTheme.colorScheme.surfaceVariant),
-                                )
-                            },
+                                .aspectRatio(21f / 9f)
+                                .background(MaterialTheme.colorScheme.surfaceVariant),
                         )
-                    }
-                }
-
-                // Tags
-                val tags = artistInfo?.tags ?: emptyList()
-                if (tags.isNotEmpty()) {
-                    item {
-                        FlowRow(
-                            modifier = Modifier.padding(horizontal = 16.dp, vertical = 8.dp),
-                            horizontalArrangement = Arrangement.spacedBy(8.dp),
-                        ) {
-                            tags.forEach { tag ->
-                                AssistChip(
-                                    onClick = {},
-                                    label = { Text(tag) },
-                                )
-                            }
-                        }
-                    }
-                }
-
-                // Bio
-                artistInfo?.bio?.let { bio ->
-                    if (bio.isNotBlank()) {
-                        item {
-                            Text(
-                                text = bio,
-                                style = MaterialTheme.typography.bodyMedium,
-                                color = MaterialTheme.colorScheme.onSurfaceVariant,
-                                modifier = Modifier.padding(16.dp),
-                            )
-                        }
-                    }
-                }
-
-                // Similar artists
-                val similar = artistInfo?.similarArtists ?: emptyList()
-                if (similar.isNotEmpty()) {
-                    item {
-                        HorizontalDivider()
-                        SectionHeader("Similar Artists")
-                    }
-                    item {
-                        FlowRow(
-                            modifier = Modifier.padding(horizontal = 16.dp, vertical = 4.dp),
-                            horizontalArrangement = Arrangement.spacedBy(8.dp),
-                        ) {
-                            similar.forEach { name ->
-                                AssistChip(
-                                    onClick = { onNavigateToArtist(name) },
-                                    label = { Text(name) },
-                                )
-                            }
-                        }
-                    }
-                }
-
-                // Discography
-                if (albums.isNotEmpty()) {
-                    item {
-                        HorizontalDivider()
-                        SectionHeader("Discography")
-                    }
-                    items(albums, key = { "album-${it.title}-${it.artist}" }) { album ->
-                        Row(
+                    },
+                    error = {
+                        Box(
                             modifier = Modifier
                                 .fillMaxWidth()
-                                .clickable { onNavigateToAlbum(album.title, album.artist) }
-                                .padding(horizontal = 16.dp, vertical = 10.dp),
-                            verticalAlignment = Alignment.CenterVertically,
-                        ) {
-                            AlbumArtCard(
-                                artworkUrl = album.artworkUrl,
-                                size = 56.dp,
-                                cornerRadius = 4.dp,
-                                elevation = 1.dp,
-                            )
-                            Spacer(modifier = Modifier.width(12.dp))
-                            Column(modifier = Modifier.weight(1f)) {
-                                Text(
-                                    text = album.title,
-                                    style = MaterialTheme.typography.bodyLarge,
-                                    maxLines = 1,
-                                    overflow = TextOverflow.Ellipsis,
-                                )
-                                val info = buildString {
-                                    album.year?.let { append("$it") }
-                                    album.trackCount?.let {
-                                        if (isNotEmpty()) append(" \u2022 ")
-                                        append("$it tracks")
-                                    }
-                                }
-                                if (info.isNotEmpty()) {
-                                    Text(
-                                        text = info,
-                                        style = MaterialTheme.typography.bodySmall,
-                                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                                        maxLines = 1,
-                                        overflow = TextOverflow.Ellipsis,
-                                    )
-                                }
-                            }
-                        }
-                    }
-                }
-
-                // Top tracks
-                if (topTracks.isNotEmpty()) {
-                    item {
-                        HorizontalDivider()
-                        SectionHeader("Tracks")
-                    }
-                    items(topTracks) { track ->
-                        TrackRow(
-                            title = track.title,
-                            artist = track.album ?: "",
-                            artworkUrl = track.artworkUrl,
+                                .aspectRatio(21f / 9f)
+                                .background(MaterialTheme.colorScheme.surfaceVariant),
                         )
-                    }
-                }
+                    },
+                )
+            }
 
-                // Provider attribution
-                artistInfo?.provider?.let { providers ->
-                    item {
-                        Spacer(modifier = Modifier.height(8.dp))
+            // Artist name
+            Text(
+                text = artistInfo?.name ?: "",
+                style = MaterialTheme.typography.headlineMedium,
+                modifier = Modifier.padding(horizontal = 16.dp, vertical = 8.dp),
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
+            )
+
+            // Tabs + pager
+            SwipeableTabLayout(
+                tabs = listOf("Discography", "Biography", "Related Artists"),
+                modifier = Modifier.fillMaxSize(),
+            ) { page ->
+                when (page) {
+                    0 -> DiscographyTab(
+                        albums = albums,
+                        topTracks = topTracks,
+                        onNavigateToAlbum = onNavigateToAlbum,
+                    )
+                    1 -> BiographyTab(
+                        bio = artistInfo?.bio,
+                        tags = artistInfo?.tags ?: emptyList(),
+                        provider = artistInfo?.provider,
+                    )
+                    2 -> RelatedArtistsTab(
+                        similarArtists = artistInfo?.similarArtists ?: emptyList(),
+                        onNavigateToArtist = onNavigateToArtist,
+                    )
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun DiscographyTab(
+    albums: List<AlbumSearchResult>,
+    topTracks: List<TrackSearchResult>,
+    onNavigateToAlbum: (albumTitle: String, artistName: String) -> Unit,
+) {
+    LazyColumn(modifier = Modifier.fillMaxSize()) {
+        if (albums.isNotEmpty()) {
+            item { SectionHeader("ALBUMS") }
+            items(albums, key = { "album-${it.title}-${it.artist}" }) { album ->
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .clickable { onNavigateToAlbum(album.title, album.artist) }
+                        .padding(horizontal = 16.dp, vertical = 10.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    AlbumArtCard(
+                        artworkUrl = album.artworkUrl,
+                        size = 56.dp,
+                        cornerRadius = 4.dp,
+                        elevation = 1.dp,
+                    )
+                    Spacer(modifier = Modifier.width(12.dp))
+                    Column(modifier = Modifier.weight(1f)) {
                         Text(
-                            text = "Sources: ${providers.split("+").distinct().joinToString(", ")}",
-                            style = MaterialTheme.typography.labelSmall,
-                            color = MaterialTheme.colorScheme.outline,
-                            modifier = Modifier.padding(horizontal = 16.dp, vertical = 8.dp),
+                            text = album.title,
+                            style = MaterialTheme.typography.bodyLarge,
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis,
+                        )
+                        val info = buildString {
+                            album.year?.let { append("$it") }
+                            album.trackCount?.let {
+                                if (isNotEmpty()) append(" \u2022 ")
+                                append("$it tracks")
+                            }
+                        }
+                        if (info.isNotEmpty()) {
+                            Text(
+                                text = info,
+                                style = MaterialTheme.typography.bodySmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                maxLines = 1,
+                                overflow = TextOverflow.Ellipsis,
+                            )
+                        }
+                    }
+                }
+            }
+        }
+
+        if (topTracks.isNotEmpty()) {
+            item {
+                if (albums.isNotEmpty()) HorizontalDivider()
+                SectionHeader("TOP TRACKS")
+            }
+            items(topTracks) { track ->
+                TrackRow(
+                    title = track.title,
+                    artist = track.album ?: "",
+                    artworkUrl = track.artworkUrl,
+                )
+            }
+        }
+
+        if (albums.isEmpty() && topTracks.isEmpty()) {
+            item {
+                Box(
+                    modifier = Modifier.fillMaxWidth().padding(32.dp),
+                    contentAlignment = Alignment.Center,
+                ) {
+                    Text(
+                        text = "No discography available",
+                        style = MaterialTheme.typography.bodyMedium,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                }
+            }
+        }
+    }
+}
+
+@OptIn(ExperimentalLayoutApi::class)
+@Composable
+private fun BiographyTab(
+    bio: String?,
+    tags: List<String>,
+    provider: String?,
+) {
+    LazyColumn(modifier = Modifier.fillMaxSize()) {
+        if (!bio.isNullOrBlank()) {
+            item {
+                Text(
+                    text = bio,
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    modifier = Modifier.padding(16.dp),
+                )
+            }
+        }
+
+        if (tags.isNotEmpty()) {
+            item {
+                if (!bio.isNullOrBlank()) HorizontalDivider()
+                SectionHeader("TAGS")
+                FlowRow(
+                    modifier = Modifier.padding(horizontal = 16.dp, vertical = 4.dp),
+                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                ) {
+                    tags.forEach { tag ->
+                        AssistChip(
+                            onClick = {},
+                            label = { Text(tag) },
                         )
                     }
                 }
+            }
+        }
+
+        provider?.let { providers ->
+            item {
+                Spacer(modifier = Modifier.height(8.dp))
+                Text(
+                    text = "Sources: ${providers.split("+").distinct().joinToString(", ")}",
+                    style = MaterialTheme.typography.labelSmall,
+                    color = MaterialTheme.colorScheme.outline,
+                    modifier = Modifier.padding(horizontal = 16.dp, vertical = 8.dp),
+                )
+            }
+        }
+
+        if (bio.isNullOrBlank() && tags.isEmpty()) {
+            item {
+                Box(
+                    modifier = Modifier.fillMaxWidth().padding(32.dp),
+                    contentAlignment = Alignment.Center,
+                ) {
+                    Text(
+                        text = "No biography available",
+                        style = MaterialTheme.typography.bodyMedium,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun RelatedArtistsTab(
+    similarArtists: List<String>,
+    onNavigateToArtist: (String) -> Unit,
+) {
+    if (similarArtists.isEmpty()) {
+        Box(
+            modifier = Modifier.fillMaxSize(),
+            contentAlignment = Alignment.Center,
+        ) {
+            Text(
+                text = "No related artists",
+                style = MaterialTheme.typography.bodyMedium,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+        }
+    } else {
+        LazyColumn(modifier = Modifier.fillMaxSize()) {
+            items(similarArtists) { name ->
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .clickable { onNavigateToArtist(name) }
+                        .padding(horizontal = 16.dp, vertical = 14.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    Text(
+                        text = name,
+                        style = MaterialTheme.typography.bodyLarge,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis,
+                    )
+                }
+                HorizontalDivider(modifier = Modifier.padding(horizontal = 16.dp))
             }
         }
     }
