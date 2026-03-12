@@ -28,6 +28,15 @@ object Routes {
     const val ARTIST = "artist/{artistName}"
     const val ALBUM = "album/{albumTitle}/{artistName}"
 
+    // Drawer destinations
+    const val HISTORY = "history"
+    const val FRESH_DROPS = "fresh_drops"
+    const val RECOMMENDATIONS = "recommendations"
+    const val POP_OF_THE_TOPS = "pop_of_the_tops"
+    const val CRITICAL_DARLINGS = "critical_darlings"
+    const val CONCERTS = "concerts"
+    const val FRIENDS = "friends"
+
     fun artist(name: String): String =
         "artist/${Uri.encode(name)}"
 
@@ -38,6 +47,7 @@ object Routes {
 @Composable
 fun ParachordNavHost(
     navController: NavHostController,
+    onOpenDrawer: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
     NavHost(
@@ -69,13 +79,18 @@ fun ParachordNavHost(
         composable(Routes.HOME) {
             com.parachord.android.ui.screens.home.HomeScreen(
                 onNavigateToNowPlaying = { navController.navigate(Routes.NOW_PLAYING) },
+                onOpenDrawer = onOpenDrawer,
             )
         }
         composable(Routes.COLLECTION) {
-            com.parachord.android.ui.screens.library.CollectionScreen()
+            com.parachord.android.ui.screens.library.CollectionScreen(
+                onOpenDrawer = onOpenDrawer,
+            )
         }
         composable(Routes.PLAYLISTS) {
-            com.parachord.android.ui.screens.playlists.PlaylistsScreen()
+            com.parachord.android.ui.screens.playlists.PlaylistsScreen(
+                onOpenDrawer = onOpenDrawer,
+            )
         }
         composable(Routes.SEARCH) {
             com.parachord.android.ui.screens.search.SearchScreen(
@@ -83,6 +98,7 @@ fun ParachordNavHost(
                 onNavigateToAlbum = { albumTitle, artistName ->
                     navController.navigate(Routes.album(albumTitle, artistName))
                 },
+                onOpenDrawer = onOpenDrawer,
             )
         }
         composable(
@@ -139,6 +155,43 @@ fun ParachordNavHost(
             ),
         ) {
             com.parachord.android.ui.screens.album.AlbumScreen(
+                onBack = { navController.popBackStack() },
+            )
+        }
+
+        // ── Drawer Destinations ─────────────────────────────────────────
+        composable(Routes.HISTORY) {
+            com.parachord.android.ui.screens.history.HistoryScreen(
+                onBack = { navController.popBackStack() },
+            )
+        }
+        composable(Routes.FRESH_DROPS) {
+            com.parachord.android.ui.screens.discover.FreshDropsScreen(
+                onBack = { navController.popBackStack() },
+            )
+        }
+        composable(Routes.RECOMMENDATIONS) {
+            com.parachord.android.ui.screens.discover.RecommendationsScreen(
+                onBack = { navController.popBackStack() },
+            )
+        }
+        composable(Routes.POP_OF_THE_TOPS) {
+            com.parachord.android.ui.screens.discover.PopOfTheTopsScreen(
+                onBack = { navController.popBackStack() },
+            )
+        }
+        composable(Routes.CRITICAL_DARLINGS) {
+            com.parachord.android.ui.screens.discover.CriticalDarlingsScreen(
+                onBack = { navController.popBackStack() },
+            )
+        }
+        composable(Routes.CONCERTS) {
+            com.parachord.android.ui.screens.discover.ConcertsScreen(
+                onBack = { navController.popBackStack() },
+            )
+        }
+        composable(Routes.FRIENDS) {
+            com.parachord.android.ui.screens.friends.FriendsScreen(
                 onBack = { navController.popBackStack() },
             )
         }

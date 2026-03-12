@@ -15,7 +15,11 @@ import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.Menu
 import androidx.compose.material3.ExperimentalMaterial3Api
+import androidx.compose.material3.Icon
+import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.material3.TopAppBar
@@ -36,6 +40,7 @@ import com.parachord.android.ui.components.TrackRow
 @Composable
 fun HomeScreen(
     onNavigateToNowPlaying: () -> Unit,
+    onOpenDrawer: () -> Unit = {},
     modifier: Modifier = Modifier,
     viewModel: HomeViewModel = hiltViewModel(),
 ) {
@@ -58,6 +63,11 @@ fun HomeScreen(
     Column(modifier = modifier.fillMaxSize()) {
         TopAppBar(
             title = { Text("Parachord") },
+            navigationIcon = {
+                IconButton(onClick = onOpenDrawer) {
+                    Icon(Icons.Filled.Menu, contentDescription = "Menu")
+                }
+            },
         )
 
         if (!hasLibrary) {
