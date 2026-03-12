@@ -35,6 +35,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
@@ -180,7 +181,16 @@ fun ParachordApp() {
                                                 Icon(item.icon, contentDescription = item.label)
                                             }
                                         },
-                                        label = if (item.isAction) null else {{ Text(item.label) }},
+                                        label = if (item.isAction) null else {
+                                            {
+                                                Text(
+                                                    item.label,
+                                                    maxLines = 1,
+                                                    softWrap = false,
+                                                    overflow = TextOverflow.Ellipsis,
+                                                )
+                                            }
+                                        },
                                         selected = selected,
                                         onClick = {
                                             if (item.isAction) {

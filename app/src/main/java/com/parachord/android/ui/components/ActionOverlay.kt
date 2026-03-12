@@ -17,6 +17,7 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.PlaylistAdd
@@ -77,6 +78,7 @@ fun ActionOverlay(
                         .padding(horizontal = 24.dp)
                         .padding(bottom = 96.dp), // above the nav bar area
                     verticalArrangement = Arrangement.spacedBy(16.dp),
+                    horizontalAlignment = Alignment.End,
                 ) {
                     ActionRow(
                         label = "Create Playlist",
@@ -95,25 +97,20 @@ fun ActionOverlay(
                     )
 
                     // Close button at the bottom-right
-                    Row(
-                        modifier = Modifier.fillMaxWidth(),
-                        horizontalArrangement = Arrangement.End,
+                    Box(
+                        modifier = Modifier
+                            .size(48.dp)
+                            .clip(CircleShape)
+                            .background(CloseButtonBg)
+                            .clickable { onDismiss() },
+                        contentAlignment = Alignment.Center,
                     ) {
-                        Box(
-                            modifier = Modifier
-                                .size(48.dp)
-                                .clip(CircleShape)
-                                .background(CloseButtonBg)
-                                .clickable { onDismiss() },
-                            contentAlignment = Alignment.Center,
-                        ) {
-                            Icon(
-                                imageVector = Icons.Filled.Close,
-                                contentDescription = "Close",
-                                tint = Color.White,
-                                modifier = Modifier.size(24.dp),
-                            )
-                        }
+                        Icon(
+                            imageVector = Icons.Filled.Close,
+                            contentDescription = "Close",
+                            tint = Color.White,
+                            modifier = Modifier.size(24.dp),
+                        )
                     }
                 }
             }
@@ -130,7 +127,6 @@ private fun ActionRow(
 ) {
     Row(
         modifier = modifier
-            .fillMaxWidth()
             .clickable(
                 indication = null,
                 interactionSource = remember { MutableInteractionSource() },
@@ -144,7 +140,7 @@ private fun ActionRow(
             fontSize = 18.sp,
             fontWeight = FontWeight.Medium,
         )
-        Spacer(modifier = Modifier.weight(1f))
+        Spacer(modifier = Modifier.width(16.dp))
         Box(
             modifier = Modifier
                 .size(48.dp)

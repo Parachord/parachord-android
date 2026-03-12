@@ -6,6 +6,7 @@ import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.WindowInsets
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.ExperimentalMaterial3Api
@@ -39,6 +40,7 @@ fun SettingsScreen(
     Column(modifier = modifier.fillMaxSize()) {
         TopAppBar(
             title = { Text("Settings") },
+            windowInsets = WindowInsets(0),
         )
         LazyColumn(modifier = Modifier.fillMaxWidth()) {
             item { SectionHeader("Accounts") }
