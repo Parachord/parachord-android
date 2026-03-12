@@ -72,7 +72,7 @@ fun ParachordNavHost(
             )
         }
         composable(Routes.COLLECTION) {
-            com.parachord.android.ui.screens.library.LibraryScreen()
+            com.parachord.android.ui.screens.library.CollectionScreen()
         }
         composable(Routes.PLAYLISTS) {
             com.parachord.android.ui.screens.playlists.PlaylistsScreen()
