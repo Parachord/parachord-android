@@ -110,7 +110,17 @@ class PlaybackController @Inject constructor(
 
     fun skipNext() {
         val currentTrack = stateHolder.state.value.currentTrack
-        val next = queueManager.skipNext(currentTrack) ?: return
+        val next = queueManager.skipNext(currentTrack)
+        if (next == null) {
+            Log.d(TAG, "skipNext: queue empty, stopping playback")
+            if (isExternalPlayback) {
+                scope.launch { router.stopExternalPlayback() }
+                isExternalPlayback = false
+            }
+            stateHolder.update { copy(isPlaying = false) }
+            return
+        }
+        Log.d(TAG, "skipNext: advancing to '${next.title}' by ${next.artist}")
         scope.launch {
             if (isExternalPlayback) router.stopExternalPlayback()
             playTrackInternal(next)
@@ -371,6 +381,8 @@ class PlaybackController @Inject constructor(
         spotifyStateJob?.cancel()
         spotifyStateJob = scope.launch {
             val spotify = router.getSpotifyHandler()
+            // Small initial delay to let the track start
+            delay(1000)
             while (isActive && isExternalPlayback) {
                 val playing = spotify.isPlaying()
                 val position = spotify.getPosition()
@@ -384,8 +396,9 @@ class PlaybackController @Inject constructor(
                     )
                 }
 
-                // Auto-advance when Spotify track ends
-                if (!playing && position >= duration - 1000 && duration > 0) {
+                // Auto-advance: detect when our track is done via multiple signals
+                // (natural end, Spotify autoplay to different track, or item cleared)
+                if (spotify.isOurTrackDone()) {
                     skipNext()
                     break
                 }

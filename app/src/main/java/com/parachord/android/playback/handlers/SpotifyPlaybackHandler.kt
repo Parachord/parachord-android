@@ -52,6 +52,11 @@ class SpotifyPlaybackHandler @Inject constructor(
     private var cachedDuration = 0L
     private var _isConnected = false
 
+    /** The Spotify track ID we expect to be playing (from the URI we sent to play). */
+    private var expectedTrackId: String? = null
+    /** The track ID currently reported by the Spotify API. */
+    private var currentItemId: String? = null
+
     override val isConnected: Boolean get() = _isConnected
 
     override fun canHandle(track: TrackEntity): Boolean =
@@ -113,6 +118,8 @@ class SpotifyPlaybackHandler @Inject constructor(
             cachedIsPlaying = true
             cachedPosition = 0L
             cachedDuration = track.duration ?: 0L
+            expectedTrackId = track.spotifyUri?.substringAfterLast(":")
+            currentItemId = expectedTrackId
             startStatePolling()
         }
     }
@@ -187,6 +194,39 @@ class SpotifyPlaybackHandler @Inject constructor(
         return null
     }
 
+    /**
+     * Detect whether the track we started has finished playing.
+     *
+     * Handles three end-of-track scenarios:
+     * 1. Spotify stopped naturally (isPlaying=false, position near duration)
+     * 2. Spotify autoplay kicked in (playing a different track than expected)
+     * 3. Spotify cleared the item (isPlaying=false, item=null)
+     */
+    fun isOurTrackDone(): Boolean {
+        val expected = expectedTrackId ?: return false
+        val current = currentItemId
+
+        // Spotify auto-advanced to a different track
+        if (current != null && current != expected) {
+            Log.d(TAG, "Track changed: expected=$expected, current=$current (autoplay)")
+            return true
+        }
+
+        // Track ended naturally — not playing and position near end
+        if (!cachedIsPlaying && cachedDuration > 0 && cachedPosition >= cachedDuration - 1500) {
+            Log.d(TAG, "Track ended naturally: pos=$cachedPosition, dur=$cachedDuration")
+            return true
+        }
+
+        // Spotify cleared the item entirely (no track playing)
+        if (!cachedIsPlaying && current == null && cachedPosition > 0) {
+            Log.d(TAG, "Track cleared: no current item, was playing pos=$cachedPosition")
+            return true
+        }
+
+        return false
+    }
+
     private fun startStatePolling() {
         statePollingJob?.cancel()
         statePollingJob = scope.launch {
@@ -196,7 +236,11 @@ class SpotifyPlaybackHandler @Inject constructor(
                     if (state != null) {
                         cachedIsPlaying = state.isPlaying
                         cachedPosition = state.progressMs ?: 0L
-                        cachedDuration = state.item?.durationMs ?: 0L
+                        currentItemId = state.item?.id
+                        // Preserve duration when item becomes null (track just ended)
+                        if (state.item?.durationMs != null) {
+                            cachedDuration = state.item.durationMs
+                        }
                     }
                 } catch (_: Exception) { /* ignore polling errors */ }
                 delay(1000)
