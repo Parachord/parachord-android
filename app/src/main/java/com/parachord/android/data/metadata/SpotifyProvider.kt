@@ -59,7 +59,7 @@ class SpotifyProvider @Inject constructor(
 
     override suspend fun searchArtists(query: String, limit: Int): List<ArtistInfo> =
         withAuth { auth ->
-            val response = api.search(auth = auth, query = query, type = "artist", limit = limit)
+            val response = api.search(auth = auth, query = "artist:\"$query\"", type = "artist", limit = limit)
             response.artists?.items?.map { a ->
                 ArtistInfo(
                     name = a.name,
@@ -73,7 +73,7 @@ class SpotifyProvider @Inject constructor(
     override suspend fun getArtistInfo(artistName: String): ArtistInfo? =
         withAuth { auth ->
             // Search to find artist ID, then fetch full artist for reliable images
-            val response = api.search(auth = auth, query = artistName, type = "artist", limit = 1)
+            val response = api.search(auth = auth, query = "artist:\"$artistName\"", type = "artist", limit = 1)
             val searchArtist = response.artists?.items?.firstOrNull() ?: return@withAuth null
             val fullArtist = api.getArtist(auth = auth, artistId = searchArtist.id)
             ArtistInfo(
@@ -86,7 +86,7 @@ class SpotifyProvider @Inject constructor(
 
     override suspend fun getArtistTopTracks(artistName: String, limit: Int): List<TrackSearchResult> =
         withAuth { auth ->
-            val response = api.search(auth = auth, query = artistName, type = "artist", limit = 1)
+            val response = api.search(auth = auth, query = "artist:\"$artistName\"", type = "artist", limit = 1)
             val artistId = response.artists?.items?.firstOrNull()?.id ?: return@withAuth emptyList()
             val topTracks = api.getArtistTopTracks(auth = auth, artistId = artistId)
             topTracks.tracks.take(limit).map { t ->
@@ -105,7 +105,7 @@ class SpotifyProvider @Inject constructor(
 
     override suspend fun getArtistAlbums(artistName: String, limit: Int): List<AlbumSearchResult> =
         withAuth { auth ->
-            val response = api.search(auth = auth, query = artistName, type = "artist", limit = 1)
+            val response = api.search(auth = auth, query = "artist:\"$artistName\"", type = "artist", limit = 1)
             val artistId = response.artists?.items?.firstOrNull()?.id ?: return@withAuth emptyList()
             val albums = api.getArtistAlbums(auth = auth, artistId = artistId, limit = limit)
             albums.items.map { a ->
