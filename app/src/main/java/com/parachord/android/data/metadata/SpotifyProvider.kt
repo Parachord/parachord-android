@@ -97,6 +97,7 @@ class SpotifyProvider @Inject constructor(
                     year = a.year,
                     trackCount = a.totalTracks,
                     spotifyId = a.id,
+                    releaseType = a.albumType,
                     provider = name,
                 )
             }

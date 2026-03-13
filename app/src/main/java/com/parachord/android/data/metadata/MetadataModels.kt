@@ -40,6 +40,7 @@ data class AlbumSearchResult(
     val trackCount: Int? = null,
     val mbid: String? = null,
     val spotifyId: String? = null,
+    val releaseType: String? = null,
     val provider: String = "",
 )
 

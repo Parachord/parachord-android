@@ -204,5 +204,6 @@ private fun AlbumSearchResult.mergeWith(other: AlbumSearchResult) = AlbumSearchR
     trackCount = trackCount ?: other.trackCount,
     mbid = mbid ?: other.mbid,
     spotifyId = spotifyId ?: other.spotifyId,
+    releaseType = releaseType ?: other.releaseType,
     provider = "$provider+${other.provider}",
 )

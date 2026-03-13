@@ -37,7 +37,7 @@ interface SpotifyApi {
     suspend fun getArtistAlbums(
         @Header("Authorization") auth: String,
         @Path("id") artistId: String,
-        @Query("include_groups") includeGroups: String = "album,single",
+        @Query("include_groups") includeGroups: String = "album,single,compilation",
         @Query("limit") limit: Int = 50,
     ): SpPaginated<SpAlbum>
 
@@ -140,6 +140,7 @@ data class SpAlbum(
     val images: List<SpImage> = emptyList(),
     @SerialName("release_date") val releaseDate: String? = null,
     @SerialName("total_tracks") val totalTracks: Int? = null,
+    @SerialName("album_type") val albumType: String? = null,
 ) {
     val artistName: String get() = artists.joinToString(", ") { it.name }
     val year: Int? get() = releaseDate?.take(4)?.toIntOrNull()

@@ -7,6 +7,7 @@ import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.ExperimentalLayoutApi
 import androidx.compose.foundation.layout.FlowRow
+import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.aspectRatio
@@ -21,8 +22,12 @@ import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
+import androidx.compose.foundation.lazy.LazyRow
+import androidx.compose.foundation.lazy.items as lazyItems
 import androidx.compose.material3.AssistChip
 import androidx.compose.material3.ExperimentalMaterial3Api
+import androidx.compose.material3.FilterChip
+import androidx.compose.material3.FilterChipDefaults
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
@@ -31,6 +36,9 @@ import androidx.compose.material3.Text
 import androidx.compose.material3.TopAppBar
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -157,16 +165,65 @@ fun ArtistScreen(
     }
 }
 
+/**
+ * Release type filters for the discography tab.
+ * "all" shows everything; other values match AlbumSearchResult.releaseType.
+ */
+private data class ReleaseFilter(val key: String, val label: String)
+
+private val RELEASE_FILTERS = listOf(
+    ReleaseFilter("all", "All"),
+    ReleaseFilter("album", "Albums"),
+    ReleaseFilter("single", "Singles"),
+    ReleaseFilter("ep", "EPs"),
+    ReleaseFilter("live", "Live"),
+)
+
 @Composable
 private fun DiscographyTab(
     albums: List<AlbumSearchResult>,
     topTracks: List<TrackSearchResult>,
     onNavigateToAlbum: (albumTitle: String, artistName: String) -> Unit,
 ) {
+    var selectedFilter by remember { mutableStateOf("all") }
+
+    // Determine which filters have matching content
+    val availableFilters = remember(albums) {
+        val types = albums.mapNotNull { it.releaseType?.lowercase() }.toSet()
+        RELEASE_FILTERS.filter { it.key == "all" || it.key in types }
+    }
+
+    val filteredAlbums = remember(albums, selectedFilter) {
+        if (selectedFilter == "all") albums
+        else albums.filter { it.releaseType?.lowercase() == selectedFilter }
+    }
+
     LazyColumn(modifier = Modifier.fillMaxSize()) {
-        if (albums.isNotEmpty()) {
-            item { SectionHeader("ALBUMS") }
-            items(albums, key = { "album-${it.title}-${it.artist}" }) { album ->
+        // Filter chips row (only show if we have more than one filter available)
+        if (availableFilters.size > 1) {
+            item {
+                LazyRow(
+                    modifier = Modifier.fillMaxWidth(),
+                    contentPadding = PaddingValues(horizontal = 16.dp, vertical = 8.dp),
+                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                ) {
+                    lazyItems(availableFilters, key = { it.key }) { filter ->
+                        FilterChip(
+                            selected = selectedFilter == filter.key,
+                            onClick = { selectedFilter = filter.key },
+                            label = { Text(filter.label) },
+                            colors = FilterChipDefaults.filterChipColors(
+                                selectedContainerColor = MaterialTheme.colorScheme.primary.copy(alpha = 0.15f),
+                                selectedLabelColor = MaterialTheme.colorScheme.primary,
+                            ),
+                        )
+                    }
+                }
+            }
+        }
+
+        if (filteredAlbums.isNotEmpty()) {
+            items(filteredAlbums, key = { "album-${it.title}-${it.artist}" }) { album ->
                 Row(
                     modifier = Modifier
                         .fillMaxWidth()
@@ -190,6 +247,12 @@ private fun DiscographyTab(
                         )
                         val info = buildString {
                             album.year?.let { append("$it") }
+                            album.releaseType?.let { type ->
+                                if (type.lowercase() != "album") {
+                                    if (isNotEmpty()) append(" \u2022 ")
+                                    append(type.replaceFirstChar { it.uppercase() })
+                                }
+                            }
                             album.trackCount?.let {
                                 if (isNotEmpty()) append(" \u2022 ")
                                 append("$it tracks")
@@ -211,7 +274,7 @@ private fun DiscographyTab(
 
         if (topTracks.isNotEmpty()) {
             item {
-                if (albums.isNotEmpty()) HorizontalDivider()
+                if (filteredAlbums.isNotEmpty()) HorizontalDivider()
                 SectionHeader("TOP TRACKS")
             }
             items(topTracks) { track ->
@@ -223,7 +286,7 @@ private fun DiscographyTab(
             }
         }
 
-        if (albums.isEmpty() && topTracks.isEmpty()) {
+        if (filteredAlbums.isEmpty() && topTracks.isEmpty()) {
             item {
                 Box(
                     modifier = Modifier.fillMaxWidth().padding(32.dp),

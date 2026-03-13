@@ -92,10 +92,17 @@ data class MbRelease(
     @SerialName("artist-credit") val artistCredit: List<MbArtistCredit> = emptyList(),
     val date: String? = null,
     @SerialName("track-count") val trackCount: Int? = null,
+    @SerialName("release-group") val releaseGroup: MbReleaseGroup? = null,
 ) {
     val artistName: String get() = artistCredit.joinToString(", ") { it.name }
     val year: Int? get() = date?.take(4)?.toIntOrNull()
 }
+
+@Serializable
+data class MbReleaseGroup(
+    @SerialName("primary-type") val primaryType: String? = null,
+    @SerialName("secondary-types") val secondaryTypes: List<String> = emptyList(),
+)
 
 @Serializable
 data class MbArtistSearchResponse(

@@ -1,5 +1,6 @@
 package com.parachord.android.data.metadata
 
+import com.parachord.android.data.api.MbReleaseGroup
 import com.parachord.android.data.api.MusicBrainzApi
 import javax.inject.Inject
 import javax.inject.Singleton
@@ -45,6 +46,7 @@ class MusicBrainzProvider @Inject constructor(
                     year = rel.year,
                     trackCount = rel.trackCount,
                     mbid = rel.id,
+                    releaseType = normalizeReleaseType(rel.releaseGroup),
                     provider = name,
                 )
             }
@@ -128,6 +130,7 @@ class MusicBrainzProvider @Inject constructor(
                     year = rel.year,
                     trackCount = rel.trackCount,
                     mbid = rel.id,
+                    releaseType = normalizeReleaseType(rel.releaseGroup),
                     provider = name,
                 )
             }
@@ -139,5 +142,27 @@ class MusicBrainzProvider @Inject constructor(
         /** Cover Art Archive front cover URL. Returns 404 if no art exists (handled by Coil). */
         fun coverArtUrl(mbid: String): String =
             "https://coverartarchive.org/release/$mbid/front-250"
+
+        /**
+         * Normalize MusicBrainz release-group types to our canonical types:
+         * "album", "single", "ep", "live", "compilation".
+         *
+         * MusicBrainz uses primary-type (Album, Single, EP) and secondary-types
+         * (Live, Compilation, Remix, etc.). If a secondary type like "Live" is
+         * present, it takes precedence for filtering purposes.
+         */
+        fun normalizeReleaseType(rg: MbReleaseGroup?): String? {
+            if (rg == null) return null
+            // Secondary types take precedence for filtering
+            val secondary = rg.secondaryTypes.firstOrNull()?.lowercase()
+            if (secondary == "live") return "live"
+            if (secondary == "compilation") return "compilation"
+            return when (rg.primaryType?.lowercase()) {
+                "album" -> "album"
+                "single" -> "single"
+                "ep" -> "ep"
+                else -> rg.primaryType?.lowercase()
+            }
+        }
     }
 }
