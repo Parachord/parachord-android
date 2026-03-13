@@ -291,8 +291,16 @@ fun SearchScreen(
             SearchHistoryContent(
                 history = searchHistory,
                 onEntryClick = { entry ->
-                    viewModel.onQueryChange(entry.query)
-                    active = true
+                    when (entry.resultType) {
+                        "artist" -> entry.resultName?.let { onNavigateToArtist(it) }
+                        "album" -> if (entry.resultName != null && entry.resultArtist != null) {
+                            onNavigateToAlbum(entry.resultName, entry.resultArtist)
+                        }
+                        else -> {
+                            viewModel.onQueryChange(entry.query)
+                            active = true
+                        }
+                    }
                 },
                 onDeleteEntry = { entry ->
                     viewModel.deleteHistoryEntry(entry)
