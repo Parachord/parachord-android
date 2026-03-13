@@ -3,6 +3,14 @@ package com.parachord.android.ui.screens.artist
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.lazy.grid.GridCells
+import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
+import androidx.compose.foundation.lazy.grid.items
+import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.ui.draw.clip
+import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.text.style.TextAlign
+import coil.compose.AsyncImage
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.ExperimentalLayoutApi
@@ -61,6 +69,7 @@ import com.parachord.android.ui.components.ShimmerTrackRow
 import com.parachord.android.ui.components.SwipeableTabLayout
 import com.parachord.android.ui.components.TrackRow
 import com.parachord.android.data.metadata.AlbumSearchResult
+import com.parachord.android.data.metadata.SimilarArtist
 import com.parachord.android.data.metadata.TrackSearchResult
 
 @OptIn(ExperimentalMaterial3Api::class, ExperimentalLayoutApi::class)
@@ -430,7 +439,7 @@ private fun BiographyTab(
 
 @Composable
 private fun RelatedArtistsTab(
-    similarArtists: List<String>,
+    similarArtists: List<SimilarArtist>,
     onNavigateToArtist: (String) -> Unit,
 ) {
     if (similarArtists.isEmpty()) {
@@ -445,23 +454,53 @@ private fun RelatedArtistsTab(
             )
         }
     } else {
-        LazyColumn(modifier = Modifier.fillMaxSize()) {
-            items(similarArtists) { name ->
-                Row(
+        LazyVerticalGrid(
+            columns = GridCells.Fixed(3),
+            modifier = Modifier.fillMaxSize(),
+            contentPadding = PaddingValues(12.dp),
+            horizontalArrangement = Arrangement.spacedBy(12.dp),
+            verticalArrangement = Arrangement.spacedBy(12.dp),
+        ) {
+            items(similarArtists, key = { it.name }) { artist ->
+                Column(
                     modifier = Modifier
                         .fillMaxWidth()
-                        .clickable { onNavigateToArtist(name) }
-                        .padding(horizontal = 16.dp, vertical = 14.dp),
-                    verticalAlignment = Alignment.CenterVertically,
+                        .clickable { onNavigateToArtist(artist.name) },
+                    horizontalAlignment = Alignment.CenterHorizontally,
                 ) {
+                    Box(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .aspectRatio(1f)
+                            .clip(CircleShape)
+                            .background(MaterialTheme.colorScheme.surfaceVariant),
+                        contentAlignment = Alignment.Center,
+                    ) {
+                        if (artist.imageUrl != null) {
+                            AsyncImage(
+                                model = artist.imageUrl,
+                                contentDescription = artist.name,
+                                contentScale = ContentScale.Crop,
+                                modifier = Modifier.fillMaxSize(),
+                            )
+                        } else {
+                            Text(
+                                text = artist.name.take(1).uppercase(),
+                                style = MaterialTheme.typography.headlineMedium,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            )
+                        }
+                    }
+                    Spacer(modifier = Modifier.height(6.dp))
                     Text(
-                        text = name,
-                        style = MaterialTheme.typography.bodyLarge,
-                        maxLines = 1,
+                        text = artist.name,
+                        style = MaterialTheme.typography.bodySmall,
+                        maxLines = 2,
                         overflow = TextOverflow.Ellipsis,
+                        textAlign = TextAlign.Center,
+                        modifier = Modifier.fillMaxWidth(),
                     )
                 }
-                HorizontalDivider(modifier = Modifier.padding(horizontal = 16.dp))
             }
         }
     }

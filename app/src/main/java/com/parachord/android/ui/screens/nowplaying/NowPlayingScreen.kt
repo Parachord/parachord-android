@@ -19,18 +19,23 @@ import androidx.compose.material.icons.filled.Pause
 import androidx.compose.material.icons.filled.PlayArrow
 import androidx.compose.material.icons.filled.SkipNext
 import androidx.compose.material.icons.filled.SkipPrevious
+import androidx.compose.material3.BottomSheetScaffold
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.IconButtonDefaults
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.SheetValue
 import androidx.compose.material3.Slider
 import androidx.compose.material3.SliderDefaults
 import androidx.compose.material3.Text
 import androidx.compose.material3.TopAppBar
 import androidx.compose.material3.TopAppBarDefaults
+import androidx.compose.material3.rememberBottomSheetScaffoldState
+import androidx.compose.material3.rememberStandardBottomSheetState
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -50,6 +55,7 @@ import com.parachord.android.ui.theme.PlayerSurface
 import com.parachord.android.ui.theme.PlayerTextPrimary
 import com.parachord.android.ui.theme.PlayerTextSecondary
 import com.parachord.android.ui.theme.PurpleDark
+import kotlinx.coroutines.launch
 import java.util.Locale
 
 private val InactiveControlColor = Color(0xFF4B5563)
@@ -64,238 +70,294 @@ fun NowPlayingScreen(
 ) {
     val playbackState by viewModel.playbackState.collectAsStateWithLifecycle()
     val track = playbackState.currentTrack
+    val upNext = playbackState.upNext
+    val scope = rememberCoroutineScope()
 
-    Box(
-        modifier = modifier
-            .fillMaxSize()
-            .background(PlayerSurface),
+    val sheetState = rememberStandardBottomSheetState(
+        initialValue = SheetValue.PartiallyExpanded,
+        skipHiddenState = true,
+    )
+    val scaffoldState = rememberBottomSheetScaffoldState(
+        bottomSheetState = sheetState,
+    )
+
+    BottomSheetScaffold(
+        scaffoldState = scaffoldState,
+        sheetPeekHeight = 0.dp,
+        sheetContainerColor = PlayerSurface,
+        sheetContentColor = PlayerTextPrimary,
+        sheetDragHandle = null,
+        containerColor = PlayerSurface,
+        modifier = modifier,
+        sheetContent = {
+            QueueSheet(
+                upNext = upNext,
+                playbackContext = playbackState.playbackContext,
+                onPlayFromQueue = { viewModel.playFromQueue(it) },
+                onMoveInQueue = { from, to -> viewModel.moveInQueue(from, to) },
+                onRemoveFromQueue = { viewModel.removeFromQueue(it) },
+                onClearQueue = { viewModel.clearQueue() },
+            )
+        },
     ) {
-        Column(
-            modifier = Modifier.fillMaxSize(),
-            horizontalAlignment = Alignment.CenterHorizontally,
+        Box(
+            modifier = Modifier
+                .fillMaxSize()
+                .background(PlayerSurface),
         ) {
-            // Always-dark top app bar
-            TopAppBar(
-                title = {
-                    Text(
-                        text = "NOW PLAYING",
-                        style = MaterialTheme.typography.titleLarge.copy(
-                            fontWeight = FontWeight.Light,
-                            letterSpacing = 0.2.em,
-                        ),
-                        color = PlayerTextSecondary,
-                    )
-                },
-                navigationIcon = {
-                    IconButton(onClick = onBack) {
-                        Icon(
-                            Icons.AutoMirrored.Filled.ArrowBack,
-                            contentDescription = "Back",
-                            tint = PlayerTextPrimary,
-                        )
-                    }
-                },
-                colors = TopAppBarDefaults.topAppBarColors(
-                    containerColor = Color.Transparent,
-                ),
-                windowInsets = WindowInsets(0),
-            )
-
-            Spacer(modifier = Modifier.height(16.dp))
-
-            // Large album artwork with shadow
-            AlbumArtCardFill(
-                artworkUrl = track?.artworkUrl,
-                modifier = Modifier
-                    .fillMaxWidth(0.85f)
-                    .padding(horizontal = 8.dp),
-                cornerRadius = 12.dp,
-                elevation = 8.dp,
-                placeholderName = track?.artist ?: track?.title,
-            )
-
-            Spacer(modifier = Modifier.height(32.dp))
-
-            // Track info
             Column(
-                modifier = Modifier.padding(horizontal = 32.dp),
+                modifier = Modifier.fillMaxSize(),
                 horizontalAlignment = Alignment.CenterHorizontally,
             ) {
-                Text(
-                    text = track?.title ?: "No track playing",
-                    style = MaterialTheme.typography.headlineMedium,
-                    color = PlayerTextPrimary,
-                    textAlign = TextAlign.Center,
-                    maxLines = 2,
-                    overflow = TextOverflow.Ellipsis,
-                )
-                Spacer(modifier = Modifier.height(4.dp))
-                Text(
-                    text = track?.artist ?: "",
-                    style = MaterialTheme.typography.bodyLarge,
-                    color = PlayerTextSecondary,
-                    textAlign = TextAlign.Center,
-                    maxLines = 1,
-                    overflow = TextOverflow.Ellipsis,
-                )
-
-                // Resolver icon
-                if (track?.resolver != null) {
-                    Spacer(modifier = Modifier.height(8.dp))
-                    ResolverIconSquare(resolver = track.resolver!!, size = 24.dp)
-                }
-            }
-
-            Spacer(modifier = Modifier.height(24.dp))
-
-            // Seek bar with custom colors
-            val duration = playbackState.duration.coerceAtLeast(1L)
-            val position = playbackState.position
-
-            Column(modifier = Modifier.padding(horizontal = 32.dp)) {
-                Slider(
-                    value = position.toFloat(),
-                    onValueChange = { viewModel.seekTo(it.toLong()) },
-                    valueRange = 0f..duration.toFloat(),
-                    modifier = Modifier.fillMaxWidth(),
-                    colors = SliderDefaults.colors(
-                        thumbColor = Color.White,
-                        activeTrackColor = PurpleDark,
-                        inactiveTrackColor = Color.White.copy(alpha = 0.15f),
+                // Always-dark top app bar
+                TopAppBar(
+                    title = {
+                        Text(
+                            text = "NOW PLAYING",
+                            style = MaterialTheme.typography.titleLarge.copy(
+                                fontWeight = FontWeight.Light,
+                                letterSpacing = 0.2.em,
+                            ),
+                            color = PlayerTextSecondary,
+                        )
+                    },
+                    navigationIcon = {
+                        IconButton(onClick = onBack) {
+                            Icon(
+                                Icons.AutoMirrored.Filled.ArrowBack,
+                                contentDescription = "Back",
+                                tint = PlayerTextPrimary,
+                            )
+                        }
+                    },
+                    colors = TopAppBarDefaults.topAppBarColors(
+                        containerColor = Color.Transparent,
                     ),
+                    windowInsets = WindowInsets(0),
                 )
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.SpaceBetween,
-                ) {
-                    Text(
-                        text = formatDuration(position),
-                        style = MaterialTheme.typography.bodySmall,
-                        color = PlayerTextSecondary,
-                    )
-                    Text(
-                        text = formatDuration(duration),
-                        style = MaterialTheme.typography.bodySmall,
-                        color = PlayerTextSecondary,
-                    )
-                }
-            }
 
-            Spacer(modifier = Modifier.height(24.dp))
+                Spacer(modifier = Modifier.height(16.dp))
 
-            // Playback controls with shuffle
-            Row(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .padding(horizontal = 32.dp),
-                horizontalArrangement = Arrangement.Center,
-                verticalAlignment = Alignment.CenterVertically,
-            ) {
-                // Shuffle
-                IconButton(
-                    onClick = { viewModel.toggleShuffle() },
-                    colors = IconButtonDefaults.iconButtonColors(
-                        contentColor = if (playbackState.shuffleEnabled) ActiveControlColor else InactiveControlColor,
-                    ),
-                ) {
-                    Icon(
-                        imageVector = ParachordIcons.Shuffle,
-                        contentDescription = "Shuffle",
-                        modifier = Modifier.size(20.dp),
-                    )
-                }
-
-                Spacer(modifier = Modifier.weight(1f))
-
-                // Skip Previous
-                IconButton(
-                    onClick = { viewModel.skipPrevious() },
-                    colors = IconButtonDefaults.iconButtonColors(
-                        contentColor = PlayerTextPrimary,
-                    ),
-                ) {
-                    Icon(
-                        Icons.Default.SkipPrevious,
-                        contentDescription = "Previous",
-                        modifier = Modifier.size(36.dp),
-                    )
-                }
-
-                // Play/Pause — large purple circle
-                IconButton(
-                    onClick = { viewModel.togglePlayPause() },
+                // Large album artwork with shadow
+                AlbumArtCardFill(
+                    artworkUrl = track?.artworkUrl,
                     modifier = Modifier
-                        .size(72.dp)
-                        .clip(CircleShape)
-                        .background(MaterialTheme.colorScheme.primary),
-                    colors = IconButtonDefaults.iconButtonColors(
-                        contentColor = Color.White,
-                    ),
+                        .fillMaxWidth(0.85f)
+                        .padding(horizontal = 8.dp),
+                    cornerRadius = 12.dp,
+                    elevation = 8.dp,
+                    placeholderName = track?.artist ?: track?.title,
+                )
+
+                Spacer(modifier = Modifier.height(32.dp))
+
+                // Track info
+                Column(
+                    modifier = Modifier.padding(horizontal = 32.dp),
+                    horizontalAlignment = Alignment.CenterHorizontally,
                 ) {
-                    Icon(
-                        imageVector = if (playbackState.isPlaying) Icons.Default.Pause else Icons.Default.PlayArrow,
-                        contentDescription = if (playbackState.isPlaying) "Pause" else "Play",
-                        modifier = Modifier.size(36.dp),
+                    Text(
+                        text = track?.title ?: "No track playing",
+                        style = MaterialTheme.typography.headlineMedium,
+                        color = PlayerTextPrimary,
+                        textAlign = TextAlign.Center,
+                        maxLines = 2,
+                        overflow = TextOverflow.Ellipsis,
                     )
+                    Spacer(modifier = Modifier.height(4.dp))
+                    Text(
+                        text = track?.artist ?: "",
+                        style = MaterialTheme.typography.bodyLarge,
+                        color = PlayerTextSecondary,
+                        textAlign = TextAlign.Center,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis,
+                    )
+
+                    // Resolver icon
+                    if (track?.resolver != null) {
+                        Spacer(modifier = Modifier.height(8.dp))
+                        ResolverIconSquare(resolver = track.resolver!!, size = 24.dp)
+                    }
                 }
 
-                // Skip Next
-                IconButton(
-                    onClick = { viewModel.skipNext() },
-                    colors = IconButtonDefaults.iconButtonColors(
-                        contentColor = PlayerTextPrimary,
-                    ),
-                ) {
-                    Icon(
-                        Icons.Default.SkipNext,
-                        contentDescription = "Next",
-                        modifier = Modifier.size(36.dp),
+                Spacer(modifier = Modifier.height(24.dp))
+
+                // Seek bar with custom colors
+                val duration = playbackState.duration.coerceAtLeast(1L)
+                val position = playbackState.position
+
+                Column(modifier = Modifier.padding(horizontal = 32.dp)) {
+                    Slider(
+                        value = position.toFloat(),
+                        onValueChange = { viewModel.seekTo(it.toLong()) },
+                        valueRange = 0f..duration.toFloat(),
+                        modifier = Modifier.fillMaxWidth(),
+                        colors = SliderDefaults.colors(
+                            thumbColor = Color.White,
+                            activeTrackColor = PurpleDark,
+                            inactiveTrackColor = Color.White.copy(alpha = 0.15f),
+                        ),
                     )
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                    ) {
+                        Text(
+                            text = formatDuration(position),
+                            style = MaterialTheme.typography.bodySmall,
+                            color = PlayerTextSecondary,
+                        )
+                        Text(
+                            text = formatDuration(duration),
+                            style = MaterialTheme.typography.bodySmall,
+                            color = PlayerTextSecondary,
+                        )
+                    }
+                }
+
+                Spacer(modifier = Modifier.height(24.dp))
+
+                // Playback controls with shuffle
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(horizontal = 32.dp),
+                    horizontalArrangement = Arrangement.Center,
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    // Shuffle
+                    IconButton(
+                        onClick = { viewModel.toggleShuffle() },
+                        colors = IconButtonDefaults.iconButtonColors(
+                            contentColor = if (playbackState.shuffleEnabled) ActiveControlColor else InactiveControlColor,
+                        ),
+                    ) {
+                        Icon(
+                            imageVector = ParachordIcons.Shuffle,
+                            contentDescription = "Shuffle",
+                            modifier = Modifier.size(20.dp),
+                        )
+                    }
+
+                    Spacer(modifier = Modifier.weight(1f))
+
+                    // Skip Previous
+                    IconButton(
+                        onClick = { viewModel.skipPrevious() },
+                        colors = IconButtonDefaults.iconButtonColors(
+                            contentColor = PlayerTextPrimary,
+                        ),
+                    ) {
+                        Icon(
+                            Icons.Default.SkipPrevious,
+                            contentDescription = "Previous",
+                            modifier = Modifier.size(36.dp),
+                        )
+                    }
+
+                    // Play/Pause — large purple circle
+                    IconButton(
+                        onClick = { viewModel.togglePlayPause() },
+                        modifier = Modifier
+                            .size(72.dp)
+                            .clip(CircleShape)
+                            .background(MaterialTheme.colorScheme.primary),
+                        colors = IconButtonDefaults.iconButtonColors(
+                            contentColor = Color.White,
+                        ),
+                    ) {
+                        Icon(
+                            imageVector = if (playbackState.isPlaying) Icons.Default.Pause else Icons.Default.PlayArrow,
+                            contentDescription = if (playbackState.isPlaying) "Pause" else "Play",
+                            modifier = Modifier.size(36.dp),
+                        )
+                    }
+
+                    // Skip Next
+                    IconButton(
+                        onClick = { viewModel.skipNext() },
+                        colors = IconButtonDefaults.iconButtonColors(
+                            contentColor = PlayerTextPrimary,
+                        ),
+                    ) {
+                        Icon(
+                            Icons.Default.SkipNext,
+                            contentDescription = "Next",
+                            modifier = Modifier.size(36.dp),
+                        )
+                    }
+
+                    Spacer(modifier = Modifier.weight(1f))
+
+                    // Spacer to balance with shuffle on the left
+                    Spacer(modifier = Modifier.size(48.dp))
                 }
 
                 Spacer(modifier = Modifier.weight(1f))
 
-                // Spacer to balance with shuffle on the left
-                Spacer(modifier = Modifier.size(48.dp))
-            }
-
-            Spacer(modifier = Modifier.weight(1f))
-
-            // Bottom row: Queue (left) and Spinoff (right)
-            Row(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .padding(horizontal = 24.dp)
-                    .padding(bottom = 32.dp),
-                horizontalArrangement = Arrangement.SpaceBetween,
-                verticalAlignment = Alignment.CenterVertically,
-            ) {
-                // Queue button
-                IconButton(
-                    onClick = { /* TODO: open queue drawer */ },
-                    colors = IconButtonDefaults.iconButtonColors(
-                        contentColor = PlayerTextSecondary,
-                    ),
+                // Bottom row: Queue (left) and Spinoff (right)
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(horizontal = 24.dp)
+                        .padding(bottom = 32.dp),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically,
                 ) {
-                    Icon(
-                        imageVector = ParachordIcons.Queue,
-                        contentDescription = "Queue",
-                        modifier = Modifier.size(22.dp),
-                    )
-                }
+                    // Queue button with badge
+                    IconButton(
+                        onClick = {
+                            scope.launch {
+                                if (sheetState.currentValue == SheetValue.Expanded) {
+                                    sheetState.partialExpand()
+                                } else {
+                                    sheetState.expand()
+                                }
+                            }
+                        },
+                        colors = IconButtonDefaults.iconButtonColors(
+                            contentColor = if (upNext.isNotEmpty()) ActiveControlColor else PlayerTextSecondary,
+                        ),
+                    ) {
+                        Box {
+                            Icon(
+                                imageVector = ParachordIcons.Queue,
+                                contentDescription = "Queue",
+                                modifier = Modifier.size(22.dp),
+                            )
+                            if (upNext.isNotEmpty()) {
+                                Box(
+                                    modifier = Modifier
+                                        .align(Alignment.TopEnd)
+                                        .size(16.dp)
+                                        .background(PurpleDark, CircleShape),
+                                    contentAlignment = Alignment.Center,
+                                ) {
+                                    Text(
+                                        text = "${upNext.size}",
+                                        style = MaterialTheme.typography.labelSmall,
+                                        color = Color.White,
+                                        fontSize = 9.sp,
+                                    )
+                                }
+                            }
+                        }
+                    }
 
-                // Spinoff button
-                IconButton(
-                    onClick = { /* TODO: toggle spinoff mode */ },
-                    colors = IconButtonDefaults.iconButtonColors(
-                        contentColor = InactiveControlColor,
-                    ),
-                ) {
-                    Icon(
-                        imageVector = ParachordIcons.Spinoff,
-                        contentDescription = "Spinoff",
-                        modifier = Modifier.size(22.dp),
-                    )
+                    // Spinoff button
+                    IconButton(
+                        onClick = { /* TODO: toggle spinoff mode */ },
+                        colors = IconButtonDefaults.iconButtonColors(
+                            contentColor = InactiveControlColor,
+                        ),
+                    ) {
+                        Icon(
+                            imageVector = ParachordIcons.Spinoff,
+                            contentDescription = "Spinoff",
+                            modifier = Modifier.size(22.dp),
+                        )
+                    }
                 }
             }
         }

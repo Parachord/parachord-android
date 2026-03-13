@@ -35,4 +35,21 @@ class NowPlayingViewModel @Inject constructor(
     fun toggleShuffle() {
         playbackController.toggleShuffle()
     }
+
+    // Queue management
+    fun playFromQueue(index: Int) {
+        playbackController.playFromQueue(index)
+    }
+
+    fun moveInQueue(from: Int, to: Int) {
+        playbackController.moveInQueue(from, to)
+    }
+
+    fun removeFromQueue(index: Int) {
+        playbackController.removeFromQueue(index)
+    }
+
+    fun clearQueue() {
+        playbackController.clearQueue()
+    }
 }

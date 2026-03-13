@@ -144,9 +144,11 @@ class LastFmProvider @Inject constructor(
                     name = d.name,
                     mbid = d.mbid?.takeIf { it.isNotBlank() },
                     imageUrl = d.image.bestImageUrl(),
-                    bio = d.bio?.summary?.stripHtmlTags(),
+                    bio = d.bio?.summary?.stripHtmlTags()?.stripLastFmSuffix(),
                     tags = d.tags?.tag?.map { it.name } ?: emptyList(),
-                    similarArtists = d.similar?.artist?.map { it.name } ?: emptyList(),
+                    similarArtists = d.similar?.artist?.map { a ->
+                        SimilarArtist(name = a.name)
+                    } ?: emptyList(),
                     provider = name,
                 )
             }
@@ -157,3 +159,6 @@ class LastFmProvider @Inject constructor(
 
 private fun String.stripHtmlTags(): String =
     replace(Regex("<[^>]*>"), "").trim()
+
+private fun String.stripLastFmSuffix(): String =
+    replace(Regex("\\s*Read more on Last\\.?\\s*fm\\.?\\s*\\.?\\s*$", RegexOption.IGNORE_CASE), "").trim()

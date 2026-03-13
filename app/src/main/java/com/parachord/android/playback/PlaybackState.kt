@@ -8,8 +8,8 @@ data class PlaybackState(
     val isPlaying: Boolean = false,
     val position: Long = 0L,
     val duration: Long = 0L,
-    val queue: List<TrackEntity> = emptyList(),
-    val queueIndex: Int = 0,
+    val upNext: List<TrackEntity> = emptyList(),
+    val playbackContext: PlaybackContext? = null,
     val shuffleEnabled: Boolean = false,
     val repeatMode: RepeatMode = RepeatMode.OFF,
 )

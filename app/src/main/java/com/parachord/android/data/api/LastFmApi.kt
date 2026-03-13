@@ -201,6 +201,7 @@ data class LfmSimilar(
 data class LfmSimilarArtist(
     val name: String,
     val url: String? = null,
+    val image: List<LfmImage> = emptyList(),
 )
 
 @Serializable

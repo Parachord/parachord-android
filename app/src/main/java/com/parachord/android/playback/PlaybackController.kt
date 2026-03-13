@@ -27,6 +27,9 @@ import javax.inject.Singleton
  * Bridges the UI layer to the PlaybackService via MediaController, and routes
  * playback through the PlaybackRouter for multi-source support.
  *
+ * Queue management is delegated to [QueueManager] which mirrors the desktop
+ * app's queue logic (current track separate from queue, play history, etc.).
+ *
  * Handles two playback modes:
  * - ExoPlayer: local files, direct streams, SoundCloud (all via MediaController)
  * - External: Spotify Connect via Web API (manages its own playback lifecycle)
@@ -36,6 +39,7 @@ class PlaybackController @Inject constructor(
     @ApplicationContext private val context: Context,
     private val stateHolder: PlaybackStateHolder,
     private val router: PlaybackRouter,
+    private val queueManager: QueueManager,
 ) {
     companion object {
         private const val TAG = "PlaybackController"
@@ -46,9 +50,6 @@ class PlaybackController @Inject constructor(
     private var controller: MediaController? = null
     private var positionUpdateJob: Job? = null
     private var spotifyStateJob: Job? = null
-
-    /** Current queue of TrackEntity objects, kept in sync with MediaController's playlist. */
-    private var currentQueue: List<TrackEntity> = emptyList()
 
     /** Whether playback is currently managed externally (e.g. Spotify Connect). */
     private var isExternalPlayback = false
@@ -75,82 +76,96 @@ class PlaybackController @Inject constructor(
         scope.launch { router.stopExternalPlayback() }
     }
 
-    /** Play a single track immediately (clears the queue and starts fresh). */
+    /** Play a single track immediately (clears the queue). */
     fun playTrack(track: TrackEntity) {
-        playQueue(listOf(track), startIndex = 0)
+        queueManager.clearQueue()
+        scope.launch { playTrackInternal(track) }
     }
 
-    /** Play a list of tracks, starting at the given index. */
-    fun playQueue(tracks: List<TrackEntity>, startIndex: Int = 0) {
-        currentQueue = tracks
-        val track = tracks.getOrNull(startIndex) ?: return
+    /**
+     * Play a list of tracks starting at the given index.
+     * Remaining tracks become the queue, tagged with [context].
+     */
+    fun playQueue(
+        tracks: List<TrackEntity>,
+        startIndex: Int = 0,
+        context: PlaybackContext? = null,
+        shuffle: Boolean = queueManager.shuffleEnabled,
+    ) {
+        val track = queueManager.setQueue(tracks, startIndex, context, shuffle) ?: return
+        scope.launch { playTrackInternal(track) }
+    }
 
+    /** Append tracks to the end of the queue. */
+    fun addToQueue(tracks: List<TrackEntity>) {
+        queueManager.addToQueue(tracks)
+        syncQueueState()
+    }
+
+    /** Insert tracks at the front of the queue (play next). */
+    fun insertNext(tracks: List<TrackEntity>) {
+        queueManager.insertNext(tracks)
+        syncQueueState()
+    }
+
+    fun skipNext() {
+        val currentTrack = stateHolder.state.value.currentTrack
+        val next = queueManager.skipNext(currentTrack) ?: return
         scope.launch {
-            playTrackInternal(track, startIndex)
+            if (isExternalPlayback) router.stopExternalPlayback()
+            playTrackInternal(next)
         }
     }
 
-    private suspend fun playTrackInternal(track: TrackEntity, queueIndex: Int) {
-        val action = router.route(track)
-        if (action == null) {
-            Log.w(TAG, "No playback handler for: ${track.title}")
-            // Fall back to ExoPlayer with whatever URL we have
-            playViaExoPlayer(track, queueIndex)
-            return
-        }
-
-        when (action) {
-            is PlaybackAction.ExoPlayerItem -> {
-                isExternalPlayback = false
-                stopSpotifyStatePolling()
-
-                val ctrl = controller ?: return
-                // Stop ExoPlayer, set new item, play
-                ctrl.stop()
-                ctrl.setMediaItems(listOf(action.mediaItem), 0, 0L)
-                ctrl.prepare()
-                ctrl.play()
-
-                // Update state immediately
-                stateHolder.update {
-                    copy(
-                        currentTrack = track,
-                        isPlaying = true,
-                        position = 0L,
-                        queue = currentQueue,
-                        queueIndex = queueIndex,
-                    )
-                }
+    fun skipPrevious() {
+        if (isExternalPlayback) {
+            val position = router.getSpotifyHandler().getPosition()
+            if (position > 3000) {
+                scope.launch { router.activeExternalHandler?.seekTo(0) }
+                return
             }
-
-            is PlaybackAction.ExternalPlayback -> {
-                // Set flag BEFORE stopping ExoPlayer so the Player.Listener
-                // ignores the state change and doesn't overwrite our update.
-                isExternalPlayback = true
-                stopPositionUpdates()
-                controller?.stop()
-
-                // Update UI immediately so the player bar appears while the
-                // Web API call is in flight.
-                stateHolder.update {
-                    copy(
-                        currentTrack = track,
-                        isPlaying = true,
-                        position = 0L,
-                        duration = track.duration ?: 0L,
-                        queue = currentQueue,
-                        queueIndex = queueIndex,
-                    )
-                }
-
-                // Start playback via Spotify Connect (may take a moment for
-                // device transfer + API call).
-                action.handler.play(track)
-
-                // Start polling Spotify for position/duration updates
-                startSpotifyStatePolling()
+        } else {
+            val ctrl = controller ?: return
+            if (ctrl.currentPosition > 3000) {
+                ctrl.seekTo(0)
+                return
             }
         }
+
+        val currentTrack = stateHolder.state.value.currentTrack
+        val prev = queueManager.skipPrevious(currentTrack) ?: return
+        scope.launch {
+            if (isExternalPlayback) router.stopExternalPlayback()
+            playTrackInternal(prev)
+        }
+    }
+
+    /** User tapped a track in the queue UI — play from that point. */
+    fun playFromQueue(index: Int) {
+        val currentTrack = stateHolder.state.value.currentTrack
+        val track = queueManager.playFromQueue(index, currentTrack) ?: return
+        scope.launch {
+            if (isExternalPlayback) router.stopExternalPlayback()
+            playTrackInternal(track)
+        }
+    }
+
+    /** Drag-to-reorder in the queue. */
+    fun moveInQueue(from: Int, to: Int) {
+        queueManager.moveInQueue(from, to)
+        syncQueueState()
+    }
+
+    /** Remove a single track from the queue. */
+    fun removeFromQueue(index: Int) {
+        queueManager.removeFromQueue(index)
+        syncQueueState()
+    }
+
+    /** Clear the queue. */
+    fun clearQueue() {
+        queueManager.clearQueue()
+        syncQueueState()
     }
 
     fun togglePlayPause() {
@@ -173,50 +188,13 @@ class PlaybackController @Inject constructor(
         if (ctrl.isPlaying) ctrl.pause() else ctrl.play()
     }
 
-    fun skipNext() {
-        val currentIndex = stateHolder.state.value.queueIndex
-        val nextIndex = currentIndex + 1
-        if (nextIndex < currentQueue.size) {
-            val nextTrack = currentQueue[nextIndex]
-            scope.launch {
-                if (isExternalPlayback) router.stopExternalPlayback()
-                playTrackInternal(nextTrack, nextIndex)
-            }
-        }
-    }
-
-    fun skipPrevious() {
-        if (isExternalPlayback) {
-            val position = router.getSpotifyHandler().getPosition()
-            if (position > 3000) {
-                scope.launch { router.activeExternalHandler?.seekTo(0) }
-                return
-            }
-        } else {
-            val ctrl = controller ?: return
-            if (ctrl.currentPosition > 3000) {
-                ctrl.seekTo(0)
-                return
-            }
-        }
-
-        val currentIndex = stateHolder.state.value.queueIndex
-        val prevIndex = currentIndex - 1
-        if (prevIndex >= 0) {
-            val prevTrack = currentQueue[prevIndex]
-            scope.launch {
-                if (isExternalPlayback) router.stopExternalPlayback()
-                playTrackInternal(prevTrack, prevIndex)
-            }
-        }
-    }
-
     fun toggleShuffle() {
-        val current = stateHolder.state.value.shuffleEnabled
-        stateHolder.update { copy(shuffleEnabled = !current) }
+        val newState = queueManager.toggleShuffle()
+        stateHolder.update { copy(shuffleEnabled = newState) }
         if (!isExternalPlayback) {
-            controller?.shuffleModeEnabled = !current
+            controller?.shuffleModeEnabled = false // We manage shuffle ourselves
         }
+        syncQueueState()
     }
 
     fun seekTo(positionMs: Long) {
@@ -230,8 +208,64 @@ class PlaybackController @Inject constructor(
         controller?.seekTo(positionMs)
     }
 
+    private suspend fun playTrackInternal(track: TrackEntity) {
+        val action = router.route(track)
+        val snapshot = queueManager.snapshot.value
+
+        if (action == null) {
+            Log.w(TAG, "No playback handler for: ${track.title}")
+            playViaExoPlayer(track)
+            return
+        }
+
+        when (action) {
+            is PlaybackAction.ExoPlayerItem -> {
+                isExternalPlayback = false
+                stopSpotifyStatePolling()
+
+                val ctrl = controller ?: return
+                ctrl.stop()
+                ctrl.setMediaItems(listOf(action.mediaItem), 0, 0L)
+                ctrl.prepare()
+                ctrl.play()
+
+                stateHolder.update {
+                    copy(
+                        currentTrack = track,
+                        isPlaying = true,
+                        position = 0L,
+                        upNext = snapshot.upNext,
+                        playbackContext = snapshot.playbackContext,
+                        shuffleEnabled = snapshot.shuffleEnabled,
+                    )
+                }
+            }
+
+            is PlaybackAction.ExternalPlayback -> {
+                isExternalPlayback = true
+                stopPositionUpdates()
+                controller?.stop()
+
+                stateHolder.update {
+                    copy(
+                        currentTrack = track,
+                        isPlaying = true,
+                        position = 0L,
+                        duration = track.duration ?: 0L,
+                        upNext = snapshot.upNext,
+                        playbackContext = snapshot.playbackContext,
+                        shuffleEnabled = snapshot.shuffleEnabled,
+                    )
+                }
+
+                action.handler.play(track)
+                startSpotifyStatePolling()
+            }
+        }
+    }
+
     /** Fallback: play directly via ExoPlayer when no handler matches. */
-    private fun playViaExoPlayer(track: TrackEntity, queueIndex: Int) {
+    private fun playViaExoPlayer(track: TrackEntity) {
         val ctrl = controller ?: return
         isExternalPlayback = false
         stopSpotifyStatePolling()
@@ -242,13 +276,27 @@ class PlaybackController @Inject constructor(
         ctrl.prepare()
         ctrl.play()
 
+        val snapshot = queueManager.snapshot.value
         stateHolder.update {
             copy(
                 currentTrack = track,
                 isPlaying = true,
                 position = 0L,
-                queue = currentQueue,
-                queueIndex = queueIndex,
+                upNext = snapshot.upNext,
+                playbackContext = snapshot.playbackContext,
+                shuffleEnabled = snapshot.shuffleEnabled,
+            )
+        }
+    }
+
+    /** Push current queue snapshot to PlaybackState without changing playback fields. */
+    private fun syncQueueState() {
+        val snapshot = queueManager.snapshot.value
+        stateHolder.update {
+            copy(
+                upNext = snapshot.upNext,
+                playbackContext = snapshot.playbackContext,
+                shuffleEnabled = snapshot.shuffleEnabled,
             )
         }
     }
@@ -270,31 +318,28 @@ class PlaybackController @Inject constructor(
             override fun onPlaybackStateChanged(playbackState: Int) {
                 if (!isExternalPlayback) {
                     syncState()
-                    // Auto-advance to next track when ExoPlayer finishes
                     if (playbackState == Player.STATE_ENDED) {
                         skipNext()
                     }
                 }
             }
         })
-        // Sync initial state in case service was already playing
         syncState()
         if (ctrl.isPlaying) startPositionUpdates()
     }
 
     private fun syncState() {
         val ctrl = controller ?: return
-        val index = ctrl.currentMediaItemIndex
-        val track = currentQueue.getOrNull(index)
+        val snapshot = queueManager.snapshot.value
 
         stateHolder.update {
             copy(
-                currentTrack = track ?: currentTrack,
                 isPlaying = ctrl.isPlaying,
                 position = ctrl.currentPosition.coerceAtLeast(0L),
                 duration = ctrl.duration.coerceAtLeast(0L),
-                queue = currentQueue,
-                queueIndex = index,
+                upNext = snapshot.upNext,
+                playbackContext = snapshot.playbackContext,
+                shuffleEnabled = snapshot.shuffleEnabled,
             )
         }
     }

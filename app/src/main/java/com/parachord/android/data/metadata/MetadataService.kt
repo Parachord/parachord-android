@@ -82,7 +82,24 @@ class MetadataService @Inject constructor(
         if (results.isEmpty()) return@coroutineScope null
 
         // Cascade: start with the highest-priority result, fill gaps from others
-        results.reduce { acc, info -> acc.mergeWith(info) }
+        var merged = results.reduce { acc, info -> acc.mergeWith(info) }
+
+        // Enrich similar artists with Spotify images (prefer Spotify over Last.fm which is often wrong)
+        if (merged.similarArtists.isNotEmpty() && spotify.isAvailable()) {
+            val enriched = merged.similarArtists.map { similar ->
+                async {
+                    try {
+                        val spotifyArtist = spotify.searchArtists(similar.name, limit = 1).firstOrNull()
+                        similar.copy(imageUrl = spotifyArtist?.imageUrl ?: similar.imageUrl)
+                    } catch (_: Exception) {
+                        similar
+                    }
+                }
+            }.awaitAll()
+            merged = merged.copy(similarArtists = enriched)
+        }
+
+        merged
     }
 
     /** Get an artist's top tracks from all available providers, merged and deduplicated. */
@@ -172,9 +189,11 @@ class MetadataService @Inject constructor(
             .values
             .map { group -> group.reduce { acc, t -> acc.mergeWith(t) } }
 
-    /** Deduplicate albums by normalized title+artist. */
+    /** Deduplicate albums by normalized title+artist+releaseType.
+     *  Release type is included so that a single and album with the same name
+     *  (e.g. "3D Country" single vs "3D Country" album) are kept as separate entries. */
     private fun deduplicateAlbums(albums: List<AlbumSearchResult>): List<AlbumSearchResult> =
-        albums.groupBy { "${it.title.lowercase()}|${it.artist.lowercase()}" }
+        albums.groupBy { "${it.title.lowercase()}|${it.artist.lowercase()}|${it.releaseType?.lowercase()}" }
             .values
             .map { group -> group.reduce { acc, a -> acc.mergeWith(a) } }
 
@@ -192,7 +211,7 @@ private fun ArtistInfo.mergeWith(other: ArtistInfo) = ArtistInfo(
     imageUrl = imageUrl ?: other.imageUrl,
     bio = bio ?: other.bio,
     tags = tags.ifEmpty { other.tags },
-    similarArtists = similarArtists.ifEmpty { other.similarArtists },
+    similarArtists = if (similarArtists.isNotEmpty()) similarArtists else other.similarArtists,
     provider = "$provider+${other.provider}",
 )
 

@@ -8,6 +8,7 @@ import com.parachord.android.data.db.entity.TrackEntity
 import com.parachord.android.data.metadata.AlbumDetail
 import com.parachord.android.data.metadata.MetadataService
 import com.parachord.android.data.metadata.TrackSearchResult
+import com.parachord.android.playback.PlaybackContext
 import com.parachord.android.playback.PlaybackController
 import com.parachord.android.resolver.ResolvedSource
 import com.parachord.android.resolver.ResolverManager
@@ -72,6 +73,7 @@ class AlbumViewModel @Inject constructor(
         viewModelScope.launch {
             _isResolving.value = true
             try {
+                // 1. Resolve and play the clicked track immediately
                 val track = tracks[index]
                 val query = "${track.artist} - ${track.title}"
                 Log.d(TAG, "Playing track: '$query' (spotifyId=${track.spotifyId})")
@@ -91,9 +93,24 @@ class AlbumViewModel @Inject constructor(
 
                 val entity = track.toTrackEntity(detail, best)
                 playbackController.playTrack(entity)
+                _isResolving.value = false
+
+                // 2. Resolve remaining tracks in background and add to queue
+                val remaining = tracks.subList(index + 1, tracks.size)
+                if (remaining.isNotEmpty()) {
+                    val context = PlaybackContext(type = "album", name = detail.title)
+                    val entities = remaining.mapNotNull { t ->
+                        val q = "${t.artist} - ${t.title}"
+                        val s = resolverManager.resolveWithHints(query = q, spotifyId = t.spotifyId)
+                        val b = resolverScoring.selectBest(s) ?: return@mapNotNull null
+                        t.toTrackEntity(detail, b)
+                    }
+                    if (entities.isNotEmpty()) {
+                        playbackController.addToQueue(entities)
+                    }
+                }
             } catch (e: Exception) {
                 Log.e(TAG, "Playback failed", e)
-            } finally {
                 _isResolving.value = false
             }
         }
@@ -117,7 +134,8 @@ class AlbumViewModel @Inject constructor(
                     track.toTrackEntity(detail, best)
                 }
                 if (entities.isNotEmpty()) {
-                    playbackController.playQueue(entities, startIndex = 0)
+                    val context = PlaybackContext(type = "album", name = detail.title)
+                    playbackController.playQueue(entities, startIndex = 0, context = context)
                 }
             } catch (_: Exception) {
                 // resolution failed
