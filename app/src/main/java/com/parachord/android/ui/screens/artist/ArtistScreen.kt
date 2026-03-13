@@ -42,17 +42,14 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
-import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.em
 import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
-import androidx.compose.ui.platform.LocalContext
-import coil.compose.SubcomposeAsyncImage
-import coil.request.ImageRequest
 import com.parachord.android.ui.components.AlbumArtCard
+import com.parachord.android.ui.components.FaceAwareImage
 import com.parachord.android.ui.components.SectionHeader
 import com.parachord.android.ui.components.ShimmerTrackRow
 import com.parachord.android.ui.components.SwipeableTabLayout
@@ -109,17 +106,13 @@ fun ArtistScreen(
             // Hero image (above tabs)
             val imageUrl = artistInfo?.imageUrl
             if (!imageUrl.isNullOrBlank()) {
-                SubcomposeAsyncImage(
-                    model = ImageRequest.Builder(LocalContext.current)
-                        .data(imageUrl)
-                        .crossfade(true)
-                        .build(),
+                FaceAwareImage(
+                    imageUrl = imageUrl,
                     contentDescription = "Artist image",
                     modifier = Modifier
                         .fillMaxWidth()
                         .aspectRatio(21f / 9f)
                         .clip(RoundedCornerShape(bottomStart = 16.dp, bottomEnd = 16.dp)),
-                    contentScale = ContentScale.Crop,
                     loading = {
                         Box(
                             modifier = Modifier

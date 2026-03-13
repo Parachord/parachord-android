@@ -132,6 +132,9 @@ dependencies {
     // Image Loading
     implementation(libs.coil.compose)
 
+    // ML Kit (face detection for artist image centering)
+    implementation(libs.mlkit.face.detection)
+
     // Testing
     testImplementation(libs.junit)
     androidTestImplementation(libs.androidx.test.ext)
