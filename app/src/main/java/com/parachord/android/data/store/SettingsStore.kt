@@ -29,6 +29,8 @@ class SettingsStore @Inject constructor(
         val RESOLVER_ORDER = stringPreferencesKey("resolver_order")
         val ACTIVE_RESOLVERS = stringPreferencesKey("active_resolvers")
         val RESOLVER_VOLUME_OFFSETS = stringPreferencesKey("resolver_volume_offsets")
+        val PERSIST_QUEUE = booleanPreferencesKey("persist_queue")
+        val PERSISTED_QUEUE_STATE = stringPreferencesKey("persisted_queue_state")
 
         /** Default canonical order matching the desktop app. */
         private const val DEFAULT_RESOLVER_ORDER = "spotify,applemusic,bandcamp,soundcloud,localfiles,youtube"
@@ -36,6 +38,7 @@ class SettingsStore @Inject constructor(
 
     val themeMode: Flow<String> = dataStore.data.map { it[THEME_MODE] ?: "system" }
     val scrobblingEnabled: Flow<Boolean> = dataStore.data.map { it[SCROBBLING_ENABLED] ?: false }
+    val persistQueue: Flow<Boolean> = dataStore.data.map { it[PERSIST_QUEUE] ?: false }
 
     suspend fun setThemeMode(mode: String) {
         dataStore.edit { it[THEME_MODE] = mode }
@@ -152,6 +155,26 @@ class SettingsStore @Inject constructor(
         dataStore.edit {
             it[RESOLVER_VOLUME_OFFSETS] = offsets.entries.joinToString(",") { (k, v) -> "$k:$v" }
         }
+    }
+
+    // --- Queue persistence ---
+
+    suspend fun setPersistQueue(enabled: Boolean) {
+        dataStore.edit { it[PERSIST_QUEUE] = enabled }
+    }
+
+    suspend fun isPersistQueueEnabled(): Boolean =
+        dataStore.data.first()[PERSIST_QUEUE] ?: false
+
+    suspend fun getPersistedQueueState(): String? =
+        dataStore.data.first()[PERSISTED_QUEUE_STATE]
+
+    suspend fun setPersistedQueueState(json: String) {
+        dataStore.edit { it[PERSISTED_QUEUE_STATE] = json }
+    }
+
+    suspend fun clearPersistedQueueState() {
+        dataStore.edit { it.remove(PERSISTED_QUEUE_STATE) }
     }
 
     private fun defaultVolumeOffsets(): Map<String, Int> = mapOf(

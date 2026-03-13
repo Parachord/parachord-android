@@ -40,6 +40,7 @@ class PlaybackController @Inject constructor(
     private val stateHolder: PlaybackStateHolder,
     private val router: PlaybackRouter,
     private val queueManager: QueueManager,
+    private val queuePersistence: QueuePersistence,
 ) {
     companion object {
         private const val TAG = "PlaybackController"
@@ -64,6 +65,24 @@ class PlaybackController @Inject constructor(
         future.addListener({
             controller = future.get()
             setupPlayerListener()
+            // Restore persisted queue (if enabled) and start auto-save
+            scope.launch {
+                val restoredTrack = queuePersistence.restoreIfEnabled()
+                if (restoredTrack != null) {
+                    val snapshot = queueManager.snapshot.value
+                    stateHolder.update {
+                        copy(
+                            currentTrack = restoredTrack,
+                            isPlaying = false,
+                            position = 0L,
+                            upNext = snapshot.upNext,
+                            playbackContext = snapshot.playbackContext,
+                            shuffleEnabled = snapshot.shuffleEnabled,
+                        )
+                    }
+                }
+                queuePersistence.startObserving()
+            }
         }, MoreExecutors.directExecutor())
     }
 

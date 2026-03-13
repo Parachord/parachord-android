@@ -4,6 +4,7 @@ import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.parachord.android.auth.OAuthManager
 import com.parachord.android.data.store.SettingsStore
+import com.parachord.android.playback.QueuePersistence
 import dagger.hilt.android.lifecycle.HiltViewModel
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
@@ -16,6 +17,7 @@ import javax.inject.Inject
 class SettingsViewModel @Inject constructor(
     private val settingsStore: SettingsStore,
     private val oAuthManager: OAuthManager,
+    private val queuePersistence: QueuePersistence,
 ) : ViewModel() {
 
     val themeMode: StateFlow<String> = settingsStore.themeMode
@@ -31,6 +33,16 @@ class SettingsViewModel @Inject constructor(
     val lastFmConnected: StateFlow<Boolean> = settingsStore.getLastFmSessionKeyFlow()
         .map { it != null }
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), false)
+
+    val persistQueue: StateFlow<Boolean> = settingsStore.persistQueue
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), false)
+
+    fun setPersistQueue(enabled: Boolean) {
+        viewModelScope.launch {
+            settingsStore.setPersistQueue(enabled)
+            if (!enabled) queuePersistence.clearPersistedQueue()
+        }
+    }
 
     fun setThemeMode(mode: String) {
         viewModelScope.launch { settingsStore.setThemeMode(mode) }

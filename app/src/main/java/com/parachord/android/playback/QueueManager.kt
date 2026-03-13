@@ -185,6 +185,33 @@ class QueueManager @Inject constructor() {
     val shuffleEnabled: Boolean get() = _shuffleEnabled
     val playbackContext: PlaybackContext? get() = _playbackContext
 
+    /** Read-only access to play history for persistence. */
+    val history: List<TrackEntity> get() = playHistory.toList()
+
+    /** Read-only access to original order for persistence. */
+    val savedOriginalOrder: List<TrackEntity>? get() = originalOrder?.toList()
+
+    /**
+     * Restore full queue state from persistence.
+     * Called once on startup when persist-queue setting is enabled.
+     */
+    fun restoreState(
+        restoredUpNext: List<TrackEntity>,
+        restoredHistory: List<TrackEntity>,
+        restoredOriginalOrder: List<TrackEntity>?,
+        context: PlaybackContext?,
+        shuffle: Boolean,
+    ) {
+        upNext.clear()
+        upNext.addAll(restoredUpNext)
+        playHistory.clear()
+        playHistory.addAll(restoredHistory)
+        originalOrder = restoredOriginalOrder
+        _playbackContext = context
+        _shuffleEnabled = shuffle
+        emitSnapshot()
+    }
+
     private fun emitSnapshot() {
         _snapshot.value = QueueSnapshot(
             upNext = upNext.toList(),

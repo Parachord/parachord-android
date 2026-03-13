@@ -133,6 +133,7 @@ fun SettingsScreen(
     val scrobbling by viewModel.scrobblingEnabled.collectAsStateWithLifecycle()
     val spotifyConnected by viewModel.spotifyConnected.collectAsStateWithLifecycle()
     val lastFmConnected by viewModel.lastFmConnected.collectAsStateWithLifecycle()
+    val persistQueue by viewModel.persistQueue.collectAsStateWithLifecycle()
 
     Column(modifier = modifier.fillMaxSize()) {
         TopAppBar(
@@ -169,6 +170,8 @@ fun SettingsScreen(
                 1 -> GeneralTab(
                     themeMode = themeMode,
                     onThemeModeChanged = { viewModel.setThemeMode(it) },
+                    persistQueue = persistQueue,
+                    onPersistQueueChanged = { viewModel.setPersistQueue(it) },
                 )
                 2 -> AboutTab()
             }
@@ -753,6 +756,8 @@ private fun LastFmConfig(
 private fun GeneralTab(
     themeMode: String,
     onThemeModeChanged: (String) -> Unit,
+    persistQueue: Boolean,
+    onPersistQueueChanged: (Boolean) -> Unit,
 ) {
     LazyColumn(modifier = Modifier.fillMaxSize()) {
         item { SectionHeader("Appearance") }
@@ -772,6 +777,19 @@ private fun GeneralTab(
                     ThemeModeSelector(
                         currentMode = themeMode,
                         onModeChanged = onThemeModeChanged,
+                    )
+                },
+            )
+        }
+        item { SectionHeader("Playback") }
+        item {
+            ListItem(
+                headlineContent = { Text("Remember queue") },
+                supportingContent = { Text("Restore your queue when the app restarts") },
+                trailingContent = {
+                    Switch(
+                        checked = persistQueue,
+                        onCheckedChange = onPersistQueueChanged,
                     )
                 },
             )
