@@ -102,6 +102,9 @@ gson = { group = "com.google.code.gson", name = "gson", version.ref = "gson" }
 # Image Loading
 coil-compose = { group = "io.coil-kt", name = "coil-compose", version.ref = "coil" }
 
+# Coroutines Play Services (for Task.await())
+kotlinx-coroutines-play-services = { group = "org.jetbrains.kotlinx", name = "kotlinx-coroutines-play-services", version = "1.8.1" }
+
 # ML Kit
 mlkit-face-detection = { group = "com.google.mlkit", name = "face-detection", version.ref = "mlkit-face" }
 

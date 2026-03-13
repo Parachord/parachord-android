@@ -134,6 +134,7 @@ dependencies {
 
     // ML Kit (face detection for artist image centering)
     implementation(libs.mlkit.face.detection)
+    implementation(libs.kotlinx.coroutines.play.services)
 
     // Testing
     testImplementation(libs.junit)
