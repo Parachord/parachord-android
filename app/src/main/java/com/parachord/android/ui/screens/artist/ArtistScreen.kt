@@ -19,7 +19,6 @@ import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.WindowInsets
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
-import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.foundation.lazy.LazyRow
@@ -36,12 +35,19 @@ import androidx.compose.material3.Text
 import androidx.compose.material3.TopAppBar
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableFloatStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.draw.clip
+import androidx.compose.ui.draw.clipToBounds
+import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.input.nestedscroll.NestedScrollConnection
+import androidx.compose.ui.input.nestedscroll.NestedScrollSource
+import androidx.compose.ui.input.nestedscroll.nestedScroll
+import androidx.compose.ui.layout.onSizeChanged
+import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
@@ -71,6 +77,47 @@ fun ArtistScreen(
     val albums by viewModel.albums.collectAsStateWithLifecycle()
     val isLoading by viewModel.isLoading.collectAsStateWithLifecycle()
 
+    val density = LocalDensity.current
+
+    // Track the max (expanded) height of the hero image in pixels
+    var imageMaxHeightPx by remember { mutableFloatStateOf(0f) }
+    // Current collapse offset: 0 = fully expanded, imageMaxHeightPx = fully collapsed
+    var collapseOffset by remember { mutableFloatStateOf(0f) }
+
+    val nestedScrollConnection = remember {
+        object : NestedScrollConnection {
+            override fun onPreScroll(available: Offset, source: NestedScrollSource): Offset {
+                if (imageMaxHeightPx <= 0f) return Offset.Zero
+                val delta = available.y
+                if (delta < 0f) {
+                    // Scrolling up — collapse the image first
+                    val oldOffset = collapseOffset
+                    collapseOffset = (collapseOffset - delta).coerceIn(0f, imageMaxHeightPx)
+                    val consumed = oldOffset - collapseOffset
+                    return Offset(0f, consumed)
+                }
+                return Offset.Zero
+            }
+
+            override fun onPostScroll(
+                consumed: Offset,
+                available: Offset,
+                source: NestedScrollSource,
+            ): Offset {
+                if (imageMaxHeightPx <= 0f) return Offset.Zero
+                val delta = available.y
+                if (delta > 0f) {
+                    // Scrolling down and child didn't consume it — expand the image
+                    val oldOffset = collapseOffset
+                    collapseOffset = (collapseOffset - delta).coerceIn(0f, imageMaxHeightPx)
+                    val consumed = oldOffset - collapseOffset
+                    return Offset(0f, consumed)
+                }
+                return Offset.Zero
+            }
+        }
+    }
+
     Column(modifier = modifier.fillMaxSize()) {
         TopAppBar(
             title = {
@@ -91,67 +138,86 @@ fun ArtistScreen(
         )
 
         if (isLoading) {
-            // Shimmer loading skeleton
             Column(modifier = Modifier.fillMaxSize()) {
                 Box(
                     modifier = Modifier
                         .fillMaxWidth()
                         .aspectRatio(16f / 9f)
-                        .clip(RoundedCornerShape(bottomStart = 16.dp, bottomEnd = 16.dp))
                         .background(MaterialTheme.colorScheme.surfaceVariant),
                 )
                 repeat(5) { ShimmerTrackRow() }
             }
         } else {
-            // Hero image (above tabs)
-            val imageUrl = artistInfo?.imageUrl
-            if (!imageUrl.isNullOrBlank()) {
-                FaceAwareImage(
-                    imageUrl = imageUrl,
-                    contentDescription = "Artist image",
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .aspectRatio(21f / 9f)
-                        .clip(RoundedCornerShape(bottomStart = 16.dp, bottomEnd = 16.dp)),
-                    loading = {
-                        Box(
+            Column(
+                modifier = Modifier
+                    .fillMaxSize()
+                    .nestedScroll(nestedScrollConnection),
+            ) {
+                // Hero image — collapsible
+                val imageUrl = artistInfo?.imageUrl
+                val hasImage = !imageUrl.isNullOrBlank()
+                if (hasImage) {
+                    val visibleHeightDp = with(density) {
+                        (imageMaxHeightPx - collapseOffset).coerceAtLeast(0f).toDp()
+                    }
+                    Box(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .height(visibleHeightDp)
+                            .clipToBounds(),
+                    ) {
+                        FaceAwareImage(
+                            imageUrl = imageUrl!!,
+                            contentDescription = "Artist image",
                             modifier = Modifier
                                 .fillMaxWidth()
-                                .aspectRatio(21f / 9f)
-                                .background(MaterialTheme.colorScheme.surfaceVariant),
+                                .aspectRatio(16f / 9f)
+                                .onSizeChanged { size ->
+                                    if (size.height > 0 && imageMaxHeightPx == 0f) {
+                                        imageMaxHeightPx = size.height.toFloat()
+                                    }
+                                },
+                            loading = {
+                                Box(
+                                    modifier = Modifier
+                                        .fillMaxWidth()
+                                        .aspectRatio(16f / 9f)
+                                        .background(MaterialTheme.colorScheme.surfaceVariant),
+                                )
+                            },
+                            error = {
+                                Box(
+                                    modifier = Modifier
+                                        .fillMaxWidth()
+                                        .aspectRatio(16f / 9f)
+                                        .background(MaterialTheme.colorScheme.surfaceVariant),
+                                )
+                            },
                         )
-                    },
-                    error = {
-                        Box(
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .aspectRatio(21f / 9f)
-                                .background(MaterialTheme.colorScheme.surfaceVariant),
-                        )
-                    },
-                )
-            }
+                    }
+                }
 
-            // Tabs + pager
-            SwipeableTabLayout(
-                tabs = listOf("Discography", "Biography", "Related Artists"),
-                modifier = Modifier.fillMaxSize(),
-            ) { page ->
-                when (page) {
-                    0 -> DiscographyTab(
-                        albums = albums,
-                        topTracks = topTracks,
-                        onNavigateToAlbum = onNavigateToAlbum,
-                    )
-                    1 -> BiographyTab(
-                        bio = artistInfo?.bio,
-                        tags = artistInfo?.tags ?: emptyList(),
-                        provider = artistInfo?.provider,
-                    )
-                    2 -> RelatedArtistsTab(
-                        similarArtists = artistInfo?.similarArtists ?: emptyList(),
-                        onNavigateToArtist = onNavigateToArtist,
-                    )
+                // Tabs + pager
+                SwipeableTabLayout(
+                    tabs = listOf("Discography", "Biography", "Related Artists"),
+                    modifier = Modifier.fillMaxSize(),
+                ) { page ->
+                    when (page) {
+                        0 -> DiscographyTab(
+                            albums = albums,
+                            topTracks = topTracks,
+                            onNavigateToAlbum = onNavigateToAlbum,
+                        )
+                        1 -> BiographyTab(
+                            bio = artistInfo?.bio,
+                            tags = artistInfo?.tags ?: emptyList(),
+                            provider = artistInfo?.provider,
+                        )
+                        2 -> RelatedArtistsTab(
+                            similarArtists = artistInfo?.similarArtists ?: emptyList(),
+                            onNavigateToArtist = onNavigateToArtist,
+                        )
+                    }
                 }
             }
         }

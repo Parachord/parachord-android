@@ -76,8 +76,12 @@ class SpotifyPlaybackHandler @Inject constructor(
                 return@withAuth false
             }
 
-            // Pick the best device using the desktop app's cascading logic
+            // Pick a Smartphone device only — never fall back to other device types
             val targetDevice = pickDevice(devices)
+            if (targetDevice == null) {
+                Log.e(TAG, "No Smartphone device available — cannot play")
+                return@withAuth false
+            }
             Log.d(TAG, "Target device: '${targetDevice.name}' (type=${targetDevice.type})")
 
             // Transfer playback to the target device if it's not already active
@@ -150,31 +154,37 @@ class SpotifyPlaybackHandler @Inject constructor(
     /**
      * Pick the best device to play on.
      *
-     * On Android we MUST force playback to this phone, not a computer or TV.
-     * The desktop app prefers Computer — we diverge here intentionally.
+     * On Android we ONLY play on Smartphone devices — never computers, TVs, or speakers.
+     * Returns null if no Smartphone device is available.
      *
      * 1. Filter out restricted devices
-     * 2. Match THIS phone by device name (Build.MODEL)
+     * 2. Match THIS phone by device name (Build.MODEL or MANUFACTURER + MODEL)
      * 3. Any Smartphone-type device
-     * 4. Last resort only: other device types (Computer, Speaker, etc.)
      */
-    private fun pickDevice(devices: List<SpDevice>): SpDevice {
+    private fun pickDevice(devices: List<SpDevice>): SpDevice? {
         val controllable = devices.filter { !it.isRestricted }
         val available = controllable.ifEmpty { devices }
 
+        Log.d(TAG, "pickDevice: localModel='${Build.MODEL}', manufacturer='${Build.MANUFACTURER}', " +
+                "devices=${available.map { "'${it.name}'(type=${it.type})" }}")
+
         // Best match: this exact phone by name
-        val localName = Build.MODEL
+        val localModel = Build.MODEL
+        val localFull = "${Build.MANUFACTURER} ${Build.MODEL}"
         available.firstOrNull {
-            it.type == "Smartphone" && it.name.contains(localName, ignoreCase = true)
+            it.type == "Smartphone" && (
+                it.name.contains(localModel, ignoreCase = true) ||
+                it.name.contains(localFull, ignoreCase = true)
+            )
         }?.let { return it }
 
         // Any Smartphone device
         available.firstOrNull { it.type == "Smartphone" }?.let { return it }
 
-        // Last resort: warn and pick whatever is available
-        Log.w(TAG, "No Smartphone device found — falling back to '${available.first().name}'. " +
-                "Open Spotify on this phone to register it as a Connect device.")
-        return available.first()
+        Log.e(TAG, "No Smartphone device found. Available: " +
+                available.joinToString { "'${it.name}'(${it.type})" } +
+                " — ensure Spotify is open on this phone.")
+        return null
     }
 
     private fun startStatePolling() {
