@@ -58,6 +58,24 @@ interface LastFmApi {
     ): LfmArtistInfoResponse
 
     @GET(".")
+    suspend fun getArtistTopTracks(
+        @Query("method") method: String = "artist.gettoptracks",
+        @Query("artist") artist: String,
+        @Query("api_key") apiKey: String,
+        @Query("limit") limit: Int = 10,
+        @Query("format") format: String = "json",
+    ): LfmTopTracksResponse
+
+    @GET(".")
+    suspend fun getArtistTopAlbums(
+        @Query("method") method: String = "artist.gettopalbums",
+        @Query("artist") artist: String,
+        @Query("api_key") apiKey: String,
+        @Query("limit") limit: Int = 50,
+        @Query("format") format: String = "json",
+    ): LfmTopAlbumsResponse
+
+    @GET(".")
     suspend fun getAlbumInfo(
         @Query("method") method: String = "album.getinfo",
         @Query("album") album: String,
@@ -244,6 +262,54 @@ fun List<LfmImage>.bestImageUrl(): String? =
  * Last.fm returns `track` as either a single object (1 track) or an array (multiple tracks).
  * This serializer handles both cases.
  */
+// --- Artist top tracks / top albums ---
+
+@Serializable
+data class LfmTopTracksResponse(
+    val toptracks: LfmTopTracks? = null,
+)
+
+@Serializable
+data class LfmTopTracks(
+    val track: List<LfmTopTrack> = emptyList(),
+)
+
+@Serializable
+data class LfmTopTrack(
+    val name: String,
+    val duration: String? = null,
+    val listeners: String? = null,
+    val playcount: String? = null,
+    val artist: LfmTopTrackArtist? = null,
+    val image: List<LfmImage> = emptyList(),
+    val mbid: String? = null,
+)
+
+@Serializable
+data class LfmTopTrackArtist(
+    val name: String,
+    val mbid: String? = null,
+)
+
+@Serializable
+data class LfmTopAlbumsResponse(
+    val topalbums: LfmTopAlbums? = null,
+)
+
+@Serializable
+data class LfmTopAlbums(
+    val album: List<LfmTopAlbum> = emptyList(),
+)
+
+@Serializable
+data class LfmTopAlbum(
+    val name: String,
+    val playcount: String? = null,
+    val artist: LfmTopTrackArtist? = null,
+    val image: List<LfmImage> = emptyList(),
+    val mbid: String? = null,
+)
+
 object LfmAlbumTrackListSerializer : KSerializer<LfmAlbumTrackList> {
     override val descriptor: SerialDescriptor = buildClassSerialDescriptor("LfmAlbumTrackList")
 

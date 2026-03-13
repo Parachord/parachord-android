@@ -46,7 +46,7 @@ class ArtistViewModel @Inject constructor(
             _isLoading.value = true
             try {
                 _artistInfo.value = metadataService.getArtistInfo(artistName)
-                _topTracks.value = metadataService.searchTracks(artistName, limit = 10)
+                _topTracks.value = metadataService.getArtistTopTracks(artistName, limit = 10)
                 _albums.value = metadataService.getArtistAlbums(artistName)
                     .sortedByDescending { it.year ?: 0 }
             } catch (e: Exception) {

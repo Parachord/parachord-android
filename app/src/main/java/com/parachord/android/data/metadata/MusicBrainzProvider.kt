@@ -1,6 +1,7 @@
 package com.parachord.android.data.metadata
 
 import com.parachord.android.data.api.MbReleaseGroup
+import com.parachord.android.data.api.MbReleaseGroupEntry
 import com.parachord.android.data.api.MusicBrainzApi
 import javax.inject.Inject
 import javax.inject.Singleton
@@ -120,17 +121,24 @@ class MusicBrainzProvider @Inject constructor(
         }
     }
 
+    /**
+     * Get an artist's discography via MusicBrainz release-groups (not releases).
+     *
+     * Release-groups are deduplicated (one entry per album, not per pressing/country).
+     * Steps: 1) search artist to get MBID, 2) browse release-groups by MBID.
+     */
     override suspend fun getArtistAlbums(artistName: String, limit: Int): List<AlbumSearchResult> =
         try {
-            api.searchReleases("artist:\"$artistName\"", limit).releases.map { rel ->
+            val artistMbid = resolveArtistMbid(artistName) ?: return emptyList()
+            val response = api.browseReleaseGroups(artistId = artistMbid, limit = limit)
+            response.releaseGroups.map { rg ->
                 AlbumSearchResult(
-                    title = rel.title,
-                    artist = rel.artistName,
-                    artworkUrl = coverArtUrl(rel.id),
-                    year = rel.year,
-                    trackCount = rel.trackCount,
-                    mbid = rel.id,
-                    releaseType = normalizeReleaseType(rel.releaseGroup),
+                    title = rg.title,
+                    artist = rg.artistName.ifBlank { artistName },
+                    artworkUrl = releaseGroupArtUrl(rg.id),
+                    year = rg.year,
+                    mbid = rg.id,
+                    releaseType = normalizeReleaseGroupEntry(rg),
                     provider = name,
                 )
             }
@@ -138,22 +146,42 @@ class MusicBrainzProvider @Inject constructor(
             emptyList()
         }
 
+    /** Resolve an artist name to their MusicBrainz MBID. */
+    private suspend fun resolveArtistMbid(artistName: String): String? =
+        try {
+            api.searchArtists(artistName, limit = 1).artists.firstOrNull()?.id
+        } catch (_: Exception) {
+            null
+        }
+
     companion object {
-        /** Cover Art Archive front cover URL. Returns 404 if no art exists (handled by Coil). */
+        /** Cover Art Archive front cover URL for a release. */
         fun coverArtUrl(mbid: String): String =
             "https://coverartarchive.org/release/$mbid/front-250"
+
+        /** Cover Art Archive front cover URL for a release-group. */
+        fun releaseGroupArtUrl(mbid: String): String =
+            "https://coverartarchive.org/release-group/$mbid/front-250"
 
         /**
          * Normalize MusicBrainz release-group types to our canonical types:
          * "album", "single", "ep", "live", "compilation".
-         *
-         * MusicBrainz uses primary-type (Album, Single, EP) and secondary-types
-         * (Live, Compilation, Remix, etc.). If a secondary type like "Live" is
-         * present, it takes precedence for filtering purposes.
          */
         fun normalizeReleaseType(rg: MbReleaseGroup?): String? {
             if (rg == null) return null
-            // Secondary types take precedence for filtering
+            val secondary = rg.secondaryTypes.firstOrNull()?.lowercase()
+            if (secondary == "live") return "live"
+            if (secondary == "compilation") return "compilation"
+            return when (rg.primaryType?.lowercase()) {
+                "album" -> "album"
+                "single" -> "single"
+                "ep" -> "ep"
+                else -> rg.primaryType?.lowercase()
+            }
+        }
+
+        /** Normalize a release-group entry (from browse API) to canonical type. */
+        fun normalizeReleaseGroupEntry(rg: MbReleaseGroupEntry): String? {
             val secondary = rg.secondaryTypes.firstOrNull()?.lowercase()
             if (secondary == "live") return "live"
             if (secondary == "compilation") return "compilation"

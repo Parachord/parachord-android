@@ -31,6 +31,10 @@ interface MetadataProvider {
     /** Look up detailed artist information by name. */
     suspend fun getArtistInfo(artistName: String): ArtistInfo?
 
+    /** Get an artist's top tracks (by popularity/play count). */
+    suspend fun getArtistTopTracks(artistName: String, limit: Int = 10): List<TrackSearchResult> =
+        emptyList()
+
     /** Get an artist's discography (albums and singles). */
     suspend fun getArtistAlbums(artistName: String, limit: Int = 50): List<AlbumSearchResult> =
         emptyList()

@@ -101,6 +101,41 @@ class LastFmProvider @Inject constructor(
         }
     }
 
+    override suspend fun getArtistTopTracks(artistName: String, limit: Int): List<TrackSearchResult> =
+        try {
+            val tracks = api.getArtistTopTracks(artist = artistName, apiKey = apiKey, limit = limit)
+                .toptracks?.track ?: emptyList()
+            tracks.map { t ->
+                TrackSearchResult(
+                    title = t.name,
+                    artist = t.artist?.name ?: artistName,
+                    artworkUrl = t.image.bestImageUrl(),
+                    duration = t.duration?.toLongOrNull()?.let { if (it > 0) it * 1000 else null },
+                    mbid = t.mbid?.takeIf { it.isNotBlank() },
+                    provider = name,
+                )
+            }
+        } catch (_: Exception) {
+            emptyList()
+        }
+
+    override suspend fun getArtistAlbums(artistName: String, limit: Int): List<AlbumSearchResult> =
+        try {
+            val albums = api.getArtistTopAlbums(artist = artistName, apiKey = apiKey, limit = limit)
+                .topalbums?.album ?: emptyList()
+            albums.map { a ->
+                AlbumSearchResult(
+                    title = a.name,
+                    artist = a.artist?.name ?: artistName,
+                    artworkUrl = a.image.bestImageUrl(),
+                    mbid = a.mbid?.takeIf { it.isNotBlank() },
+                    provider = name,
+                )
+            }
+        } catch (_: Exception) {
+            emptyList()
+        }
+
     override suspend fun getArtistInfo(artistName: String): ArtistInfo? =
         try {
             val detail = api.getArtistInfo(artist = artistName, apiKey = apiKey).artist

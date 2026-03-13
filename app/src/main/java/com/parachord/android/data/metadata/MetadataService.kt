@@ -85,6 +85,18 @@ class MetadataService @Inject constructor(
         results.reduce { acc, info -> acc.mergeWith(info) }
     }
 
+    /** Get an artist's top tracks from all available providers, merged and deduplicated. */
+    suspend fun getArtistTopTracks(artistName: String, limit: Int = 10): List<TrackSearchResult> = coroutineScope {
+        val results = availableProviders()
+            .map { provider -> async {
+                try { provider.getArtistTopTracks(artistName, limit) } catch (_: Exception) { emptyList() }
+            } }
+            .awaitAll()
+            .flatten()
+
+        deduplicateTracks(results).take(limit)
+    }
+
     /** Get an artist's discography from all available providers. */
     suspend fun getArtistAlbums(artistName: String, limit: Int = 50): List<AlbumSearchResult> = coroutineScope {
         val results = availableProviders()

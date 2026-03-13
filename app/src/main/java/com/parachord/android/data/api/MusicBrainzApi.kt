@@ -41,6 +41,15 @@ interface MusicBrainzApi {
         @Query("inc") inc: String = "recordings+artist-credits",
         @Query("fmt") fmt: String = "json",
     ): MbReleaseDetail
+
+    /** Browse release-groups for an artist by MBID. Returns the actual discography. */
+    @GET("release-group")
+    suspend fun browseReleaseGroups(
+        @Query("artist") artistId: String,
+        @Query("limit") limit: Int = 100,
+        @Query("offset") offset: Int = 0,
+        @Query("fmt") fmt: String = "json",
+    ): MbReleaseGroupBrowseResponse
 }
 
 // --- Response models ---
@@ -166,3 +175,25 @@ data class MbTrackRecording(
     val length: Long? = null,
     @SerialName("artist-credit") val artistCredit: List<MbArtistCredit> = emptyList(),
 )
+
+// --- Release-group browse (artist discography) ---
+
+@Serializable
+data class MbReleaseGroupBrowseResponse(
+    @SerialName("release-groups") val releaseGroups: List<MbReleaseGroupEntry> = emptyList(),
+    @SerialName("release-group-count") val releaseGroupCount: Int = 0,
+    @SerialName("release-group-offset") val releaseGroupOffset: Int = 0,
+)
+
+@Serializable
+data class MbReleaseGroupEntry(
+    val id: String,
+    val title: String,
+    @SerialName("primary-type") val primaryType: String? = null,
+    @SerialName("secondary-types") val secondaryTypes: List<String> = emptyList(),
+    @SerialName("first-release-date") val firstReleaseDate: String? = null,
+    @SerialName("artist-credit") val artistCredit: List<MbArtistCredit> = emptyList(),
+) {
+    val artistName: String get() = artistCredit.joinToString(", ") { it.name }
+    val year: Int? get() = firstReleaseDate?.take(4)?.toIntOrNull()
+}

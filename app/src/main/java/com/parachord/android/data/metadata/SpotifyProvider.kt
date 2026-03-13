@@ -84,6 +84,25 @@ class SpotifyProvider @Inject constructor(
             )
         }
 
+    override suspend fun getArtistTopTracks(artistName: String, limit: Int): List<TrackSearchResult> =
+        withAuth { auth ->
+            val response = api.search(auth = auth, query = artistName, type = "artist", limit = 1)
+            val artistId = response.artists?.items?.firstOrNull()?.id ?: return@withAuth emptyList()
+            val topTracks = api.getArtistTopTracks(auth = auth, artistId = artistId)
+            topTracks.tracks.take(limit).map { t ->
+                TrackSearchResult(
+                    title = t.name,
+                    artist = t.artistName,
+                    album = t.album?.name,
+                    duration = t.durationMs,
+                    artworkUrl = t.album?.images?.bestImageUrl(),
+                    previewUrl = t.previewUrl,
+                    spotifyId = t.id,
+                    provider = name,
+                )
+            }
+        } ?: emptyList()
+
     override suspend fun getArtistAlbums(artistName: String, limit: Int): List<AlbumSearchResult> =
         withAuth { auth ->
             val response = api.search(auth = auth, query = artistName, type = "artist", limit = 1)

@@ -33,6 +33,13 @@ interface SpotifyApi {
         @Path("id") artistId: String,
     ): SpArtist
 
+    @GET("v1/artists/{id}/top-tracks")
+    suspend fun getArtistTopTracks(
+        @Header("Authorization") auth: String,
+        @Path("id") artistId: String,
+        @Query("market") market: String = "US",
+    ): SpTopTracksResponse
+
     @GET("v1/artists/{id}/albums")
     suspend fun getArtistAlbums(
         @Header("Authorization") auth: String,
@@ -91,6 +98,11 @@ interface SpotifyApi {
 }
 
 // --- Response models ---
+
+@Serializable
+data class SpTopTracksResponse(
+    val tracks: List<SpTrack> = emptyList(),
+)
 
 @Serializable
 data class SpSearchResponse(
