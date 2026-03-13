@@ -1,6 +1,7 @@
 package com.parachord.android.ui.screens.search
 
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
@@ -14,9 +15,11 @@ import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.Menu
 import androidx.compose.material.icons.filled.Person
 import androidx.compose.material.icons.filled.Search
+import androidx.compose.material.icons.outlined.History
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
@@ -26,6 +29,7 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.SearchBar
 import androidx.compose.material3.SearchBarDefaults
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -42,6 +46,7 @@ import androidx.compose.ui.unit.em
 import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import coil.compose.AsyncImage
+import com.parachord.android.data.db.entity.SearchHistoryEntity
 import com.parachord.android.ui.components.AlbumArtCard
 import com.parachord.android.ui.components.SectionHeader
 import com.parachord.android.ui.components.ShimmerTrackRow
@@ -63,6 +68,7 @@ fun SearchScreen(
     val remoteAlbums by viewModel.remoteAlbumResults.collectAsStateWithLifecycle()
     val artists by viewModel.artistResults.collectAsStateWithLifecycle()
     val isSearchingRemote by viewModel.isSearchingRemote.collectAsStateWithLifecycle()
+    val searchHistory by viewModel.searchHistory.collectAsStateWithLifecycle()
     var active by remember { mutableStateOf(false) }
 
     Column(modifier = modifier.fillMaxSize()) {
@@ -101,6 +107,23 @@ fun SearchScreen(
                 .fillMaxWidth()
                 .padding(horizontal = if (!active) 16.dp else 0.dp),
         ) {
+            // Show search history when query is empty
+            if (query.isBlank() && searchHistory.isNotEmpty()) {
+                SearchHistoryContent(
+                    history = searchHistory,
+                    onEntryClick = { entry ->
+                        viewModel.onQueryChange(entry.query)
+                    },
+                    onDeleteEntry = { entry ->
+                        viewModel.deleteHistoryEntry(entry)
+                    },
+                    onClearAll = {
+                        viewModel.clearHistory()
+                    },
+                )
+                return@SearchBar
+            }
+
             // Shimmer loading when searching remote
             if (isSearchingRemote && localTracks.isEmpty() && artists.isEmpty()) {
                 repeat(4) { ShimmerTrackRow() }
@@ -117,7 +140,15 @@ fun SearchScreen(
                             artworkUrl = track.artworkUrl,
                             resolver = track.resolver,
                             duration = track.duration,
-                            onClick = { viewModel.playLocalTrack(track) },
+                            onClick = {
+                                viewModel.saveHistoryEntry(
+                                    resultType = "track",
+                                    resultName = track.title,
+                                    resultArtist = track.artist,
+                                    artworkUrl = track.artworkUrl,
+                                )
+                                viewModel.playLocalTrack(track)
+                            },
                         )
                     }
                 }
@@ -132,7 +163,14 @@ fun SearchScreen(
                         Row(
                             modifier = Modifier
                                 .fillMaxWidth()
-                                .clickable { onNavigateToArtist(artist.name) }
+                                .clickable {
+                                    viewModel.saveHistoryEntry(
+                                        resultType = "artist",
+                                        resultName = artist.name,
+                                        artworkUrl = artist.imageUrl,
+                                    )
+                                    onNavigateToArtist(artist.name)
+                                }
                                 .padding(horizontal = 16.dp, vertical = 10.dp),
                             verticalAlignment = Alignment.CenterVertically,
                         ) {
@@ -186,6 +224,14 @@ fun SearchScreen(
                             title = track.title,
                             artist = track.artist,
                             artworkUrl = track.artworkUrl,
+                            onClick = {
+                                viewModel.saveHistoryEntry(
+                                    resultType = "track",
+                                    resultName = track.title,
+                                    resultArtist = track.artist,
+                                    artworkUrl = track.artworkUrl,
+                                )
+                            },
                         )
                     }
                 }
@@ -200,7 +246,15 @@ fun SearchScreen(
                         Row(
                             modifier = Modifier
                                 .fillMaxWidth()
-                                .clickable { onNavigateToAlbum(album.title, album.artist) }
+                                .clickable {
+                                    viewModel.saveHistoryEntry(
+                                        resultType = "album",
+                                        resultName = album.title,
+                                        resultArtist = album.artist,
+                                        artworkUrl = album.artworkUrl,
+                                    )
+                                    onNavigateToAlbum(album.title, album.artist)
+                                }
                                 .padding(horizontal = 16.dp, vertical = 10.dp),
                             verticalAlignment = Alignment.CenterVertically,
                         ) {
@@ -245,6 +299,90 @@ fun SearchScreen(
                             modifier = Modifier.padding(16.dp),
                         )
                     }
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun SearchHistoryContent(
+    history: List<SearchHistoryEntity>,
+    onEntryClick: (SearchHistoryEntity) -> Unit,
+    onDeleteEntry: (SearchHistoryEntity) -> Unit,
+    onClearAll: () -> Unit,
+) {
+    LazyColumn {
+        item {
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(horizontal = 16.dp, vertical = 4.dp),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                Text(
+                    text = "Recent",
+                    style = MaterialTheme.typography.titleSmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+                TextButton(onClick = onClearAll) {
+                    Text(
+                        text = "Clear all",
+                        style = MaterialTheme.typography.labelMedium,
+                    )
+                }
+            }
+        }
+
+        items(history, key = { "history-${it.id}" }) { entry ->
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .clickable { onEntryClick(entry) }
+                    .padding(horizontal = 16.dp, vertical = 10.dp),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                Icon(
+                    Icons.Outlined.History,
+                    contentDescription = null,
+                    modifier = Modifier.size(24.dp),
+                    tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+                Spacer(modifier = Modifier.width(12.dp))
+                Column(modifier = Modifier.weight(1f)) {
+                    Text(
+                        text = entry.query,
+                        style = MaterialTheme.typography.bodyLarge,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis,
+                    )
+                    entry.resultName?.let { name ->
+                        Text(
+                            text = buildString {
+                                append(name)
+                                entry.resultArtist?.let { append(" \u2022 $it") }
+                                entry.resultType?.let { type ->
+                                    append(" \u2022 ${type.replaceFirstChar { it.uppercase() }}")
+                                }
+                            },
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis,
+                        )
+                    }
+                }
+                IconButton(
+                    onClick = { onDeleteEntry(entry) },
+                    modifier = Modifier.size(32.dp),
+                ) {
+                    Icon(
+                        Icons.Default.Close,
+                        contentDescription = "Remove",
+                        modifier = Modifier.size(18.dp),
+                        tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
                 }
             }
         }

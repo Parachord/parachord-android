@@ -3,6 +3,7 @@ package com.parachord.android.app
 import com.parachord.android.data.db.ParachordDatabase
 import com.parachord.android.data.db.dao.AlbumDao
 import com.parachord.android.data.db.dao.PlaylistDao
+import com.parachord.android.data.db.dao.SearchHistoryDao
 import com.parachord.android.data.db.dao.TrackDao
 import dagger.Module
 import dagger.Provides
@@ -21,4 +22,7 @@ object DatabaseModule {
 
     @Provides
     fun providePlaylistDao(database: ParachordDatabase): PlaylistDao = database.playlistDao()
+
+    @Provides
+    fun provideSearchHistoryDao(database: ParachordDatabase): SearchHistoryDao = database.searchHistoryDao()
 }

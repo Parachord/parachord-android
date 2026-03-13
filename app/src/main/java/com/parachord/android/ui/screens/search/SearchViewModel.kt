@@ -2,6 +2,8 @@ package com.parachord.android.ui.screens.search
 
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
+import com.parachord.android.data.db.dao.SearchHistoryDao
+import com.parachord.android.data.db.entity.SearchHistoryEntity
 import com.parachord.android.data.db.entity.AlbumEntity
 import com.parachord.android.data.db.entity.TrackEntity
 import com.parachord.android.data.metadata.ArtistInfo
@@ -30,6 +32,7 @@ class SearchViewModel @Inject constructor(
     private val repository: LibraryRepository,
     private val metadataService: MetadataService,
     private val playbackController: PlaybackController,
+    private val searchHistoryDao: SearchHistoryDao,
 ) : ViewModel() {
 
     private val _query = MutableStateFlow("")
@@ -63,6 +66,10 @@ class SearchViewModel @Inject constructor(
     private val _isSearchingRemote = MutableStateFlow(false)
     val isSearchingRemote: StateFlow<Boolean> = _isSearchingRemote.asStateFlow()
 
+    // Search history
+    val searchHistory: StateFlow<List<SearchHistoryEntity>> = searchHistoryDao.getRecent()
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), emptyList())
+
     init {
         // Launch remote search whenever the debounced query changes
         viewModelScope.launch {
@@ -89,21 +96,100 @@ class SearchViewModel @Inject constructor(
         playbackController.playQueue(allTracks, startIndex = index)
     }
 
+    /** Save a search history entry when user selects a result. */
+    fun saveHistoryEntry(
+        resultType: String,
+        resultName: String,
+        resultArtist: String? = null,
+        artworkUrl: String? = null,
+    ) {
+        val q = _query.value.trim()
+        if (q.isBlank()) return
+        viewModelScope.launch {
+            // Dedup: remove older entries with same query (case-insensitive)
+            searchHistoryDao.deleteByQuery(q)
+            searchHistoryDao.insert(
+                SearchHistoryEntity(
+                    query = q,
+                    resultType = resultType,
+                    resultName = resultName,
+                    resultArtist = resultArtist,
+                    artworkUrl = artworkUrl,
+                )
+            )
+            searchHistoryDao.trimToLimit()
+        }
+    }
+
+    fun deleteHistoryEntry(entry: SearchHistoryEntity) {
+        viewModelScope.launch {
+            searchHistoryDao.deleteById(entry.id)
+        }
+    }
+
+    fun clearHistory() {
+        viewModelScope.launch {
+            searchHistoryDao.clearAll()
+        }
+    }
+
     private suspend fun searchRemote(query: String) {
         _isSearchingRemote.value = true
         try {
-            // Run all three searches in parallel within MetadataService
             val tracks = metadataService.searchTracks(query)
             val albums = metadataService.searchAlbums(query)
             val artists = metadataService.searchArtists(query)
 
-            _remoteTrackResults.value = tracks
-            _remoteAlbumResults.value = albums
-            _artistResults.value = artists
+            // Re-rank results using fuzzy matching (desktop formula: 60% fuzzy + 40% source)
+            _remoteTrackResults.value = rankTracks(query, tracks)
+            _remoteAlbumResults.value = rankAlbums(query, albums)
+            _artistResults.value = rankArtists(query, artists)
         } catch (_: Exception) {
             // Silently fail — local results still available
         } finally {
             _isSearchingRemote.value = false
         }
+    }
+
+    private fun rankTracks(query: String, tracks: List<TrackSearchResult>): List<TrackSearchResult> =
+        tracks.map { track ->
+            val titleScore = FuzzyMatch.score(query, track.title)
+            val artistScore = FuzzyMatch.score(query, track.artist)
+            val fuzzy = maxOf(titleScore, artistScore * 0.9)
+            val priority = providerPriority(track.provider)
+            track to FuzzyMatch.combinedScore(fuzzy, priority)
+        }
+            .filter { it.second > 0.0 }
+            .sortedByDescending { it.second }
+            .map { it.first }
+
+    private fun rankAlbums(query: String, albums: List<AlbumSearchResult>): List<AlbumSearchResult> =
+        albums.map { album ->
+            val titleScore = FuzzyMatch.score(query, album.title)
+            val artistScore = FuzzyMatch.score(query, album.artist)
+            val fuzzy = maxOf(titleScore, artistScore * 0.9)
+            val priority = providerPriority(album.provider)
+            album to FuzzyMatch.combinedScore(fuzzy, priority)
+        }
+            .filter { it.second > 0.0 }
+            .sortedByDescending { it.second }
+            .map { it.first }
+
+    private fun rankArtists(query: String, artists: List<ArtistInfo>): List<ArtistInfo> =
+        artists.map { artist ->
+            val fuzzy = FuzzyMatch.score(query, artist.name)
+            val priority = providerPriority(artist.provider)
+            artist to FuzzyMatch.combinedScore(fuzzy, priority)
+        }
+            .filter { it.second > 0.0 }
+            .sortedByDescending { it.second }
+            .map { it.first }
+
+    /** Map provider name to priority value for scoring. */
+    private fun providerPriority(provider: String): Int = when {
+        "musicbrainz" in provider -> 0
+        "lastfm" in provider -> 10
+        "spotify" in provider -> 20
+        else -> 10
     }
 }
