@@ -41,6 +41,7 @@ class PlaybackController @Inject constructor(
     private val router: PlaybackRouter,
     private val queueManager: QueueManager,
     private val queuePersistence: QueuePersistence,
+    private val scrobbleManager: ScrobbleManager,
 ) {
     companion object {
         private const val TAG = "PlaybackController"
@@ -82,6 +83,7 @@ class PlaybackController @Inject constructor(
                     }
                 }
                 queuePersistence.startObserving()
+                scrobbleManager.startObserving()
             }
         }, MoreExecutors.directExecutor())
     }

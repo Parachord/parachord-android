@@ -61,6 +61,9 @@ class SettingsStore @Inject constructor(
     fun getLastFmSessionKeyFlow(): Flow<String?> =
         dataStore.data.map { it[LASTFM_SESSION_KEY] }
 
+    suspend fun getLastFmSessionKey(): String? =
+        dataStore.data.first()[LASTFM_SESSION_KEY]
+
     suspend fun clearSpotifyTokens() {
         dataStore.edit {
             it.remove(SPOTIFY_ACCESS_TOKEN)
