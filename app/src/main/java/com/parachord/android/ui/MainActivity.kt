@@ -194,10 +194,9 @@ private fun ParachordAppContent(mainViewModel: MainViewModel) {
                                                     item.route?.let { route ->
                                                         navController.navigate(route) {
                                                             popUpTo(navController.graph.findStartDestination().id) {
-                                                                saveState = true
+                                                                inclusive = false
                                                             }
                                                             launchSingleTop = true
-                                                            restoreState = true
                                                         }
                                                     }
                                                 }
