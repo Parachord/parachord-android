@@ -1,5 +1,6 @@
 package com.parachord.android.playback.handlers
 
+import android.os.Build
 import android.util.Log
 import com.parachord.android.auth.OAuthManager
 import com.parachord.android.data.api.SpPlaybackRequest
@@ -23,9 +24,11 @@ import javax.inject.Singleton
 /**
  * Handles Spotify playback via the Web API (Spotify Connect).
  *
- * Matches the desktop app's approach: uses the Web API to control playback on
- * an active Spotify device rather than embedding a player. Prefers the local
- * phone device (type "Smartphone") over TVs and computers.
+ * Unlike the desktop app (which prefers Computer devices), the Android app
+ * forces playback to THIS phone. Device selection:
+ * 1. Match this device by name (Build.MODEL)
+ * 2. Any Smartphone-type device
+ * 3. Only if no phone is available, fall back to other device types
  *
  * Requires an active Spotify device and Premium account.
  */
@@ -147,26 +150,30 @@ class SpotifyPlaybackHandler @Inject constructor(
     /**
      * Pick the best device to play on.
      *
-     * Matches the desktop app's cascading approach:
+     * On Android we MUST force playback to this phone, not a computer or TV.
+     * The desktop app prefers Computer — we diverge here intentionally.
+     *
      * 1. Filter out restricted devices
-     * 2. Prefer Smartphone > Computer > Speaker (on Android, phone comes first)
-     * 3. Fall back to active non-web device, then any non-web device
-     * 4. Last resort: first available device
+     * 2. Match THIS phone by device name (Build.MODEL)
+     * 3. Any Smartphone-type device
+     * 4. Last resort only: other device types (Computer, Speaker, etc.)
      */
     private fun pickDevice(devices: List<SpDevice>): SpDevice {
         val controllable = devices.filter { !it.isRestricted }
         val available = controllable.ifEmpty { devices }
 
-        // Type-based priority (Smartphone first on Android, then Computer, then Speaker)
+        // Best match: this exact phone by name
+        val localName = Build.MODEL
+        available.firstOrNull {
+            it.type == "Smartphone" && it.name.contains(localName, ignoreCase = true)
+        }?.let { return it }
+
+        // Any Smartphone device
         available.firstOrNull { it.type == "Smartphone" }?.let { return it }
-        available.firstOrNull { it.type == "Computer" }?.let { return it }
-        available.firstOrNull { it.type == "Speaker" }?.let { return it }
 
-        // Avoid web-based players (like Spotify Web Player)
-        val isWeb: (SpDevice) -> Boolean = { it.name.contains("web", ignoreCase = true) }
-        available.firstOrNull { it.isActive && !isWeb(it) }?.let { return it }
-        available.firstOrNull { !isWeb(it) }?.let { return it }
-
+        // Last resort: warn and pick whatever is available
+        Log.w(TAG, "No Smartphone device found — falling back to '${available.first().name}'. " +
+                "Open Spotify on this phone to register it as a Connect device.")
         return available.first()
     }
 
