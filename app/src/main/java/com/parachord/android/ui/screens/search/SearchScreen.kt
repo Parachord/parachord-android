@@ -14,12 +14,12 @@ import androidx.compose.foundation.layout.WindowInsets
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.Menu
 import androidx.compose.material.icons.filled.Person
 import androidx.compose.material.icons.filled.Search
-import androidx.compose.material.icons.outlined.History
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
@@ -107,23 +107,6 @@ fun SearchScreen(
                 .fillMaxWidth()
                 .padding(horizontal = if (!active) 16.dp else 0.dp),
         ) {
-            // Show search history when query is empty
-            if (query.isBlank() && searchHistory.isNotEmpty()) {
-                SearchHistoryContent(
-                    history = searchHistory,
-                    onEntryClick = { entry ->
-                        viewModel.onQueryChange(entry.query)
-                    },
-                    onDeleteEntry = { entry ->
-                        viewModel.deleteHistoryEntry(entry)
-                    },
-                    onClearAll = {
-                        viewModel.clearHistory()
-                    },
-                )
-                return@SearchBar
-            }
-
             // Shimmer loading when searching remote
             if (isSearchingRemote && localTracks.isEmpty() && artists.isEmpty()) {
                 repeat(4) { ShimmerTrackRow() }
@@ -302,6 +285,24 @@ fun SearchScreen(
                 }
             }
         }
+
+        // Show search history on the page when query is empty (like desktop)
+        if (query.isBlank() && searchHistory.isNotEmpty() && !active) {
+            SearchHistoryContent(
+                history = searchHistory,
+                onEntryClick = { entry ->
+                    viewModel.onQueryChange(entry.query)
+                    active = true
+                },
+                onDeleteEntry = { entry ->
+                    viewModel.deleteHistoryEntry(entry)
+                },
+                onClearAll = {
+                    viewModel.clearHistory()
+                },
+                modifier = Modifier.weight(1f),
+            )
+        }
     }
 }
 
@@ -311,27 +312,31 @@ private fun SearchHistoryContent(
     onEntryClick: (SearchHistoryEntity) -> Unit,
     onDeleteEntry: (SearchHistoryEntity) -> Unit,
     onClearAll: () -> Unit,
+    modifier: Modifier = Modifier,
 ) {
-    LazyColumn {
+    LazyColumn(modifier = modifier) {
         item {
             Row(
                 modifier = Modifier
                     .fillMaxWidth()
-                    .padding(horizontal = 16.dp, vertical = 4.dp),
+                    .padding(horizontal = 16.dp, vertical = 12.dp),
                 horizontalArrangement = Arrangement.SpaceBetween,
                 verticalAlignment = Alignment.CenterVertically,
             ) {
                 Text(
-                    text = "Recent",
-                    style = MaterialTheme.typography.titleSmall,
+                    text = "RECENT SEARCHES",
+                    style = MaterialTheme.typography.labelMedium.copy(
+                        fontWeight = FontWeight.Medium,
+                        letterSpacing = 0.1.em,
+                    ),
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
-                TextButton(onClick = onClearAll) {
-                    Text(
-                        text = "Clear all",
-                        style = MaterialTheme.typography.labelMedium,
-                    )
-                }
+                Text(
+                    text = "Clear All",
+                    style = MaterialTheme.typography.labelMedium,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    modifier = Modifier.clickable { onClearAll() },
+                )
             }
         }
 
@@ -340,19 +345,31 @@ private fun SearchHistoryContent(
                 modifier = Modifier
                     .fillMaxWidth()
                     .clickable { onEntryClick(entry) }
-                    .padding(horizontal = 16.dp, vertical = 10.dp),
+                    .padding(horizontal = 16.dp, vertical = 8.dp),
                 verticalAlignment = Alignment.CenterVertically,
             ) {
-                Icon(
-                    Icons.Outlined.History,
-                    contentDescription = null,
-                    modifier = Modifier.size(24.dp),
-                    tint = MaterialTheme.colorScheme.onSurfaceVariant,
-                )
+                // Artwork thumbnail (matching desktop layout)
+                if (entry.artworkUrl != null) {
+                    AsyncImage(
+                        model = entry.artworkUrl,
+                        contentDescription = null,
+                        modifier = Modifier
+                            .size(48.dp)
+                            .clip(RoundedCornerShape(4.dp)),
+                        contentScale = ContentScale.Crop,
+                    )
+                } else {
+                    AlbumArtCard(
+                        artworkUrl = null,
+                        size = 48.dp,
+                        cornerRadius = 4.dp,
+                        elevation = 0.dp,
+                    )
+                }
                 Spacer(modifier = Modifier.width(12.dp))
                 Column(modifier = Modifier.weight(1f)) {
                     Text(
-                        text = entry.query,
+                        text = "\"${entry.query}\"",
                         style = MaterialTheme.typography.bodyLarge,
                         maxLines = 1,
                         overflow = TextOverflow.Ellipsis,
@@ -360,11 +377,10 @@ private fun SearchHistoryContent(
                     entry.resultName?.let { name ->
                         Text(
                             text = buildString {
-                                append(name)
-                                entry.resultArtist?.let { append(" \u2022 $it") }
                                 entry.resultType?.let { type ->
-                                    append(" \u2022 ${type.replaceFirstChar { it.uppercase() }}")
+                                    append("${type}: ")
                                 }
+                                append(name)
                             },
                             style = MaterialTheme.typography.bodySmall,
                             color = MaterialTheme.colorScheme.onSurfaceVariant,
