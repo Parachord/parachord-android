@@ -5,7 +5,9 @@ import kotlinx.serialization.Serializable
 import retrofit2.Response
 import retrofit2.http.Body
 import retrofit2.http.GET
+import retrofit2.http.HTTP
 import retrofit2.http.Header
+import retrofit2.http.POST
 import retrofit2.http.PUT
 import retrofit2.http.Path
 import retrofit2.http.Query
@@ -103,6 +105,133 @@ interface SpotifyApi {
     suspend fun getPlaybackState(
         @Header("Authorization") auth: String,
     ): Response<SpPlaybackState>
+
+    // --- Library (Sync) ---
+
+    @GET("v1/me/tracks")
+    suspend fun getLikedTracks(
+        @Header("Authorization") auth: String,
+        @Query("limit") limit: Int = 50,
+        @Query("offset") offset: Int = 0,
+    ): SpSavedTracksResponse
+
+    @GET("v1/me/albums")
+    suspend fun getSavedAlbums(
+        @Header("Authorization") auth: String,
+        @Query("limit") limit: Int = 50,
+        @Query("offset") offset: Int = 0,
+    ): SpSavedAlbumsResponse
+
+    @GET("v1/me/following")
+    suspend fun getFollowedArtists(
+        @Header("Authorization") auth: String,
+        @Query("type") type: String = "artist",
+        @Query("limit") limit: Int = 50,
+        @Query("after") after: String? = null,
+    ): SpFollowedArtistsResponse
+
+    @GET("v1/me/playlists")
+    suspend fun getUserPlaylists(
+        @Header("Authorization") auth: String,
+        @Query("limit") limit: Int = 50,
+        @Query("offset") offset: Int = 0,
+    ): SpPaginatedPlaylists
+
+    @GET("v1/playlists/{id}/tracks")
+    suspend fun getPlaylistTracks(
+        @Header("Authorization") auth: String,
+        @Path("id") playlistId: String,
+        @Query("limit") limit: Int = 100,
+        @Query("offset") offset: Int = 0,
+    ): SpPlaylistTracksResponse
+
+    @GET("v1/playlists/{id}")
+    suspend fun getPlaylist(
+        @Header("Authorization") auth: String,
+        @Path("id") playlistId: String,
+        @Query("fields") fields: String? = null,
+    ): SpPlaylistFull
+
+    @GET("v1/me")
+    suspend fun getCurrentUser(
+        @Header("Authorization") auth: String,
+    ): SpUser
+
+    // --- Library Write (Sync push-back) ---
+
+    @PUT("v1/me/tracks")
+    suspend fun saveTracks(
+        @Header("Authorization") auth: String,
+        @Body body: SpIdsRequest,
+    ): Response<Unit>
+
+    @HTTP(method = "DELETE", path = "v1/me/tracks", hasBody = true)
+    suspend fun removeTracks(
+        @Header("Authorization") auth: String,
+        @Body body: SpIdsRequest,
+    ): Response<Unit>
+
+    @PUT("v1/me/albums")
+    suspend fun saveAlbums(
+        @Header("Authorization") auth: String,
+        @Body body: SpIdsRequest,
+    ): Response<Unit>
+
+    @HTTP(method = "DELETE", path = "v1/me/albums", hasBody = true)
+    suspend fun removeAlbums(
+        @Header("Authorization") auth: String,
+        @Body body: SpIdsRequest,
+    ): Response<Unit>
+
+    @PUT("v1/me/following")
+    suspend fun followArtists(
+        @Header("Authorization") auth: String,
+        @Query("type") type: String = "artist",
+        @Body body: SpIdsRequest,
+    ): Response<Unit>
+
+    @HTTP(method = "DELETE", path = "v1/me/following", hasBody = true)
+    suspend fun unfollowArtists(
+        @Header("Authorization") auth: String,
+        @Query("type") type: String = "artist",
+        @Body body: SpIdsRequest,
+    ): Response<Unit>
+
+    // --- Playlist Write ---
+
+    @POST("v1/users/{userId}/playlists")
+    suspend fun createPlaylist(
+        @Header("Authorization") auth: String,
+        @Path("userId") userId: String,
+        @Body body: SpCreatePlaylistRequest,
+    ): SpPlaylistFull
+
+    @PUT("v1/playlists/{id}/tracks")
+    suspend fun replacePlaylistTracks(
+        @Header("Authorization") auth: String,
+        @Path("id") playlistId: String,
+        @Body body: SpUrisRequest,
+    ): Response<SpSnapshotResponse>
+
+    @POST("v1/playlists/{id}/tracks")
+    suspend fun addPlaylistTracks(
+        @Header("Authorization") auth: String,
+        @Path("id") playlistId: String,
+        @Body body: SpUrisRequest,
+    ): Response<SpSnapshotResponse>
+
+    @PUT("v1/playlists/{id}")
+    suspend fun updatePlaylistDetails(
+        @Header("Authorization") auth: String,
+        @Path("id") playlistId: String,
+        @Body body: SpUpdatePlaylistRequest,
+    ): Response<Unit>
+
+    @HTTP(method = "DELETE", path = "v1/playlists/{id}/followers")
+    suspend fun unfollowPlaylist(
+        @Header("Authorization") auth: String,
+        @Path("id") playlistId: String,
+    ): Response<Unit>
 }
 
 // --- Response models ---
@@ -234,4 +363,141 @@ data class SpPlaybackState(
     @SerialName("progress_ms") val progressMs: Long? = null,
     val item: SpTrack? = null,
     val device: SpDevice? = null,
+)
+
+// --- Library Sync response models ---
+
+@Serializable
+data class SpSavedTrack(
+    @SerialName("added_at") val addedAt: String? = null,
+    val track: SpTrack,
+)
+
+@Serializable
+data class SpSavedTracksResponse(
+    val items: List<SpSavedTrack> = emptyList(),
+    val total: Int = 0,
+    val offset: Int = 0,
+    val limit: Int = 50,
+    val next: String? = null,
+)
+
+@Serializable
+data class SpSavedAlbum(
+    @SerialName("added_at") val addedAt: String? = null,
+    val album: SpAlbum,
+)
+
+@Serializable
+data class SpSavedAlbumsResponse(
+    val items: List<SpSavedAlbum> = emptyList(),
+    val total: Int = 0,
+    val offset: Int = 0,
+    val limit: Int = 50,
+    val next: String? = null,
+)
+
+@Serializable
+data class SpFollowedArtistsResponse(
+    val artists: SpCursorPaginated,
+)
+
+@Serializable
+data class SpCursorPaginated(
+    val items: List<SpArtist> = emptyList(),
+    val total: Int = 0,
+    val cursors: SpCursors? = null,
+    val next: String? = null,
+)
+
+@Serializable
+data class SpCursors(
+    val after: String? = null,
+)
+
+@Serializable
+data class SpPlaylistSimple(
+    val id: String,
+    val name: String,
+    val description: String? = null,
+    val images: List<SpImage> = emptyList(),
+    val owner: SpUser? = null,
+    @SerialName("snapshot_id") val snapshotId: String? = null,
+    val tracks: SpPlaylistTracksRef? = null,
+)
+
+@Serializable
+data class SpPlaylistTracksRef(
+    val total: Int = 0,
+)
+
+@Serializable
+data class SpPaginatedPlaylists(
+    val items: List<SpPlaylistSimple> = emptyList(),
+    val total: Int = 0,
+    val offset: Int = 0,
+    val limit: Int = 50,
+    val next: String? = null,
+)
+
+@Serializable
+data class SpPlaylistTrackItem(
+    @SerialName("added_at") val addedAt: String? = null,
+    val track: SpTrack? = null,
+)
+
+@Serializable
+data class SpPlaylistTracksResponse(
+    val items: List<SpPlaylistTrackItem> = emptyList(),
+    val total: Int = 0,
+    val offset: Int = 0,
+    val limit: Int = 100,
+    val next: String? = null,
+)
+
+@Serializable
+data class SpPlaylistFull(
+    val id: String,
+    val name: String,
+    val description: String? = null,
+    val images: List<SpImage> = emptyList(),
+    val owner: SpUser? = null,
+    @SerialName("snapshot_id") val snapshotId: String? = null,
+    val tracks: SpPlaylistTracksResponse? = null,
+)
+
+@Serializable
+data class SpUser(
+    val id: String,
+    @SerialName("display_name") val displayName: String? = null,
+)
+
+// --- Library Write request models ---
+
+@Serializable
+data class SpIdsRequest(
+    val ids: List<String>,
+)
+
+@Serializable
+data class SpUrisRequest(
+    val uris: List<String>,
+)
+
+@Serializable
+data class SpCreatePlaylistRequest(
+    val name: String,
+    val description: String? = null,
+    val public: Boolean = false,
+)
+
+@Serializable
+data class SpUpdatePlaylistRequest(
+    val name: String? = null,
+    val description: String? = null,
+)
+
+@Serializable
+data class SpSnapshotResponse(
+    @SerialName("snapshot_id") val snapshotId: String,
 )
