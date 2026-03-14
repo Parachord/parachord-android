@@ -6,6 +6,7 @@ import com.parachord.android.playback.handlers.DirectStreamHandler
 import com.parachord.android.playback.handlers.ExternalPlaybackHandler
 import com.parachord.android.playback.handlers.LocalFileHandler
 import com.parachord.android.playback.handlers.PlaybackAction
+import com.parachord.android.playback.handlers.AppleMusicPlaybackHandler
 import com.parachord.android.playback.handlers.SoundCloudPlaybackHandler
 import com.parachord.android.playback.handlers.SourceHandler
 import com.parachord.android.playback.handlers.SpotifyPlaybackHandler
@@ -17,13 +18,15 @@ import javax.inject.Singleton
  *
  * The routing order matches the desktop app's logic:
  * 1. Spotify tracks → Web API / Spotify Connect (external playback)
- * 2. SoundCloud tracks → Stream URL resolution + ExoPlayer
- * 3. Local files → ExoPlayer with content:// URI
- * 4. Direct streams → ExoPlayer with HTTP URL
+ * 2. Apple Music tracks → MusicKit JS WebView (external playback)
+ * 3. SoundCloud tracks → Stream URL resolution + ExoPlayer
+ * 4. Local files → ExoPlayer with content:// URI
+ * 5. Direct streams → ExoPlayer with HTTP URL
  */
 @Singleton
 class PlaybackRouter @Inject constructor(
     private val spotifyHandler: SpotifyPlaybackHandler,
+    private val appleMusicHandler: AppleMusicPlaybackHandler,
     private val soundCloudHandler: SoundCloudPlaybackHandler,
 ) {
     companion object {
@@ -39,7 +42,7 @@ class PlaybackRouter @Inject constructor(
 
     /** All handlers in priority order. */
     private val handlers: List<SourceHandler>
-        get() = listOf(spotifyHandler, soundCloudHandler, localFileHandler, directStreamHandler)
+        get() = listOf(spotifyHandler, appleMusicHandler, soundCloudHandler, localFileHandler, directStreamHandler)
 
     /**
      * Determine how to play a track and return the appropriate action.
@@ -52,9 +55,8 @@ class PlaybackRouter @Inject constructor(
 
             Log.d(TAG, "Routing '${track.title}' to ${handler::class.simpleName}")
 
-            // Spotify is external playback (Web API / Spotify Connect)
-            if (handler is SpotifyPlaybackHandler) {
-                // Stop any previous external handler
+            // External playback handlers manage their own lifecycle (Spotify, Apple Music)
+            if (handler is ExternalPlaybackHandler) {
                 stopExternalPlayback()
                 activeExternalHandler = handler
                 return PlaybackAction.ExternalPlayback(handler)
@@ -80,4 +82,7 @@ class PlaybackRouter @Inject constructor(
 
     /** Get the Spotify handler for state observation. */
     fun getSpotifyHandler(): SpotifyPlaybackHandler = spotifyHandler
+
+    /** Get the Apple Music handler for state observation. */
+    fun getAppleMusicHandler(): AppleMusicPlaybackHandler = appleMusicHandler
 }
