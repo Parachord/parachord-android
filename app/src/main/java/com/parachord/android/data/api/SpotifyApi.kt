@@ -256,8 +256,8 @@ data class SpPaginated<T>(
 
 @Serializable
 data class SpTrack(
-    val id: String,
-    val name: String,
+    val id: String? = null,
+    val name: String? = null,
     val artists: List<SpArtistRef> = emptyList(),
     val album: SpAlbumRef? = null,
     @SerialName("duration_ms") val durationMs: Long? = null,
@@ -370,7 +370,7 @@ data class SpPlaybackState(
 @Serializable
 data class SpSavedTrack(
     @SerialName("added_at") val addedAt: String? = null,
-    val track: SpTrack,
+    val track: SpTrack? = null,
 )
 
 @Serializable

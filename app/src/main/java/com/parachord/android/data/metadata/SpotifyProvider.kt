@@ -29,9 +29,10 @@ class SpotifyProvider @Inject constructor(
     override suspend fun searchTracks(query: String, limit: Int): List<TrackSearchResult> =
         withAuth { auth ->
             val response = api.search(auth = auth, query = query, type = "track", limit = limit)
-            response.tracks?.items?.map { t ->
+            response.tracks?.items?.mapNotNull { t ->
+                val title = t.name ?: return@mapNotNull null
                 TrackSearchResult(
-                    title = t.name,
+                    title = title,
                     artist = t.artistName,
                     album = t.album?.name,
                     duration = t.durationMs,
@@ -89,9 +90,10 @@ class SpotifyProvider @Inject constructor(
             val response = api.search(auth = auth, query = "artist:\"$artistName\"", type = "artist", limit = 1)
             val artistId = response.artists?.items?.firstOrNull()?.id ?: return@withAuth emptyList()
             val topTracks = api.getArtistTopTracks(auth = auth, artistId = artistId)
-            topTracks.tracks.take(limit).map { t ->
+            topTracks.tracks.take(limit).mapNotNull { t ->
+                val title = t.name ?: return@mapNotNull null
                 TrackSearchResult(
-                    title = t.name,
+                    title = title,
                     artist = t.artistName,
                     album = t.album?.name,
                     duration = t.durationMs,

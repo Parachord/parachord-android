@@ -122,22 +122,23 @@ class SpotifySyncProvider @Inject constructor(
         while (offset < total) {
             val page = withRetry { spotifyApi.getLikedTracks(it, limit = BATCH_SIZE, offset = offset) }
             page.items.forEach { saved ->
-                val track = saved.track
+                val track = saved.track ?: return@forEach
+                val trackId = track.id ?: return@forEach
                 all.add(SyncedTrack(
                     entity = TrackEntity(
-                        id = "spotify-${track.id}",
-                        title = track.name,
+                        id = "spotify-$trackId",
+                        title = track.name ?: "Unknown",
                         artist = track.artistName,
                         album = track.album?.name,
                         albumId = track.album?.id?.let { "spotify-$it" },
                         duration = track.durationMs,
                         artworkUrl = track.album?.images?.bestImageUrl(),
-                        spotifyUri = "spotify:track:${track.id}",
-                        spotifyId = track.id,
+                        spotifyUri = "spotify:track:$trackId",
+                        spotifyId = trackId,
                         resolver = "spotify",
                         sourceType = "synced",
                     ),
-                    spotifyId = track.id,
+                    spotifyId = trackId,
                     addedAt = parseIsoTimestamp(saved.addedAt),
                 ))
             }
@@ -277,13 +278,13 @@ class SpotifySyncProvider @Inject constructor(
                 all.add(PlaylistTrackEntity(
                     playlistId = localPlaylistId,
                     position = all.size,
-                    trackTitle = track.name,
+                    trackTitle = track.name ?: "Unknown",
                     trackArtist = track.artistName,
                     trackAlbum = track.album?.name,
                     trackDuration = track.durationMs,
                     trackArtworkUrl = track.album?.images?.bestImageUrl(),
                     trackResolver = "spotify",
-                    trackSpotifyUri = "spotify:track:${track.id}",
+                    trackSpotifyUri = track.id?.let { "spotify:track:$it" },
                     addedAt = parseIsoTimestamp(item.addedAt),
                 ))
             }
