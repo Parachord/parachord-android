@@ -14,7 +14,7 @@ import javax.inject.Singleton
  */
 @Singleton
 class AppleMusicPlaybackHandler @Inject constructor(
-    private val musicKitBridge: MusicKitWebBridge,
+    val musicKitBridge: MusicKitWebBridge,
 ) : SourceHandler, ExternalPlaybackHandler {
 
     companion object {

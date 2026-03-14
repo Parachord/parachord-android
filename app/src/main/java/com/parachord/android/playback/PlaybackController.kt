@@ -15,6 +15,7 @@ import com.parachord.android.BuildConfig
 import com.parachord.android.data.api.LastFmApi
 import com.parachord.android.data.db.entity.TrackEntity
 import com.parachord.android.data.metadata.ImageEnrichmentService
+import com.parachord.android.playback.handlers.AppleMusicPlaybackHandler
 import com.parachord.android.playback.handlers.PlaybackAction
 import com.parachord.android.resolver.ResolverManager
 import com.parachord.android.resolver.ResolverScoring
@@ -64,6 +65,7 @@ class PlaybackController @Inject constructor(
     private var controller: MediaController? = null
     private var positionUpdateJob: Job? = null
     private var spotifyStateJob: Job? = null
+    private var appleMusicPollingJob: Job? = null
 
     /** Whether playback is currently managed externally (e.g. Spotify Connect). */
     private var isExternalPlayback = false
@@ -118,6 +120,7 @@ class PlaybackController @Inject constructor(
     fun release() {
         positionUpdateJob?.cancel()
         spotifyStateJob?.cancel()
+        appleMusicPollingJob?.cancel()
         controllerFuture?.let { MediaController.releaseFuture(it) }
         controllerFuture = null
         controller = null
@@ -208,7 +211,10 @@ class PlaybackController @Inject constructor(
     fun skipPrevious() {
         onUserPlaybackActionListener?.invoke()
         if (isExternalPlayback) {
-            val position = router.getSpotifyHandler().getPosition()
+            val position = when (val handler = router.activeExternalHandler) {
+                is AppleMusicPlaybackHandler -> handler.getPosition()
+                else -> router.getSpotifyHandler().getPosition()
+            }
             if (position > 3000) {
                 scope.launch { router.activeExternalHandler?.seekTo(0) }
                 return
@@ -261,8 +267,11 @@ class PlaybackController @Inject constructor(
         if (isExternalPlayback) {
             scope.launch {
                 val handler = router.activeExternalHandler ?: return@launch
-                val spotify = router.getSpotifyHandler()
-                if (spotify.isPlaying()) {
+                val isCurrentlyPlaying = when (handler) {
+                    is AppleMusicPlaybackHandler -> handler.isPlaying()
+                    else -> router.getSpotifyHandler().isPlaying()
+                }
+                if (isCurrentlyPlaying) {
                     handler.pause()
                     stateHolder.update { copy(isPlaying = false) }
                 } else {
@@ -313,6 +322,7 @@ class PlaybackController @Inject constructor(
             is PlaybackAction.ExoPlayerItem -> {
                 isExternalPlayback = false
                 stopSpotifyStatePolling()
+                stopAppleMusicStatePolling()
 
                 val ctrl = controller ?: return
                 ctrl.stop()
@@ -335,6 +345,8 @@ class PlaybackController @Inject constructor(
             is PlaybackAction.ExternalPlayback -> {
                 isExternalPlayback = true
                 stopPositionUpdates()
+                stopSpotifyStatePolling()
+                stopAppleMusicStatePolling()
                 controller?.stop()
 
                 // Set UI state optimistically — show the track as playing immediately
@@ -353,7 +365,14 @@ class PlaybackController @Inject constructor(
                 }
 
                 action.handler.play(track)
-                startSpotifyStatePolling()
+
+                // Start the appropriate state polling based on the handler type
+                when (action.handler) {
+                    is AppleMusicPlaybackHandler ->
+                        startAppleMusicStatePolling()
+                    else ->
+                        startSpotifyStatePolling()
+                }
             }
         }
 
@@ -371,6 +390,7 @@ class PlaybackController @Inject constructor(
         val ctrl = controller ?: return
         isExternalPlayback = false
         stopSpotifyStatePolling()
+        stopAppleMusicStatePolling()
 
         val mediaItem = track.toMediaItem()
         ctrl.stop()
@@ -503,6 +523,50 @@ class PlaybackController @Inject constructor(
 
     private fun stopSpotifyStatePolling() {
         spotifyStateJob?.cancel()
+    }
+
+    /** Poll Apple Music (MusicKit JS) for position/state when playing externally. */
+    private fun startAppleMusicStatePolling() {
+        appleMusicPollingJob?.cancel()
+        val handler = router.getAppleMusicHandler()
+
+        // Register track-ended callback from MusicKit JS
+        handler.musicKitBridge.onTrackEnded = {
+            scope.launch { skipNextInternal(userInitiated = false) }
+        }
+
+        appleMusicPollingJob = scope.launch {
+            // Small initial delay to let the track start
+            delay(1000)
+            while (isActive && isExternalPlayback) {
+                val position = handler.getPosition()
+                val duration = handler.getDuration()
+                val playing = handler.isPlaying()
+
+                stateHolder.update {
+                    copy(
+                        isPlaying = playing,
+                        position = position,
+                        duration = duration,
+                    )
+                }
+
+                // Safety-net track completion detection
+                if (handler.isOurTrackDone()) {
+                    Log.d(TAG, "Apple Music track done (safety net)")
+                    skipNextInternal(userInitiated = false)
+                    break
+                }
+
+                delay(500)
+            }
+        }
+    }
+
+    private fun stopAppleMusicStatePolling() {
+        appleMusicPollingJob?.cancel()
+        // Clear the callback to avoid stale references
+        router.getAppleMusicHandler().musicKitBridge.onTrackEnded = null
     }
 
     // ── Spinoff public API ────────────────────────────────────────────────
