@@ -253,7 +253,7 @@ private fun DrawerNavItem(
     onClick: () -> Unit,
 ) {
     val shape = RoundedCornerShape(6.dp)
-    val backgroundColor = if (selected) item.activeColor.copy(alpha = 0.10f) else Color.Transparent
+    val backgroundColor = if (selected) item.activeColor.copy(alpha = 0.15f) else Color.Transparent
     val textColor = if (selected) {
         MaterialTheme.colorScheme.onSurface
     } else {
@@ -300,7 +300,7 @@ private fun DrawerFriendItem(
     onUnpin: () -> Unit = {},
 ) {
     val shape = RoundedCornerShape(6.dp)
-    val backgroundColor = if (selected) FriendPurple.copy(alpha = 0.10f) else Color.Transparent
+    val backgroundColor = if (selected) FriendPurple.copy(alpha = 0.15f) else Color.Transparent
     val textColor = if (selected) {
         MaterialTheme.colorScheme.onSurface
     } else {

@@ -147,6 +147,10 @@ class HomeViewModel @Inject constructor(
 
     private fun loadAiRecommendations() {
         viewModelScope.launch {
+            // Show cached results immediately (stale-while-revalidate)
+            aiRecommendationService.cachedRecommendations?.let { cached ->
+                _aiRecommendations.value = cached
+            }
             _aiLoading.value = true
             try {
                 val recs = aiRecommendationService.loadRecommendations()

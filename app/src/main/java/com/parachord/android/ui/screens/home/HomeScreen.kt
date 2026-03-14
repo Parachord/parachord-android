@@ -762,7 +762,7 @@ private fun FriendActivityRow(
                     color = badgeColor,
                     modifier = Modifier
                         .background(
-                            color = badgeColor.copy(alpha = 0.12f),
+                            color = badgeColor.copy(alpha = 0.18f),
                             shape = RoundedCornerShape(4.dp),
                         )
                         .padding(horizontal = 6.dp, vertical = 2.dp),
@@ -1267,7 +1267,7 @@ private fun ShuffleupagusBadge() {
         color = MaterialTheme.colorScheme.primary,
         modifier = Modifier
             .background(
-                color = MaterialTheme.colorScheme.primary.copy(alpha = 0.1f),
+                color = MaterialTheme.colorScheme.primary.copy(alpha = 0.15f),
                 shape = RoundedCornerShape(4.dp),
             )
             .padding(horizontal = 6.dp, vertical = 2.dp),
@@ -1449,8 +1449,7 @@ private fun StatsRow(
     onPlaylistsClick: () -> Unit = {},
     onFriendsClick: () -> Unit = {},
 ) {
-    val isDark = isSystemInDarkTheme()
-    val cardBg = if (isDark) Color(0xFF1E1E1E) else Color(0xFFF3F4F6)
+    val cardBg = MaterialTheme.colorScheme.surfaceVariant
 
     LazyRow(
         contentPadding = PaddingValues(horizontal = 16.dp),

@@ -185,7 +185,7 @@ fun AlbumScreen(
                                             color = badgeColor,
                                             modifier = Modifier
                                                 .clip(RoundedCornerShape(4.dp))
-                                                .background(badgeColor.copy(alpha = 0.1f))
+                                                .background(badgeColor.copy(alpha = 0.18f))
                                                 .padding(horizontal = 6.dp, vertical = 2.dp),
                                         )
                                     }

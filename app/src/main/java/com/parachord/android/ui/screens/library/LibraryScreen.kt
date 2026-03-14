@@ -624,7 +624,7 @@ private fun FriendsTab(
                                         color = badgeColor,
                                         modifier = Modifier
                                             .background(
-                                                color = badgeColor.copy(alpha = 0.12f),
+                                                color = badgeColor.copy(alpha = 0.18f),
                                                 shape = RoundedCornerShape(4.dp),
                                             )
                                             .padding(horizontal = 6.dp, vertical = 2.dp),

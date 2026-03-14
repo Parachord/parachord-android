@@ -372,7 +372,7 @@ private fun DiscographyTab(
                             onClick = { selectedFilter = filter.key },
                             label = { Text(chipLabel) },
                             colors = FilterChipDefaults.filterChipColors(
-                                selectedContainerColor = chipColor.copy(alpha = 0.15f),
+                                selectedContainerColor = chipColor.copy(alpha = 0.20f),
                                 selectedLabelColor = chipColor,
                             ),
                         )
@@ -431,7 +431,7 @@ private fun DiscographyTab(
                                                     color = badgeColor,
                                                     modifier = Modifier
                                                         .clip(RoundedCornerShape(4.dp))
-                                                        .background(badgeColor.copy(alpha = 0.1f))
+                                                        .background(badgeColor.copy(alpha = 0.18f))
                                                         .padding(horizontal = 8.dp, vertical = 3.dp),
                                                 )
                                             }

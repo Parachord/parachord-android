@@ -218,7 +218,7 @@ private fun PeriodFilter(
                 onClick = { onPeriodChanged(option.key) },
                 label = { Text(option.label) },
                 colors = FilterChipDefaults.filterChipColors(
-                    selectedContainerColor = MaterialTheme.colorScheme.primary.copy(alpha = 0.15f),
+                    selectedContainerColor = MaterialTheme.colorScheme.primary.copy(alpha = 0.20f),
                     selectedLabelColor = MaterialTheme.colorScheme.primary,
                 ),
             )
@@ -374,9 +374,15 @@ private fun FriendTopAlbumsTab(
                 if (albums.data.isEmpty()) {
                     EmptyState("No album data for this period")
                 } else {
-                    LazyColumn(contentPadding = PaddingValues(bottom = 16.dp)) {
-                        items(albums.data, key = { "${it.rank}-${it.name}" }) { album ->
-                            AlbumRow(
+                    LazyVerticalGrid(
+                        columns = GridCells.Fixed(2),
+                        contentPadding = PaddingValues(horizontal = 12.dp, vertical = 8.dp),
+                        horizontalArrangement = Arrangement.spacedBy(10.dp),
+                        verticalArrangement = Arrangement.spacedBy(12.dp),
+                    ) {
+                        items(albums.data.size, key = { "${albums.data[it].rank}-${albums.data[it].name}" }) { index ->
+                            val album = albums.data[index]
+                            AlbumGridItem(
                                 album = album,
                                 onClick = { onAlbumClick(album.name, album.artist) },
                             )
@@ -389,49 +395,70 @@ private fun FriendTopAlbumsTab(
 }
 
 @Composable
-private fun AlbumRow(album: HistoryAlbum, onClick: () -> Unit = {}) {
-    Row(
+private fun AlbumGridItem(album: HistoryAlbum, onClick: () -> Unit = {}) {
+    Column(
         modifier = Modifier
-            .fillMaxWidth()
-            .clickable(onClick = onClick)
-            .padding(horizontal = 16.dp, vertical = 6.dp),
-        verticalAlignment = Alignment.CenterVertically,
+            .clip(RoundedCornerShape(8.dp))
+            .clickable(onClick = onClick),
     ) {
-        Text(
-            text = "${album.rank}",
-            style = MaterialTheme.typography.bodySmall,
-            color = MaterialTheme.colorScheme.onSurfaceVariant,
-            modifier = Modifier.width(28.dp),
-        )
-        AlbumArtCard(
-            artworkUrl = album.artworkUrl,
-            size = 44.dp,
-            cornerRadius = 4.dp,
-            elevation = 1.dp,
-            placeholderName = album.name,
-        )
-        Spacer(modifier = Modifier.width(12.dp))
-        Column(modifier = Modifier.weight(1f)) {
-            Text(
-                text = album.name,
-                style = MaterialTheme.typography.bodyMedium,
-                fontWeight = FontWeight.Medium,
-                maxLines = 1,
-                overflow = TextOverflow.Ellipsis,
+        Box {
+            AlbumArtCard(
+                artworkUrl = album.artworkUrl,
+                size = 180.dp,
+                cornerRadius = 8.dp,
+                placeholderName = album.name,
             )
-            Text(
-                text = album.artist,
-                style = MaterialTheme.typography.bodySmall,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-                maxLines = 1,
-                overflow = TextOverflow.Ellipsis,
-            )
+            // Rank badge
+            Box(
+                modifier = Modifier
+                    .padding(6.dp)
+                    .background(
+                        color = Color.Black.copy(alpha = 0.65f),
+                        shape = RoundedCornerShape(4.dp),
+                    )
+                    .padding(horizontal = 6.dp, vertical = 2.dp)
+                    .align(Alignment.TopStart),
+            ) {
+                Text(
+                    text = "#${album.rank}",
+                    style = MaterialTheme.typography.labelSmall,
+                    fontWeight = FontWeight.Bold,
+                    color = Color.White,
+                )
+            }
+            // Play count badge
+            Box(
+                modifier = Modifier
+                    .padding(6.dp)
+                    .background(
+                        color = Color.Black.copy(alpha = 0.65f),
+                        shape = RoundedCornerShape(4.dp),
+                    )
+                    .padding(horizontal = 6.dp, vertical = 2.dp)
+                    .align(Alignment.TopEnd),
+            ) {
+                Text(
+                    text = formatPlayCount(album.playCount),
+                    style = MaterialTheme.typography.labelSmall,
+                    color = Color.White,
+                )
+            }
         }
-        Spacer(modifier = Modifier.width(8.dp))
+        Spacer(modifier = Modifier.height(4.dp))
         Text(
-            text = formatPlayCount(album.playCount),
-            style = MaterialTheme.typography.bodySmall,
+            text = album.name,
+            style = MaterialTheme.typography.bodySmall.copy(fontWeight = FontWeight.Medium),
+            maxLines = 1,
+            overflow = TextOverflow.Ellipsis,
+            modifier = Modifier.padding(horizontal = 2.dp),
+        )
+        Text(
+            text = album.artist,
+            style = MaterialTheme.typography.labelSmall,
             color = MaterialTheme.colorScheme.onSurfaceVariant,
+            maxLines = 1,
+            overflow = TextOverflow.Ellipsis,
+            modifier = Modifier.padding(horizontal = 2.dp),
         )
     }
 }

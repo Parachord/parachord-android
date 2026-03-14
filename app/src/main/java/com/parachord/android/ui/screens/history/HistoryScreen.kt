@@ -174,7 +174,7 @@ private fun PeriodFilter(
                 onClick = { onPeriodChanged(option.key) },
                 label = { Text(option.label) },
                 colors = FilterChipDefaults.filterChipColors(
-                    selectedContainerColor = MaterialTheme.colorScheme.primary.copy(alpha = 0.15f),
+                    selectedContainerColor = MaterialTheme.colorScheme.primary.copy(alpha = 0.20f),
                     selectedLabelColor = MaterialTheme.colorScheme.primary,
                 ),
             )

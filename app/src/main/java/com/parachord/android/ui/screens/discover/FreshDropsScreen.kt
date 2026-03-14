@@ -310,7 +310,7 @@ private fun FreshDropsFilterBar(
                         onClick = { onFilterTypeChange(key) },
                         label = { Text(label, style = MaterialTheme.typography.labelMedium) },
                         colors = FilterChipDefaults.filterChipColors(
-                            selectedContainerColor = MaterialTheme.colorScheme.primary.copy(alpha = 0.15f),
+                            selectedContainerColor = MaterialTheme.colorScheme.primary.copy(alpha = 0.20f),
                             selectedLabelColor = MaterialTheme.colorScheme.primary,
                         ),
                     )
@@ -464,7 +464,7 @@ private fun FreshDropRow(
                     color = badgeColor,
                     modifier = Modifier
                         .clip(RoundedCornerShape(4.dp))
-                        .background(badgeColor.copy(alpha = 0.12f))
+                        .background(badgeColor.copy(alpha = 0.18f))
                         .padding(horizontal = 6.dp, vertical = 2.dp),
                 )
                 // Date

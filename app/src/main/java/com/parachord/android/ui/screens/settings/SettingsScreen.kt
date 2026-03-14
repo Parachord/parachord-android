@@ -1969,7 +1969,7 @@ private fun ThemeModeSelector(
                 onClick = { onModeChanged(value) },
                 label = { Text(label, style = MaterialTheme.typography.labelSmall) },
                 colors = FilterChipDefaults.filterChipColors(
-                    selectedContainerColor = MaterialTheme.colorScheme.primary.copy(alpha = 0.15f),
+                    selectedContainerColor = MaterialTheme.colorScheme.primary.copy(alpha = 0.20f),
                     selectedLabelColor = MaterialTheme.colorScheme.primary,
                 ),
             )
