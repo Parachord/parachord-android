@@ -105,6 +105,9 @@ import com.parachord.android.ui.components.ParachordCard
 import com.parachord.android.ui.components.SectionHeader
 import com.parachord.android.ui.components.ShimmerTrackRow
 import com.parachord.android.ui.components.TrackRow
+import com.parachord.android.ai.AiAlbumSuggestion
+import com.parachord.android.ai.AiArtistSuggestion
+import com.parachord.android.ai.AiRecommendations
 import com.parachord.android.playback.PlaybackState
 
 @OptIn(ExperimentalMaterial3Api::class)
@@ -138,6 +141,9 @@ fun HomeScreen(
     val freshDropsPreview by viewModel.freshDropsPreview.collectAsStateWithLifecycle()
     val popOfTheTopsPreview by viewModel.popOfTheTopsPreview.collectAsStateWithLifecycle()
     val playbackState by viewModel.playbackState.collectAsStateWithLifecycle()
+    val hasAiPlugins by viewModel.hasAiPlugins.collectAsStateWithLifecycle()
+    val aiRecommendations by viewModel.aiRecommendations.collectAsStateWithLifecycle()
+    val aiLoading by viewModel.aiLoading.collectAsStateWithLifecycle()
 
     val audioPermission = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
         Manifest.permission.READ_MEDIA_AUDIO
@@ -311,6 +317,7 @@ fun HomeScreen(
                                     friend = friend,
                                     onClick = { onNavigateToFriend(friend.id) },
                                     onListenAlong = { onListenAlong(friend) },
+                                    onTogglePin = { viewModel.togglePin(friend) },
                                 )
                             }
                         }
@@ -318,12 +325,31 @@ fun HomeScreen(
                     }
                 }
 
-                // ── Surprise Me / Shuffleupagus ──────────────────────────
-                item {
-                    SurpriseMeCard(
-                        modifier = Modifier.padding(horizontal = 16.dp),
-                    )
-                    Spacer(modifier = Modifier.height(8.dp))
+                // ── AI Shuffleupagus ─────────────────────────────────────
+                if (hasAiPlugins != null) {
+                    item { SectionHeader("AI Shuffleupagus") }
+                    if (hasAiPlugins == true) {
+                        // AI plugins enabled — show suggestions or loading
+                        item {
+                            AiSuggestionsSection(
+                                recommendations = aiRecommendations,
+                                isLoading = aiLoading,
+                                onRefresh = { viewModel.refreshAiRecommendations() },
+                                onAlbumClick = onNavigateToAlbum,
+                                onArtistClick = onNavigateToArtist,
+                                modifier = Modifier.padding(horizontal = 16.dp),
+                            )
+                            Spacer(modifier = Modifier.height(8.dp))
+                        }
+                    } else {
+                        // No AI plugins — show configure card
+                        item {
+                            NoAiPluginsCard(
+                                modifier = Modifier.padding(horizontal = 16.dp),
+                            )
+                            Spacer(modifier = Modifier.height(8.dp))
+                        }
+                    }
                 }
 
                 // ── Collection Stats ─────────────────────────────────────
@@ -630,6 +656,7 @@ private fun FriendActivityRow(
     friend: FriendEntity,
     onClick: () -> Unit,
     onListenAlong: () -> Unit = {},
+    onTogglePin: () -> Unit = {},
 ) {
     val surfaceColor = MaterialTheme.colorScheme.surface
     var showMenu by remember { mutableStateOf(false) }
@@ -782,6 +809,15 @@ private fun FriendActivityRow(
                     onClick = {
                         showMenu = false
                         onClick()
+                    },
+                )
+                HorizontalDivider(color = ModalDivider, modifier = Modifier.padding(vertical = 4.dp))
+                ContextMenuItem(
+                    icon = Icons.Filled.PushPin,
+                    label = if (friend.pinnedToSidebar) "Unpin from Sidebar" else "Pin to Sidebar",
+                    onClick = {
+                        showMenu = false
+                        onTogglePin()
                     },
                 )
             }
@@ -982,10 +1018,10 @@ private fun ContinueListeningCard(
     Spacer(modifier = Modifier.height(8.dp))
 }
 
-// ── Surprise Me / Shuffleupagus Card ────────────────────────────
+// ── AI Shuffleupagus — No Plugins Card ──────────────────────────
 
 @Composable
-private fun SurpriseMeCard(
+private fun NoAiPluginsCard(
     modifier: Modifier = Modifier,
 ) {
     Box(
@@ -1015,12 +1051,10 @@ private fun SurpriseMeCard(
                     .background(Color.White.copy(alpha = 0.1f)),
                 contentAlignment = Alignment.Center,
             ) {
-                // Sparkle/star SVG path matching desktop
                 Canvas(modifier = Modifier.size(26.dp)) {
                     val w = size.width
                     val h = size.height
                     val path = Path().apply {
-                        // Large 4-point star (bottom-center)
                         moveTo(w * 0.558f, h * 1f)
                         lineTo(w * 0.573f, h * 0.974f)
                         cubicTo(w * 0.61f, h * 0.74f, w * 0.64f, h * 0.71f, w * 0.867f, h * 0.668f)
@@ -1032,7 +1066,6 @@ private fun SurpriseMeCard(
                         lineTo(w * 0.228f, h * 0.668f)
                         cubicTo(w * 0.475f, h * 0.718f, w * 0.505f, h * 0.748f, w * 0.537f, h * 0.974f)
                         close()
-                        // Small 4-point star (top-right)
                         moveTo(w * 0.477f, h * 0.232f)
                         cubicTo(w * 0.49f, h * 0.153f, w * 0.49f, h * 0.151f, w * 0.57f, h * 0.137f)
                         cubicTo(w * 0.49f, h * 0.12f, w * 0.49f, h * 0.1f, w * 0.477f, h * 0.024f)
@@ -1056,7 +1089,10 @@ private fun SurpriseMeCard(
             Spacer(modifier = Modifier.height(8.dp))
 
             Text(
-                text = "Shuffleupagus, your AI companion, can recommend music, provide insights, and control your playback experience.",
+                text = "Shuffleupagus, your AI companion, can recommend music, provide insights, " +
+                    "control your playback experience and integrates with other AI agents so they " +
+                    "can control it too. Enable at least one AI plug-in (like ChatGPT, Gemini, or " +
+                    "Claude) to get started.",
                 fontSize = 13.sp,
                 color = Color.White.copy(alpha = 0.7f),
                 lineHeight = 18.sp,
@@ -1070,15 +1106,256 @@ private fun SurpriseMeCard(
                 modifier = Modifier
                     .clip(RoundedCornerShape(50))
                     .background(Color.White.copy(alpha = 0.2f))
-                    .clickable { /* TODO: navigate to AI chat */ }
+                    .clickable { /* TODO: navigate to settings → AI plugins */ }
                     .padding(horizontal = 24.dp, vertical = 10.dp),
             ) {
                 Text(
-                    text = "Coming Soon",
+                    text = "Configure Plugins",
                     fontSize = 13.sp,
                     fontWeight = FontWeight.SemiBold,
                     color = Color.White,
                 )
+            }
+        }
+    }
+}
+
+// ── AI Shuffleupagus — Suggestions Section ──────────────────────
+
+@Composable
+private fun AiSuggestionsSection(
+    recommendations: AiRecommendations?,
+    isLoading: Boolean,
+    onRefresh: () -> Unit,
+    onAlbumClick: (albumTitle: String, artistName: String) -> Unit,
+    onArtistClick: (String) -> Unit,
+    modifier: Modifier = Modifier,
+) {
+    Column(modifier = modifier) {
+        if (isLoading && recommendations == null) {
+            // Loading shimmer
+            AiSuggestionsShimmer()
+        } else if (recommendations != null && (recommendations.albums.isNotEmpty() || recommendations.artists.isNotEmpty())) {
+            // Album Suggestions
+            if (recommendations.albums.isNotEmpty()) {
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(bottom = 8.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    Text(
+                        text = "Album Suggestions",
+                        style = MaterialTheme.typography.titleSmall,
+                        fontWeight = FontWeight.SemiBold,
+                        modifier = Modifier.weight(1f),
+                    )
+                    ShuffleupagusBadge()
+                }
+
+                LazyRow(
+                    horizontalArrangement = Arrangement.spacedBy(12.dp),
+                ) {
+                    items(recommendations.albums.size) { index ->
+                        AiAlbumCard(
+                            album = recommendations.albums[index],
+                            onClick = { onAlbumClick(recommendations.albums[index].title, recommendations.albums[index].artist) },
+                        )
+                    }
+                }
+
+                Spacer(modifier = Modifier.height(16.dp))
+            }
+
+            // Artist Suggestions
+            if (recommendations.artists.isNotEmpty()) {
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(bottom = 8.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    Text(
+                        text = "Artist Suggestions",
+                        style = MaterialTheme.typography.titleSmall,
+                        fontWeight = FontWeight.SemiBold,
+                        modifier = Modifier.weight(1f),
+                    )
+                    ShuffleupagusBadge()
+                }
+
+                LazyRow(
+                    horizontalArrangement = Arrangement.spacedBy(12.dp),
+                ) {
+                    items(recommendations.artists.size) { index ->
+                        AiArtistCard(
+                            artist = recommendations.artists[index],
+                            onClick = { onArtistClick(recommendations.artists[index].name) },
+                        )
+                    }
+                }
+            }
+
+            // Refresh button
+            Spacer(modifier = Modifier.height(12.dp))
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.Center,
+            ) {
+                Text(
+                    text = if (isLoading) "Loading..." else "Refresh suggestions",
+                    style = MaterialTheme.typography.labelMedium,
+                    color = MaterialTheme.colorScheme.primary,
+                    modifier = Modifier
+                        .clip(RoundedCornerShape(50))
+                        .clickable(enabled = !isLoading) { onRefresh() }
+                        .padding(horizontal = 16.dp, vertical = 6.dp),
+                )
+            }
+        } else {
+            // Empty state / error — show minimal message
+            Text(
+                text = "Could not load suggestions. Tap to retry.",
+                style = MaterialTheme.typography.bodyMedium,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .clickable { onRefresh() }
+                    .padding(vertical = 24.dp),
+                textAlign = TextAlign.Center,
+            )
+        }
+    }
+}
+
+@Composable
+private fun ShuffleupagusBadge() {
+    Text(
+        text = "Shuffleupagus",
+        style = MaterialTheme.typography.labelSmall,
+        fontWeight = FontWeight.Medium,
+        color = MaterialTheme.colorScheme.primary,
+        modifier = Modifier
+            .background(
+                color = MaterialTheme.colorScheme.primary.copy(alpha = 0.1f),
+                shape = RoundedCornerShape(4.dp),
+            )
+            .padding(horizontal = 6.dp, vertical = 2.dp),
+    )
+}
+
+@Composable
+private fun AiAlbumCard(
+    album: AiAlbumSuggestion,
+    onClick: () -> Unit,
+) {
+    Column(
+        modifier = Modifier
+            .width(120.dp)
+            .clickable(onClick = onClick),
+    ) {
+        AlbumArtCard(
+            artworkUrl = album.artworkUrl,
+            size = 120.dp,
+            cornerRadius = 6.dp,
+            elevation = 2.dp,
+            placeholderName = album.artist,
+        )
+        Spacer(modifier = Modifier.height(6.dp))
+        Text(
+            text = album.title,
+            style = MaterialTheme.typography.bodySmall,
+            fontWeight = FontWeight.Medium,
+            maxLines = 1,
+            overflow = TextOverflow.Ellipsis,
+        )
+        Text(
+            text = album.artist,
+            style = MaterialTheme.typography.labelSmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+            maxLines = 1,
+            overflow = TextOverflow.Ellipsis,
+        )
+    }
+}
+
+@Composable
+private fun AiArtistCard(
+    artist: AiArtistSuggestion,
+    onClick: () -> Unit,
+) {
+    Column(
+        modifier = Modifier
+            .width(100.dp)
+            .clickable(onClick = onClick),
+        horizontalAlignment = Alignment.CenterHorizontally,
+    ) {
+        AlbumArtCard(
+            artworkUrl = artist.imageUrl,
+            size = 100.dp,
+            cornerRadius = 50.dp,
+            elevation = 2.dp,
+            placeholderName = artist.name,
+        )
+        Spacer(modifier = Modifier.height(6.dp))
+        Text(
+            text = artist.name,
+            style = MaterialTheme.typography.bodySmall,
+            fontWeight = FontWeight.Medium,
+            maxLines = 1,
+            overflow = TextOverflow.Ellipsis,
+            textAlign = TextAlign.Center,
+        )
+    }
+}
+
+@Composable
+private fun AiSuggestionsShimmer() {
+    Column {
+        // Album shimmer row
+        Row(
+            modifier = Modifier.padding(bottom = 8.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            Text(
+                text = "Album Suggestions",
+                style = MaterialTheme.typography.titleSmall,
+                fontWeight = FontWeight.SemiBold,
+                modifier = Modifier.weight(1f),
+            )
+            ShuffleupagusBadge()
+        }
+        LazyRow(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+            items(5) {
+                Column(modifier = Modifier.width(120.dp)) {
+                    ShimmerTrackRow(modifier = Modifier.height(120.dp))
+                }
+            }
+        }
+
+        Spacer(modifier = Modifier.height(16.dp))
+
+        // Artist shimmer row
+        Row(
+            modifier = Modifier.padding(bottom = 8.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            Text(
+                text = "Artist Suggestions",
+                style = MaterialTheme.typography.titleSmall,
+                fontWeight = FontWeight.SemiBold,
+                modifier = Modifier.weight(1f),
+            )
+            ShuffleupagusBadge()
+        }
+        LazyRow(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+            items(5) {
+                Column(
+                    modifier = Modifier.width(100.dp),
+                    horizontalAlignment = Alignment.CenterHorizontally,
+                ) {
+                    ShimmerTrackRow(modifier = Modifier.size(100.dp))
+                }
             }
         }
     }

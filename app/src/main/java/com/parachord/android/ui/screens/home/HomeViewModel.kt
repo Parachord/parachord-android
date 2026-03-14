@@ -6,6 +6,8 @@ import com.parachord.android.data.db.entity.AlbumEntity
 import com.parachord.android.data.db.entity.FriendEntity
 import com.parachord.android.data.db.entity.PlaylistEntity
 import com.parachord.android.data.db.entity.TrackEntity
+import com.parachord.android.ai.AiRecommendationService
+import com.parachord.android.ai.AiRecommendations
 import com.parachord.android.data.repository.ChartsRepository
 import com.parachord.android.data.repository.CriticalDarlingsRepository
 import com.parachord.android.data.repository.FreshDropsRepository
@@ -54,6 +56,7 @@ class HomeViewModel @Inject constructor(
     private val criticalDarlingsRepository: CriticalDarlingsRepository,
     private val freshDropsRepository: FreshDropsRepository,
     private val chartsRepository: ChartsRepository,
+    private val aiRecommendationService: AiRecommendationService,
 ) : ViewModel() {
 
     val recentTracks: StateFlow<List<TrackEntity>> = repository.getAllTracks()
@@ -116,8 +119,45 @@ class HomeViewModel @Inject constructor(
     private val _popOfTheTopsPreview = MutableStateFlow<DiscoverPreview?>(null)
     val popOfTheTopsPreview: StateFlow<DiscoverPreview?> = _popOfTheTopsPreview
 
+    // ── AI Shuffleupagus ──────────────────────────────────────────
+
+    private val _hasAiPlugins = MutableStateFlow<Boolean?>(null) // null = checking
+    val hasAiPlugins: StateFlow<Boolean?> = _hasAiPlugins
+
+    private val _aiRecommendations = MutableStateFlow<AiRecommendations?>(null)
+    val aiRecommendations: StateFlow<AiRecommendations?> = _aiRecommendations
+
+    private val _aiLoading = MutableStateFlow(false)
+    val aiLoading: StateFlow<Boolean> = _aiLoading
+
     init {
         loadDiscoverPreviews()
+        checkAiPlugins()
+    }
+
+    private fun checkAiPlugins() {
+        viewModelScope.launch {
+            val hasPlugins = aiRecommendationService.hasEnabledProvider()
+            _hasAiPlugins.value = hasPlugins
+            if (hasPlugins) {
+                loadAiRecommendations()
+            }
+        }
+    }
+
+    private fun loadAiRecommendations() {
+        viewModelScope.launch {
+            _aiLoading.value = true
+            try {
+                val recs = aiRecommendationService.loadRecommendations()
+                _aiRecommendations.value = recs
+            } catch (_: Exception) { /* handled in service */ }
+            _aiLoading.value = false
+        }
+    }
+
+    fun refreshAiRecommendations() {
+        loadAiRecommendations()
     }
 
     private fun loadDiscoverPreviews() {
@@ -195,6 +235,12 @@ class HomeViewModel @Inject constructor(
     fun scanLocalMusic() {
         viewModelScope.launch {
             mediaScanner.scan()
+        }
+    }
+
+    fun togglePin(friend: FriendEntity) {
+        viewModelScope.launch {
+            friendsRepository.pinFriend(friend.id, !friend.pinnedToSidebar)
         }
     }
 }
