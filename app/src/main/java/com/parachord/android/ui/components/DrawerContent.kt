@@ -1,7 +1,14 @@
 package com.parachord.android.ui.components
 
+import androidx.compose.animation.core.LinearEasing
+import androidx.compose.animation.core.RepeatMode
+import androidx.compose.animation.core.animateFloat
+import androidx.compose.animation.core.infiniteRepeatable
+import androidx.compose.animation.core.rememberInfiniteTransition
+import androidx.compose.animation.core.tween
 import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.background
+import androidx.compose.foundation.basicMarquee
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.isSystemInDarkTheme
@@ -466,7 +473,7 @@ private fun FriendMiniPlaybar(
             }
         }
 
-        // Track info text
+        // Track info text — marquee scroll matching desktop's animate-marquee
         Text(
             text = buildString {
                 append(trackName)
@@ -477,10 +484,15 @@ private fun FriendMiniPlaybar(
             lineHeight = 20.sp,
             color = artistTextColor,
             maxLines = 1,
-            overflow = TextOverflow.Ellipsis,
+            overflow = TextOverflow.Clip,
             modifier = Modifier
                 .weight(1f)
-                .padding(horizontal = 6.dp),
+                .padding(horizontal = 6.dp)
+                .basicMarquee(
+                    iterations = Int.MAX_VALUE,
+                    initialDelayMillis = 1000, // 1s pause before scrolling (desktop: animation-delay: 1s)
+                    velocity = 30.dp,           // slow scroll speed
+                ),
         )
 
         // On-air live indicator
