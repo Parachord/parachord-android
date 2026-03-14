@@ -336,8 +336,8 @@ private fun PlaylistSkeletonRow() {
         ),
         label = "shimmerOffset",
     )
-    val baseColor = MaterialTheme.colorScheme.surfaceVariant
-    val highlightColor = MaterialTheme.colorScheme.surface
+    val baseColor = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.12f)
+    val highlightColor = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.04f)
     val shimmerBrush = Brush.linearGradient(
         colors = listOf(baseColor, highlightColor, baseColor),
         start = Offset(shimmerOffset, 0f),
