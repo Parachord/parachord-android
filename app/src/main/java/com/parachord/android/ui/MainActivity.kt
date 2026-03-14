@@ -322,20 +322,12 @@ private fun ParachordAppContent(mainViewModel: MainViewModel) {
                                         contentAlignment = Alignment.Center,
                                     ) {
                                         if (item.isAction) {
-                                            Box(
-                                                modifier = Modifier
-                                                    .size(32.dp)
-                                                    .clip(CircleShape)
-                                                    .background(Color.White.copy(alpha = 0.55f)),
-                                                contentAlignment = Alignment.Center,
-                                            ) {
-                                                Icon(
-                                                    item.icon,
-                                                    contentDescription = item.label,
-                                                    tint = MaterialTheme.colorScheme.primary,
-                                                    modifier = Modifier.size(20.dp),
-                                                )
-                                            }
+                                            Icon(
+                                                item.icon,
+                                                contentDescription = item.label,
+                                                tint = Color.White.copy(alpha = 0.7f),
+                                                modifier = Modifier.size(28.dp),
+                                            )
                                         } else {
                                             Icon(
                                                 item.icon,

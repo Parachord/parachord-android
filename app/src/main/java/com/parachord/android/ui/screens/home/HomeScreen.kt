@@ -77,6 +77,7 @@ import androidx.compose.ui.graphics.Shape
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.Density
 import androidx.compose.ui.unit.LayoutDirection
@@ -819,6 +820,200 @@ private fun HomeHexFallback(name: String) {
             fontWeight = FontWeight.Bold,
             color = Color.White,
         )
+    }
+}
+
+// ── Continue Listening Card ──────────────────────────────────────
+
+@Composable
+private fun ContinueListeningCard(
+    playbackState: PlaybackState,
+    onPlayPause: () -> Unit,
+    onClick: () -> Unit,
+) {
+    val track = playbackState.currentTrack ?: return
+    val isDark = isSystemInDarkTheme()
+
+    Column(modifier = Modifier.padding(horizontal = 16.dp)) {
+        SectionHeader("Continue Listening")
+
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .clip(RoundedCornerShape(12.dp))
+                .background(
+                    brush = Brush.linearGradient(
+                        colors = if (isDark) {
+                            listOf(
+                                Color(0xFF2D1B69).copy(alpha = 0.6f),
+                                Color(0xFF1E1B4B).copy(alpha = 0.4f),
+                            )
+                        } else {
+                            listOf(
+                                Color(0xFF8B5CF6).copy(alpha = 0.06f),
+                                Color(0xFF6366F1).copy(alpha = 0.06f),
+                            )
+                        },
+                    ),
+                )
+                .clickable(onClick = onClick)
+                .padding(14.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            // Album art
+            AlbumArtCard(
+                artworkUrl = track.artworkUrl,
+                size = 56.dp,
+                cornerRadius = 8.dp,
+                elevation = 2.dp,
+                placeholderName = track.artist,
+            )
+
+            Spacer(modifier = Modifier.width(14.dp))
+
+            // Track info
+            Column(modifier = Modifier.weight(1f)) {
+                Text(
+                    text = track.title,
+                    style = MaterialTheme.typography.bodyMedium,
+                    fontWeight = FontWeight.SemiBold,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                )
+                Text(
+                    text = track.artist,
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                )
+                if (playbackState.upNext.isNotEmpty()) {
+                    Text(
+                        text = "${playbackState.upNext.size} more in queue",
+                        style = MaterialTheme.typography.labelSmall,
+                        color = MaterialTheme.colorScheme.primary,
+                        fontWeight = FontWeight.Medium,
+                        modifier = Modifier.padding(top = 2.dp),
+                    )
+                }
+            }
+
+            // Play/Pause button
+            IconButton(
+                onClick = onPlayPause,
+                modifier = Modifier.size(40.dp),
+            ) {
+                Icon(
+                    imageVector = if (playbackState.isPlaying) Icons.Filled.Pause else Icons.Filled.PlayArrow,
+                    contentDescription = if (playbackState.isPlaying) "Pause" else "Play",
+                    tint = MaterialTheme.colorScheme.primary,
+                    modifier = Modifier.size(28.dp),
+                )
+            }
+        }
+    }
+    Spacer(modifier = Modifier.height(8.dp))
+}
+
+// ── Surprise Me / Shuffleupagus Card ────────────────────────────
+
+@Composable
+private fun SurpriseMeCard(
+    modifier: Modifier = Modifier,
+) {
+    Box(
+        modifier = modifier
+            .fillMaxWidth()
+            .clip(RoundedCornerShape(12.dp))
+            .background(
+                brush = Brush.linearGradient(
+                    colors = listOf(
+                        Color(0xFF1E1B4B), // indigo-950
+                        Color(0xFF312E81), // indigo-900
+                        Color(0xFF4C1D95), // purple-900
+                    ),
+                ),
+            )
+            .padding(24.dp),
+        contentAlignment = Alignment.Center,
+    ) {
+        Column(
+            horizontalAlignment = Alignment.CenterHorizontally,
+        ) {
+            // Sparkle icon in circle
+            Box(
+                modifier = Modifier
+                    .size(52.dp)
+                    .clip(CircleShape)
+                    .background(Color.White.copy(alpha = 0.1f)),
+                contentAlignment = Alignment.Center,
+            ) {
+                // Sparkle/star SVG path matching desktop
+                Canvas(modifier = Modifier.size(26.dp)) {
+                    val w = size.width
+                    val h = size.height
+                    val path = Path().apply {
+                        // Large 4-point star (bottom-center)
+                        moveTo(w * 0.558f, h * 1f)
+                        lineTo(w * 0.573f, h * 0.974f)
+                        cubicTo(w * 0.61f, h * 0.74f, w * 0.64f, h * 0.71f, w * 0.867f, h * 0.668f)
+                        lineTo(w * 0.888f, h * 0.668f)
+                        cubicTo(w * 0.64f, h * 0.62f, w * 0.608f, h * 0.58f, w * 0.573f, h * 0.346f)
+                        lineTo(w * 0.558f, h * 0.326f)
+                        lineTo(w * 0.537f, h * 0.346f)
+                        cubicTo(w * 0.507f, h * 0.58f, w * 0.47f, h * 0.628f, w * 0.248f, h * 0.668f)
+                        lineTo(w * 0.228f, h * 0.668f)
+                        cubicTo(w * 0.475f, h * 0.718f, w * 0.505f, h * 0.748f, w * 0.537f, h * 0.974f)
+                        close()
+                        // Small 4-point star (top-right)
+                        moveTo(w * 0.477f, h * 0.232f)
+                        cubicTo(w * 0.49f, h * 0.153f, w * 0.49f, h * 0.151f, w * 0.57f, h * 0.137f)
+                        cubicTo(w * 0.49f, h * 0.12f, w * 0.49f, h * 0.1f, w * 0.477f, h * 0.024f)
+                        cubicTo(w * 0.468f, h * 0.1f, w * 0.455f, h * 0.12f, w * 0.383f, h * 0.137f)
+                        cubicTo(w * 0.455f, h * 0.151f, w * 0.468f, h * 0.153f, w * 0.477f, h * 0.232f)
+                        close()
+                    }
+                    drawPath(path, color = Color.White)
+                }
+            }
+
+            Spacer(modifier = Modifier.height(14.dp))
+
+            Text(
+                text = "Surprise Me",
+                fontSize = 18.sp,
+                fontWeight = FontWeight.Bold,
+                color = Color.White,
+            )
+
+            Spacer(modifier = Modifier.height(8.dp))
+
+            Text(
+                text = "Shuffleupagus, your AI companion, can recommend music, provide insights, and control your playback experience.",
+                fontSize = 13.sp,
+                color = Color.White.copy(alpha = 0.7f),
+                lineHeight = 18.sp,
+                modifier = Modifier.padding(horizontal = 8.dp),
+                textAlign = TextAlign.Center,
+            )
+
+            Spacer(modifier = Modifier.height(16.dp))
+
+            Box(
+                modifier = Modifier
+                    .clip(RoundedCornerShape(50))
+                    .background(Color.White.copy(alpha = 0.2f))
+                    .clickable { /* TODO: navigate to AI chat */ }
+                    .padding(horizontal = 24.dp, vertical = 10.dp),
+            ) {
+                Text(
+                    text = "Coming Soon",
+                    fontSize = 13.sp,
+                    fontWeight = FontWeight.SemiBold,
+                    color = Color.White,
+                )
+            }
+        }
     }
 }
 

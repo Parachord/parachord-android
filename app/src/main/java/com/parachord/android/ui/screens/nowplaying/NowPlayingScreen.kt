@@ -226,7 +226,8 @@ fun NowPlayingScreen(
                 ) {
                     Text(
                         text = track?.title ?: "No track playing",
-                        style = MaterialTheme.typography.headlineMedium,
+                        style = MaterialTheme.typography.titleLarge,
+                        fontWeight = FontWeight.SemiBold,
                         color = PlayerTextPrimary,
                         textAlign = TextAlign.Center,
                         maxLines = 2,
@@ -244,6 +245,22 @@ fun NowPlayingScreen(
                             Modifier.clickable { onNavigateToArtist(track.artist) }
                         } else Modifier,
                     )
+
+                    // Album name (tappable to navigate)
+                    if (!track?.album.isNullOrBlank() && track?.artist?.isNotBlank() == true) {
+                        Spacer(modifier = Modifier.height(2.dp))
+                        Text(
+                            text = track!!.album,
+                            style = MaterialTheme.typography.bodySmall,
+                            color = PlayerTextSecondary.copy(alpha = 0.7f),
+                            textAlign = TextAlign.Center,
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis,
+                            modifier = Modifier.clickable {
+                                onNavigateToAlbum(track.album, track.artist)
+                            },
+                        )
+                    }
 
                     // Resolver icon
                     if (track?.resolver != null) {
