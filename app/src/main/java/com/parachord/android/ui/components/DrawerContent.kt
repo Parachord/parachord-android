@@ -379,14 +379,26 @@ private fun DrawerFriendItem(
                     )
                 }
 
-                // Mini playbar showing currently/last played track (desktop: FriendMiniPlaybar)
-                if (friend.cachedTrackName != null) {
+                // On-air: dark pill mini playbar. Offline: plain muted text.
+                if (friend.isOnAir && friend.cachedTrackName != null) {
                     Spacer(modifier = Modifier.height(3.dp))
                     FriendMiniPlaybar(
                         trackName = friend.cachedTrackName!!,
                         artistName = friend.cachedTrackArtist,
                         artworkUrl = friend.cachedTrackArtworkUrl,
-                        isOnAir = friend.isOnAir,
+                        isOnAir = true,
+                    )
+                } else if (friend.cachedTrackName != null) {
+                    Spacer(modifier = Modifier.height(1.dp))
+                    Text(
+                        text = buildString {
+                            append(friend.cachedTrackName)
+                            friend.cachedTrackArtist?.let { append("  ·  $it") }
+                        },
+                        fontSize = 10.sp,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.5f),
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis,
                     )
                 }
             }
@@ -416,14 +428,6 @@ private fun DrawerFriendItem(
                         .background(Brush.verticalGradient(listOf(ModalBg, ModalBgDarker)))
                         .padding(bottom = 32.dp),
                 ) {
-                    ContextMenuItem(
-                        icon = Icons.Filled.Person,
-                        label = "View Profile",
-                        onClick = {
-                            showMenu = false
-                            onClick()
-                        },
-                    )
                     if (friend.isOnAir && friend.cachedTrackName != null) {
                         ContextMenuItem(
                             icon = Icons.Filled.Headphones,
@@ -433,7 +437,16 @@ private fun DrawerFriendItem(
                                 onListenAlong()
                             },
                         )
+                        HorizontalDivider(color = ModalDivider, modifier = Modifier.padding(vertical = 4.dp))
                     }
+                    ContextMenuItem(
+                        icon = Icons.Filled.Person,
+                        label = "View Profile",
+                        onClick = {
+                            showMenu = false
+                            onClick()
+                        },
+                    )
                     HorizontalDivider(color = ModalDivider, modifier = Modifier.padding(vertical = 4.dp))
                     ContextMenuItem(
                         icon = Icons.Filled.PushPin,

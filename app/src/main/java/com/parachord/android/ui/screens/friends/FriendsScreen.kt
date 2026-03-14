@@ -1,7 +1,10 @@
 package com.parachord.android.ui.screens.friends
 
+import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.background
+import androidx.compose.foundation.basicMarquee
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.isSystemInDarkTheme
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -22,6 +25,7 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.Delete
+import androidx.compose.material.icons.filled.MusicNote
 import androidx.compose.material.icons.filled.People
 import androidx.compose.material.icons.filled.PersonAdd
 import androidx.compose.material.icons.filled.PushPin
@@ -51,9 +55,12 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.em
+import androidx.compose.ui.unit.sp
 import androidx.hilt.navigation.compose.hiltViewModel
+import coil.compose.SubcomposeAsyncImage
 import com.parachord.android.data.db.entity.FriendEntity
 import com.parachord.android.data.repository.Resource
 import com.parachord.android.ui.components.AlbumArtCard
@@ -64,6 +71,8 @@ import com.parachord.android.ui.components.ModalTextSecondary
 
 private val OnAirGreen = Color(0xFF22C55E)
 private val LastFmRed = Color(0xFFD51007)
+private val MiniPlaybarBgLight = Color(0xF21F2937)
+private val MiniPlaybarBgDark = Color(0xF2262626)
 private val ListenBrainzOrange = Color(0xFFE8702A)
 
 @OptIn(ExperimentalMaterial3Api::class)
@@ -181,7 +190,7 @@ fun FriendsScreen(
     }
 }
 
-@OptIn(ExperimentalMaterial3Api::class)
+@OptIn(ExperimentalMaterial3Api::class, ExperimentalFoundationApi::class)
 @Composable
 private fun FriendRow(
     friend: FriendEntity,
@@ -268,24 +277,21 @@ private fun FriendRow(
                         overflow = TextOverflow.Ellipsis,
                     )
                 } else if (friend.cachedTrackName != null) {
-                    Row(verticalAlignment = Alignment.CenterVertically) {
-                        Text(
-                            text = "${friend.cachedTrackArtist ?: ""} — ${friend.cachedTrackName}",
-                            style = MaterialTheme.typography.bodySmall,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant,
-                            maxLines = 1,
-                            overflow = TextOverflow.Ellipsis,
-                            modifier = Modifier.weight(1f, fill = false),
-                        )
-                        if (friend.cachedTrackTimestamp > 0) {
-                            Spacer(modifier = Modifier.width(6.dp))
-                            Text(
-                                text = formatTimeAgo(friend.cachedTrackTimestamp),
-                                style = MaterialTheme.typography.labelSmall,
-                                color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.6f),
-                            )
-                        }
-                    }
+                    Text(
+                        text = buildString {
+                            append(friend.cachedTrackArtist ?: "")
+                            append(" — ")
+                            append(friend.cachedTrackName)
+                            if (friend.cachedTrackTimestamp > 0) {
+                                append("  ·  ")
+                                append(formatTimeAgo(friend.cachedTrackTimestamp))
+                            }
+                        },
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.6f),
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis,
+                    )
                 }
             }
 
@@ -316,6 +322,112 @@ private fun formatTimeAgo(timestampSeconds: Long): String {
         diff < 172800 -> "Yesterday"
         diff < 604800 -> "${diff / 86400}d ago"
         else -> "${diff / 604800}w ago"
+    }
+}
+
+/**
+ * Mini playbar pill for the Friends list — matches the sidebar FriendMiniPlaybar
+ * with dark pill background, mini album art, marquee scrolling text, and on-air dot.
+ */
+@OptIn(ExperimentalFoundationApi::class)
+@Composable
+private fun FriendsMiniPlaybar(
+    trackName: String,
+    artistName: String?,
+    artworkUrl: String?,
+    isOnAir: Boolean,
+    timestamp: Long,
+) {
+    val isDark = isSystemInDarkTheme()
+    val pillBg = if (isDark) MiniPlaybarBgDark else MiniPlaybarBgLight
+    val pillShape = RoundedCornerShape(4.dp)
+    val textColor = Color(0xFFD1D5DB) // gray-300
+
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .height(24.dp)
+            .clip(pillShape)
+            .background(pillBg),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        // Mini album art (24×24, rounded-left only)
+        Box(
+            modifier = Modifier
+                .size(24.dp)
+                .clip(RoundedCornerShape(topStart = 4.dp, bottomStart = 4.dp)),
+            contentAlignment = Alignment.Center,
+        ) {
+            if (!artworkUrl.isNullOrBlank()) {
+                SubcomposeAsyncImage(
+                    model = artworkUrl,
+                    contentDescription = null,
+                    contentScale = ContentScale.Crop,
+                    modifier = Modifier.size(24.dp),
+                    loading = { FriendsMiniArtFallback() },
+                    error = { FriendsMiniArtFallback() },
+                )
+            } else {
+                FriendsMiniArtFallback()
+            }
+        }
+
+        // Track info — marquee scroll matching sidebar
+        Text(
+            text = buildString {
+                append(trackName)
+                artistName?.let { append("  ·  $it") }
+            },
+            fontSize = 11.sp,
+            fontWeight = FontWeight.Medium,
+            lineHeight = 24.sp,
+            color = textColor,
+            maxLines = 1,
+            overflow = TextOverflow.Clip,
+            modifier = Modifier
+                .weight(1f)
+                .padding(horizontal = 8.dp)
+                .basicMarquee(
+                    iterations = Int.MAX_VALUE,
+                    initialDelayMillis = 1000,
+                    velocity = 30.dp,
+                ),
+        )
+
+        // On-air dot or time ago
+        if (isOnAir) {
+            Box(
+                modifier = Modifier
+                    .padding(end = 6.dp)
+                    .size(6.dp)
+                    .clip(CircleShape)
+                    .background(OnAirGreen),
+            )
+        } else if (timestamp > 0) {
+            Text(
+                text = formatTimeAgo(timestamp),
+                fontSize = 9.sp,
+                color = Color(0xFF9CA3AF),
+                modifier = Modifier.padding(end = 6.dp),
+            )
+        }
+    }
+}
+
+@Composable
+private fun FriendsMiniArtFallback() {
+    Box(
+        modifier = Modifier
+            .size(24.dp)
+            .background(Color(0xFF4B5563)),
+        contentAlignment = Alignment.Center,
+    ) {
+        Icon(
+            Icons.Filled.MusicNote,
+            contentDescription = null,
+            tint = Color(0xFF9CA3AF),
+            modifier = Modifier.size(12.dp),
+        )
     }
 }
 

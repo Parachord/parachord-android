@@ -467,7 +467,11 @@ private fun FriendsTab(
             FriendSort.ALPHA_ASC -> filtered.sortedBy { it.displayName.lowercase() }
             FriendSort.ALPHA_DESC -> filtered.sortedByDescending { it.displayName.lowercase() }
             FriendSort.RECENT -> filtered.sortedByDescending { it.addedAt }
-            FriendSort.ACTIVE -> filtered.sortedByDescending { it.cachedTrackTimestamp }
+            FriendSort.ACTIVE -> {
+                val fourteenDaysAgo = System.currentTimeMillis() / 1000 - 14 * 86400
+                filtered.filter { it.cachedTrackTimestamp > fourteenDaysAgo }
+                    .sortedByDescending { it.cachedTrackTimestamp }
+            }
             FriendSort.ON_AIR -> filtered.filter { it.isOnAir }
                 .sortedByDescending { it.cachedTrackTimestamp }
         }

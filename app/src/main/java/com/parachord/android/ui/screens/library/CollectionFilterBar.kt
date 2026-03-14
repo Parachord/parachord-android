@@ -5,6 +5,7 @@ import androidx.compose.animation.expandHorizontally
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
 import androidx.compose.animation.shrinkHorizontally
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
@@ -13,6 +14,7 @@ import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.ArrowDropDown
@@ -20,7 +22,6 @@ import androidx.compose.material.icons.filled.Check
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.Search
 import androidx.compose.material3.DropdownMenu
-import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
@@ -40,6 +41,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.focus.focusRequester
+import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 
 /**
@@ -47,6 +49,10 @@ import androidx.compose.ui.unit.dp
  *
  * Left side: sort dropdown showing the current sort label with a chevron.
  * Right side: search icon that expands into a pill-shaped text field.
+ *
+ * Styling matches the desktop app's filter bar:
+ * - Bar: px-6 py-3, sticky, surface bg, bottom border
+ * - Menu items: px-4 py-2, checkmark on the right, bold for selected
  */
 @Composable
 fun CollectionFilterBar(
@@ -99,28 +105,38 @@ fun CollectionFilterBar(
                         onDismissRequest = { sortExpanded = false },
                     ) {
                         sortOptions.forEach { (label, onClick) ->
-                            DropdownMenuItem(
-                                text = { Text(label) },
-                                onClick = {
-                                    onClick()
-                                    sortExpanded = false
-                                },
-                                leadingIcon = if (label == selectedSortLabel) {
-                                    {
-                                        Icon(
-                                            imageVector = Icons.Default.Check,
-                                            contentDescription = "Selected",
-                                            modifier = Modifier.size(18.dp),
-                                            tint = MaterialTheme.colorScheme.primary,
-                                        )
+                            val isSelected = label == selectedSortLabel
+                            Row(
+                                modifier = Modifier
+                                    .widthIn(min = 160.dp)
+                                    .clickable {
+                                        onClick()
+                                        sortExpanded = false
                                     }
-                                } else {
-                                    // Invisible spacer to keep text aligned
-                                    {
-                                        Spacer(modifier = Modifier.size(18.dp))
-                                    }
-                                },
-                            )
+                                    .padding(horizontal = 16.dp, vertical = 10.dp),
+                                verticalAlignment = Alignment.CenterVertically,
+                            ) {
+                                Text(
+                                    text = label,
+                                    style = MaterialTheme.typography.bodyMedium,
+                                    fontWeight = if (isSelected) FontWeight.Medium else FontWeight.Normal,
+                                    color = if (isSelected) {
+                                        MaterialTheme.colorScheme.onSurface
+                                    } else {
+                                        MaterialTheme.colorScheme.onSurfaceVariant
+                                    },
+                                    modifier = Modifier.weight(1f),
+                                )
+                                if (isSelected) {
+                                    Spacer(modifier = Modifier.width(12.dp))
+                                    Icon(
+                                        imageVector = Icons.Default.Check,
+                                        contentDescription = "Selected",
+                                        modifier = Modifier.size(16.dp),
+                                        tint = MaterialTheme.colorScheme.primary,
+                                    )
+                                }
+                            }
                         }
                     }
                 }
