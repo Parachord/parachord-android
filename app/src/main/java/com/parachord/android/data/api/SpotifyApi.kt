@@ -270,14 +270,14 @@ data class SpTrack(
 
 @Serializable
 data class SpArtistRef(
-    val id: String,
+    val id: String? = null,
     val name: String,
 )
 
 @Serializable
 data class SpAlbumRef(
-    val id: String,
-    val name: String,
+    val id: String? = null,
+    val name: String? = null,
     val images: List<SpImage>? = null,
     @SerialName("release_date") val releaseDate: String? = null,
     @SerialName("total_tracks") val totalTracks: Int? = null,
