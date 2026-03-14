@@ -29,6 +29,22 @@ interface PlaylistDao {
     @Query("SELECT * FROM playlists ORDER BY updatedAt DESC")
     suspend fun getAllSync(): List<PlaylistEntity>
 
+    @Query("UPDATE playlists SET artworkUrl = :artworkUrl WHERE id = :id AND (artworkUrl IS NULL OR artworkUrl = '')")
+    suspend fun updateArtworkById(id: String, artworkUrl: String)
+
+    /**
+     * Backfill lastModified from the most recent track addedAt in each playlist.
+     * Falls back to updatedAt when a playlist has no tracks.
+     */
+    @Query("""
+        UPDATE playlists SET lastModified = COALESCE(
+            (SELECT MAX(addedAt) FROM playlist_tracks WHERE playlist_tracks.playlistId = playlists.id),
+            updatedAt
+        )
+        WHERE lastModified = 0
+    """)
+    suspend fun backfillLastModified()
+
     @Delete
     suspend fun delete(playlist: PlaylistEntity)
 }

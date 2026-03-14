@@ -185,6 +185,12 @@ class QueueManager @Inject constructor() {
     val shuffleEnabled: Boolean get() = _shuffleEnabled
     val playbackContext: PlaybackContext? get() = _playbackContext
 
+    /** Set the playback context without changing the queue contents. */
+    fun setContext(context: PlaybackContext?) {
+        _playbackContext = context
+        emitSnapshot()
+    }
+
     /** Read-only access to play history for persistence. */
     val history: List<TrackEntity> get() = playHistory.toList()
 

@@ -1,6 +1,8 @@
 package com.parachord.android.sync
 
 import android.util.Log
+import androidx.room.withTransaction
+import com.parachord.android.data.db.ParachordDatabase
 import com.parachord.android.data.db.dao.*
 import com.parachord.android.data.db.entity.*
 import com.parachord.android.data.store.SettingsStore
@@ -11,6 +13,7 @@ import javax.inject.Singleton
 
 @Singleton
 class SyncEngine @Inject constructor(
+    private val db: ParachordDatabase,
     private val trackDao: TrackDao,
     private val albumDao: AlbumDao,
     private val artistDao: ArtistDao,
@@ -24,6 +27,12 @@ class SyncEngine @Inject constructor(
         private const val TAG = "SyncEngine"
         private const val MASS_REMOVAL_THRESHOLD_PERCENT = 0.25
         private const val MASS_REMOVAL_THRESHOLD_COUNT = 50
+        /**
+         * Bump this to force a full re-fetch on next sync (bypasses quick-check).
+         * The current version is stored in DataStore; when it's less than this,
+         * localCount is passed as 0 to force a full diff.
+         */
+        private const val SYNC_DATA_VERSION = 3
     }
 
     private val syncMutex = Mutex()
@@ -116,6 +125,18 @@ class SyncEngine @Inject constructor(
         val localCount = localSources.size
         val latest = syncSourceDao.getMostRecentByProvider(providerId, "track")
 
+        // One-time fixup: wipe synced tracks and re-fetch cleanly to fix
+        // duplicates + correct addedAt timestamps from Spotify
+        if (settingsStore.getSyncDataVersion() < SYNC_DATA_VERSION) {
+            Log.d(TAG, "v3 migration: clearing synced tracks for clean re-sync")
+            syncSourceDao.deleteByProviderAndType(providerId, "track")
+            trackDao.deleteSyncedTracks()
+            // Don't set version yet — only after clean sync succeeds
+            val result = syncTracksClean(onProgress)
+            settingsStore.setSyncDataVersion(SYNC_DATA_VERSION)
+            return result
+        }
+
         val remote = spotifyProvider.fetchTracks(
             localCount = localCount,
             latestExternalId = latest?.externalId,
@@ -125,6 +146,22 @@ class SyncEngine @Inject constructor(
         ) ?: return TypeSyncResult(unchanged = localCount)
 
         return applyTrackDiff(remote, localSources, providerId)
+    }
+
+    /** Clean sync after wiping synced tracks — no local sources to diff against. */
+    private suspend fun syncTracksClean(
+        onProgress: (SyncProgress) -> Unit,
+    ): TypeSyncResult {
+        val providerId = SpotifySyncProvider.PROVIDER_ID
+        val remote = spotifyProvider.fetchTracks(
+            localCount = 0,
+            latestExternalId = null,
+            onProgress = { current, total ->
+                onProgress(SyncProgress(SyncPhase.TRACKS, current, total, "Syncing liked songs..."))
+            },
+        ) ?: return TypeSyncResult()
+
+        return applyTrackDiff(remote, emptyList(), providerId)
     }
 
     private suspend fun applyTrackDiff(
@@ -140,6 +177,7 @@ class SyncEngine @Inject constructor(
         val toUpdate = remote.filter { synced ->
             synced.spotifyId in localByExternalId
         }
+        Log.d(TAG, "applyTrackDiff: remote=${remote.size}, localSources=${localSources.size}, toAdd=${toAdd.size}, toRemove=${toRemove.size}, toUpdate=${toUpdate.size}")
 
         if (toRemove.size > localSources.size * MASS_REMOVAL_THRESHOLD_PERCENT
             && toRemove.size > MASS_REMOVAL_THRESHOLD_COUNT
@@ -148,35 +186,45 @@ class SyncEngine @Inject constructor(
             toRemove = emptyList()
         }
 
-        toAdd.forEach { synced ->
-            trackDao.insert(synced.entity)
-            syncSourceDao.insert(SyncSourceEntity(
-                itemId = synced.entity.id,
-                itemType = "track",
-                providerId = providerId,
-                externalId = synced.spotifyId,
-                addedAt = synced.addedAt,
-                syncedAt = System.currentTimeMillis(),
-            ))
-        }
+        val now = System.currentTimeMillis()
 
-        toRemove.forEach { source ->
-            syncSourceDao.deleteByKey(source.itemId, "track", providerId)
-            val remaining = syncSourceDao.getByItem(source.itemId, "track")
-            if (remaining.isEmpty()) {
-                trackDao.getById(source.itemId)?.let { trackDao.delete(it) }
+        // Batch all writes in a single transaction so Room emits only one Flow update
+        db.withTransaction {
+            if (toAdd.isNotEmpty()) {
+                trackDao.insertAll(toAdd.map { it.entity })
+                syncSourceDao.insertAll(toAdd.map { synced ->
+                    SyncSourceEntity(
+                        itemId = synced.entity.id,
+                        itemType = "track",
+                        providerId = providerId,
+                        externalId = synced.spotifyId,
+                        addedAt = synced.addedAt,
+                        syncedAt = now,
+                    )
+                })
             }
-        }
 
-        toUpdate.forEach { synced ->
-            val existing = localByExternalId[synced.spotifyId] ?: return@forEach
-            syncSourceDao.insert(existing.copy(syncedAt = System.currentTimeMillis()))
+            toRemove.forEach { source ->
+                syncSourceDao.deleteByKey(source.itemId, "track", providerId)
+                val remaining = syncSourceDao.getByItem(source.itemId, "track")
+                if (remaining.isEmpty()) {
+                    trackDao.getById(source.itemId)?.let { trackDao.delete(it) }
+                }
+            }
+
+            if (toUpdate.isNotEmpty()) {
+                trackDao.insertAll(toUpdate.map { it.entity })
+                syncSourceDao.insertAll(toUpdate.map { synced ->
+                    val existing = localByExternalId[synced.spotifyId]!!
+                    existing.copy(syncedAt = now)
+                })
+            }
         }
 
         return TypeSyncResult(
             added = toAdd.size,
             removed = toRemove.size,
-            updated = 0,
+            updated = toUpdate.size,
             unchanged = toUpdate.size,
         )
     }
@@ -221,32 +269,40 @@ class SyncEngine @Inject constructor(
             toRemove = emptyList()
         }
 
-        toAdd.forEach { synced ->
-            albumDao.insert(synced.entity)
-            syncSourceDao.insert(SyncSourceEntity(
-                itemId = synced.entity.id,
-                itemType = "album",
-                providerId = providerId,
-                externalId = synced.spotifyId,
-                addedAt = synced.addedAt,
-                syncedAt = System.currentTimeMillis(),
-            ))
-        }
+        val now = System.currentTimeMillis()
 
-        toRemove.forEach { source ->
-            syncSourceDao.deleteByKey(source.itemId, "album", providerId)
-            val remaining = syncSourceDao.getByItem(source.itemId, "album")
-            if (remaining.isEmpty()) {
-                albumDao.getById(source.itemId)?.let { albumDao.delete(it) }
+        db.withTransaction {
+            if (toAdd.isNotEmpty()) {
+                albumDao.insertAll(toAdd.map { it.entity })
+                syncSourceDao.insertAll(toAdd.map { synced ->
+                    SyncSourceEntity(
+                        itemId = synced.entity.id,
+                        itemType = "album",
+                        providerId = providerId,
+                        externalId = synced.spotifyId,
+                        addedAt = synced.addedAt,
+                        syncedAt = now,
+                    )
+                })
+            }
+
+            toRemove.forEach { source ->
+                syncSourceDao.deleteByKey(source.itemId, "album", providerId)
+                val remaining = syncSourceDao.getByItem(source.itemId, "album")
+                if (remaining.isEmpty()) {
+                    albumDao.getById(source.itemId)?.let { albumDao.delete(it) }
+                }
+            }
+
+            if (unchanged.isNotEmpty()) {
+                albumDao.insertAll(unchanged.map { it.entity })
+                syncSourceDao.insertAll(unchanged.mapNotNull { synced ->
+                    localByExternalId[synced.spotifyId]?.copy(syncedAt = now)
+                })
             }
         }
 
-        unchanged.forEach { synced ->
-            val existing = localByExternalId[synced.spotifyId] ?: return@forEach
-            syncSourceDao.insert(existing.copy(syncedAt = System.currentTimeMillis()))
-        }
-
-        return TypeSyncResult(added = toAdd.size, removed = toRemove.size, unchanged = unchanged.size)
+        return TypeSyncResult(added = toAdd.size, removed = toRemove.size, updated = unchanged.size)
     }
 
     // ── Artist sync ──────────────────────────────────────────────
@@ -279,31 +335,39 @@ class SyncEngine @Inject constructor(
             toRemove = emptyList()
         }
 
-        toAdd.forEach { synced ->
-            artistDao.insert(synced.entity)
-            syncSourceDao.insert(SyncSourceEntity(
-                itemId = synced.entity.id,
-                itemType = "artist",
-                providerId = providerId,
-                externalId = synced.spotifyId,
-                syncedAt = System.currentTimeMillis(),
-            ))
-        }
+        val now = System.currentTimeMillis()
 
-        toRemove.forEach { source ->
-            syncSourceDao.deleteByKey(source.itemId, "artist", providerId)
-            val remaining = syncSourceDao.getByItem(source.itemId, "artist")
-            if (remaining.isEmpty()) {
-                artistDao.deleteById(source.itemId)
+        db.withTransaction {
+            if (toAdd.isNotEmpty()) {
+                artistDao.insertAll(toAdd.map { it.entity })
+                syncSourceDao.insertAll(toAdd.map { synced ->
+                    SyncSourceEntity(
+                        itemId = synced.entity.id,
+                        itemType = "artist",
+                        providerId = providerId,
+                        externalId = synced.spotifyId,
+                        syncedAt = now,
+                    )
+                })
+            }
+
+            toRemove.forEach { source ->
+                syncSourceDao.deleteByKey(source.itemId, "artist", providerId)
+                val remaining = syncSourceDao.getByItem(source.itemId, "artist")
+                if (remaining.isEmpty()) {
+                    artistDao.deleteById(source.itemId)
+                }
+            }
+
+            if (unchanged.isNotEmpty()) {
+                artistDao.insertAll(unchanged.map { it.entity })
+                syncSourceDao.insertAll(unchanged.mapNotNull { synced ->
+                    localByExternalId[synced.spotifyId]?.copy(syncedAt = now)
+                })
             }
         }
 
-        unchanged.forEach { synced ->
-            val existing = localByExternalId[synced.spotifyId] ?: return@forEach
-            syncSourceDao.insert(existing.copy(syncedAt = System.currentTimeMillis()))
-        }
-
-        return TypeSyncResult(added = toAdd.size, removed = toRemove.size, unchanged = unchanged.size)
+        return TypeSyncResult(added = toAdd.size, removed = toRemove.size, updated = unchanged.size)
     }
 
     // ── Playlist sync ────────────────────────────────────────────
@@ -341,7 +405,12 @@ class SyncEngine @Inject constructor(
             val existingSource = localByExternalId[remote.spotifyId]
 
             if (existingSource == null) {
-                playlistDao.insert(remote.entity)
+                val now = System.currentTimeMillis()
+                playlistDao.insert(remote.entity.copy(
+                    createdAt = now,
+                    updatedAt = now,
+                    lastModified = now,
+                ))
                 val tracks = spotifyProvider.fetchPlaylistTracks(remote.spotifyId)
                 playlistTrackDao.deleteByPlaylistId(remote.entity.id)
                 playlistTrackDao.insertAll(tracks)
@@ -400,13 +469,14 @@ class SyncEngine @Inject constructor(
                     val created = spotifyProvider.createPlaylistOnSpotify(
                         playlist.name, playlist.description
                     )
+                    val createdId = created.id ?: continue
                     val tracks = playlistTrackDao.getByPlaylistIdSync(playlist.id)
                     val uris = tracks.mapNotNull { it.trackSpotifyUri }
                     if (uris.isNotEmpty()) {
-                        spotifyProvider.replacePlaylistTracks(created.id, uris)
+                        spotifyProvider.replacePlaylistTracks(createdId, uris)
                     }
-                    playlistDao.insert(playlist.copy(
-                        spotifyId = created.id,
+                    playlistDao.update(playlist.copy(
+                        spotifyId = createdId,
                         snapshotId = created.snapshotId,
                         locallyModified = false,
                     ))
@@ -414,7 +484,7 @@ class SyncEngine @Inject constructor(
                         itemId = playlist.id,
                         itemType = "playlist",
                         providerId = providerId,
-                        externalId = created.id,
+                        externalId = createdId,
                         syncedAt = System.currentTimeMillis(),
                     ))
                     added++
@@ -446,8 +516,9 @@ class SyncEngine @Inject constructor(
         val uris = tracks.mapNotNull { it.trackSpotifyUri }
         val snapshotId = spotifyProvider.replacePlaylistTracks(spotifyId, uris)
 
-        playlistDao.insert(playlist.copy(
+        playlistDao.update(playlist.copy(
             snapshotId = snapshotId ?: playlist.snapshotId,
+            trackCount = tracks.size,
             locallyModified = false,
         ))
 
@@ -461,18 +532,24 @@ class SyncEngine @Inject constructor(
         localPlaylist: PlaylistEntity,
         remote: SpotifySyncProvider.SyncedPlaylist,
     ) {
+        // Fetch tracks first, then update playlist metadata with actual count
+        // (use update, not insert/REPLACE, because REPLACE does DELETE+INSERT
+        // which CASCADE-deletes playlist_tracks)
         val tracks = spotifyProvider.fetchPlaylistTracks(remote.spotifyId)
         playlistTrackDao.deleteByPlaylistId(localPlaylist.id)
         playlistTrackDao.insertAll(tracks)
 
-        playlistDao.insert(localPlaylist.copy(
+        val now = System.currentTimeMillis()
+        playlistDao.update(localPlaylist.copy(
             name = remote.entity.name,
             description = remote.entity.description,
             artworkUrl = remote.entity.artworkUrl,
             trackCount = tracks.size,
             snapshotId = remote.snapshotId,
-            lastModified = System.currentTimeMillis(),
+            updatedAt = now,
+            lastModified = now,
             locallyModified = false,
+            ownerName = remote.entity.ownerName,
         ))
 
         val source = syncSourceDao.get(localPlaylist.id, "playlist", SpotifySyncProvider.PROVIDER_ID)

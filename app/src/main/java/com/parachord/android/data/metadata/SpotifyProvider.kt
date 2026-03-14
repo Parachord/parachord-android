@@ -46,9 +46,9 @@ class SpotifyProvider @Inject constructor(
     override suspend fun searchAlbums(query: String, limit: Int): List<AlbumSearchResult> =
         withAuth { auth ->
             val response = api.search(auth = auth, query = query, type = "album", limit = limit)
-            response.albums?.items?.map { a ->
+            response.albums?.items?.mapNotNull { a ->
                 AlbumSearchResult(
-                    title = a.name,
+                    title = a.name ?: return@mapNotNull null,
                     artist = a.artistName,
                     artworkUrl = a.images.bestImageUrl(),
                     year = a.year,
@@ -61,9 +61,9 @@ class SpotifyProvider @Inject constructor(
     override suspend fun searchArtists(query: String, limit: Int): List<ArtistInfo> =
         withAuth { auth ->
             val response = api.search(auth = auth, query = "artist:\"$query\"", type = "artist", limit = limit)
-            response.artists?.items?.map { a ->
+            response.artists?.items?.mapNotNull { a ->
                 ArtistInfo(
-                    name = a.name,
+                    name = a.name ?: return@mapNotNull null,
                     imageUrl = a.images.bestImageUrl(),
                     tags = a.genres,
                     provider = name,
@@ -76,9 +76,10 @@ class SpotifyProvider @Inject constructor(
             // Search to find artist ID, then fetch full artist for reliable images
             val response = api.search(auth = auth, query = "artist:\"$artistName\"", type = "artist", limit = 1)
             val searchArtist = response.artists?.items?.firstOrNull() ?: return@withAuth null
-            val fullArtist = api.getArtist(auth = auth, artistId = searchArtist.id)
+            val searchArtistId = searchArtist.id ?: return@withAuth null
+            val fullArtist = api.getArtist(auth = auth, artistId = searchArtistId)
             ArtistInfo(
-                name = fullArtist.name,
+                name = fullArtist.name ?: return@withAuth null,
                 imageUrl = fullArtist.images.bestImageUrl(),
                 tags = fullArtist.genres,
                 provider = name,
@@ -110,9 +111,9 @@ class SpotifyProvider @Inject constructor(
             val response = api.search(auth = auth, query = "artist:\"$artistName\"", type = "artist", limit = 1)
             val artistId = response.artists?.items?.firstOrNull()?.id ?: return@withAuth emptyList()
             val albums = api.getArtistAlbums(auth = auth, artistId = artistId, limit = limit)
-            albums.items.map { a ->
+            albums.items.mapNotNull { a ->
                 AlbumSearchResult(
-                    title = a.name,
+                    title = a.name ?: return@mapNotNull null,
                     artist = a.artistName,
                     artworkUrl = a.images.bestImageUrl(),
                     year = a.year,
@@ -133,17 +134,19 @@ class SpotifyProvider @Inject constructor(
                 limit = 1,
             )
             val album = response.albums?.items?.firstOrNull() ?: return@withAuth null
-            val tracksResponse = api.getAlbumTracks(auth = auth, albumId = album.id)
+            val albumId = album.id ?: return@withAuth null
+            val albumName = album.name ?: return@withAuth null
+            val tracksResponse = api.getAlbumTracks(auth = auth, albumId = albumId)
             AlbumDetail(
-                title = album.name,
+                title = albumName,
                 artist = album.artistName,
                 artworkUrl = album.images.bestImageUrl(),
                 year = album.year,
-                tracks = tracksResponse.items.map { t ->
+                tracks = tracksResponse.items.mapNotNull { t ->
                     TrackSearchResult(
-                        title = t.name,
+                        title = t.name ?: return@mapNotNull null,
                         artist = t.artistName,
-                        album = album.name,
+                        album = albumName,
                         duration = t.durationMs,
                         artworkUrl = album.images.bestImageUrl(),
                         previewUrl = t.previewUrl,

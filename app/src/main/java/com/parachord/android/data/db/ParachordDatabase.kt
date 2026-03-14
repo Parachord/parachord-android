@@ -37,7 +37,7 @@ import com.parachord.android.data.db.entity.TrackEntity
         SyncSourceEntity::class,
         ArtistEntity::class,
     ],
-    version = 7,
+    version = 9,
     exportSchema = false,
 )
 abstract class ParachordDatabase : RoomDatabase() {
@@ -188,13 +188,34 @@ abstract class ParachordDatabase : RoomDatabase() {
             }
         }
 
+        /**
+         * Migration from v7 → v8: add ownerName column to playlists table
+         * for displaying the playlist author in the UI.
+         */
+        private val MIGRATION_7_8 = object : Migration(7, 8) {
+            override fun migrate(db: SupportSQLiteDatabase) {
+                db.execSQL("ALTER TABLE `playlists` ADD COLUMN `ownerName` TEXT")
+            }
+        }
+
+        /**
+         * Migration from v8 → v9: add pinnedToSidebar and autoPinned columns
+         * to friends table for sidebar pinning and auto-pin behavior.
+         */
+        private val MIGRATION_8_9 = object : Migration(8, 9) {
+            override fun migrate(db: SupportSQLiteDatabase) {
+                db.execSQL("ALTER TABLE `friends` ADD COLUMN `pinnedToSidebar` INTEGER NOT NULL DEFAULT 0")
+                db.execSQL("ALTER TABLE `friends` ADD COLUMN `autoPinned` INTEGER NOT NULL DEFAULT 0")
+            }
+        }
+
         fun create(context: Context): ParachordDatabase =
             Room.databaseBuilder(
                 context,
                 ParachordDatabase::class.java,
                 "parachord.db"
             )
-                .addMigrations(MIGRATION_4_5, MIGRATION_5_6, MIGRATION_6_7)
+                .addMigrations(MIGRATION_4_5, MIGRATION_5_6, MIGRATION_6_7, MIGRATION_7_8, MIGRATION_8_9)
                 // Only fall back to destructive for very old versions (pre-v4)
                 // that we can't reasonably migrate from
                 .fallbackToDestructiveMigrationFrom(1, 2, 3)

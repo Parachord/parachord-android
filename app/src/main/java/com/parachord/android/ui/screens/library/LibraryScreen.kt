@@ -15,6 +15,7 @@ import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.WindowInsets
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
@@ -24,6 +25,7 @@ import androidx.compose.material.icons.filled.MusicNote
 import androidx.compose.material.icons.filled.People
 import androidx.compose.material.icons.filled.Person
 import androidx.compose.material.icons.filled.Sync
+import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
@@ -40,6 +42,7 @@ import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -51,10 +54,15 @@ import androidx.compose.ui.unit.em
 import androidx.compose.ui.Alignment
 import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import kotlinx.coroutines.launch
+import androidx.compose.ui.platform.LocalContext
 import com.parachord.android.data.db.entity.FriendEntity
 import com.parachord.android.ui.components.AlbumArtCard
 import com.parachord.android.ui.components.SwipeableTabLayout
+import com.parachord.android.ui.components.TrackContextInfo
+import com.parachord.android.ui.components.TrackContextMenuHost
 import com.parachord.android.ui.components.TrackRow
+import com.parachord.android.ui.components.rememberTrackContextMenuState
 import com.parachord.android.ui.screens.friends.FriendsViewModel
 import com.parachord.android.ui.screens.sync.SyncSetupSheet
 
@@ -69,18 +77,13 @@ fun CollectionScreen(
     viewModel: LibraryViewModel = hiltViewModel(),
     friendsViewModel: FriendsViewModel = hiltViewModel(),
 ) {
-    val sortedArtistNames by viewModel.sortedArtistNames.collectAsStateWithLifecycle()
+    val sortedArtists by viewModel.sortedArtists.collectAsStateWithLifecycle()
     val sortedAlbums by viewModel.sortedAlbums.collectAsStateWithLifecycle()
     val sortedTracks by viewModel.sortedTracks.collectAsStateWithLifecycle()
-    val syncedArtists by viewModel.artists.collectAsStateWithLifecycle()
+    val rawArtists by viewModel.artists.collectAsStateWithLifecycle()
     val rawTracks by viewModel.tracks.collectAsStateWithLifecycle()
     val rawAlbums by viewModel.albums.collectAsStateWithLifecycle()
     val friends by friendsViewModel.friends.collectAsState()
-
-    // Unfiltered counts for tab labels
-    val artistCount = remember(rawTracks, syncedArtists) {
-        (rawTracks.map { it.artist } + syncedArtists.map { it.name }).distinct().size
-    }
 
     val artistSort by viewModel.artistSort.collectAsStateWithLifecycle()
     val albumSort by viewModel.albumSort.collectAsStateWithLifecycle()
@@ -89,10 +92,26 @@ fun CollectionScreen(
     val searchQuery by viewModel.searchQuery.collectAsStateWithLifecycle()
 
     var showSyncSheet by remember { mutableStateOf(false) }
+    val contextMenuState = rememberTrackContextMenuState()
+    val allPlaylists by viewModel.playlists.collectAsStateWithLifecycle()
 
     if (showSyncSheet) {
         SyncSetupSheet(onDismiss = { showSyncSheet = false })
     }
+
+    // Track context menu host
+    TrackContextMenuHost(
+        state = contextMenuState,
+        playlists = allPlaylists,
+        onPlayNext = { viewModel.playNext(it) },
+        onAddToQueue = { viewModel.addToQueue(it) },
+        onAddToPlaylist = { playlist, track -> viewModel.addToPlaylist(playlist, track) },
+        onNavigateToArtist = onNavigateToArtist,
+        onNavigateToAlbum = onNavigateToAlbum,
+        onToggleCollection = { track, isInCollection ->
+            if (isInCollection) viewModel.removeTrackFromCollection(track)
+        },
+    )
 
     Column(modifier = modifier.fillMaxSize()) {
         TopAppBar(
@@ -119,56 +138,61 @@ fun CollectionScreen(
         )
         SwipeableTabLayout(
             tabs = listOf("Artists", "Albums", "Songs", "Friends"),
-            counts = listOf(artistCount, rawAlbums.size, rawTracks.size, friends.size),
+            counts = listOf(rawArtists.size, rawAlbums.size, rawTracks.size, friends.size),
             modifier = Modifier.fillMaxSize(),
         ) { page ->
             when (page) {
                 0 -> {
-                    // Build a lookup for artist image URLs from synced ArtistEntity items
-                    val artistImageMap = remember(syncedArtists) {
-                        syncedArtists.associate { it.name to it.imageUrl }
+                    val artistListState = rememberLazyListState()
+                    val artistScope = rememberCoroutineScope()
+
+                    // Scroll to top when sort or search changes
+                    LaunchedEffect(artistSort, searchQuery) {
+                        artistListState.scrollToItem(0)
                     }
+
                     Column(modifier = Modifier.fillMaxSize()) {
                         CollectionFilterBar(
                             sortLabel = artistSort.label,
                             sortOptions = ArtistSort.entries.map { sort ->
-                                sort.label to { viewModel.setArtistSort(sort) }
+                                sort.label to {
+                                    viewModel.setArtistSort(sort)
+                                    artistScope.launch { artistListState.scrollToItem(0) }
+                                }
                             },
                             selectedSortLabel = artistSort.label,
                             searchQuery = searchQuery,
                             onSearchQueryChange = { viewModel.setSearchQuery(it) },
                             onClearSearch = { viewModel.setSearchQuery("") },
                         )
-                        if (sortedArtistNames.isEmpty()) {
+                        if (sortedArtists.isEmpty()) {
                             EmptyState("No artists yet", Icons.Default.Person, onSyncClick = { showSyncSheet = true })
                         } else {
-                            LazyColumn(modifier = Modifier.fillMaxSize()) {
-                                items(sortedArtistNames, key = { it }) { artist ->
-                                    val imageUrl = artistImageMap[artist]
-
-                                    // Trigger lazy image enrichment for artists in the DB with no image
-                                    if (artist in artistImageMap && imageUrl == null) {
-                                        LaunchedEffect(artist) {
-                                            viewModel.enrichArtistImageIfNeeded(artist)
+                            LazyColumn(state = artistListState, modifier = Modifier.fillMaxSize()) {
+                                items(sortedArtists, key = { it.id }) { artist ->
+                                    // Trigger lazy image enrichment for artists with no image
+                                    if (artist.imageUrl == null) {
+                                        LaunchedEffect(artist.id) {
+                                            viewModel.enrichArtistImageIfNeeded(artist.name)
                                         }
                                     }
 
                                     Row(
                                         modifier = Modifier
                                             .fillMaxWidth()
-                                            .clickable { onNavigateToArtist(artist) }
+                                            .clickable { onNavigateToArtist(artist.name) }
                                             .padding(horizontal = 16.dp, vertical = 10.dp),
                                         verticalAlignment = Alignment.CenterVertically,
                                     ) {
                                         AlbumArtCard(
-                                            artworkUrl = imageUrl,
+                                            artworkUrl = artist.imageUrl,
                                             size = 40.dp,
                                             cornerRadius = 20.dp,
-                                            placeholderName = artist,
+                                            placeholderName = artist.name,
                                         )
                                         Spacer(modifier = Modifier.width(12.dp))
                                         Text(
-                                            text = artist,
+                                            text = artist.name,
                                             style = MaterialTheme.typography.bodyLarge,
                                             maxLines = 1,
                                             overflow = TextOverflow.Ellipsis,
@@ -180,11 +204,21 @@ fun CollectionScreen(
                     }
                 }
                 1 -> {
+                    val albumListState = rememberLazyListState()
+                    val albumScope = rememberCoroutineScope()
+
+                    LaunchedEffect(albumSort, searchQuery) {
+                        albumListState.scrollToItem(0)
+                    }
+
                     Column(modifier = Modifier.fillMaxSize()) {
                         CollectionFilterBar(
                             sortLabel = albumSort.label,
                             sortOptions = AlbumSort.entries.map { sort ->
-                                sort.label to { viewModel.setAlbumSort(sort) }
+                                sort.label to {
+                                    viewModel.setAlbumSort(sort)
+                                    albumScope.launch { albumListState.scrollToItem(0) }
+                                }
                             },
                             selectedSortLabel = albumSort.label,
                             searchQuery = searchQuery,
@@ -194,7 +228,7 @@ fun CollectionScreen(
                         if (sortedAlbums.isEmpty()) {
                             EmptyState("No albums yet", Icons.Default.MusicNote, onSyncClick = { showSyncSheet = true })
                         } else {
-                            LazyColumn(modifier = Modifier.fillMaxSize()) {
+                            LazyColumn(state = albumListState, modifier = Modifier.fillMaxSize()) {
                                 items(sortedAlbums, key = { it.id }) { album ->
                                     // Trigger lazy artwork enrichment for albums with no artwork
                                     if (album.artworkUrl == null) {
@@ -239,11 +273,21 @@ fun CollectionScreen(
                     }
                 }
                 2 -> {
+                    val trackListState = rememberLazyListState()
+                    val trackScope = rememberCoroutineScope()
+
+                    LaunchedEffect(trackSort, searchQuery) {
+                        trackListState.scrollToItem(0)
+                    }
+
                     Column(modifier = Modifier.fillMaxSize()) {
                         CollectionFilterBar(
                             sortLabel = trackSort.label,
                             sortOptions = TrackSort.entries.map { sort ->
-                                sort.label to { viewModel.setTrackSort(sort) }
+                                sort.label to {
+                                    viewModel.setTrackSort(sort)
+                                    trackScope.launch { trackListState.scrollToItem(0) }
+                                }
                             },
                             selectedSortLabel = trackSort.label,
                             searchQuery = searchQuery,
@@ -253,7 +297,7 @@ fun CollectionScreen(
                         if (sortedTracks.isEmpty()) {
                             EmptyState("No songs yet", Icons.Default.MusicNote, onSyncClick = { showSyncSheet = true })
                         } else {
-                            LazyColumn(modifier = Modifier.fillMaxSize()) {
+                            LazyColumn(state = trackListState, modifier = Modifier.fillMaxSize()) {
                                 items(sortedTracks, key = { it.id }) { track ->
                                     TrackRow(
                                         title = track.title,
@@ -262,6 +306,19 @@ fun CollectionScreen(
                                         resolver = track.resolver,
                                         duration = track.duration,
                                         onClick = { viewModel.playTrack(track) },
+                                        onLongClick = {
+                                            contextMenuState.show(
+                                                TrackContextInfo(
+                                                    title = track.title,
+                                                    artist = track.artist,
+                                                    album = track.album,
+                                                    artworkUrl = track.artworkUrl,
+                                                    duration = track.duration,
+                                                    isInCollection = true,
+                                                ),
+                                                track,
+                                            )
+                                        },
                                     )
                                 }
                             }
@@ -310,34 +367,67 @@ private fun FriendsTab(
             FriendSort.ALPHA_ASC -> filtered.sortedBy { it.displayName.lowercase() }
             FriendSort.ALPHA_DESC -> filtered.sortedByDescending { it.displayName.lowercase() }
             FriendSort.RECENT -> filtered.sortedByDescending { it.addedAt }
-            FriendSort.ON_AIR -> filtered.sortedByDescending { it.isOnAir }
+            FriendSort.ACTIVE -> filtered.sortedByDescending { it.cachedTrackTimestamp }
+            FriendSort.ON_AIR -> filtered.filter { it.isOnAir }
+                .sortedByDescending { it.cachedTrackTimestamp }
         }
+    }
+
+    val friendListState = rememberLazyListState()
+    val friendScope = rememberCoroutineScope()
+
+    LaunchedEffect(friendSort, searchQuery) {
+        friendListState.scrollToItem(0)
     }
 
     Column(modifier = Modifier.fillMaxSize()) {
         CollectionFilterBar(
             sortLabel = friendSort.label,
             sortOptions = FriendSort.entries.map { sort ->
-                sort.label to { onSortChange(sort) }
+                sort.label to {
+                    onSortChange(sort)
+                    friendScope.launch { friendListState.scrollToItem(0) }
+                }
             },
             selectedSortLabel = friendSort.label,
             searchQuery = searchQuery,
             onSearchQueryChange = onSearchQueryChange,
             onClearSearch = onClearSearch,
         )
+        var pendingDeleteFriend by remember { mutableStateOf<FriendEntity?>(null) }
+
+        pendingDeleteFriend?.let { f ->
+            AlertDialog(
+                onDismissRequest = { pendingDeleteFriend = null },
+                title = { Text("Remove Friend") },
+                text = { Text("Are you sure you want to remove ${f.displayName}?") },
+                confirmButton = {
+                    TextButton(onClick = {
+                        onRemoveFriend(f.id)
+                        pendingDeleteFriend = null
+                    }) {
+                        Text("Remove", color = MaterialTheme.colorScheme.error)
+                    }
+                },
+                dismissButton = {
+                    TextButton(onClick = { pendingDeleteFriend = null }) {
+                        Text("Cancel")
+                    }
+                },
+            )
+        }
+
         if (sortedFriends.isEmpty()) {
             EmptyState("No friends yet", Icons.Default.People)
         } else {
-            LazyColumn(modifier = Modifier.fillMaxSize()) {
+            LazyColumn(state = friendListState, modifier = Modifier.fillMaxSize()) {
                 items(sortedFriends, key = { it.id }) { friend ->
                     val dismissState = rememberSwipeToDismissBoxState(
                         confirmValueChange = { value ->
                             if (value == SwipeToDismissBoxValue.EndToStart) {
-                                onRemoveFriend(friend.id)
-                                true
-                            } else {
-                                false
+                                pendingDeleteFriend = friend
                             }
+                            false // always snap back; dialog handles the delete
                         },
                     )
 
@@ -427,13 +517,24 @@ private fun FriendsTab(
                                         overflow = TextOverflow.Ellipsis,
                                     )
                                 } else if (friend.cachedTrackName != null) {
-                                    Text(
-                                        text = "${friend.cachedTrackArtist ?: ""} \u2014 ${friend.cachedTrackName}",
-                                        style = MaterialTheme.typography.bodySmall,
-                                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                                        maxLines = 1,
-                                        overflow = TextOverflow.Ellipsis,
-                                    )
+                                    Row(verticalAlignment = Alignment.CenterVertically) {
+                                        Text(
+                                            text = "${friend.cachedTrackArtist ?: ""} \u2014 ${friend.cachedTrackName}",
+                                            style = MaterialTheme.typography.bodySmall,
+                                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                            maxLines = 1,
+                                            overflow = TextOverflow.Ellipsis,
+                                            modifier = Modifier.weight(1f, fill = false),
+                                        )
+                                        if (friend.cachedTrackTimestamp > 0) {
+                                            Spacer(modifier = Modifier.width(6.dp))
+                                            Text(
+                                                text = formatFriendTimeAgo(friend.cachedTrackTimestamp),
+                                                style = MaterialTheme.typography.labelSmall,
+                                                color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.6f),
+                                            )
+                                        }
+                                    }
                                 }
                             }
                         }
@@ -441,6 +542,19 @@ private fun FriendsTab(
                 }
             }
         }
+    }
+}
+
+private fun formatFriendTimeAgo(timestampSeconds: Long): String {
+    val now = System.currentTimeMillis() / 1000
+    val diff = now - timestampSeconds
+    return when {
+        diff < 60 -> "Just now"
+        diff < 3600 -> "${diff / 60}m ago"
+        diff < 86400 -> "${diff / 3600}h ago"
+        diff < 172800 -> "Yesterday"
+        diff < 604800 -> "${diff / 86400}d ago"
+        else -> "${diff / 604800}w ago"
     }
 }
 

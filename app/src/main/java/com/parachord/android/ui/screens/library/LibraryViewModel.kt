@@ -20,7 +20,7 @@ import javax.inject.Inject
 
 @HiltViewModel
 class LibraryViewModel @Inject constructor(
-    repository: LibraryRepository,
+    private val repository: LibraryRepository,
     private val playbackController: PlaybackController,
     private val imageEnrichmentService: ImageEnrichmentService,
 ) : ViewModel() {
@@ -66,30 +66,18 @@ class LibraryViewModel @Inject constructor(
     fun setFriendSort(sort: FriendSort) { _friendSort.value = sort }
     fun setSearchQuery(query: String) { _searchQuery.value = query }
 
-    // --- Sorted + filtered combined artist names (merges tracks + ArtistEntity) ---
+    // --- Sorted + filtered followed artists (ArtistEntity only) ---
 
-    val sortedArtistNames: StateFlow<List<String>> = combine(
-        tracks, artists, _artistSort, _searchQuery,
-    ) { trackList, artistList, sort, query ->
-        val merged = (trackList.map { it.artist } + artistList.map { it.name })
-            .distinct()
-        val filtered = if (query.isBlank()) merged else {
-            merged.filter { it.contains(query, ignoreCase = true) }
+    val sortedArtists: StateFlow<List<ArtistEntity>> = combine(
+        artists, _artistSort, _searchQuery,
+    ) { list, sort, query ->
+        val filtered = if (query.isBlank()) list else {
+            list.filter { it.name.contains(query, ignoreCase = true) }
         }
-        // For RECENT sort, we need addedAt. Build a map of name -> earliest addedAt from both sources.
         when (sort) {
-            ArtistSort.ALPHA_ASC -> filtered.sortedBy { it.lowercase() }
-            ArtistSort.ALPHA_DESC -> filtered.sortedByDescending { it.lowercase() }
-            ArtistSort.RECENT -> {
-                val artistAddedAt = mutableMapOf<String, Long>()
-                for (a in artistList) {
-                    artistAddedAt[a.name] = maxOf(artistAddedAt[a.name] ?: 0L, a.addedAt)
-                }
-                for (t in trackList) {
-                    artistAddedAt[t.artist] = maxOf(artistAddedAt[t.artist] ?: 0L, t.addedAt)
-                }
-                filtered.sortedByDescending { artistAddedAt[it] ?: 0L }
-            }
+            ArtistSort.ALPHA_ASC -> filtered.sortedBy { it.name.lowercase() }
+            ArtistSort.ALPHA_DESC -> filtered.sortedByDescending { it.name.lowercase() }
+            ArtistSort.RECENT -> filtered.sortedByDescending { it.addedAt }
         }
     }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), emptyList())
 
@@ -157,5 +145,39 @@ class LibraryViewModel @Inject constructor(
         val allTracks = tracks.value
         val index = allTracks.indexOf(track).coerceAtLeast(0)
         playbackController.playQueue(allTracks, startIndex = index)
+    }
+
+    // ── Context menu actions ─────────────────────────────────────────
+
+    fun playNext(track: TrackEntity) {
+        playbackController.insertNext(listOf(track))
+    }
+
+    fun addToQueue(track: TrackEntity) {
+        playbackController.addToQueue(listOf(track))
+    }
+
+    fun addToPlaylist(playlist: PlaylistEntity, track: TrackEntity) {
+        viewModelScope.launch {
+            repository.addTracksToPlaylist(playlist.id, listOf(track))
+        }
+    }
+
+    fun removeTrackFromCollection(track: TrackEntity) {
+        viewModelScope.launch {
+            repository.deleteTrackWithSync(track)
+        }
+    }
+
+    fun removeAlbumFromCollection(album: AlbumEntity) {
+        viewModelScope.launch {
+            repository.deleteAlbumWithSync(album)
+        }
+    }
+
+    fun removeArtistFromCollection(artist: ArtistEntity) {
+        viewModelScope.launch {
+            repository.deleteArtistWithSync(artist)
+        }
     }
 }

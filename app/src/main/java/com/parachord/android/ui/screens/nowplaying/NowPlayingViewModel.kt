@@ -1,20 +1,32 @@
 package com.parachord.android.ui.screens.nowplaying
 
 import androidx.lifecycle.ViewModel
+import androidx.lifecycle.viewModelScope
+import com.parachord.android.data.db.entity.PlaylistEntity
+import com.parachord.android.data.db.entity.TrackEntity
+import com.parachord.android.data.repository.LibraryRepository
 import com.parachord.android.playback.PlaybackController
 import com.parachord.android.playback.PlaybackState
 import com.parachord.android.playback.PlaybackStateHolder
 import dagger.hilt.android.lifecycle.HiltViewModel
+import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.stateIn
+import kotlinx.coroutines.launch
 import javax.inject.Inject
 
 @HiltViewModel
 class NowPlayingViewModel @Inject constructor(
     private val playbackStateHolder: PlaybackStateHolder,
     private val playbackController: PlaybackController,
+    private val libraryRepository: LibraryRepository,
 ) : ViewModel() {
 
     val playbackState: StateFlow<PlaybackState> = playbackStateHolder.state
+
+    val playlists: StateFlow<List<PlaylistEntity>> =
+        libraryRepository.getAllPlaylists()
+            .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), emptyList())
 
     fun togglePlayPause() {
         playbackController.togglePlayPause()
@@ -51,5 +63,26 @@ class NowPlayingViewModel @Inject constructor(
 
     fun clearQueue() {
         playbackController.clearQueue()
+    }
+
+    // Context menu actions
+    fun playNext(track: TrackEntity) {
+        playbackController.insertNext(listOf(track))
+    }
+
+    fun addToQueue(track: TrackEntity) {
+        playbackController.addToQueue(listOf(track))
+    }
+
+    fun addToPlaylist(playlist: PlaylistEntity, track: TrackEntity) {
+        viewModelScope.launch {
+            libraryRepository.addTracksToPlaylist(playlist.id, listOf(track))
+        }
+    }
+
+    fun addToCollection(track: TrackEntity) {
+        viewModelScope.launch {
+            libraryRepository.addTrack(track)
+        }
     }
 }

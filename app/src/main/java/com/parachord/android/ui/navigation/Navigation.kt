@@ -58,6 +58,7 @@ object Routes {
 fun ParachordNavHost(
     navController: NavHostController,
     onOpenDrawer: () -> Unit,
+    onOpenChat: () -> Unit = {},
     modifier: Modifier = Modifier,
 ) {
     NavHost(
@@ -120,6 +121,10 @@ fun ParachordNavHost(
         ) {
             com.parachord.android.ui.screens.playlists.PlaylistDetailScreen(
                 onBack = { navController.popBackStack() },
+                onNavigateToArtist = { name -> navController.navigate(Routes.artist(name)) },
+                onNavigateToAlbum = { albumTitle, artistName ->
+                    navController.navigate(Routes.album(albumTitle, artistName))
+                },
             )
         }
         composable(Routes.SEARCH) {
@@ -190,6 +195,7 @@ fun ParachordNavHost(
         ) {
             com.parachord.android.ui.screens.album.AlbumScreen(
                 onBack = { navController.popBackStack() },
+                onNavigateToArtist = { name -> navController.navigate(Routes.artist(name)) },
             )
         }
 

@@ -44,4 +44,11 @@ interface SyncSourceDao {
 
     @Query("SELECT * FROM sync_sources WHERE providerId = :providerId AND itemType = :itemType ORDER BY addedAt DESC LIMIT 1")
     suspend fun getMostRecentByProvider(providerId: String, itemType: String): SyncSourceEntity?
+
+    /** Remove orphaned sync_sources for tracks that no longer exist. */
+    @Query("DELETE FROM sync_sources WHERE itemType = 'track' AND itemId NOT IN (SELECT id FROM tracks)")
+    suspend fun deleteOrphanedTrackSources(): Int
+
+    @Query("DELETE FROM sync_sources WHERE providerId = :providerId AND itemType = :itemType")
+    suspend fun deleteByProviderAndType(providerId: String, itemType: String)
 }

@@ -8,6 +8,7 @@ import com.parachord.android.data.api.bestImageUrl
 import com.parachord.android.data.db.dao.FriendDao
 import com.parachord.android.data.db.entity.FriendEntity
 import com.parachord.android.data.metadata.MetadataService
+import com.parachord.android.data.store.SettingsStore
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.async
 import kotlinx.coroutines.awaitAll
@@ -29,6 +30,7 @@ class FriendsRepository @Inject constructor(
     private val lastFmApi: LastFmApi,
     private val listenBrainzApi: ListenBrainzApi,
     private val metadataService: MetadataService,
+    private val settingsStore: SettingsStore,
 ) {
     companion object {
         private const val TAG = "FriendsRepository"
@@ -37,11 +39,44 @@ class FriendsRepository @Inject constructor(
     /** All friends as a live-updating Flow from Room. */
     fun getAllFriends(): Flow<List<FriendEntity>> = friendDao.getAllFriends()
 
+    /** Only friends pinned to sidebar (manual or auto-pinned). */
+    fun getPinnedFriends(): Flow<List<FriendEntity>> = friendDao.getPinnedFriends()
+
     /** Get a single friend by ID. */
     suspend fun getFriendById(id: String): FriendEntity? = friendDao.getFriendById(id)
 
-    /** Remove a friend. */
-    suspend fun removeFriend(friendId: String) = friendDao.delete(friendId)
+    /** Remove a friend locally and unfollow on the service. */
+    suspend fun removeFriend(friendId: String) = withContext(Dispatchers.IO) {
+        val friend = friendDao.getFriendById(friendId) ?: return@withContext
+        // Add to deleted keys so sync doesn't re-add them
+        val key = "${friend.service}:${friend.username.lowercase()}"
+        settingsStore.addDeletedFriendKey(key)
+        // Unfollow on service (ListenBrainz supports this; Last.fm does not)
+        unfollowOnService(friend)
+        // Delete locally
+        friendDao.delete(friendId)
+    }
+
+    /** Manually pin/unpin a friend to the sidebar. */
+    suspend fun pinFriend(friendId: String, pinned: Boolean) {
+        friendDao.setPinned(id = friendId, pinned = pinned, auto = false)
+    }
+
+    /** Auto-pin friends that are on-air, auto-unpin those that aren't. */
+    suspend fun updateAutoPins() = withContext(Dispatchers.IO) {
+        val allFriends = friendDao.getAllFriendsSync()
+        for (friend in allFriends) {
+            if (friend.isOnAir && !friend.pinnedToSidebar) {
+                // Auto-pin on-air friend
+                friendDao.setPinned(id = friend.id, pinned = true, auto = true)
+                Log.d(TAG, "Auto-pinned on-air friend: ${friend.displayName}")
+            } else if (!friend.isOnAir && friend.autoPinned && friend.pinnedToSidebar) {
+                // Auto-unpin friend that was auto-pinned but is no longer on-air
+                friendDao.setPinned(id = friend.id, pinned = false, auto = false)
+                Log.d(TAG, "Auto-unpinned inactive friend: ${friend.displayName}")
+            }
+        }
+    }
 
     // ---------- Input Parsing (mirrors desktop parseFriendInput) ----------
 
@@ -93,7 +128,12 @@ class FriendsRepository @Inject constructor(
             }
 
             if (friend != null) {
+                // Clear deleted key if re-adding a previously removed friend
+                val key = "${friend.service}:${friend.username.lowercase()}"
+                settingsStore.removeDeletedFriendKey(key)
                 friendDao.upsert(friend)
+                // Follow on the service so desktop stays in sync
+                followOnService(friend)
                 // Fetch initial activity
                 refreshFriendActivity(friend)
                 // Re-read from DB to get latest cached data
@@ -138,6 +178,122 @@ class FriendsRepository @Inject constructor(
         )
     }
 
+    /**
+     * Follow a user on their service so changes propagate to other Parachord clients.
+     * ListenBrainz supports follow via API; Last.fm deprecated their add-friend API.
+     */
+    private suspend fun followOnService(friend: FriendEntity) {
+        try {
+            when (friend.service) {
+                "listenbrainz" -> {
+                    val token = settingsStore.getListenBrainzToken() ?: return
+                    listenBrainzApi.followUser(friend.username, token)
+                    Log.d(TAG, "Followed ${friend.username} on ListenBrainz")
+                }
+                // Last.fm deprecated user.addFriend — can't follow via API
+            }
+        } catch (e: Exception) {
+            Log.w(TAG, "Failed to follow ${friend.username} on ${friend.service}", e)
+        }
+    }
+
+    /**
+     * Unfollow a user on their service when removing them from friends.
+     * ListenBrainz supports unfollow via API; Last.fm deprecated their friend API.
+     */
+    private suspend fun unfollowOnService(friend: FriendEntity) {
+        try {
+            when (friend.service) {
+                "listenbrainz" -> {
+                    val token = settingsStore.getListenBrainzToken() ?: return
+                    listenBrainzApi.unfollowUser(friend.username, token)
+                    Log.d(TAG, "Unfollowed ${friend.username} on ListenBrainz")
+                }
+                // Last.fm deprecated friend management API — can't unfollow via API.
+                // The deleted-keys mechanism prevents re-sync instead.
+            }
+        } catch (e: Exception) {
+            Log.w(TAG, "Failed to unfollow ${friend.username} on ${friend.service}", e)
+        }
+    }
+
+    // ---------- Sync Friends from Services ----------
+
+    /**
+     * Sync friends from Last.fm and ListenBrainz.
+     * Pulls the user's friend/following lists from both services and adds
+     * any users not already in the local friends DB.
+     * This keeps friends in sync across desktop and mobile without a backend.
+     *
+     * @return number of newly synced friends
+     */
+    suspend fun syncFriendsFromServices(): Int = withContext(Dispatchers.IO) {
+        val existingFriends = friendDao.getAllFriendsSync()
+        val existingByKey = existingFriends.associate {
+            "${it.service}:${it.username.lowercase()}" to it
+        }
+        val deletedKeys = settingsStore.getDeletedFriendKeys()
+        var synced = 0
+
+        // Sync from Last.fm
+        try {
+            val lastFmUsername = settingsStore.getLastFmUsername()
+            if (lastFmUsername != null) {
+                val response = lastFmApi.getUserFriends(
+                    user = lastFmUsername,
+                    apiKey = BuildConfig.LASTFM_API_KEY,
+                )
+                val friends = response.friends?.user ?: emptyList()
+                for (user in friends) {
+                    val key = "lastfm:${user.name.lowercase()}"
+                    if (key !in existingByKey && key !in deletedKeys) {
+                        val entity = FriendEntity(
+                            id = "friend-${System.currentTimeMillis()}-${UUID.randomUUID().toString().take(8)}",
+                            username = user.name,
+                            service = "lastfm",
+                            displayName = user.realname?.takeIf { it.isNotBlank() } ?: user.name,
+                            avatarUrl = user.image.bestImageUrl(),
+                            addedAt = System.currentTimeMillis(),
+                        )
+                        friendDao.upsert(entity)
+                        synced++
+                        Log.d(TAG, "Synced Last.fm friend: ${user.name}")
+                    }
+                }
+            }
+        } catch (e: Exception) {
+            Log.e(TAG, "Failed to sync Last.fm friends", e)
+        }
+
+        // Sync from ListenBrainz
+        try {
+            val lbUsername = settingsStore.getListenBrainzUsername()
+            if (lbUsername != null) {
+                val following = listenBrainzApi.getUserFollowing(lbUsername)
+                for (username in following) {
+                    val key = "listenbrainz:${username.lowercase()}"
+                    if (key !in existingByKey && key !in deletedKeys) {
+                        val entity = FriendEntity(
+                            id = "friend-${System.currentTimeMillis()}-${UUID.randomUUID().toString().take(8)}",
+                            username = username,
+                            service = "listenbrainz",
+                            displayName = username,
+                            addedAt = System.currentTimeMillis(),
+                        )
+                        friendDao.upsert(entity)
+                        synced++
+                        Log.d(TAG, "Synced ListenBrainz following: $username")
+                    }
+                }
+            }
+        } catch (e: Exception) {
+            Log.e(TAG, "Failed to sync ListenBrainz following", e)
+        }
+
+        Log.d(TAG, "Friend sync complete: $synced new friends")
+        synced
+    }
+
     // ---------- Refresh Activity ----------
 
     /**
@@ -153,6 +309,22 @@ class FriendsRepository @Inject constructor(
         } catch (e: Exception) {
             Log.w(TAG, "Failed to refresh activity for ${friend.username}", e)
         }
+    }
+
+    /**
+     * Refresh all friends' activity and update auto-pins.
+     * Called periodically (every 2 minutes) by MainViewModel.
+     */
+    suspend fun refreshAllActivity() = withContext(Dispatchers.IO) {
+        val allFriends = friendDao.getAllFriendsSync()
+        for (friend in allFriends) {
+            try {
+                refreshFriendActivity(friend)
+            } catch (e: Exception) {
+                Log.w(TAG, "Failed to refresh ${friend.username}", e)
+            }
+        }
+        updateAutoPins()
     }
 
     private suspend fun refreshLastFmActivity(friend: FriendEntity) {

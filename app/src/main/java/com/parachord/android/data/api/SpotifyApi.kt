@@ -113,6 +113,7 @@ interface SpotifyApi {
         @Header("Authorization") auth: String,
         @Query("limit") limit: Int = 50,
         @Query("offset") offset: Int = 0,
+        @Query("market") market: String = "from_token",
     ): SpSavedTracksResponse
 
     @GET("v1/me/albums")
@@ -120,6 +121,7 @@ interface SpotifyApi {
         @Header("Authorization") auth: String,
         @Query("limit") limit: Int = 50,
         @Query("offset") offset: Int = 0,
+        @Query("market") market: String = "from_token",
     ): SpSavedAlbumsResponse
 
     @GET("v1/me/following")
@@ -143,6 +145,7 @@ interface SpotifyApi {
         @Path("id") playlistId: String,
         @Query("limit") limit: Int = 100,
         @Query("offset") offset: Int = 0,
+        @Query("market") market: String = "from_token",
     ): SpPlaylistTracksResponse
 
     @GET("v1/playlists/{id}")
@@ -265,13 +268,13 @@ data class SpTrack(
     /** Whether the track is playable in the user's market. Only present when market param is set. */
     @SerialName("is_playable") val isPlayable: Boolean? = null,
 ) {
-    val artistName: String get() = artists.joinToString(", ") { it.name }
+    val artistName: String get() = artists.joinToString(", ") { it.name.orEmpty() }
 }
 
 @Serializable
 data class SpArtistRef(
     val id: String? = null,
-    val name: String,
+    val name: String? = null,
 )
 
 @Serializable
@@ -285,49 +288,49 @@ data class SpAlbumRef(
 
 @Serializable
 data class SpAlbum(
-    val id: String,
-    val name: String,
+    val id: String? = null,
+    val name: String? = null,
     val artists: List<SpArtistRef> = emptyList(),
     val images: List<SpImage>? = null,
     @SerialName("release_date") val releaseDate: String? = null,
     @SerialName("total_tracks") val totalTracks: Int? = null,
     @SerialName("album_type") val albumType: String? = null,
 ) {
-    val artistName: String get() = artists.joinToString(", ") { it.name }
+    val artistName: String get() = artists.joinToString(", ") { it.name.orEmpty() }
     val year: Int? get() = releaseDate?.take(4)?.toIntOrNull()
 }
 
 @Serializable
 data class SpSimpleTrack(
-    val id: String,
-    val name: String,
+    val id: String? = null,
+    val name: String? = null,
     val artists: List<SpArtistRef> = emptyList(),
     @SerialName("duration_ms") val durationMs: Long? = null,
     @SerialName("track_number") val trackNumber: Int? = null,
     @SerialName("preview_url") val previewUrl: String? = null,
 ) {
-    val artistName: String get() = artists.joinToString(", ") { it.name }
+    val artistName: String get() = artists.joinToString(", ") { it.name.orEmpty() }
 }
 
 @Serializable
 data class SpArtist(
-    val id: String,
-    val name: String,
+    val id: String? = null,
+    val name: String? = null,
     val genres: List<String> = emptyList(),
     val images: List<SpImage>? = null,
 )
 
 @Serializable
 data class SpImage(
-    val url: String,
+    val url: String? = null,
     val height: Int? = null,
     val width: Int? = null,
 )
 
 /** Get the best image URL (prefer medium ~300px, fall back to first available). */
 fun List<SpImage>?.bestImageUrl(): String? =
-    this?.sortedBy { it.width ?: 0 }?.firstOrNull { (it.width ?: 0) >= 300 }?.url
-        ?: this?.firstOrNull()?.url
+    this?.filter { it.url != null }?.sortedBy { it.width ?: 0 }?.firstOrNull { (it.width ?: 0) >= 300 }?.url
+        ?: this?.firstOrNull { it.url != null }?.url
 
 // --- Playback Control models ---
 
@@ -385,7 +388,7 @@ data class SpSavedTracksResponse(
 @Serializable
 data class SpSavedAlbum(
     @SerialName("added_at") val addedAt: String? = null,
-    val album: SpAlbum,
+    val album: SpAlbum? = null,
 )
 
 @Serializable
@@ -417,8 +420,8 @@ data class SpCursors(
 
 @Serializable
 data class SpPlaylistSimple(
-    val id: String,
-    val name: String,
+    val id: String? = null,
+    val name: String? = null,
     val description: String? = null,
     val images: List<SpImage>? = null,
     val owner: SpUser? = null,
@@ -457,8 +460,8 @@ data class SpPlaylistTracksResponse(
 
 @Serializable
 data class SpPlaylistFull(
-    val id: String,
-    val name: String,
+    val id: String? = null,
+    val name: String? = null,
     val description: String? = null,
     val images: List<SpImage>? = null,
     val owner: SpUser? = null,
@@ -470,6 +473,7 @@ data class SpPlaylistFull(
 data class SpUser(
     val id: String,
     @SerialName("display_name") val displayName: String? = null,
+    val country: String? = null,
 )
 
 // --- Library Write request models ---

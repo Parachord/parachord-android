@@ -16,4 +16,6 @@ data class PlaylistEntity(
     val snapshotId: String? = null,
     val lastModified: Long = 0L,
     val locallyModified: Boolean = false,
+    /** Display name of the playlist owner (from Spotify). */
+    val ownerName: String? = null,
 )

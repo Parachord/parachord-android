@@ -28,6 +28,7 @@ object AppModule {
         ignoreUnknownKeys = true
         isLenient = true
         encodeDefaults = true
+        coerceInputValues = true
     }
 
     @Provides

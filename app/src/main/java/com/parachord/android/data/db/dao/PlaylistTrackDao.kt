@@ -24,4 +24,8 @@ interface PlaylistTrackDao {
 
     @Query("DELETE FROM playlist_tracks WHERE playlistId = :playlistId AND position = :position")
     suspend fun deleteTrack(playlistId: String, position: Int)
+
+    /** Get the max position in a playlist (for appending new tracks). */
+    @Query("SELECT COALESCE(MAX(position), -1) FROM playlist_tracks WHERE playlistId = :playlistId")
+    suspend fun getMaxPosition(playlistId: String): Int
 }

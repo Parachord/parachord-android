@@ -4,7 +4,11 @@ import android.util.Log
 import androidx.lifecycle.SavedStateHandle
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
+import com.parachord.android.data.db.dao.ArtistDao
+import com.parachord.android.data.db.entity.ArtistEntity
+import com.parachord.android.data.db.entity.PlaylistEntity
 import com.parachord.android.data.db.entity.TrackEntity
+import com.parachord.android.data.repository.LibraryRepository
 import com.parachord.android.data.metadata.AlbumSearchResult
 import com.parachord.android.data.metadata.ArtistInfo
 import com.parachord.android.data.metadata.MetadataService
@@ -23,6 +27,7 @@ import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
+import java.util.UUID
 import javax.inject.Inject
 
 @HiltViewModel
@@ -32,6 +37,8 @@ class ArtistViewModel @Inject constructor(
     private val resolverManager: ResolverManager,
     private val resolverScoring: ResolverScoring,
     private val playbackController: PlaybackController,
+    private val artistDao: ArtistDao,
+    private val libraryRepository: LibraryRepository,
 ) : ViewModel() {
 
     private val artistName: String = savedStateHandle.get<String>("artistName") ?: ""
@@ -48,6 +55,11 @@ class ArtistViewModel @Inject constructor(
     private val _isLoading = MutableStateFlow(true)
     val isLoading: StateFlow<Boolean> = _isLoading.asStateFlow()
 
+    /** Whether this artist is saved in the user's collection. */
+    val isSaved: StateFlow<Boolean> = artistDao.getByName(artistName)
+        .map { it != null }
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), false)
+
     /** Cached resolved sources for tracks, keyed by "title|artist" */
     private val _trackSources = MutableStateFlow<Map<String, List<ResolvedSource>>>(emptyMap())
 
@@ -59,6 +71,26 @@ class ArtistViewModel @Inject constructor(
     init {
         if (artistName.isNotBlank()) {
             loadArtist()
+        }
+    }
+
+    /** Toggle saving/removing the artist from the collection. */
+    fun toggleSaved() {
+        viewModelScope.launch {
+            val existing = artistDao.getByName(artistName).stateIn(viewModelScope).value
+            if (existing != null) {
+                // Remove from collection
+                artistDao.delete(existing)
+            } else {
+                // Save to collection
+                val info = _artistInfo.value
+                artistDao.insert(ArtistEntity(
+                    id = "manual-${UUID.randomUUID()}",
+                    name = artistName,
+                    imageUrl = info?.imageUrl,
+                    genres = info?.tags?.joinToString(","),
+                ))
+            }
         }
     }
 
@@ -186,6 +218,55 @@ class ArtistViewModel @Inject constructor(
                 Log.e("ArtistVM", "Failed to play '${track.title}'", e)
             }
         }
+    }
+
+    /** Get all playlists for the playlist picker. */
+    val playlists: StateFlow<List<PlaylistEntity>> =
+        libraryRepository.getAllPlaylists()
+            .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), emptyList())
+
+    fun playNext(track: TrackEntity) {
+        playbackController.insertNext(listOf(track))
+    }
+
+    fun addToQueue(track: TrackEntity) {
+        playbackController.addToQueue(listOf(track))
+    }
+
+    fun addToPlaylist(playlist: PlaylistEntity, track: TrackEntity) {
+        viewModelScope.launch {
+            libraryRepository.addTracksToPlaylist(playlist.id, listOf(track))
+        }
+    }
+
+    fun addToCollection(track: TrackEntity) {
+        viewModelScope.launch {
+            libraryRepository.addTrack(track)
+        }
+    }
+
+    /**
+     * Build a TrackEntity from a TrackSearchResult for context menu actions.
+     * Uses cached resolved sources if available.
+     */
+    fun trackSearchResultToEntity(track: TrackSearchResult): TrackEntity {
+        val key = trackKey(track.title, track.artist)
+        val sources = _trackSources.value[key]
+        // Use first cached source — best effort without suspending
+        val best = sources?.firstOrNull()
+        return TrackEntity(
+            id = "artist-${track.title.hashCode()}-${track.artist.hashCode()}",
+            title = track.title,
+            artist = track.artist,
+            album = track.album,
+            duration = track.duration,
+            artworkUrl = track.artworkUrl,
+            sourceType = best?.sourceType,
+            sourceUrl = best?.url,
+            resolver = best?.resolver,
+            spotifyUri = best?.spotifyUri,
+            soundcloudId = best?.soundcloudId,
+        )
     }
 
     private fun resolveTracksInBackground(tracks: List<TrackSearchResult>) {

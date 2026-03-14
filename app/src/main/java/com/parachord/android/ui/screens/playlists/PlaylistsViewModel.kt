@@ -3,6 +3,7 @@ package com.parachord.android.ui.screens.playlists
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.parachord.android.data.db.entity.PlaylistEntity
+import com.parachord.android.data.metadata.ImageEnrichmentService
 import com.parachord.android.data.repository.LibraryRepository
 import dagger.hilt.android.lifecycle.HiltViewModel
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -16,7 +17,13 @@ import javax.inject.Inject
 @HiltViewModel
 class PlaylistsViewModel @Inject constructor(
     private val libraryRepository: LibraryRepository,
+    private val imageEnrichmentService: ImageEnrichmentService,
 ) : ViewModel() {
+
+    init {
+        // Backfill lastModified for playlists synced before we started tracking it.
+        viewModelScope.launch { libraryRepository.backfillPlaylistLastModified() }
+    }
 
     val playlists: StateFlow<List<PlaylistEntity>> = libraryRepository.getAllPlaylists()
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
@@ -39,11 +46,27 @@ class PlaylistsViewModel @Inject constructor(
         when (sort) {
             PlaylistSort.RECENT -> filtered.sortedByDescending { it.createdAt }
             PlaylistSort.CREATED -> filtered.sortedBy { it.createdAt }
-            PlaylistSort.MODIFIED -> filtered.sortedByDescending { it.updatedAt }
+            PlaylistSort.MODIFIED -> filtered.sortedByDescending {
+                if (it.lastModified > 0L) it.lastModified else it.updatedAt
+            }
             PlaylistSort.ALPHA_ASC -> filtered.sortedBy { it.name.lowercase() }
             PlaylistSort.ALPHA_DESC -> filtered.sortedByDescending { it.name.lowercase() }
         }
     }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
+
+    /** Session-scoped set to avoid re-triggering enrichment for the same playlist. */
+    private val enrichedPlaylists = mutableSetOf<String>()
+
+    /**
+     * Enrich a playlist's artwork if it has none.
+     * Generates a 2x2 mosaic from the playlist's track artwork.
+     */
+    fun enrichPlaylistArtIfNeeded(playlistId: String) {
+        if (!enrichedPlaylists.add(playlistId)) return
+        viewModelScope.launch {
+            imageEnrichmentService.enrichPlaylistArt(playlistId)
+        }
+    }
 
     fun deletePlaylist(playlist: PlaylistEntity) {
         viewModelScope.launch { libraryRepository.deletePlaylist(playlist) }

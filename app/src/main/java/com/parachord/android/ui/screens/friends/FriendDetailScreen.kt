@@ -25,6 +25,8 @@ import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
+import androidx.compose.material.icons.filled.PushPin
+import androidx.compose.material.icons.outlined.PushPin
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.FilterChip
 import androidx.compose.material3.FilterChipDefaults
@@ -123,6 +125,18 @@ fun FriendDetailScreen(
             navigationIcon = {
                 IconButton(onClick = onBack) {
                     Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Back")
+                }
+            },
+            actions = {
+                if (currentFriend != null) {
+                    IconButton(onClick = { viewModel.togglePin() }) {
+                        Icon(
+                            imageVector = if (currentFriend.pinnedToSidebar) Icons.Filled.PushPin else Icons.Outlined.PushPin,
+                            contentDescription = if (currentFriend.pinnedToSidebar) "Unpin from sidebar" else "Pin to sidebar",
+                            tint = if (currentFriend.pinnedToSidebar) MaterialTheme.colorScheme.primary
+                                else MaterialTheme.colorScheme.onSurfaceVariant,
+                        )
+                    }
                 }
             },
             windowInsets = WindowInsets(0),

@@ -59,6 +59,13 @@ class SettingsViewModel @Inject constructor(
     val disabledMetaProviders: StateFlow<Set<String>> = settingsStore.getDisabledMetaProvidersFlow()
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), emptySet())
 
+    val resolverOrder: StateFlow<List<String>> = settingsStore.getResolverOrderFlow()
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), emptyList())
+
+    fun setResolverOrder(order: List<String>) {
+        viewModelScope.launch { settingsStore.setResolverOrder(order) }
+    }
+
     val chatGptConnected: StateFlow<Boolean> = settingsStore.getAiProviderApiKeyFlow("chatgpt")
         .map { it != null }
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), false)

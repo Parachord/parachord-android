@@ -13,6 +13,9 @@ interface FriendDao {
     @Query("SELECT * FROM friends ORDER BY addedAt DESC")
     fun getAllFriends(): Flow<List<FriendEntity>>
 
+    @Query("SELECT * FROM friends ORDER BY addedAt DESC")
+    suspend fun getAllFriendsSync(): List<FriendEntity>
+
     @Query("SELECT * FROM friends WHERE id = :id")
     suspend fun getFriendById(id: String): FriendEntity?
 
@@ -21,6 +24,12 @@ interface FriendDao {
 
     @Query("DELETE FROM friends WHERE id = :id")
     suspend fun delete(id: String)
+
+    @Query("SELECT * FROM friends WHERE pinnedToSidebar = 1 ORDER BY cachedTrackTimestamp DESC")
+    fun getPinnedFriends(): Flow<List<FriendEntity>>
+
+    @Query("UPDATE friends SET pinnedToSidebar = :pinned, autoPinned = :auto WHERE id = :id")
+    suspend fun setPinned(id: String, pinned: Boolean, auto: Boolean = false)
 
     @Query(
         """UPDATE friends SET

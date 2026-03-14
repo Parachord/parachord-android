@@ -44,12 +44,16 @@ import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.parachord.android.ui.components.AlbumArtCard
 import com.parachord.android.ui.components.ShimmerTrackRow
+import com.parachord.android.ui.components.TrackContextInfo
+import com.parachord.android.ui.components.TrackContextMenuHost
 import com.parachord.android.ui.components.TrackRow
+import com.parachord.android.ui.components.rememberTrackContextMenuState
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun AlbumScreen(
     onBack: () -> Unit,
+    onNavigateToArtist: (String) -> Unit = {},
     modifier: Modifier = Modifier,
     viewModel: AlbumViewModel = hiltViewModel(),
 ) {
@@ -57,6 +61,21 @@ fun AlbumScreen(
     val isLoading by viewModel.isLoading.collectAsStateWithLifecycle()
     val isResolving by viewModel.isResolving.collectAsStateWithLifecycle()
     val trackResolvers by viewModel.trackResolvers.collectAsStateWithLifecycle()
+    val playlists by viewModel.playlists.collectAsStateWithLifecycle()
+    val contextMenuState = rememberTrackContextMenuState()
+
+    // Context menu host
+    TrackContextMenuHost(
+        state = contextMenuState,
+        playlists = playlists,
+        onPlayNext = { viewModel.playNext(it) },
+        onAddToQueue = { viewModel.addToQueue(it) },
+        onAddToPlaylist = { playlist, track -> viewModel.addToPlaylist(playlist, track) },
+        onNavigateToArtist = onNavigateToArtist,
+        onToggleCollection = { track, isInCollection ->
+            if (!isInCollection) viewModel.addToCollection(track)
+        },
+    )
 
     Column(modifier = modifier.fillMaxSize()) {
         TopAppBar(
@@ -171,6 +190,21 @@ fun AlbumScreen(
                             trackNumber = index + 1,
                             resolvers = trackResolvers["${track.title.lowercase().trim()}|${track.artist.lowercase().trim()}"]?.ifEmpty { null },
                             onClick = { viewModel.playTrack(index) },
+                            onLongClick = {
+                                val entity = viewModel.resolvedTrackEntity(index)
+                                if (entity != null) {
+                                    contextMenuState.show(
+                                        TrackContextInfo(
+                                            title = track.title,
+                                            artist = track.artist,
+                                            album = detail.title,
+                                            artworkUrl = track.artworkUrl ?: detail.artworkUrl,
+                                            duration = track.duration,
+                                        ),
+                                        entity,
+                                    )
+                                }
+                            },
                         )
                     }
 

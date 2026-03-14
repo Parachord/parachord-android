@@ -26,5 +26,6 @@ enum class FriendSort(val label: String) {
     ALPHA_ASC("A-Z"),
     ALPHA_DESC("Z-A"),
     RECENT("Recently Added"),
+    ACTIVE("Recently Active"),
     ON_AIR("On Air Now"),
 }

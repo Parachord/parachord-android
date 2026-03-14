@@ -30,6 +30,7 @@ class AlbumViewModel @Inject constructor(
     private val resolverManager: ResolverManager,
     private val resolverScoring: ResolverScoring,
     private val playbackController: PlaybackController,
+    private val libraryRepository: com.parachord.android.data.repository.LibraryRepository,
 ) : ViewModel() {
 
     companion object {
@@ -147,6 +148,61 @@ class AlbumViewModel @Inject constructor(
                 Log.e(TAG, "Playback failed", e)
                 _isResolving.value = false
             }
+        }
+    }
+
+    /** Get all playlists for the playlist picker. */
+    val playlists: StateFlow<List<com.parachord.android.data.db.entity.PlaylistEntity>> =
+        libraryRepository.getAllPlaylists()
+            .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), emptyList())
+
+    /**
+     * Build a resolved TrackEntity from a track at [index] for context menu actions.
+     * Uses cached sources if available.
+     */
+    /**
+     * Build a TrackEntity from a track at [index] for context menu actions.
+     * Uses cached sources if available. Not suspend — uses synchronous source cache only.
+     */
+    fun resolvedTrackEntity(index: Int): TrackEntity? {
+        val detail = _albumDetail.value ?: return null
+        val track = detail.tracks.getOrNull(index) ?: return null
+        val key = "${track.title.lowercase().trim()}|${track.artist.lowercase().trim()}"
+        val sources = _trackSources.value[key]
+        // Build entity without waiting for resolution — best effort from cache
+        val best = sources?.firstOrNull()
+        return TrackEntity(
+            id = "album-${track.title.hashCode()}-${track.artist.hashCode()}",
+            title = track.title,
+            artist = track.artist,
+            album = detail.title,
+            duration = track.duration,
+            artworkUrl = track.artworkUrl ?: detail.artworkUrl,
+            sourceType = best?.sourceType,
+            sourceUrl = best?.url,
+            resolver = best?.resolver,
+            spotifyUri = best?.spotifyUri,
+            soundcloudId = best?.soundcloudId,
+        )
+    }
+
+    fun playNext(track: TrackEntity) {
+        playbackController.insertNext(listOf(track))
+    }
+
+    fun addToQueue(track: TrackEntity) {
+        playbackController.addToQueue(listOf(track))
+    }
+
+    fun addToPlaylist(playlist: com.parachord.android.data.db.entity.PlaylistEntity, track: TrackEntity) {
+        viewModelScope.launch {
+            libraryRepository.addTracksToPlaylist(playlist.id, listOf(track))
+        }
+    }
+
+    fun addToCollection(track: TrackEntity) {
+        viewModelScope.launch {
+            libraryRepository.addTrack(track)
         }
     }
 

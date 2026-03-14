@@ -24,6 +24,8 @@ import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.People
 import androidx.compose.material.icons.filled.PersonAdd
+import androidx.compose.material.icons.filled.PushPin
+import androidx.compose.material.icons.outlined.PushPin
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.ExperimentalMaterial3Api
@@ -40,6 +42,9 @@ import androidx.compose.material3.rememberSwipeToDismissBoxState
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -69,6 +74,28 @@ fun FriendsScreen(
     val showAddDialog by viewModel.showAddDialog.collectAsState()
     val addFriendInput by viewModel.addFriendInput.collectAsState()
     val addFriendState by viewModel.addFriendState.collectAsState()
+    var pendingDeleteFriend by remember { mutableStateOf<FriendEntity?>(null) }
+
+    pendingDeleteFriend?.let { friend ->
+        AlertDialog(
+            onDismissRequest = { pendingDeleteFriend = null },
+            title = { Text("Remove Friend") },
+            text = { Text("Are you sure you want to remove ${friend.displayName}?") },
+            confirmButton = {
+                TextButton(onClick = {
+                    viewModel.removeFriend(friend.id)
+                    pendingDeleteFriend = null
+                }) {
+                    Text("Remove", color = MaterialTheme.colorScheme.error)
+                }
+            },
+            dismissButton = {
+                TextButton(onClick = { pendingDeleteFriend = null }) {
+                    Text("Cancel")
+                }
+            },
+        )
+    }
 
     Column(modifier = modifier.fillMaxSize()) {
         TopAppBar(
@@ -127,7 +154,8 @@ fun FriendsScreen(
                     FriendRow(
                         friend = friend,
                         onClick = { onNavigateToFriend(friend.id) },
-                        onDelete = { viewModel.removeFriend(friend.id) },
+                        onDelete = { pendingDeleteFriend = friend },
+                        onTogglePin = { viewModel.togglePin(friend) },
                     )
                 }
             }
@@ -152,15 +180,14 @@ private fun FriendRow(
     friend: FriendEntity,
     onClick: () -> Unit,
     onDelete: () -> Unit,
+    onTogglePin: () -> Unit = {},
 ) {
     val dismissState = rememberSwipeToDismissBoxState(
         confirmValueChange = { value ->
             if (value == SwipeToDismissBoxValue.EndToStart) {
                 onDelete()
-                true
-            } else {
-                false
             }
+            false // always snap back; dialog handles the delete
         },
     )
 
@@ -234,16 +261,54 @@ private fun FriendRow(
                         overflow = TextOverflow.Ellipsis,
                     )
                 } else if (friend.cachedTrackName != null) {
-                    Text(
-                        text = "${friend.cachedTrackArtist ?: ""} — ${friend.cachedTrackName}",
-                        style = MaterialTheme.typography.bodySmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                        maxLines = 1,
-                        overflow = TextOverflow.Ellipsis,
-                    )
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Text(
+                            text = "${friend.cachedTrackArtist ?: ""} — ${friend.cachedTrackName}",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis,
+                            modifier = Modifier.weight(1f, fill = false),
+                        )
+                        if (friend.cachedTrackTimestamp > 0) {
+                            Spacer(modifier = Modifier.width(6.dp))
+                            Text(
+                                text = formatTimeAgo(friend.cachedTrackTimestamp),
+                                style = MaterialTheme.typography.labelSmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.6f),
+                            )
+                        }
+                    }
                 }
             }
+
+            // Pin to sidebar toggle
+            IconButton(
+                onClick = onTogglePin,
+                modifier = Modifier.size(36.dp),
+            ) {
+                Icon(
+                    imageVector = if (friend.pinnedToSidebar) Icons.Filled.PushPin else Icons.Outlined.PushPin,
+                    contentDescription = if (friend.pinnedToSidebar) "Unpin from sidebar" else "Pin to sidebar",
+                    tint = if (friend.pinnedToSidebar) MaterialTheme.colorScheme.primary
+                        else MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.5f),
+                    modifier = Modifier.size(18.dp),
+                )
+            }
         }
+    }
+}
+
+private fun formatTimeAgo(timestampSeconds: Long): String {
+    val now = System.currentTimeMillis() / 1000
+    val diff = now - timestampSeconds
+    return when {
+        diff < 60 -> "Just now"
+        diff < 3600 -> "${diff / 60}m ago"
+        diff < 86400 -> "${diff / 3600}h ago"
+        diff < 172800 -> "Yesterday"
+        diff < 604800 -> "${diff / 86400}d ago"
+        else -> "${diff / 604800}w ago"
     }
 }
 

@@ -29,6 +29,8 @@ import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
+import androidx.compose.material.icons.filled.Star
+import androidx.compose.material.icons.outlined.StarOutline
 import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.items as lazyItems
 import androidx.compose.material3.AssistChip
@@ -63,12 +65,16 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.em
 import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import com.parachord.android.data.db.entity.TrackEntity
 import com.parachord.android.ui.components.AlbumArtCard
 import com.parachord.android.ui.components.FaceAwareImage
 import com.parachord.android.ui.components.SectionHeader
 import com.parachord.android.ui.components.ShimmerTrackRow
 import com.parachord.android.ui.components.SwipeableTabLayout
+import com.parachord.android.ui.components.TrackContextInfo
+import com.parachord.android.ui.components.TrackContextMenuHost
 import com.parachord.android.ui.components.TrackRow
+import com.parachord.android.ui.components.rememberTrackContextMenuState
 import com.parachord.android.data.metadata.AlbumSearchResult
 import com.parachord.android.data.metadata.SimilarArtist
 import com.parachord.android.data.metadata.TrackSearchResult
@@ -87,6 +93,23 @@ fun ArtistScreen(
     val albums by viewModel.albums.collectAsStateWithLifecycle()
     val isLoading by viewModel.isLoading.collectAsStateWithLifecycle()
     val trackResolvers by viewModel.trackResolvers.collectAsStateWithLifecycle()
+    val isSaved by viewModel.isSaved.collectAsStateWithLifecycle()
+    val playlists by viewModel.playlists.collectAsStateWithLifecycle()
+    val contextMenuState = rememberTrackContextMenuState()
+
+    // Context menu host
+    TrackContextMenuHost(
+        state = contextMenuState,
+        playlists = playlists,
+        onPlayNext = { viewModel.playNext(it) },
+        onAddToQueue = { viewModel.addToQueue(it) },
+        onAddToPlaylist = { playlist, track -> viewModel.addToPlaylist(playlist, track) },
+        onNavigateToArtist = onNavigateToArtist,
+        onNavigateToAlbum = onNavigateToAlbum,
+        onToggleCollection = { track, isInCollection ->
+            if (!isInCollection) viewModel.addToCollection(track)
+        },
+    )
 
     val density = LocalDensity.current
 
@@ -143,6 +166,15 @@ fun ArtistScreen(
             navigationIcon = {
                 IconButton(onClick = onBack) {
                     Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Back")
+                }
+            },
+            actions = {
+                IconButton(onClick = { viewModel.toggleSaved() }) {
+                    Icon(
+                        imageVector = if (isSaved) Icons.Filled.Star else Icons.Outlined.StarOutline,
+                        contentDescription = if (isSaved) "Remove from collection" else "Save to collection",
+                        tint = if (isSaved) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
                 }
             },
             windowInsets = WindowInsets(0),
@@ -220,6 +252,19 @@ fun ArtistScreen(
                             onNavigateToAlbum = onNavigateToAlbum,
                             onPlayTrack = viewModel::playTrack,
                             trackResolvers = trackResolvers,
+                            onTrackLongClick = { track ->
+                                val entity = viewModel.trackSearchResultToEntity(track)
+                                contextMenuState.show(
+                                    TrackContextInfo(
+                                        title = track.title,
+                                        artist = track.artist,
+                                        album = track.album,
+                                        artworkUrl = track.artworkUrl,
+                                        duration = track.duration,
+                                    ),
+                                    entity,
+                                )
+                            },
                         )
                         1 -> BiographyTab(
                             bio = artistInfo?.bio,
@@ -260,6 +305,7 @@ private fun DiscographyTab(
     onNavigateToAlbum: (albumTitle: String, artistName: String) -> Unit,
     onPlayTrack: (TrackSearchResult) -> Unit = {},
     trackResolvers: Map<String, List<String>> = emptyMap(),
+    onTrackLongClick: (TrackSearchResult) -> Unit = {},
 ) {
     var selectedFilter by remember { mutableStateOf("all") }
 
@@ -364,6 +410,7 @@ private fun DiscographyTab(
                     artworkUrl = track.artworkUrl,
                     resolvers = trackResolvers[trackKey(track.title, track.artist)]?.ifEmpty { null },
                     onClick = { onPlayTrack(track) },
+                    onLongClick = { onTrackLongClick(track) },
                 )
             }
         }

@@ -70,6 +70,12 @@ class FriendsViewModel @Inject constructor(
         }
     }
 
+    fun togglePin(friend: FriendEntity) {
+        viewModelScope.launch {
+            friendsRepository.pinFriend(friend.id, !friend.pinnedToSidebar)
+        }
+    }
+
     fun refreshAll() {
         viewModelScope.launch {
             friends.value.forEach { friend ->
@@ -79,7 +85,10 @@ class FriendsViewModel @Inject constructor(
     }
 
     init {
-        // Auto-refresh friend activity on start
-        refreshAll()
+        // Sync friends from Last.fm/ListenBrainz, then refresh activity
+        viewModelScope.launch {
+            friendsRepository.syncFriendsFromServices()
+            refreshAll()
+        }
     }
 }

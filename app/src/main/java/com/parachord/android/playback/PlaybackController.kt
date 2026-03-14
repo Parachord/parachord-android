@@ -11,6 +11,7 @@ import androidx.media3.session.SessionToken
 import com.google.common.util.concurrent.ListenableFuture
 import com.google.common.util.concurrent.MoreExecutors
 import com.parachord.android.data.db.entity.TrackEntity
+import com.parachord.android.data.metadata.ImageEnrichmentService
 import com.parachord.android.playback.handlers.PlaybackAction
 import dagger.hilt.android.qualifiers.ApplicationContext
 import kotlinx.coroutines.CoroutineScope
@@ -42,6 +43,7 @@ class PlaybackController @Inject constructor(
     private val queueManager: QueueManager,
     private val queuePersistence: QueuePersistence,
     private val scrobbleManager: ScrobbleManager,
+    private val imageEnrichment: ImageEnrichmentService,
 ) {
     companion object {
         private const val TAG = "PlaybackController"
@@ -55,6 +57,12 @@ class PlaybackController @Inject constructor(
 
     /** Whether playback is currently managed externally (e.g. Spotify Connect). */
     private var isExternalPlayback = false
+
+    /** Listener called when a track naturally completes (auto-advance, not user skip). */
+    var onTrackEndedListener: (() -> Unit)? = null
+
+    /** Listener called when the user manually changes playback (skip, play different track). */
+    var onUserPlaybackActionListener: (() -> Unit)? = null
 
     fun connect() {
         if (controllerFuture != null) return
@@ -98,8 +106,10 @@ class PlaybackController @Inject constructor(
     }
 
     /** Play a single track immediately (clears the queue). */
-    fun playTrack(track: TrackEntity) {
+    fun playTrack(track: TrackEntity, context: PlaybackContext? = null) {
+        onUserPlaybackActionListener?.invoke()
         queueManager.clearQueue()
+        if (context != null) queueManager.setContext(context)
         scope.launch { playTrackInternal(track) }
     }
 
@@ -113,6 +123,7 @@ class PlaybackController @Inject constructor(
         context: PlaybackContext? = null,
         shuffle: Boolean = queueManager.shuffleEnabled,
     ) {
+        onUserPlaybackActionListener?.invoke()
         val track = queueManager.setQueue(tracks, startIndex, context, shuffle) ?: return
         scope.launch { playTrackInternal(track) }
     }
@@ -130,6 +141,15 @@ class PlaybackController @Inject constructor(
     }
 
     fun skipNext() {
+        skipNextInternal(userInitiated = true)
+    }
+
+    private fun skipNextInternal(userInitiated: Boolean) {
+        if (userInitiated) {
+            onUserPlaybackActionListener?.invoke()
+        } else {
+            onTrackEndedListener?.invoke()
+        }
         val currentTrack = stateHolder.state.value.currentTrack
         val next = queueManager.skipNext(currentTrack)
         if (next == null) {
@@ -149,6 +169,7 @@ class PlaybackController @Inject constructor(
     }
 
     fun skipPrevious() {
+        onUserPlaybackActionListener?.invoke()
         if (isExternalPlayback) {
             val position = router.getSpotifyHandler().getPosition()
             if (position > 3000) {
@@ -296,6 +317,9 @@ class PlaybackController @Inject constructor(
                 startSpotifyStatePolling()
             }
         }
+
+        // If the track has no artwork, try to fetch it in the background
+        enrichArtworkIfMissing(track)
     }
 
     /** Fallback: play directly via ExoPlayer when no handler matches. */
@@ -321,6 +345,7 @@ class PlaybackController @Inject constructor(
                 shuffleEnabled = snapshot.shuffleEnabled,
             )
         }
+        enrichArtworkIfMissing(track)
     }
 
     /** Push current queue snapshot to PlaybackState without changing playback fields. */
@@ -353,7 +378,7 @@ class PlaybackController @Inject constructor(
                 if (!isExternalPlayback) {
                     syncState()
                     if (playbackState == Player.STATE_ENDED) {
-                        skipNext()
+                        skipNextInternal(userInitiated = false)
                     }
                 }
             }
@@ -423,7 +448,7 @@ class PlaybackController @Inject constructor(
                 // Auto-advance: detect when our track is done via multiple signals
                 // (natural end, Spotify autoplay to different track, or item cleared)
                 if (spotify.isOurTrackDone()) {
-                    skipNext()
+                    skipNextInternal(userInitiated = false)
                     break
                 }
 
@@ -434,6 +459,29 @@ class PlaybackController @Inject constructor(
 
     private fun stopSpotifyStatePolling() {
         spotifyStateJob?.cancel()
+    }
+
+    /**
+     * If the currently playing track has no artwork, try to fetch it from
+     * metadata providers in the background. Updates both the DB and the
+     * live PlaybackState so the UI refreshes without a restart.
+     */
+    private fun enrichArtworkIfMissing(track: TrackEntity) {
+        if (!track.artworkUrl.isNullOrBlank()) return
+        scope.launch(Dispatchers.IO) {
+            val url = imageEnrichment.enrichTrackArt(
+                trackId = track.id,
+                trackTitle = track.title,
+                artistName = track.artist,
+                albumTitle = track.album,
+            ) ?: return@launch
+            // Update live state if this track is still playing
+            stateHolder.update {
+                if (currentTrack?.id == track.id) {
+                    copy(currentTrack = currentTrack?.copy(artworkUrl = url))
+                } else this
+            }
+        }
     }
 }
 

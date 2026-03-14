@@ -141,6 +141,15 @@ interface LastFmApi {
         @Query("api_key") apiKey: String,
         @Query("format") format: String = "json",
     ): LfmUserRecentTracksResponse
+
+    @GET(".")
+    suspend fun getUserFriends(
+        @Query("method") method: String = "user.getfriends",
+        @Query("user") user: String,
+        @Query("limit") limit: Int = 200,
+        @Query("api_key") apiKey: String,
+        @Query("format") format: String = "json",
+    ): LfmUserFriendsResponse
 }
 
 // --- Response models ---
@@ -516,6 +525,18 @@ data class LfmUserInfo(
     val image: List<LfmImage> = emptyList(),
     val url: String? = null,
     val playcount: String? = null,
+)
+
+// --- User friends ---
+
+@Serializable
+data class LfmUserFriendsResponse(
+    val friends: LfmUserFriends? = null,
+)
+
+@Serializable
+data class LfmUserFriends(
+    val user: List<LfmUserInfo> = emptyList(),
 )
 
 object LfmAlbumTrackListSerializer : KSerializer<LfmAlbumTrackList> {

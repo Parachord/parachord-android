@@ -136,7 +136,7 @@ private val builtInPlugins = listOf(
         id = "local-files",
         name = "Local Files",
         resolverId = "localfiles",
-        bgColor = Color(0xFF6B7280),
+        bgColor = Color(0xFFA855F7), // Match ResolverIconColors.localfiles
         category = PluginCategory.RESOLVER,
         capabilities = listOf("Resolve", "Browse", "Stream"),
         description = "Play music stored on your device",
@@ -235,6 +235,7 @@ fun SettingsScreen(
     val libreFmAuthError by viewModel.libreFmAuthError.collectAsStateWithLifecycle()
     val listenBrainzAuthError by viewModel.listenBrainzAuthError.collectAsStateWithLifecycle()
     val disabledMetaProviders by viewModel.disabledMetaProviders.collectAsStateWithLifecycle()
+    val resolverOrder by viewModel.resolverOrder.collectAsStateWithLifecycle()
     val chatGptConnected by viewModel.chatGptConnected.collectAsStateWithLifecycle()
     val claudeConnected by viewModel.claudeConnected.collectAsStateWithLifecycle()
     val geminiConnected by viewModel.geminiConnected.collectAsStateWithLifecycle()
@@ -263,6 +264,8 @@ fun SettingsScreen(
                     listenBrainzConnected = listenBrainzConnected,
                     libreFmConnected = libreFmConnected,
                     soundCloudConnected = soundCloudConnected,
+                    resolverOrder = resolverOrder,
+                    onResolverOrderChanged = { viewModel.setResolverOrder(it) },
                     onSpotifyToggle = {
                         if (spotifyConnected) viewModel.disconnectSpotify()
                         else viewModel.connectSpotify(BuildConfig.SPOTIFY_CLIENT_ID)
@@ -325,6 +328,8 @@ private fun PlugInsTab(
     soundCloudConnected: Boolean,
     onSpotifyToggle: () -> Unit,
     onLastFmToggle: () -> Unit,
+    resolverOrder: List<String> = emptyList(),
+    onResolverOrderChanged: (List<String>) -> Unit = {},
     soundCloudCredentialsSaved: Boolean = false,
     onSoundCloudSaveCredentials: (String, String) -> Unit = { _, _ -> },
     onSoundCloudConnect: () -> Unit = {},
@@ -350,55 +355,117 @@ private fun PlugInsTab(
 ) {
     var selectedPlugin by remember { mutableStateOf<PluginInfo?>(null) }
 
-    // Resolver order state (drag-to-reorder)
     val resolverPlugins = builtInPlugins.filter { it.category == PluginCategory.RESOLVER }
-    val resolverOrder = remember { mutableStateListOf(*resolverPlugins.map { it.id }.toTypedArray()) }
     val metaServices = builtInPlugins.filter { it.category == PluginCategory.META_SERVICE }
 
-    fun isConnected(pluginId: String): Boolean = when (pluginId) {
-        "spotify" -> spotifyConnected
-        "soundcloud" -> soundCloudConnected
-        "lastfm" -> lastFmConnected
-        "listenbrainz" -> listenBrainzConnected
-        "librefm" -> libreFmConnected
-        "local-files" -> true // always available
-        // Discogs and Wikipedia are always available (no auth) — enabled by default
-        "discogs" -> pluginId !in disabledMetaProviders
-        "wikipedia" -> pluginId !in disabledMetaProviders
-        "chatgpt" -> chatGptConnected
-        "claude" -> claudeConnected
-        "gemini" -> geminiConnected
-        else -> false
+    // Lookup can be by id ("local-files") or resolverId ("localfiles")
+    fun findPlugin(key: String): PluginInfo? =
+        builtInPlugins.find { it.id == key || it.resolverId == key }
+
+    fun isConnected(key: String): Boolean {
+        val plugin = findPlugin(key)
+        val id = plugin?.id ?: key
+        return when (id) {
+            "spotify" -> spotifyConnected
+            "soundcloud" -> soundCloudConnected
+            "lastfm" -> lastFmConnected
+            "listenbrainz" -> listenBrainzConnected
+            "librefm" -> libreFmConnected
+            "local-files" -> true // always available
+            // Discogs and Wikipedia are always available (no auth) — enabled by default
+            "discogs" -> id !in disabledMetaProviders
+            "wikipedia" -> id !in disabledMetaProviders
+            "chatgpt" -> chatGptConnected
+            "claude" -> claudeConnected
+            "gemini" -> geminiConnected
+            else -> false
+        }
     }
 
-    fun findPlugin(id: String): PluginInfo? = builtInPlugins.find { it.id == id }
+    // Split resolvers into enabled (connected) and disabled (not connected).
+    // Enabled resolvers are shown in drag-to-reorder with priority numbers.
+    // Disabled resolvers are shown grayed out below.
+    // resolverOrder uses resolverId values (e.g. "localfiles", "spotify")
+    val enabledResolverIds = resolverOrder.filter { id ->
+        val plugin = findPlugin(id)
+        plugin != null && plugin.category == PluginCategory.RESOLVER && isConnected(id)
+    }
+    val disabledResolverPlugins = resolverPlugins.filter { !isConnected(it.resolverId) }
+
+    // Mutable state for drag-to-reorder (synced from persisted order)
+    val orderedEnabled = remember(enabledResolverIds) {
+        mutableStateListOf(*enabledResolverIds.toTypedArray())
+    }
 
     LazyColumn(
         modifier = Modifier.fillMaxSize(),
         verticalArrangement = Arrangement.spacedBy(0.dp),
     ) {
-        // Content Resolvers section
+        // Content Resolvers section — enabled (draggable)
         item { SectionHeader("Content Resolvers") }
-        item {
-            Text(
-                text = "Drag to reorder playback priority",
-                style = MaterialTheme.typography.bodySmall,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-                modifier = Modifier.padding(horizontal = 16.dp, vertical = 0.dp),
-            )
-            Spacer(modifier = Modifier.height(12.dp))
+        if (orderedEnabled.isNotEmpty()) {
+            item {
+                Text(
+                    text = "Drag to reorder playback priority",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    modifier = Modifier.padding(horizontal = 16.dp, vertical = 0.dp),
+                )
+                Spacer(modifier = Modifier.height(12.dp))
+            }
+            item {
+                DraggableResolverRow(
+                    resolverOrder = orderedEnabled,
+                    findPlugin = ::findPlugin,
+                    isConnected = ::isConnected,
+                    onReorder = { from, to ->
+                        val item = orderedEnabled.removeAt(from)
+                        orderedEnabled.add(to, item)
+                        // Persist: enabled resolvers in new order + disabled resolvers appended
+                        val newOrder = orderedEnabled.toList() +
+                            resolverOrder.filter { it !in orderedEnabled }
+                        onResolverOrderChanged(newOrder)
+                    },
+                    onPluginClick = { id -> findPlugin(id)?.let { selectedPlugin = it } },
+                )
+            }
         }
-        item {
-            DraggableResolverRow(
-                resolverOrder = resolverOrder,
-                findPlugin = ::findPlugin,
-                isConnected = ::isConnected,
-                onReorder = { from, to ->
-                    val item = resolverOrder.removeAt(from)
-                    resolverOrder.add(to, item)
-                },
-                onPluginClick = { id -> findPlugin(id)?.let { selectedPlugin = it } },
-            )
+
+        // Disabled resolvers — grayed out, not draggable
+        if (disabledResolverPlugins.isNotEmpty()) {
+            item {
+                Spacer(modifier = Modifier.height(16.dp))
+                Text(
+                    text = "Not connected",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    modifier = Modifier.padding(horizontal = 16.dp, vertical = 0.dp),
+                )
+                Spacer(modifier = Modifier.height(12.dp))
+            }
+            item {
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(horizontal = 16.dp),
+                    horizontalArrangement = Arrangement.spacedBy(12.dp),
+                ) {
+                    disabledResolverPlugins.forEach { plugin ->
+                        PluginTile(
+                            plugin = plugin,
+                            isConnected = false,
+                            priorityNumber = null,
+                            onClick = { selectedPlugin = plugin },
+                            modifier = Modifier.weight(1f),
+                            grayed = true,
+                        )
+                    }
+                    // Fill remaining space
+                    repeat(3 - disabledResolverPlugins.size) {
+                        Spacer(modifier = Modifier.weight(1f))
+                    }
+                }
+            }
         }
 
         item { Spacer(modifier = Modifier.height(24.dp)) }
@@ -426,12 +493,14 @@ private fun PlugInsTab(
                     horizontalArrangement = Arrangement.spacedBy(12.dp),
                 ) {
                     rowPlugins.forEach { plugin ->
+                        val connected = isConnected(plugin.id)
                         PluginTile(
                             plugin = plugin,
-                            isConnected = isConnected(plugin.id),
+                            isConnected = connected,
                             priorityNumber = null,
                             onClick = { selectedPlugin = plugin },
                             modifier = Modifier.weight(1f),
+                            grayed = !connected,
                         )
                     }
                     // Fill remaining space in last row
@@ -583,7 +652,10 @@ private fun PluginTile(
     priorityNumber: Int? = null,
     onClick: () -> Unit,
     modifier: Modifier = Modifier,
+    grayed: Boolean = false,
 ) {
+    val tileAlpha = if (grayed) 0.35f else 1f
+
     Column(
         modifier = modifier,
         horizontalAlignment = Alignment.CenterHorizontally,
@@ -593,7 +665,7 @@ private fun PluginTile(
                 .fillMaxWidth()
                 .aspectRatio(1f)
                 .clip(RoundedCornerShape(16.dp))
-                .background(plugin.bgColor)
+                .background(plugin.bgColor.copy(alpha = tileAlpha))
                 .clickable(onClick = onClick),
             contentAlignment = Alignment.Center,
         ) {
@@ -654,6 +726,11 @@ private fun PluginTile(
             fontWeight = FontWeight.Medium,
             maxLines = 1,
             overflow = TextOverflow.Ellipsis,
+            color = if (grayed) {
+                MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.5f)
+            } else {
+                MaterialTheme.colorScheme.onSurface
+            },
         )
     }
 }

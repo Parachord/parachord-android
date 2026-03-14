@@ -5,6 +5,7 @@ import androidx.datastore.preferences.core.Preferences
 import androidx.datastore.preferences.core.booleanPreferencesKey
 import androidx.datastore.preferences.core.edit
 import androidx.datastore.preferences.core.stringPreferencesKey
+import androidx.datastore.preferences.core.stringSetPreferencesKey
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.map
@@ -56,6 +57,8 @@ class SettingsStore @Inject constructor(
         val SYNC_SELECTED_PLAYLIST_IDS = stringPreferencesKey("sync_selected_playlist_ids")
         val SYNC_LAST_COMPLETED_AT = stringPreferencesKey("sync_last_completed_at")
         val SYNC_PUSH_LOCAL_PLAYLISTS = booleanPreferencesKey("sync_push_local_playlists")
+        val SYNC_DATA_VERSION = stringPreferencesKey("sync_data_version")
+        val DELETED_FRIEND_KEYS = stringSetPreferencesKey("deleted_friend_keys")
 
         /** Default canonical order matching the desktop app. */
         private const val DEFAULT_RESOLVER_ORDER = "spotify,applemusic,bandcamp,soundcloud,localfiles,youtube"
@@ -508,6 +511,13 @@ class SettingsStore @Inject constructor(
         dataStore.edit { it[SYNC_LAST_COMPLETED_AT] = timestamp.toString() }
     }
 
+    suspend fun getSyncDataVersion(): Int =
+        dataStore.data.first()[SYNC_DATA_VERSION]?.toIntOrNull() ?: 0
+
+    suspend fun setSyncDataVersion(version: Int) {
+        dataStore.edit { it[SYNC_DATA_VERSION] = version.toString() }
+    }
+
     suspend fun clearSyncSettings() {
         dataStore.edit { prefs ->
             prefs.remove(SYNC_ENABLED)
@@ -519,6 +529,28 @@ class SettingsStore @Inject constructor(
             prefs.remove(SYNC_SELECTED_PLAYLIST_IDS)
             prefs.remove(SYNC_LAST_COMPLETED_AT)
             prefs.remove(SYNC_PUSH_LOCAL_PLAYLISTS)
+        }
+    }
+
+    // --- Deleted Friends (prevent re-sync) ---
+
+    /** Get the set of friend keys (service:username) the user has explicitly deleted. */
+    suspend fun getDeletedFriendKeys(): Set<String> =
+        dataStore.data.first()[DELETED_FRIEND_KEYS] ?: emptySet()
+
+    /** Mark a friend as deleted so sync won't re-add them. */
+    suspend fun addDeletedFriendKey(key: String) {
+        dataStore.edit {
+            val current = it[DELETED_FRIEND_KEYS] ?: emptySet()
+            it[DELETED_FRIEND_KEYS] = current + key
+        }
+    }
+
+    /** Remove a friend from the deleted list (e.g. when re-adding them). */
+    suspend fun removeDeletedFriendKey(key: String) {
+        dataStore.edit {
+            val current = it[DELETED_FRIEND_KEYS] ?: emptySet()
+            it[DELETED_FRIEND_KEYS] = current - key
         }
     }
 

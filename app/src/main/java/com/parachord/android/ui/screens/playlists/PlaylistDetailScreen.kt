@@ -36,17 +36,39 @@ import androidx.compose.ui.unit.em
 import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.parachord.android.ui.components.AlbumArtCard
+import com.parachord.android.ui.components.TrackContextInfo
+import com.parachord.android.ui.components.TrackContextMenuHost
 import com.parachord.android.ui.components.TrackRow
+import com.parachord.android.ui.components.rememberTrackContextMenuState
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun PlaylistDetailScreen(
     onBack: () -> Unit,
+    onNavigateToArtist: (String) -> Unit = {},
+    onNavigateToAlbum: (albumTitle: String, artistName: String) -> Unit = { _, _ -> },
     modifier: Modifier = Modifier,
     viewModel: PlaylistDetailViewModel = hiltViewModel(),
 ) {
     val playlist by viewModel.playlist.collectAsStateWithLifecycle()
     val tracks by viewModel.tracks.collectAsStateWithLifecycle()
+    val allPlaylists by viewModel.allPlaylists.collectAsStateWithLifecycle()
+    val contextMenuState = rememberTrackContextMenuState()
+
+    // Context menu host with Remove from Playlist support
+    TrackContextMenuHost(
+        state = contextMenuState,
+        playlists = allPlaylists,
+        onPlayNext = { viewModel.playNext(it) },
+        onAddToQueue = { viewModel.addToQueue(it) },
+        onAddToPlaylist = { targetPlaylist, track -> viewModel.addToPlaylist(targetPlaylist, track) },
+        onNavigateToArtist = onNavigateToArtist,
+        onNavigateToAlbum = onNavigateToAlbum,
+        onToggleCollection = { track, isInCollection ->
+            if (!isInCollection) viewModel.addToCollection(track)
+        },
+        onRemoveFromPlaylist = { _, position -> viewModel.removeFromPlaylist(position) },
+    )
 
     Column(modifier = modifier.fillMaxSize()) {
         TopAppBar(
@@ -96,8 +118,14 @@ fun PlaylistDetailScreen(
                         overflow = TextOverflow.Ellipsis,
                     )
 
+                    // Author and source line
+                    val metaParts = buildList {
+                        playlist?.ownerName?.let { add("by $it") }
+                        if (playlist?.spotifyId != null) add("Spotify")
+                        add("${tracks.size} tracks")
+                    }
                     Text(
-                        text = "${tracks.size} tracks",
+                        text = metaParts.joinToString(" · "),
                         style = MaterialTheme.typography.bodyMedium,
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                     )
@@ -136,6 +164,23 @@ fun PlaylistDetailScreen(
                     duration = track.trackDuration,
                     trackNumber = index + 1,
                     onClick = { viewModel.playTrack(index) },
+                    onLongClick = {
+                        val entity = viewModel.trackEntityAt(index)
+                        if (entity != null) {
+                            contextMenuState.show(
+                                TrackContextInfo(
+                                    title = track.trackTitle,
+                                    artist = track.trackArtist,
+                                    album = track.trackAlbum,
+                                    artworkUrl = track.trackArtworkUrl,
+                                    duration = track.trackDuration,
+                                    playlistId = track.playlistId,
+                                    playlistPosition = track.position,
+                                ),
+                                entity,
+                            )
+                        }
+                    },
                 )
             }
         }

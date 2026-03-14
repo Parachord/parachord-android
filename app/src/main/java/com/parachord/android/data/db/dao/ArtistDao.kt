@@ -19,6 +19,9 @@ interface ArtistDao {
     @Query("SELECT * FROM artists WHERE spotifyId = :spotifyId")
     suspend fun getBySpotifyId(spotifyId: String): ArtistEntity?
 
+    @Query("SELECT * FROM artists WHERE name = :name LIMIT 1")
+    fun getByName(name: String): Flow<ArtistEntity?>
+
     @Query("SELECT * FROM artists WHERE name LIKE '%' || :query || '%'")
     fun search(query: String): Flow<List<ArtistEntity>>
 

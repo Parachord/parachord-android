@@ -1,6 +1,7 @@
 package com.parachord.android.ui.components
 
-import androidx.compose.foundation.clickable
+import androidx.compose.foundation.ExperimentalFoundationApi
+import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
@@ -22,7 +23,10 @@ import java.util.Locale
  * Shows album art (48dp), title/artist, optional track number,
  * resolver icon squares (colored squares with white logos matching desktop),
  * and optional duration.
+ *
+ * Supports long-press via [onLongClick] for context menu actions.
  */
+@OptIn(ExperimentalFoundationApi::class)
 @Composable
 fun TrackRow(
     title: String,
@@ -34,6 +38,7 @@ fun TrackRow(
     trackNumber: Int? = null,
     isPlaying: Boolean = false,
     onClick: () -> Unit = {},
+    onLongClick: (() -> Unit)? = null,
     modifier: Modifier = Modifier,
 ) {
     // Combine single resolver with list of resolvers, deduplicating
@@ -45,7 +50,10 @@ fun TrackRow(
     Row(
         modifier = modifier
             .fillMaxWidth()
-            .clickable(onClick = onClick)
+            .combinedClickable(
+                onClick = onClick,
+                onLongClick = onLongClick,
+            )
             .padding(horizontal = 16.dp, vertical = 10.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {

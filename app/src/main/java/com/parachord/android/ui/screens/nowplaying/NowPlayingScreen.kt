@@ -19,6 +19,7 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.KeyboardArrowDown
 import androidx.compose.material.icons.filled.Pause
 import androidx.compose.material.icons.filled.PlayArrow
+import androidx.compose.material.icons.filled.MoreHoriz
 import androidx.compose.material.icons.filled.SkipNext
 import androidx.compose.material.icons.filled.SkipPrevious
 import androidx.compose.material3.BottomSheetScaffold
@@ -53,6 +54,9 @@ import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.parachord.android.ui.components.AlbumArtCardFill
 import com.parachord.android.ui.components.ResolverIconSquare
+import com.parachord.android.ui.components.TrackContextInfo
+import com.parachord.android.ui.components.TrackContextMenuHost
+import com.parachord.android.ui.components.rememberTrackContextMenuState
 import com.parachord.android.ui.icons.ParachordIcons
 import com.parachord.android.ui.theme.PlayerSurface
 import com.parachord.android.ui.theme.PlayerTextPrimary
@@ -77,6 +81,22 @@ fun NowPlayingScreen(
     val track = playbackState.currentTrack
     val upNext = playbackState.upNext
     val scope = rememberCoroutineScope()
+    val playlists by viewModel.playlists.collectAsStateWithLifecycle()
+    val contextMenuState = rememberTrackContextMenuState()
+
+    // Context menu host
+    TrackContextMenuHost(
+        state = contextMenuState,
+        playlists = playlists,
+        onPlayNext = { viewModel.playNext(it) },
+        onAddToQueue = { viewModel.addToQueue(it) },
+        onAddToPlaylist = { playlist, t -> viewModel.addToPlaylist(playlist, t) },
+        onNavigateToArtist = onNavigateToArtist,
+        onNavigateToAlbum = onNavigateToAlbum,
+        onToggleCollection = { t, isInCollection ->
+            if (!isInCollection) viewModel.addToCollection(t)
+        },
+    )
 
     val sheetState = rememberStandardBottomSheetState(
         initialValue = SheetValue.PartiallyExpanded,
@@ -341,8 +361,32 @@ fun NowPlayingScreen(
 
                     Spacer(modifier = Modifier.weight(1f))
 
-                    // Spacer to balance with shuffle on the left
-                    Spacer(modifier = Modifier.size(48.dp))
+                    // Context menu (•••) button — opens track actions
+                    IconButton(
+                        onClick = {
+                            if (track != null) {
+                                contextMenuState.show(
+                                    TrackContextInfo(
+                                        title = track.title,
+                                        artist = track.artist,
+                                        album = track.album,
+                                        artworkUrl = track.artworkUrl,
+                                        duration = track.duration,
+                                    ),
+                                    track,
+                                )
+                            }
+                        },
+                        colors = IconButtonDefaults.iconButtonColors(
+                            contentColor = InactiveControlColor,
+                        ),
+                    ) {
+                        Icon(
+                            imageVector = Icons.Default.MoreHoriz,
+                            contentDescription = "More actions",
+                            modifier = Modifier.size(24.dp),
+                        )
+                    }
                 }
 
                 Spacer(modifier = Modifier.weight(1f))

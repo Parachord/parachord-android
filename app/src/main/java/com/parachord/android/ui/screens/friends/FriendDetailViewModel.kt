@@ -93,6 +93,15 @@ class FriendDetailViewModel @Inject constructor(
         loadRecentTracks(friend)
     }
 
+    fun togglePin() {
+        val current = _friend.value ?: return
+        viewModelScope.launch {
+            val newPinned = !current.pinnedToSidebar
+            friendsRepository.pinFriend(current.id, newPinned)
+            _friend.value = current.copy(pinnedToSidebar = newPinned, autoPinned = false)
+        }
+    }
+
     /**
      * Resolve and play a top track at the given index.
      */

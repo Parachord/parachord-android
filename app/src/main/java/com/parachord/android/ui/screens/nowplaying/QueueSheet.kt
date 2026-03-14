@@ -61,24 +61,6 @@ fun QueueSheet(
             .fillMaxSize()
             .background(PlayerSurface),
     ) {
-        // Drag handle indicator
-        Box(
-            modifier = Modifier
-                .fillMaxWidth()
-                .padding(top = 8.dp),
-            contentAlignment = Alignment.Center,
-        ) {
-            Box(
-                modifier = Modifier
-                    .width(32.dp)
-                    .height(4.dp)
-                    .background(
-                        color = PlayerTextSecondary.copy(alpha = 0.4f),
-                        shape = MaterialTheme.shapes.small,
-                    ),
-            )
-        }
-
         // Header
         Row(
             modifier = Modifier
@@ -103,10 +85,20 @@ fun QueueSheet(
                     }
                 }
                 if (playbackContext != null) {
+                    val contextLabel = if (playbackContext.type == "listen-along") {
+                        "Listening along with ${playbackContext.name}"
+                    } else {
+                        "Playing from: ${playbackContext.name}"
+                    }
+                    val contextColor = if (playbackContext.type == "listen-along") {
+                        Color(0xFF34D399) // Green for listen-along, matching desktop
+                    } else {
+                        PurpleDark
+                    }
                     Text(
-                        text = "Playing from: ${playbackContext.name}",
+                        text = contextLabel,
                         style = MaterialTheme.typography.bodySmall,
-                        color = PurpleDark,
+                        color = contextColor,
                         maxLines = 1,
                         overflow = TextOverflow.Ellipsis,
                     )

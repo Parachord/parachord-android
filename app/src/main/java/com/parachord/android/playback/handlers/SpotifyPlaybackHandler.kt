@@ -61,6 +61,10 @@ class SpotifyPlaybackHandler @Inject constructor(
     /** True when WE initiated a pause (user tapped pause). False means Spotify stopped on its own. */
     private var pausedByUs = false
 
+    // Track previous poll state for reset-after-end detection (matches desktop pattern)
+    private var lastProgressMs = 0L
+    private var lastPercentComplete = 0f
+
     override val isConnected: Boolean get() = _isConnected
 
     override fun canHandle(track: TrackEntity): Boolean =
@@ -93,6 +97,8 @@ class SpotifyPlaybackHandler @Inject constructor(
             currentItemId = expectedTrackId
             playStartedAt = System.currentTimeMillis()
             pausedByUs = false
+            lastProgressMs = 0L
+            lastPercentComplete = 0f
             startStatePolling()
         } else {
             Log.e(TAG, "Failed to play '${track.title}' after retries")
@@ -263,44 +269,60 @@ class SpotifyPlaybackHandler @Inject constructor(
     }
 
     /**
-     * Detect whether the track we started has finished playing.
+     * Detect whether the track we started has finished or is about to finish.
      *
-     * Handles three end-of-track scenarios:
-     * 1. Spotify auto-advanced to a different track (autoplay)
-     * 2. Spotify stopped naturally (isPlaying=false, position near duration end)
-     * 3. Spotify cleared the item entirely (no track playing)
+     * Matches the desktop app's approach: advance EARLY (within 2s of end)
+     * while still playing, to preempt Spotify's autoplay from starting a
+     * different track. This avoids the race condition where Spotify auto-advances
+     * to its own recommendation before we can queue our next track.
      *
-     * Does NOT treat mid-track pauses as "done" — Spotify can pause due to
-     * audio focus loss (voice typing, phone calls, notifications) which is
-     * not a track-ended event.
+     * Detection scenarios (mirroring desktop spotifyPoller):
+     * 1. Near-end: still playing, within 2s of track end → advance early
+     * 2. Finished: paused, position at 98%+ of duration → normal end
+     * 3. Reset-after-end: position jumped to 0 after being at 90%+ → track looped/reset
+     * 4. Track changed: Spotify auto-played a different track (URI mismatch)
+     * 5. Item cleared: no track playing, was playing before
      */
     fun isOurTrackDone(): Boolean {
         val expected = expectedTrackId ?: return false
         val current = currentItemId
 
-        // Spotify auto-advanced to a different track
+        // 1. Near-end: advance EARLY while still playing (preempt Spotify autoplay)
+        val isNearEnd = cachedDuration > 0 && cachedPosition >= cachedDuration - 2000
+        if (isNearEnd && cachedIsPlaying) {
+            Log.d(TAG, "Near end (advance early): pos=$cachedPosition, dur=$cachedDuration")
+            return true
+        }
+
+        // 2. Finished: paused at or near end (98%+)
+        val percentComplete = if (cachedDuration > 0) (cachedPosition.toFloat() / cachedDuration * 100) else 0f
+        val isAtEnd = cachedDuration > 0 && cachedPosition >= cachedDuration - 100
+        if (!cachedIsPlaying && (isAtEnd || percentComplete >= 98f)) {
+            Log.d(TAG, "Track finished: pos=$cachedPosition, dur=$cachedDuration, pct=$percentComplete%")
+            return true
+        }
+
+        // 3. Reset-after-end: position was 90%+ but now at 0 (Spotify reset after track end)
+        if (!cachedIsPlaying && cachedPosition == 0L && lastProgressMs > 0 && lastPercentComplete >= 90f) {
+            Log.d(TAG, "Reset after end: lastPos=$lastProgressMs, lastPct=$lastPercentComplete%")
+            return true
+        }
+
+        // 4. Spotify auto-advanced to a different track
         if (current != null && current != expected) {
             Log.d(TAG, "Track changed: expected=$expected, current=$current (autoplay)")
             return true
         }
 
-        // Track ended naturally — not playing and position near end.
-        // Use a generous threshold (3s) since the Spotify API position
-        // doesn't always reach exactly the duration value.
-        if (!cachedIsPlaying && cachedDuration > 0 && cachedPosition >= cachedDuration - 3000) {
-            Log.d(TAG, "Track ended naturally: pos=$cachedPosition, dur=$cachedDuration")
-            return true
-        }
-
-        // Spotify cleared the item entirely (no track playing)
+        // 5. Spotify cleared the item entirely (no track playing)
         if (!cachedIsPlaying && current == null && cachedPosition > 0) {
             Log.d(TAG, "Track cleared: no current item, was playing pos=$cachedPosition")
             return true
         }
 
-        // If Spotify is paused mid-track and we didn't pause it, it's likely
-        // an external event (audio focus loss, phone call, etc.) — NOT track end.
-        // Don't skip. The user can resume manually or it'll resume when focus returns.
+        // Update last-known progress for reset-after-end detection
+        lastProgressMs = cachedPosition
+        lastPercentComplete = percentComplete
 
         return false
     }

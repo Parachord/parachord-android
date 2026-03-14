@@ -53,7 +53,18 @@ class SpotifySyncProvider @Inject constructor(
         val isOwned: Boolean,
     )
 
+    private var cachedMarket: String? = null
+
     private suspend fun auth(): String = "Bearer ${settingsStore.getSpotifyAccessToken() ?: ""}"
+
+    /** Fetch the user's country code from their Spotify profile for market-aware API calls. */
+    suspend fun getMarket(): String {
+        cachedMarket?.let { return it }
+        val user = withRetry { spotifyApi.getCurrentUser(it) }
+        val market = user.country ?: "US"
+        cachedMarket = market
+        return market
+    }
 
     /**
      * Execute a Spotify API call with automatic token refresh on 401,
@@ -108,22 +119,39 @@ class SpotifySyncProvider @Inject constructor(
         latestExternalId: String? = null,
         onProgress: (current: Int, total: Int) -> Unit = { _, _ -> },
     ): List<SyncedTrack>? {
-        val probe = withRetry { spotifyApi.getLikedTracks(it, limit = 1) }
-        if (probe.total == localCount && probe.items.firstOrNull()?.track?.id == latestExternalId) {
+        val market = getMarket()
+        Log.d(TAG, "fetchTracks: market=$market, localCount=$localCount, latestExternalId=$latestExternalId")
+        val probe = withRetry { spotifyApi.getLikedTracks(it, limit = 1, market = market) }
+        val probeTrackId = probe.items.firstOrNull()?.track?.id
+        Log.d(TAG, "fetchTracks probe: total=${probe.total}, firstTrackId=$probeTrackId, firstTrackName=${probe.items.firstOrNull()?.track?.name}")
+        if (probe.total == localCount && probeTrackId == latestExternalId) {
             Log.d(TAG, "Tracks unchanged (count=$localCount), skipping full fetch")
             return null
         }
+        Log.d(TAG, "fetchTracks: changes detected (remote=${probe.total} vs local=$localCount, latestId match=${probeTrackId == latestExternalId}), doing full fetch")
 
         val all = mutableListOf<SyncedTrack>()
         var offset = 0
         val total = probe.total
+        var skippedNullTracks = 0
         onProgress(0, total)
 
         while (offset < total) {
-            val page = withRetry { spotifyApi.getLikedTracks(it, limit = BATCH_SIZE, offset = offset) }
+            val page = withRetry { spotifyApi.getLikedTracks(it, limit = BATCH_SIZE, offset = offset, market = market) }
+            if (page.items.isEmpty()) break
             page.items.forEach { saved ->
-                val track = saved.track ?: return@forEach
-                val trackId = track.id ?: return@forEach
+                val track = saved.track
+                if (track == null) {
+                    skippedNullTracks++
+                    return@forEach
+                }
+                val spotifyAddedAt = parseIsoTimestamp(saved.addedAt)
+                // Spotify local files have null id — generate a stable synthetic ID
+                val isLocalFile = track.id == null
+                val trackId = track.id ?: run {
+                    val key = "local:${track.name.orEmpty()}:${track.artistName}"
+                    key.hashCode().toUInt().toString(16)
+                }
                 all.add(SyncedTrack(
                     entity = TrackEntity(
                         id = "spotify-$trackId",
@@ -133,19 +161,23 @@ class SpotifySyncProvider @Inject constructor(
                         albumId = track.album?.id?.let { "spotify-$it" },
                         duration = track.durationMs,
                         artworkUrl = track.album?.images?.bestImageUrl(),
-                        spotifyUri = "spotify:track:$trackId",
-                        spotifyId = trackId,
-                        resolver = "spotify",
+                        spotifyUri = if (!isLocalFile) "spotify:track:$trackId" else null,
+                        spotifyId = track.id,
+                        resolver = if (!isLocalFile) "spotify" else "localfiles",
                         sourceType = "synced",
+                        addedAt = spotifyAddedAt,
                     ),
                     spotifyId = trackId,
-                    addedAt = parseIsoTimestamp(saved.addedAt),
+                    addedAt = spotifyAddedAt,
                 ))
             }
             offset += BATCH_SIZE
             onProgress(all.size, total)
         }
 
+        Log.d(TAG, "fetchTracks complete: fetched=${all.size}/$total, skippedNull=$skippedNullTracks")
+        // Final progress with actual count (some tracks are null/unavailable in market)
+        onProgress(all.size, all.size)
         return all
     }
 
@@ -154,7 +186,8 @@ class SpotifySyncProvider @Inject constructor(
         latestExternalId: String? = null,
         onProgress: (current: Int, total: Int) -> Unit = { _, _ -> },
     ): List<SyncedAlbum>? {
-        val probe = withRetry { spotifyApi.getSavedAlbums(it, limit = 1) }
+        val market = getMarket()
+        val probe = withRetry { spotifyApi.getSavedAlbums(it, limit = 1, market = market) }
         if (probe.total == localCount && probe.items.firstOrNull()?.album?.id == latestExternalId) {
             return null
         }
@@ -164,25 +197,33 @@ class SpotifySyncProvider @Inject constructor(
         val total = probe.total
 
         while (offset < total) {
-            val page = withRetry { spotifyApi.getSavedAlbums(it, limit = BATCH_SIZE, offset = offset) }
+            val page = withRetry { spotifyApi.getSavedAlbums(it, limit = BATCH_SIZE, offset = offset, market = market) }
+            if (page.items.isEmpty()) break
             page.items.forEach { saved ->
-                val album = saved.album
+                val album = saved.album ?: return@forEach
+                val albumId = album.id ?: return@forEach
+                val spotifyAddedAt = parseIsoTimestamp(saved.addedAt)
                 all.add(SyncedAlbum(
                     entity = AlbumEntity(
-                        id = "spotify-${album.id}",
-                        title = album.name,
+                        id = "spotify-$albumId",
+                        title = album.name ?: "Unknown Album",
                         artist = album.artistName,
                         artworkUrl = album.images.bestImageUrl(),
                         year = album.year,
                         trackCount = album.totalTracks,
-                        spotifyId = album.id,
+                        spotifyId = albumId,
+                        addedAt = spotifyAddedAt,
                     ),
-                    spotifyId = album.id,
-                    addedAt = parseIsoTimestamp(saved.addedAt),
+                    spotifyId = albumId,
+                    addedAt = spotifyAddedAt,
                 ))
             }
             offset += BATCH_SIZE
             onProgress(all.size, total)
+        }
+
+        if (all.size < total) {
+            Log.w(TAG, "Album pagination incomplete: fetched ${all.size}/$total albums")
         }
 
         return all
@@ -200,15 +241,16 @@ class SpotifySyncProvider @Inject constructor(
             val response = withRetry { spotifyApi.getFollowedArtists(it, after = after) }
             total = response.artists.total
             response.artists.items.forEach { artist ->
+                val artistId = artist.id ?: return@forEach
                 all.add(SyncedArtist(
                     entity = ArtistEntity(
-                        id = "spotify-${artist.id}",
-                        name = artist.name,
+                        id = "spotify-$artistId",
+                        name = artist.name ?: "Unknown Artist",
                         imageUrl = artist.images.bestImageUrl(),
-                        spotifyId = artist.id,
+                        spotifyId = artistId,
                         genres = artist.genres.joinToString(","),
                     ),
-                    spotifyId = artist.id,
+                    spotifyId = artistId,
                 ))
             }
             after = response.artists.cursors?.after
@@ -232,19 +274,22 @@ class SpotifySyncProvider @Inject constructor(
 
         while (offset < total) {
             val page = withRetry { spotifyApi.getUserPlaylists(it, limit = BATCH_SIZE, offset = offset) }
+            if (page.items.isEmpty()) break
             page.items.forEach { playlist ->
-                if (seen.add(playlist.id)) {
+                val playlistId = playlist.id ?: return@forEach
+                if (seen.add(playlistId)) {
                     all.add(SyncedPlaylist(
                         entity = PlaylistEntity(
-                            id = "spotify-${playlist.id}",
-                            name = playlist.name,
+                            id = "spotify-$playlistId",
+                            name = playlist.name ?: "Untitled Playlist",
                             description = playlist.description,
                             artworkUrl = playlist.images.bestImageUrl(),
                             trackCount = playlist.tracks?.total ?: 0,
-                            spotifyId = playlist.id,
+                            spotifyId = playlistId,
                             snapshotId = playlist.snapshotId,
+                            ownerName = playlist.owner?.displayName,
                         ),
-                        spotifyId = playlist.id,
+                        spotifyId = playlistId,
                         snapshotId = playlist.snapshotId,
                         trackCount = playlist.tracks?.total ?: 0,
                         isOwned = playlist.owner?.id == currentUser.id,
@@ -266,13 +311,15 @@ class SpotifySyncProvider @Inject constructor(
         var offset = 0
         val localPlaylistId = "spotify-$spotifyPlaylistId"
 
-        val probe = withRetry { spotifyApi.getPlaylistTracks(it, spotifyPlaylistId, limit = 1) }
+        val market = getMarket()
+        val probe = withRetry { spotifyApi.getPlaylistTracks(it, spotifyPlaylistId, limit = 1, market = market) }
         val total = probe.total
 
         while (offset < total) {
             val page = withRetry {
-                spotifyApi.getPlaylistTracks(it, spotifyPlaylistId, limit = PLAYLIST_TRACK_BATCH_SIZE, offset = offset)
+                spotifyApi.getPlaylistTracks(it, spotifyPlaylistId, limit = PLAYLIST_TRACK_BATCH_SIZE, offset = offset, market = market)
             }
+            if (page.items.isEmpty()) break
             page.items.forEach { item ->
                 val track = item.track ?: return@forEach
                 all.add(PlaylistTrackEntity(

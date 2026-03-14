@@ -5,6 +5,7 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import okhttp3.OkHttpClient
 import okhttp3.Request
+import okhttp3.RequestBody.Companion.toRequestBody
 import org.json.JSONObject
 import javax.inject.Inject
 import javax.inject.Singleton
@@ -69,6 +70,67 @@ class ListenBrainzApi @Inject constructor(
         } catch (e: Exception) {
             Log.e(TAG, "Failed to validate token", e)
             null
+        }
+    }
+
+    /**
+     * Fetch the list of users this user follows on ListenBrainz.
+     * No auth required.
+     */
+    suspend fun getUserFollowing(username: String): List<String> = withContext(Dispatchers.IO) {
+        val url = "$BASE_URL/1/user/$username/following"
+        val request = Request.Builder().url(url).get().build()
+        return@withContext try {
+            val response = okHttpClient.newCall(request).execute()
+            val body = response.body?.string()
+            if (!response.isSuccessful || body == null) return@withContext emptyList()
+
+            val json = JSONObject(body)
+            val following = json.optJSONArray("following") ?: return@withContext emptyList()
+            (0 until following.length()).map { following.getString(it) }
+        } catch (e: Exception) {
+            Log.e(TAG, "Failed to fetch following for $username", e)
+            emptyList()
+        }
+    }
+
+    /**
+     * Follow a user on ListenBrainz. Requires auth token.
+     * POST /1/user/{user_name}/follow
+     */
+    suspend fun followUser(username: String, token: String): Boolean = withContext(Dispatchers.IO) {
+        val url = "$BASE_URL/1/user/$username/follow"
+        val request = Request.Builder()
+            .url(url)
+            .post(ByteArray(0).toRequestBody(null))
+            .addHeader("Authorization", "Token $token")
+            .build()
+        return@withContext try {
+            val response = okHttpClient.newCall(request).execute()
+            response.isSuccessful
+        } catch (e: Exception) {
+            Log.e(TAG, "Failed to follow $username", e)
+            false
+        }
+    }
+
+    /**
+     * Unfollow a user on ListenBrainz. Requires auth token.
+     * POST /1/user/{user_name}/unfollow
+     */
+    suspend fun unfollowUser(username: String, token: String): Boolean = withContext(Dispatchers.IO) {
+        val url = "$BASE_URL/1/user/$username/unfollow"
+        val request = Request.Builder()
+            .url(url)
+            .post(ByteArray(0).toRequestBody(null))
+            .addHeader("Authorization", "Token $token")
+            .build()
+        return@withContext try {
+            val response = okHttpClient.newCall(request).execute()
+            response.isSuccessful
+        } catch (e: Exception) {
+            Log.e(TAG, "Failed to unfollow $username", e)
+            false
         }
     }
 

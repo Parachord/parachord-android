@@ -35,13 +35,20 @@ class LibraryRepository @Inject constructor(
 
     fun getAlbumTracks(albumId: String): Flow<List<TrackEntity>> = trackDao.getByAlbumId(albumId)
 
-    suspend fun addTrack(track: TrackEntity) = trackDao.insert(track)
+    suspend fun addTrack(track: TrackEntity) {
+        val existing = trackDao.getById(track.id)
+        // Preserve the synced addedAt timestamp if one exists
+        trackDao.insert(if (existing != null) track.copy(addedAt = existing.addedAt) else track)
+    }
     suspend fun addTracks(tracks: List<TrackEntity>) = trackDao.insertAll(tracks)
     suspend fun addAlbum(album: AlbumEntity) = albumDao.insert(album)
     suspend fun addAlbums(albums: List<AlbumEntity>) = albumDao.insertAll(albums)
     suspend fun addArtist(artist: ArtistEntity) = artistDao.insert(artist)
     suspend fun addArtists(artists: List<ArtistEntity>) = artistDao.insertAll(artists)
     suspend fun addPlaylist(playlist: PlaylistEntity) = playlistDao.insert(playlist)
+
+    /** Backfill lastModified from updatedAt for playlists synced before tracking. */
+    suspend fun backfillPlaylistLastModified() = playlistDao.backfillLastModified()
 
     suspend fun deleteTrack(track: TrackEntity) = trackDao.delete(track)
     suspend fun deleteAlbum(album: AlbumEntity) = albumDao.delete(album)
@@ -95,6 +102,52 @@ class LibraryRepository @Inject constructor(
             )
         }
         playlistTrackDao.insertAll(playlistTracks)
+    }
+
+    /**
+     * Append tracks to an existing playlist.
+     * Positions are assigned after the current max position.
+     */
+    suspend fun addTracksToPlaylist(playlistId: String, tracks: List<TrackEntity>) {
+        val startPosition = playlistTrackDao.getMaxPosition(playlistId) + 1
+        val playlistTracks = tracks.mapIndexed { index, track ->
+            PlaylistTrackEntity(
+                playlistId = playlistId,
+                position = startPosition + index,
+                trackTitle = track.title,
+                trackArtist = track.artist,
+                trackAlbum = track.album,
+                trackDuration = track.duration,
+                trackArtworkUrl = track.artworkUrl,
+                trackSourceUrl = track.sourceUrl,
+                trackResolver = track.resolver,
+                trackSpotifyUri = track.spotifyUri,
+                trackSoundcloudId = track.soundcloudId,
+            )
+        }
+        playlistTrackDao.insertAll(playlistTracks)
+        // Update track count and modification timestamps
+        val playlist = playlistDao.getById(playlistId) ?: return
+        val now = System.currentTimeMillis()
+        playlistDao.update(playlist.copy(
+            trackCount = playlist.trackCount + tracks.size,
+            updatedAt = now,
+            lastModified = now,
+            locallyModified = true,
+        ))
+    }
+
+    /** Remove a single track from a playlist by position and update the count. */
+    suspend fun removeTrackFromPlaylist(playlistId: String, position: Int) {
+        playlistTrackDao.deleteTrack(playlistId, position)
+        val playlist = playlistDao.getById(playlistId) ?: return
+        val now = System.currentTimeMillis()
+        playlistDao.update(playlist.copy(
+            trackCount = (playlist.trackCount - 1).coerceAtLeast(0),
+            updatedAt = now,
+            lastModified = now,
+            locallyModified = true,
+        ))
     }
 
     /** Convert a PlaylistTrackEntity to a TrackEntity for playback. */

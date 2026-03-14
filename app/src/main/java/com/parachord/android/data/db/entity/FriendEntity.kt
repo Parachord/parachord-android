@@ -22,6 +22,10 @@ data class FriendEntity(
     val cachedTrackAlbum: String? = null,
     val cachedTrackTimestamp: Long = 0,
     val cachedTrackArtworkUrl: String? = null,
+    /** Whether the friend is pinned to the sidebar. */
+    val pinnedToSidebar: Boolean = false,
+    /** Whether the pin was automatic (on-air auto-pin). Auto-pins get auto-unpinned. */
+    val autoPinned: Boolean = false,
 ) {
     /** Friend is "on air" if their cached track was played within the last 10 minutes. */
     val isOnAir: Boolean
