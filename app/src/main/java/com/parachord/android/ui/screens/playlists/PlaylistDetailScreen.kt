@@ -1,5 +1,6 @@
 package com.parachord.android.ui.screens.playlists
 
+import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
@@ -16,26 +17,46 @@ import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
+import androidx.compose.material.icons.automirrored.filled.QueueMusic
+import androidx.compose.material.icons.filled.Delete
+import androidx.compose.material.icons.filled.MoreVert
 import androidx.compose.material.icons.filled.PlayArrow
+import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.ExperimentalMaterial3Api
+import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.ModalBottomSheet
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.material3.TopAppBar
+import androidx.compose.material3.rememberModalBottomSheetState
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.Brush
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.em
+import androidx.compose.ui.unit.sp
 import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.parachord.android.ui.components.AlbumArtCard
+import com.parachord.android.ui.components.ContextMenuItem
+import com.parachord.android.ui.components.ModalBg
+import com.parachord.android.ui.components.ModalBgDarker
+import com.parachord.android.ui.components.ModalDivider
+import com.parachord.android.ui.components.ModalTextActive
+import com.parachord.android.ui.components.ModalTextPrimary
 import com.parachord.android.ui.components.TrackContextInfo
 import com.parachord.android.ui.components.TrackContextMenuHost
 import com.parachord.android.ui.components.TrackRow
@@ -54,6 +75,8 @@ fun PlaylistDetailScreen(
     val tracks by viewModel.tracks.collectAsStateWithLifecycle()
     val allPlaylists by viewModel.allPlaylists.collectAsStateWithLifecycle()
     val contextMenuState = rememberTrackContextMenuState()
+    var showPlaylistMenu by remember { mutableStateOf(false) }
+    var showDeleteConfirm by remember { mutableStateOf(false) }
 
     // Context menu host with Remove from Playlist support
     TrackContextMenuHost(
@@ -133,20 +156,30 @@ fun PlaylistDetailScreen(
                     Spacer(modifier = Modifier.height(12.dp))
 
                     if (tracks.isNotEmpty()) {
-                        Button(
-                            onClick = { viewModel.playAll() },
-                            shape = RoundedCornerShape(24.dp),
-                            colors = ButtonDefaults.buttonColors(
-                                containerColor = MaterialTheme.colorScheme.primary,
-                            ),
-                        ) {
-                            Icon(
-                                Icons.Filled.PlayArrow,
-                                contentDescription = null,
-                                modifier = Modifier.size(20.dp),
-                            )
-                            Spacer(modifier = Modifier.width(4.dp))
-                            Text("Play All")
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            Button(
+                                onClick = { viewModel.playAll() },
+                                shape = RoundedCornerShape(24.dp),
+                                colors = ButtonDefaults.buttonColors(
+                                    containerColor = MaterialTheme.colorScheme.primary,
+                                ),
+                            ) {
+                                Icon(
+                                    Icons.Filled.PlayArrow,
+                                    contentDescription = null,
+                                    modifier = Modifier.size(20.dp),
+                                )
+                                Spacer(modifier = Modifier.width(4.dp))
+                                Text("Play All")
+                            }
+                            Spacer(modifier = Modifier.width(8.dp))
+                            IconButton(onClick = { showPlaylistMenu = true }) {
+                                Icon(
+                                    Icons.Default.MoreVert,
+                                    contentDescription = "More options",
+                                    tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                                )
+                            }
                         }
                     }
 
@@ -183,6 +216,133 @@ fun PlaylistDetailScreen(
                     },
                 )
             }
+        }
+
+        if (showPlaylistMenu) {
+            val pl = playlist
+            if (pl != null) {
+                PlaylistOptionsSheet(
+                    playlistName = pl.name,
+                    artworkUrl = pl.artworkUrl,
+                    trackCount = tracks.size,
+                    onDismiss = { showPlaylistMenu = false },
+                    onQueuePlaylist = {
+                        showPlaylistMenu = false
+                        viewModel.queueAll()
+                    },
+                    onDeletePlaylist = {
+                        showPlaylistMenu = false
+                        showDeleteConfirm = true
+                    },
+                )
+            }
+        }
+
+        if (showDeleteConfirm) {
+            AlertDialog(
+                onDismissRequest = { showDeleteConfirm = false },
+                containerColor = ModalBg,
+                titleContentColor = ModalTextActive,
+                textContentColor = ModalTextPrimary,
+                title = { Text("Delete Playlist") },
+                text = { Text("Are you sure you want to delete \"${playlist?.name}\"?") },
+                confirmButton = {
+                    TextButton(onClick = {
+                        showDeleteConfirm = false
+                        viewModel.deletePlaylist()
+                        onBack()
+                    }) {
+                        Text("Delete", color = Color(0xFFEF4444))
+                    }
+                },
+                dismissButton = {
+                    TextButton(onClick = { showDeleteConfirm = false }) {
+                        Text("Cancel", color = ModalTextPrimary)
+                    }
+                },
+            )
+        }
+    }
+}
+
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+private fun PlaylistOptionsSheet(
+    playlistName: String,
+    artworkUrl: String?,
+    trackCount: Int,
+    onDismiss: () -> Unit,
+    onQueuePlaylist: () -> Unit,
+    onDeletePlaylist: () -> Unit,
+) {
+    ModalBottomSheet(
+        onDismissRequest = onDismiss,
+        sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true),
+        containerColor = ModalBg,
+        scrimColor = Color.Black.copy(alpha = 0.4f),
+        dragHandle = {
+            Box(
+                modifier = Modifier
+                    .padding(vertical = 10.dp)
+                    .size(width = 32.dp, height = 4.dp)
+                    .background(
+                        color = Color.White.copy(alpha = 0.2f),
+                        shape = RoundedCornerShape(2.dp),
+                    ),
+            )
+        },
+    ) {
+        Column(
+            modifier = Modifier
+                .background(Brush.verticalGradient(listOf(ModalBg, ModalBgDarker)))
+                .padding(bottom = 32.dp),
+        ) {
+            // Header
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(horizontal = 20.dp, vertical = 8.dp),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                AlbumArtCard(
+                    artworkUrl = artworkUrl,
+                    size = 48.dp,
+                    cornerRadius = 4.dp,
+                    elevation = 1.dp,
+                )
+                Spacer(modifier = Modifier.width(12.dp))
+                Column(modifier = Modifier.weight(1f)) {
+                    Text(
+                        text = playlistName,
+                        fontSize = 15.sp,
+                        fontWeight = FontWeight.Medium,
+                        color = ModalTextActive,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis,
+                    )
+                    Text(
+                        text = "$trackCount tracks",
+                        fontSize = 13.sp,
+                        color = ModalTextPrimary,
+                    )
+                }
+            }
+
+            HorizontalDivider(color = ModalDivider, modifier = Modifier.padding(vertical = 8.dp))
+
+            ContextMenuItem(
+                icon = Icons.AutoMirrored.Filled.QueueMusic,
+                label = "Queue Playlist",
+                onClick = onQueuePlaylist,
+            )
+
+            HorizontalDivider(color = ModalDivider, modifier = Modifier.padding(vertical = 4.dp))
+
+            ContextMenuItem(
+                icon = Icons.Filled.Delete,
+                label = "Delete Playlist",
+                onClick = onDeletePlaylist,
+            )
         }
     }
 }

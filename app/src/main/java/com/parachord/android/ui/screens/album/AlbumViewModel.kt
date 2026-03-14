@@ -68,7 +68,17 @@ class AlbumViewModel @Inject constructor(
         viewModelScope.launch {
             _isLoading.value = true
             try {
-                _albumDetail.value = metadataService.getAlbumTracks(albumTitle, artistName)
+                // Check local DB for cached artwork (available instantly from collection)
+                val cachedArtwork = libraryRepository.getAlbumByTitleAndArtist(albumTitle, artistName)
+                    ?.artworkUrl
+
+                val detail = metadataService.getAlbumTracks(albumTitle, artistName)
+                // Use local DB artwork as fallback if providers didn't return any
+                _albumDetail.value = if (detail != null && detail.artworkUrl == null && cachedArtwork != null) {
+                    detail.copy(artworkUrl = cachedArtwork)
+                } else {
+                    detail
+                }
                 _albumDetail.value?.tracks?.let { resolveTracksInBackground(it) }
             } catch (_: Exception) {
                 // partial results still shown
@@ -214,17 +224,7 @@ class AlbumViewModel @Inject constructor(
         viewModelScope.launch {
             _isResolving.value = true
             try {
-                val entities = tracks.mapNotNull { track ->
-                    val query = "${track.artist} - ${track.title}"
-                    val key = "${track.title.lowercase().trim()}|${track.artist.lowercase().trim()}"
-                    val sources = _trackSources.value[key]
-                        ?: resolverManager.resolveWithHints(
-                            query = query,
-                            spotifyId = track.spotifyId,
-                        )
-                    val best = resolverScoring.selectBest(sources) ?: return@mapNotNull null
-                    track.toTrackEntity(detail, best)
-                }
+                val entities = resolveAllTracks(detail)
                 if (entities.isNotEmpty()) {
                     val context = PlaybackContext(type = "album", name = detail.title)
                     playbackController.playQueue(entities, startIndex = 0, context = context)
@@ -236,6 +236,40 @@ class AlbumViewModel @Inject constructor(
             }
         }
     }
+
+    /** Add all album tracks to the queue without interrupting playback. */
+    fun queueAll() {
+        val detail = _albumDetail.value ?: return
+        val tracks = detail.tracks
+        if (tracks.isEmpty()) return
+
+        viewModelScope.launch {
+            _isResolving.value = true
+            try {
+                val entities = resolveAllTracks(detail)
+                if (entities.isNotEmpty()) {
+                    playbackController.addToQueue(entities)
+                }
+            } catch (_: Exception) {
+                // resolution failed
+            } finally {
+                _isResolving.value = false
+            }
+        }
+    }
+
+    private suspend fun resolveAllTracks(detail: AlbumDetail): List<TrackEntity> =
+        detail.tracks.mapNotNull { track ->
+            val query = "${track.artist} - ${track.title}"
+            val key = "${track.title.lowercase().trim()}|${track.artist.lowercase().trim()}"
+            val sources = _trackSources.value[key]
+                ?: resolverManager.resolveWithHints(
+                    query = query,
+                    spotifyId = track.spotifyId,
+                )
+            val best = resolverScoring.selectBest(sources) ?: return@mapNotNull null
+            track.toTrackEntity(detail, best)
+        }
 }
 
 private fun TrackSearchResult.toTrackEntity(

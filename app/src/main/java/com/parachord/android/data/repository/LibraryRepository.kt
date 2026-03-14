@@ -35,6 +35,9 @@ class LibraryRepository @Inject constructor(
 
     fun getAlbumTracks(albumId: String): Flow<List<TrackEntity>> = trackDao.getByAlbumId(albumId)
 
+    suspend fun getAlbumByTitleAndArtist(title: String, artist: String): AlbumEntity? =
+        albumDao.getByTitleAndArtist(title, artist)
+
     suspend fun addTrack(track: TrackEntity) {
         val existing = trackDao.getById(track.id)
         // Preserve the synced addedAt timestamp if one exists

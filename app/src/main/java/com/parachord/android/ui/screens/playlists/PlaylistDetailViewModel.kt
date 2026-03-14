@@ -82,4 +82,19 @@ class PlaylistDetailViewModel @Inject constructor(
             libraryRepository.addTrack(track)
         }
     }
+
+    /** Add all playlist tracks to the queue without interrupting playback. */
+    fun queueAll() {
+        val trackList = tracks.value
+        if (trackList.isEmpty()) return
+        val entities = trackList.map { libraryRepository.playlistTrackToTrackEntity(it) }
+        playbackController.addToQueue(entities)
+    }
+
+    /** Delete this playlist. */
+    fun deletePlaylist() {
+        viewModelScope.launch {
+            playlist.value?.let { libraryRepository.deletePlaylist(it) }
+        }
+    }
 }

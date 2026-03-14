@@ -23,6 +23,7 @@ import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.filled.QueueMusic
 import androidx.compose.material.icons.filled.Album
 import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.Favorite
@@ -237,6 +238,14 @@ fun CollectionScreen(
                                             artistName = artist.name,
                                             imageUrl = artist.imageUrl,
                                             onDismiss = { showMenu = false },
+                                            onPlayTopSongs = {
+                                                showMenu = false
+                                                viewModel.playArtistTopSongs(artist.name)
+                                            },
+                                            onQueueTopSongs = {
+                                                showMenu = false
+                                                viewModel.queueArtistTopSongs(artist.name)
+                                            },
                                             onGoToArtist = {
                                                 showMenu = false
                                                 onNavigateToArtist(artist.name)
@@ -328,6 +337,14 @@ fun CollectionScreen(
                                             artistName = album.artist,
                                             artworkUrl = album.artworkUrl,
                                             onDismiss = { showMenu = false },
+                                            onPlayAlbum = {
+                                                showMenu = false
+                                                viewModel.playAlbum(album.id, album.title)
+                                            },
+                                            onQueueAlbum = {
+                                                showMenu = false
+                                                viewModel.queueAlbum(album.id)
+                                            },
                                             onGoToAlbum = {
                                                 showMenu = false
                                                 onNavigateToAlbum(album.title, album.artist)
@@ -881,6 +898,8 @@ private fun ArtistContextMenu(
     artistName: String,
     imageUrl: String?,
     onDismiss: () -> Unit,
+    onPlayTopSongs: () -> Unit,
+    onQueueTopSongs: () -> Unit,
     onGoToArtist: () -> Unit,
     onRemoveFromCollection: () -> Unit,
 ) {
@@ -933,6 +952,16 @@ private fun ArtistContextMenu(
             HorizontalDivider(color = ModalDivider, modifier = Modifier.padding(vertical = 8.dp))
 
             ContextMenuItem(
+                icon = Icons.Filled.PlayArrow,
+                label = "Play Top Songs",
+                onClick = onPlayTopSongs,
+            )
+            ContextMenuItem(
+                icon = Icons.AutoMirrored.Filled.QueueMusic,
+                label = "Queue Top Songs",
+                onClick = onQueueTopSongs,
+            )
+            ContextMenuItem(
                 icon = Icons.Filled.Person,
                 label = "Go to Artist",
                 onClick = onGoToArtist,
@@ -958,6 +987,8 @@ private fun AlbumContextMenu(
     artistName: String,
     artworkUrl: String?,
     onDismiss: () -> Unit,
+    onPlayAlbum: () -> Unit,
+    onQueueAlbum: () -> Unit,
     onGoToAlbum: () -> Unit,
     onGoToArtist: () -> Unit,
     onRemoveFromCollection: () -> Unit,
@@ -1020,6 +1051,16 @@ private fun AlbumContextMenu(
 
             HorizontalDivider(color = ModalDivider, modifier = Modifier.padding(vertical = 8.dp))
 
+            ContextMenuItem(
+                icon = Icons.Filled.PlayArrow,
+                label = "Play Album",
+                onClick = onPlayAlbum,
+            )
+            ContextMenuItem(
+                icon = Icons.AutoMirrored.Filled.QueueMusic,
+                label = "Queue Album",
+                onClick = onQueueAlbum,
+            )
             ContextMenuItem(
                 icon = Icons.Filled.Album,
                 label = "Go to Album",

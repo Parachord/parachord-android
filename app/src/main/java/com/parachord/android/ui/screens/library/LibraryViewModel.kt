@@ -6,15 +6,21 @@ import com.parachord.android.data.db.entity.AlbumEntity
 import com.parachord.android.data.db.entity.ArtistEntity
 import com.parachord.android.data.db.entity.PlaylistEntity
 import com.parachord.android.data.db.entity.TrackEntity
+import android.util.Log
 import com.parachord.android.data.metadata.ImageEnrichmentService
+import com.parachord.android.data.metadata.MetadataService
 import com.parachord.android.data.repository.LibraryRepository
 import com.parachord.android.data.store.SettingsStore
+import com.parachord.android.playback.PlaybackContext
 import com.parachord.android.playback.PlaybackController
+import com.parachord.android.resolver.ResolverManager
+import com.parachord.android.resolver.ResolverScoring
 import dagger.hilt.android.lifecycle.HiltViewModel
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.combine
+import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
 import javax.inject.Inject
@@ -24,6 +30,9 @@ class LibraryViewModel @Inject constructor(
     private val repository: LibraryRepository,
     private val playbackController: PlaybackController,
     private val imageEnrichmentService: ImageEnrichmentService,
+    private val metadataService: MetadataService,
+    private val resolverManager: ResolverManager,
+    private val resolverScoring: ResolverScoring,
     private val settingsStore: SettingsStore,
 ) : ViewModel() {
 
@@ -209,6 +218,110 @@ class LibraryViewModel @Inject constructor(
     fun removeArtistFromCollection(artist: ArtistEntity) {
         viewModelScope.launch {
             repository.deleteArtistWithSync(artist)
+        }
+    }
+
+    /** Play all tracks from an album in the collection. */
+    fun playAlbum(albumId: String, albumTitle: String) {
+        viewModelScope.launch {
+            try {
+                val albumTracks = repository.getAlbumTracks(albumId).first()
+                if (albumTracks.isEmpty()) return@launch
+                playbackController.playQueue(
+                    albumTracks,
+                    startIndex = 0,
+                    context = PlaybackContext(type = "album", name = albumTitle),
+                )
+            } catch (e: Exception) {
+                Log.e("LibraryVM", "Failed to play album '$albumTitle'", e)
+            }
+        }
+    }
+
+    /** Add all tracks from an album to the queue without interrupting playback. */
+    fun queueAlbum(albumId: String) {
+        viewModelScope.launch {
+            try {
+                val albumTracks = repository.getAlbumTracks(albumId).first()
+                if (albumTracks.isEmpty()) return@launch
+                playbackController.addToQueue(albumTracks)
+            } catch (e: Exception) {
+                Log.e("LibraryVM", "Failed to queue album", e)
+            }
+        }
+    }
+
+    /** Fetch an artist's top tracks from metadata providers, resolve, and play. */
+    fun playArtistTopSongs(artistName: String) {
+        viewModelScope.launch {
+            try {
+                val topTracks = metadataService.getArtistTopTracks(artistName, limit = 10)
+                if (topTracks.isEmpty()) return@launch
+                val entities = topTracks.mapNotNull { track ->
+                    val sources = resolverManager.resolveWithHints(
+                        query = "${track.artist} - ${track.title}",
+                        spotifyId = track.spotifyId,
+                    )
+                    val best = resolverScoring.selectBest(sources) ?: return@mapNotNull null
+                    TrackEntity(
+                        id = "top-${track.title.hashCode()}-${track.artist.hashCode()}",
+                        title = track.title,
+                        artist = track.artist,
+                        album = track.album,
+                        duration = track.duration,
+                        artworkUrl = track.artworkUrl,
+                        sourceType = best.sourceType,
+                        sourceUrl = best.url,
+                        resolver = best.resolver,
+                        spotifyUri = best.spotifyUri,
+                        soundcloudId = best.soundcloudId,
+                    )
+                }
+                if (entities.isNotEmpty()) {
+                    playbackController.playQueue(
+                        entities,
+                        startIndex = 0,
+                        context = PlaybackContext(type = "artist", name = artistName),
+                    )
+                }
+            } catch (e: Exception) {
+                Log.e("LibraryVM", "Failed to play top songs for '$artistName'", e)
+            }
+        }
+    }
+
+    /** Fetch an artist's top tracks, resolve, and add to queue without interrupting playback. */
+    fun queueArtistTopSongs(artistName: String) {
+        viewModelScope.launch {
+            try {
+                val topTracks = metadataService.getArtistTopTracks(artistName, limit = 10)
+                if (topTracks.isEmpty()) return@launch
+                val entities = topTracks.mapNotNull { track ->
+                    val sources = resolverManager.resolveWithHints(
+                        query = "${track.artist} - ${track.title}",
+                        spotifyId = track.spotifyId,
+                    )
+                    val best = resolverScoring.selectBest(sources) ?: return@mapNotNull null
+                    TrackEntity(
+                        id = "top-${track.title.hashCode()}-${track.artist.hashCode()}",
+                        title = track.title,
+                        artist = track.artist,
+                        album = track.album,
+                        duration = track.duration,
+                        artworkUrl = track.artworkUrl,
+                        sourceType = best.sourceType,
+                        sourceUrl = best.url,
+                        resolver = best.resolver,
+                        spotifyUri = best.spotifyUri,
+                        soundcloudId = best.soundcloudId,
+                    )
+                }
+                if (entities.isNotEmpty()) {
+                    playbackController.addToQueue(entities)
+                }
+            } catch (e: Exception) {
+                Log.e("LibraryVM", "Failed to queue top songs for '$artistName'", e)
+            }
         }
     }
 }

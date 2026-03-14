@@ -91,6 +91,15 @@ fun ParachordNavHost(
             com.parachord.android.ui.screens.home.HomeScreen(
                 onNavigateToNowPlaying = { navController.navigate(Routes.NOW_PLAYING) },
                 onOpenDrawer = onOpenDrawer,
+                onNavigateToAlbum = { albumTitle, artistName ->
+                    navController.navigate(Routes.album(albumTitle, artistName))
+                },
+                onNavigateToPlaylist = { playlistId ->
+                    navController.navigate(Routes.playlistDetail(playlistId))
+                },
+                onNavigateToFriend = { friendId ->
+                    navController.navigate(Routes.friendDetail(friendId))
+                },
             )
         }
         composable(Routes.COLLECTION) {

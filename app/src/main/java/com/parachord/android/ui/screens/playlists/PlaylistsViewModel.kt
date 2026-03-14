@@ -6,11 +6,14 @@ import com.parachord.android.data.db.entity.PlaylistEntity
 import com.parachord.android.data.metadata.ImageEnrichmentService
 import com.parachord.android.data.repository.LibraryRepository
 import com.parachord.android.data.store.SettingsStore
+import com.parachord.android.playback.PlaybackContext
+import com.parachord.android.playback.PlaybackController
 import dagger.hilt.android.lifecycle.HiltViewModel
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.combine
+import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
 import javax.inject.Inject
@@ -18,6 +21,7 @@ import javax.inject.Inject
 @HiltViewModel
 class PlaylistsViewModel @Inject constructor(
     private val libraryRepository: LibraryRepository,
+    private val playbackController: PlaybackController,
     private val imageEnrichmentService: ImageEnrichmentService,
     private val settingsStore: SettingsStore,
 ) : ViewModel() {
@@ -79,5 +83,19 @@ class PlaylistsViewModel @Inject constructor(
 
     fun deletePlaylist(playlist: PlaylistEntity) {
         viewModelScope.launch { libraryRepository.deletePlaylist(playlist) }
+    }
+
+    /** Play all tracks in a playlist. */
+    fun playPlaylist(playlistId: String, playlistName: String) {
+        viewModelScope.launch {
+            val playlistTracks = libraryRepository.getPlaylistTracks(playlistId).first()
+            if (playlistTracks.isEmpty()) return@launch
+            val entities = playlistTracks.map { libraryRepository.playlistTrackToTrackEntity(it) }
+            playbackController.playQueue(
+                entities,
+                startIndex = 0,
+                context = PlaybackContext(type = "playlist", name = playlistName),
+            )
+        }
     }
 }
