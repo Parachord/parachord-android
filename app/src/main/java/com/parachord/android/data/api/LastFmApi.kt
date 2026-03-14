@@ -150,6 +150,25 @@ interface LastFmApi {
         @Query("api_key") apiKey: String,
         @Query("format") format: String = "json",
     ): LfmUserFriendsResponse
+
+    // --- Global & geo chart endpoints ---
+
+    @GET(".")
+    suspend fun getChartTopTracks(
+        @Query("method") method: String = "chart.gettoptracks",
+        @Query("limit") limit: Int = 50,
+        @Query("api_key") apiKey: String,
+        @Query("format") format: String = "json",
+    ): LfmChartTopTracksResponse
+
+    @GET(".")
+    suspend fun getGeoTopTracks(
+        @Query("method") method: String = "geo.gettoptracks",
+        @Query("country") country: String,
+        @Query("limit") limit: Int = 50,
+        @Query("api_key") apiKey: String,
+        @Query("format") format: String = "json",
+    ): LfmGeoTopTracksResponse
 }
 
 // --- Response models ---
@@ -564,3 +583,43 @@ object LfmAlbumTrackListSerializer : KSerializer<LfmAlbumTrackList> {
         }
     }
 }
+
+// --- Chart / Geo top tracks ---
+
+@Serializable
+data class LfmChartTopTracksResponse(
+    val tracks: LfmChartTracks? = null,
+)
+
+@Serializable
+data class LfmChartTracks(
+    val track: List<LfmChartTrack> = emptyList(),
+)
+
+@Serializable
+data class LfmGeoTopTracksResponse(
+    val tracks: LfmGeoTracks? = null,
+)
+
+@Serializable
+data class LfmGeoTracks(
+    val track: List<LfmChartTrack> = emptyList(),
+)
+
+@Serializable
+data class LfmChartTrack(
+    val name: String,
+    val artist: LfmChartTrackArtist? = null,
+    val url: String? = null,
+    val listeners: String? = null,
+    val playcount: String? = null,
+    val image: List<LfmImage> = emptyList(),
+    val mbid: String? = null,
+)
+
+@Serializable
+data class LfmChartTrackArtist(
+    val name: String,
+    val mbid: String? = null,
+    val url: String? = null,
+)

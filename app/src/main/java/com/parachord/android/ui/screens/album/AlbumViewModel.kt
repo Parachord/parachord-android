@@ -31,11 +31,17 @@ class AlbumViewModel @Inject constructor(
     private val resolverScoring: ResolverScoring,
     private val playbackController: PlaybackController,
     private val libraryRepository: com.parachord.android.data.repository.LibraryRepository,
+    private val playbackStateHolder: com.parachord.android.playback.PlaybackStateHolder,
 ) : ViewModel() {
 
     companion object {
         private const val TAG = "AlbumViewModel"
     }
+
+    /** Title of the currently playing track (for highlight). */
+    val nowPlayingTitle: StateFlow<String?> = playbackStateHolder.state
+        .map { it.currentTrack?.title }
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), null)
 
     // Navigation already decodes URI path segments — do not double-decode
     private val albumTitle: String = savedStateHandle.get<String>("albumTitle") ?: ""

@@ -20,7 +20,8 @@ import androidx.navigation.navArgument
 /** Top-level route definitions. */
 object Routes {
     const val HOME = "home"
-    const val COLLECTION = "collection"
+    const val COLLECTION = "collection?tab={tab}"
+    const val COLLECTION_BASE = "collection"
     const val SEARCH = "search"
     const val PLAYLISTS = "playlists"
     const val PLAYLIST_DETAIL = "playlist/{playlistId}"
@@ -52,6 +53,9 @@ object Routes {
 
     fun friendDetail(friendId: String): String =
         "friend/${Uri.encode(friendId)}"
+
+    fun collection(tab: Int = 0): String =
+        if (tab > 0) "collection?tab=$tab" else "collection"
 }
 
 @Composable
@@ -100,10 +104,21 @@ fun ParachordNavHost(
                 onNavigateToFriend = { friendId ->
                     navController.navigate(Routes.friendDetail(friendId))
                 },
+                onNavigateToRecommendations = { navController.navigate(Routes.RECOMMENDATIONS) },
+                onNavigateToCriticalDarlings = { navController.navigate(Routes.CRITICAL_DARLINGS) },
+                onNavigateToPopOfTheTops = { navController.navigate(Routes.POP_OF_THE_TOPS) },
+                onNavigateToFreshDrops = { navController.navigate(Routes.FRESH_DROPS) },
+                onNavigateToCollection = { tab -> navController.navigate(Routes.collection(tab)) },
+                onNavigateToPlaylists = { navController.navigate(Routes.PLAYLISTS) },
             )
         }
-        composable(Routes.COLLECTION) {
+        composable(
+            Routes.COLLECTION,
+            arguments = listOf(navArgument("tab") { type = NavType.IntType; defaultValue = 0 }),
+        ) { backStackEntry ->
+            val initialTab = backStackEntry.arguments?.getInt("tab") ?: 0
             com.parachord.android.ui.screens.library.CollectionScreen(
+                initialTab = initialTab,
                 onOpenDrawer = onOpenDrawer,
                 onNavigateToFriend = { friendId ->
                     navController.navigate(Routes.friendDetail(friendId))
@@ -278,6 +293,12 @@ fun ParachordNavHost(
         composable(Routes.POP_OF_THE_TOPS) {
             com.parachord.android.ui.screens.discover.PopOfTheTopsScreen(
                 onBack = { navController.popBackStack() },
+                onNavigateToAlbum = { albumTitle, artistName ->
+                    navController.navigate(Routes.album(albumTitle, artistName))
+                },
+                onNavigateToArtist = { name ->
+                    navController.navigate(Routes.artist(name))
+                },
             )
         }
         composable(Routes.CRITICAL_DARLINGS) {

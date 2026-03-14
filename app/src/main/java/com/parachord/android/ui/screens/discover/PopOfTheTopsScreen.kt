@@ -1,16 +1,36 @@
 package com.parachord.android.ui.screens.discover
 
+import androidx.compose.animation.animateContentSize
+import androidx.compose.foundation.background
+import androidx.compose.foundation.clickable
+import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.PaddingValues
+import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.WindowInsets
 import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.grid.GridCells
+import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
+import androidx.compose.foundation.lazy.grid.items
+import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.text.BasicTextField
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
-import androidx.compose.material.icons.filled.Album
-import androidx.compose.material.icons.filled.MusicNote
+import androidx.compose.material.icons.filled.ArrowDropDown
+import androidx.compose.material.icons.filled.Close
+import androidx.compose.material.icons.filled.Search
+import androidx.compose.material3.CircularProgressIndicator
+import androidx.compose.material3.DropdownMenu
+import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
@@ -18,30 +38,58 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.material3.TopAppBar
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.collectAsState
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
+import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.graphics.vector.ImageVector
+import androidx.compose.ui.graphics.SolidColor
+import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextAlign
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.em
+import androidx.compose.ui.unit.sp
+import androidx.hilt.navigation.compose.hiltViewModel
+import com.parachord.android.data.repository.ChartAlbum
+import com.parachord.android.data.repository.ChartSong
+import com.parachord.android.data.repository.CHARTS_COUNTRIES
+import com.parachord.android.ui.components.AlbumArtCard
 import com.parachord.android.ui.components.SwipeableTabLayout
 
 private val OrangeAccent = Color(0xFFF97316)
 
-private val popOfTheTopsTabs = listOf("Albums", "Songs")
-
-private val popOfTheTopsTabIcons = listOf(
-    Icons.Filled.Album,
-    Icons.Filled.MusicNote,
+private val HeaderGradient = Brush.horizontalGradient(
+    colors = listOf(
+        Color(0xFFF97316), // orange
+        Color(0xFFEC4899), // pink
+        Color(0xFF8B5CF6), // purple
+    ),
 )
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun PopOfTheTopsScreen(
     onBack: () -> Unit,
+    onNavigateToAlbum: (albumTitle: String, artistName: String) -> Unit = { _, _ -> },
+    onNavigateToArtist: (String) -> Unit = {},
     modifier: Modifier = Modifier,
+    viewModel: PopOfTheTopsViewModel = hiltViewModel(),
 ) {
+    val albums by viewModel.albums.collectAsState()
+    val songs by viewModel.songs.collectAsState()
+    val albumsLoading by viewModel.albumsLoading.collectAsState()
+    val songsLoading by viewModel.songsLoading.collectAsState()
+    val selectedCountry by viewModel.selectedCountry.collectAsState()
+    val songsSource by viewModel.songsSource.collectAsState()
+    val searchQuery by viewModel.searchQuery.collectAsState()
+
     Column(modifier = modifier.fillMaxSize()) {
         TopAppBar(
             title = {
@@ -60,31 +108,506 @@ fun PopOfTheTopsScreen(
             },
             windowInsets = WindowInsets(0),
         )
-        SwipeableTabLayout(tabs = popOfTheTopsTabs) { page ->
-            TabPlaceholder(icon = popOfTheTopsTabIcons[page], accentColor = OrangeAccent)
+
+        // Gradient header
+        ChartsHeader(
+            albumCount = albums.size,
+            songCount = songs.size,
+        )
+
+        SwipeableTabLayout(tabs = listOf("Albums", "Songs")) { page ->
+            when (page) {
+                0 -> AlbumsTab(
+                    albums = viewModel.filterAlbums(albums),
+                    loading = albumsLoading,
+                    selectedCountry = selectedCountry,
+                    searchQuery = searchQuery,
+                    onCountryChange = viewModel::setCountry,
+                    onSearchQueryChange = viewModel::setSearchQuery,
+                    onAlbumClick = { album -> onNavigateToAlbum(album.title, album.artist) },
+                )
+                1 -> SongsTab(
+                    songs = viewModel.filterSongs(songs),
+                    loading = songsLoading,
+                    selectedCountry = selectedCountry,
+                    songsSource = songsSource,
+                    searchQuery = searchQuery,
+                    onCountryChange = viewModel::setCountry,
+                    onSourceChange = viewModel::setSongsSource,
+                    onSearchQueryChange = viewModel::setSearchQuery,
+                    onSongClick = viewModel::playSong,
+                    onArtistClick = onNavigateToArtist,
+                )
+            }
+        }
+    }
+}
+
+// ── Header ──────────────────────────────────────────────────────────
+
+@Composable
+private fun ChartsHeader(albumCount: Int, songCount: Int) {
+    Box(
+        modifier = Modifier
+            .fillMaxWidth()
+            .background(HeaderGradient)
+            .padding(horizontal = 20.dp, vertical = 14.dp)
+            .animateContentSize(),
+    ) {
+        Column {
+            Text(
+                text = "What's trending around the world",
+                style = MaterialTheme.typography.bodySmall,
+                color = Color.White.copy(alpha = 0.9f),
+            )
+            if (albumCount > 0 || songCount > 0) {
+                Text(
+                    text = buildString {
+                        if (albumCount > 0) append("$albumCount albums")
+                        if (albumCount > 0 && songCount > 0) append("  ·  ")
+                        if (songCount > 0) append("$songCount songs")
+                    },
+                    style = MaterialTheme.typography.labelSmall,
+                    color = Color.White.copy(alpha = 0.7f),
+                )
+            }
+        }
+    }
+}
+
+// ── Filter Bar ──────────────────────────────────────────────────────
+
+@Composable
+private fun ChartsFilterBar(
+    selectedCountry: String,
+    onCountryChange: (String) -> Unit,
+    searchQuery: String,
+    onSearchQueryChange: (String) -> Unit,
+    songsSource: String? = null, // null = albums tab (no source selector)
+    onSourceChange: ((String) -> Unit)? = null,
+    showGlobalOption: Boolean = false,
+) {
+    var countryDropdownOpen by remember { mutableStateOf(false) }
+    var sourceDropdownOpen by remember { mutableStateOf(false) }
+    var searchOpen by remember { mutableStateOf(false) }
+
+    Column(
+        modifier = Modifier
+            .fillMaxWidth()
+            .background(MaterialTheme.colorScheme.surface),
+    ) {
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(horizontal = 8.dp, vertical = 4.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            // Country dropdown
+            Box {
+                Row(
+                    modifier = Modifier
+                        .clip(RoundedCornerShape(8.dp))
+                        .clickable { countryDropdownOpen = true }
+                        .padding(horizontal = 10.dp, vertical = 6.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    val countryName = if (showGlobalOption && selectedCountry.isEmpty()) {
+                        "Global"
+                    } else {
+                        CHARTS_COUNTRIES.find { it.code == selectedCountry }?.name ?: "United States"
+                    }
+                    Text(
+                        text = countryName,
+                        style = MaterialTheme.typography.labelMedium,
+                        color = MaterialTheme.colorScheme.onSurface,
+                    )
+                    Icon(
+                        Icons.Filled.ArrowDropDown,
+                        contentDescription = null,
+                        modifier = Modifier.size(18.dp),
+                        tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                }
+                DropdownMenu(
+                    expanded = countryDropdownOpen,
+                    onDismissRequest = { countryDropdownOpen = false },
+                ) {
+                    if (showGlobalOption) {
+                        DropdownMenuItem(
+                            text = { Text("Global") },
+                            onClick = {
+                                onCountryChange("")
+                                countryDropdownOpen = false
+                            },
+                            leadingIcon = {
+                                if (selectedCountry.isEmpty()) {
+                                    Text("✓", color = OrangeAccent)
+                                }
+                            },
+                        )
+                    }
+                    CHARTS_COUNTRIES.forEach { country ->
+                        DropdownMenuItem(
+                            text = { Text(country.name) },
+                            onClick = {
+                                onCountryChange(country.code)
+                                countryDropdownOpen = false
+                            },
+                            leadingIcon = {
+                                if (selectedCountry == country.code) {
+                                    Text("✓", color = OrangeAccent)
+                                }
+                            },
+                        )
+                    }
+                }
+            }
+
+            // Source dropdown (Songs tab only)
+            if (songsSource != null && onSourceChange != null) {
+                Spacer(modifier = Modifier.width(4.dp))
+                Box {
+                    Row(
+                        modifier = Modifier
+                            .clip(RoundedCornerShape(8.dp))
+                            .clickable { sourceDropdownOpen = true }
+                            .padding(horizontal = 10.dp, vertical = 6.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                    ) {
+                        Text(
+                            text = if (songsSource == "lastfm") "Last.fm" else "Apple Music",
+                            style = MaterialTheme.typography.labelMedium,
+                            color = MaterialTheme.colorScheme.onSurface,
+                        )
+                        Icon(
+                            Icons.Filled.ArrowDropDown,
+                            contentDescription = null,
+                            modifier = Modifier.size(18.dp),
+                            tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                        )
+                    }
+                    DropdownMenu(
+                        expanded = sourceDropdownOpen,
+                        onDismissRequest = { sourceDropdownOpen = false },
+                    ) {
+                        DropdownMenuItem(
+                            text = { Text("Apple Music") },
+                            onClick = {
+                                onSourceChange("apple")
+                                sourceDropdownOpen = false
+                            },
+                            leadingIcon = {
+                                if (songsSource == "apple") {
+                                    Text("✓", color = OrangeAccent)
+                                }
+                            },
+                        )
+                        DropdownMenuItem(
+                            text = { Text("Last.fm") },
+                            onClick = {
+                                onSourceChange("lastfm")
+                                sourceDropdownOpen = false
+                            },
+                            leadingIcon = {
+                                if (songsSource == "lastfm") {
+                                    Text("✓", color = OrangeAccent)
+                                }
+                            },
+                        )
+                    }
+                }
+            }
+
+            Spacer(modifier = Modifier.weight(1f))
+
+            // Search toggle
+            IconButton(onClick = { searchOpen = !searchOpen }) {
+                Icon(
+                    if (searchOpen) Icons.Filled.Close else Icons.Filled.Search,
+                    contentDescription = if (searchOpen) "Close search" else "Search",
+                    modifier = Modifier.size(20.dp),
+                )
+            }
+        }
+
+        // Expandable search field
+        if (searchOpen) {
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(horizontal = 16.dp)
+                    .padding(bottom = 8.dp)
+                    .clip(RoundedCornerShape(8.dp))
+                    .background(MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f))
+                    .padding(horizontal = 12.dp, vertical = 10.dp),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                Icon(
+                    Icons.Filled.Search,
+                    contentDescription = null,
+                    modifier = Modifier.size(18.dp),
+                    tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+                Spacer(modifier = Modifier.width(8.dp))
+                BasicTextField(
+                    value = searchQuery,
+                    onValueChange = onSearchQueryChange,
+                    singleLine = true,
+                    textStyle = TextStyle(
+                        color = MaterialTheme.colorScheme.onSurface,
+                        fontSize = 14.sp,
+                    ),
+                    cursorBrush = SolidColor(MaterialTheme.colorScheme.primary),
+                    modifier = Modifier.weight(1f),
+                    decorationBox = { innerTextField ->
+                        Box {
+                            if (searchQuery.isEmpty()) {
+                                Text(
+                                    text = "Search…",
+                                    style = MaterialTheme.typography.bodyMedium,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.6f),
+                                )
+                            }
+                            innerTextField()
+                        }
+                    },
+                )
+                if (searchQuery.isNotEmpty()) {
+                    Icon(
+                        Icons.Filled.Close,
+                        contentDescription = "Clear",
+                        modifier = Modifier
+                            .size(18.dp)
+                            .clickable { onSearchQueryChange("") },
+                        tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                }
+            }
+        }
+    }
+}
+
+// ── Albums Tab ───────────────────────────────────────────────────────
+
+@Composable
+private fun AlbumsTab(
+    albums: List<ChartAlbum>,
+    loading: Boolean,
+    selectedCountry: String,
+    searchQuery: String,
+    onCountryChange: (String) -> Unit,
+    onSearchQueryChange: (String) -> Unit,
+    onAlbumClick: (ChartAlbum) -> Unit,
+) {
+    Column(modifier = Modifier.fillMaxSize()) {
+        ChartsFilterBar(
+            selectedCountry = selectedCountry,
+            onCountryChange = onCountryChange,
+            searchQuery = searchQuery,
+            onSearchQueryChange = onSearchQueryChange,
+        )
+
+        if (loading) {
+            Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+                CircularProgressIndicator(color = OrangeAccent)
+            }
+        } else if (albums.isEmpty()) {
+            Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+                Text(
+                    text = if (searchQuery.isNotBlank()) "No results for \"$searchQuery\"" else "No albums available",
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    textAlign = TextAlign.Center,
+                )
+            }
+        } else {
+            LazyVerticalGrid(
+                columns = GridCells.Fixed(2),
+                contentPadding = PaddingValues(horizontal = 12.dp, vertical = 8.dp),
+                horizontalArrangement = Arrangement.spacedBy(10.dp),
+                verticalArrangement = Arrangement.spacedBy(12.dp),
+            ) {
+                items(albums, key = { it.id }) { album ->
+                    AlbumGridItem(album = album, onClick = { onAlbumClick(album) })
+                }
+            }
         }
     }
 }
 
 @Composable
-private fun TabPlaceholder(icon: ImageVector, accentColor: Color) {
-    Box(
-        modifier = Modifier.fillMaxSize(),
-        contentAlignment = Alignment.Center,
+private fun AlbumGridItem(album: ChartAlbum, onClick: () -> Unit) {
+    Column(
+        modifier = Modifier
+            .clip(RoundedCornerShape(8.dp))
+            .clickable(onClick = onClick),
     ) {
-        Column(horizontalAlignment = Alignment.CenterHorizontally) {
-            Icon(
-                imageVector = icon,
-                contentDescription = null,
-                modifier = Modifier.size(48.dp),
-                tint = accentColor,
+        Box {
+            AlbumArtCard(
+                artworkUrl = album.artworkUrl,
+                size = 180.dp,
+                cornerRadius = 8.dp,
+                placeholderName = album.title,
             )
-            Spacer(modifier = Modifier.height(16.dp))
+            // Rank badge
+            Box(
+                modifier = Modifier
+                    .padding(6.dp)
+                    .background(
+                        color = Color.Black.copy(alpha = 0.65f),
+                        shape = RoundedCornerShape(4.dp),
+                    )
+                    .padding(horizontal = 6.dp, vertical = 2.dp)
+                    .align(Alignment.TopStart),
+            ) {
+                Text(
+                    text = "#${album.rank}",
+                    style = MaterialTheme.typography.labelSmall,
+                    fontWeight = FontWeight.Bold,
+                    color = Color.White,
+                )
+            }
+        }
+        Spacer(modifier = Modifier.height(4.dp))
+        Text(
+            text = album.title,
+            style = MaterialTheme.typography.bodySmall.copy(fontWeight = FontWeight.Medium),
+            maxLines = 1,
+            overflow = TextOverflow.Ellipsis,
+            modifier = Modifier.padding(horizontal = 2.dp),
+        )
+        Text(
+            text = album.artist,
+            style = MaterialTheme.typography.labelSmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+            maxLines = 1,
+            overflow = TextOverflow.Ellipsis,
+            modifier = Modifier.padding(horizontal = 2.dp),
+        )
+    }
+}
+
+// ── Songs Tab ────────────────────────────────────────────────────────
+
+@Composable
+private fun SongsTab(
+    songs: List<ChartSong>,
+    loading: Boolean,
+    selectedCountry: String,
+    songsSource: String,
+    searchQuery: String,
+    onCountryChange: (String) -> Unit,
+    onSourceChange: (String) -> Unit,
+    onSearchQueryChange: (String) -> Unit,
+    onSongClick: (ChartSong) -> Unit,
+    onArtistClick: (String) -> Unit,
+) {
+    Column(modifier = Modifier.fillMaxSize()) {
+        ChartsFilterBar(
+            selectedCountry = selectedCountry,
+            onCountryChange = onCountryChange,
+            searchQuery = searchQuery,
+            onSearchQueryChange = onSearchQueryChange,
+            songsSource = songsSource,
+            onSourceChange = onSourceChange,
+            showGlobalOption = songsSource == "lastfm",
+        )
+
+        if (loading) {
+            Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+                CircularProgressIndicator(color = OrangeAccent)
+            }
+        } else if (songs.isEmpty()) {
+            Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+                Text(
+                    text = if (searchQuery.isNotBlank()) "No results for \"$searchQuery\"" else "No songs available",
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    textAlign = TextAlign.Center,
+                )
+            }
+        } else {
+            LazyColumn(
+                contentPadding = PaddingValues(vertical = 4.dp),
+            ) {
+                items(songs, key = { it.id }) { song ->
+                    SongRow(
+                        song = song,
+                        onClick = { onSongClick(song) },
+                        onArtistClick = { onArtistClick(song.artist) },
+                    )
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun SongRow(
+    song: ChartSong,
+    onClick: () -> Unit,
+    onArtistClick: () -> Unit,
+) {
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .clickable(onClick = onClick)
+            .padding(horizontal = 16.dp, vertical = 10.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        // Rank
+        Text(
+            text = "${song.rank}",
+            style = MaterialTheme.typography.bodyMedium.copy(fontWeight = FontWeight.Bold),
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+            modifier = Modifier.width(32.dp),
+            textAlign = TextAlign.Center,
+        )
+
+        // Artwork (small)
+        if (song.artworkUrl != null) {
+            AlbumArtCard(
+                artworkUrl = song.artworkUrl,
+                size = 40.dp,
+                cornerRadius = 4.dp,
+                placeholderName = song.title,
+            )
+            Spacer(modifier = Modifier.width(10.dp))
+        }
+
+        // Title + Artist
+        Column(modifier = Modifier.weight(1f)) {
             Text(
-                text = "Coming soon",
-                style = MaterialTheme.typography.titleMedium,
+                text = song.title,
+                style = MaterialTheme.typography.bodyMedium,
+                fontWeight = FontWeight.Medium,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
+            )
+            Text(
+                text = song.artist,
+                style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
+                modifier = Modifier.clickable(onClick = onArtistClick),
+            )
+        }
+
+        // Listeners (Last.fm only)
+        if (song.listeners != null && song.listeners > 0) {
+            Spacer(modifier = Modifier.width(8.dp))
+            Text(
+                text = formatListeners(song.listeners),
+                style = MaterialTheme.typography.labelSmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.7f),
             )
         }
     }
+}
+
+private fun formatListeners(count: Long): String = when {
+    count >= 1_000_000 -> "${count / 1_000_000}.${(count % 1_000_000) / 100_000}M"
+    count >= 1_000 -> "${count / 1_000}.${(count % 1_000) / 100}K"
+    else -> "$count"
 }

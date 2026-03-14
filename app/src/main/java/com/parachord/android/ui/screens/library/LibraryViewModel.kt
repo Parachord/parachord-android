@@ -255,7 +255,9 @@ class LibraryViewModel @Inject constructor(
     fun playArtistTopSongs(artistName: String) {
         viewModelScope.launch {
             try {
+                Log.d("LibraryVM", "Play top songs: fetching for '$artistName'")
                 val topTracks = metadataService.getArtistTopTracks(artistName, limit = 10)
+                Log.d("LibraryVM", "Play top songs: got ${topTracks.size} tracks")
                 if (topTracks.isEmpty()) return@launch
                 val entities = topTracks.mapNotNull { track ->
                     val sources = resolverManager.resolveWithHints(
@@ -294,13 +296,16 @@ class LibraryViewModel @Inject constructor(
     fun queueArtistTopSongs(artistName: String) {
         viewModelScope.launch {
             try {
+                Log.d("LibraryVM", "Queue top songs: fetching for '$artistName'")
                 val topTracks = metadataService.getArtistTopTracks(artistName, limit = 10)
+                Log.d("LibraryVM", "Queue top songs: got ${topTracks.size} tracks")
                 if (topTracks.isEmpty()) return@launch
                 val entities = topTracks.mapNotNull { track ->
                     val sources = resolverManager.resolveWithHints(
                         query = "${track.artist} - ${track.title}",
                         spotifyId = track.spotifyId,
                     )
+                    Log.d("LibraryVM", "Queue top songs: resolved '${track.title}' → ${sources.size} sources")
                     val best = resolverScoring.selectBest(sources) ?: return@mapNotNull null
                     TrackEntity(
                         id = "top-${track.title.hashCode()}-${track.artist.hashCode()}",
@@ -316,6 +321,7 @@ class LibraryViewModel @Inject constructor(
                         soundcloudId = best.soundcloudId,
                     )
                 }
+                Log.d("LibraryVM", "Queue top songs: resolved ${entities.size}/${topTracks.size} tracks")
                 if (entities.isNotEmpty()) {
                     playbackController.addToQueue(entities)
                 }

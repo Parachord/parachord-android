@@ -17,6 +17,7 @@ import androidx.compose.foundation.layout.aspectRatio
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
@@ -51,14 +52,22 @@ import androidx.compose.runtime.getValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.Outline
+import androidx.compose.ui.graphics.Path
+import androidx.compose.ui.graphics.Shape
 import androidx.compose.ui.graphics.vector.ImageVector
+import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.unit.Density
+import androidx.compose.ui.unit.LayoutDirection
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.em
 import androidx.compose.ui.unit.sp
+import coil.compose.SubcomposeAsyncImage
 import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.parachord.android.data.db.entity.AlbumEntity
@@ -79,6 +88,12 @@ fun HomeScreen(
     onNavigateToPlaylist: (playlistId: String) -> Unit = {},
     onNavigateToArtist: (String) -> Unit = {},
     onNavigateToFriend: (String) -> Unit = {},
+    onNavigateToRecommendations: () -> Unit = {},
+    onNavigateToCriticalDarlings: () -> Unit = {},
+    onNavigateToPopOfTheTops: () -> Unit = {},
+    onNavigateToFreshDrops: () -> Unit = {},
+    onNavigateToCollection: (tab: Int) -> Unit = {},
+    onNavigateToPlaylists: () -> Unit = {},
     modifier: Modifier = Modifier,
     viewModel: HomeViewModel = hiltViewModel(),
 ) {
@@ -89,6 +104,9 @@ fun HomeScreen(
     val recentPlaylists by viewModel.recentPlaylists.collectAsStateWithLifecycle()
     val friendActivity by viewModel.friendActivity.collectAsStateWithLifecycle()
     val stats by viewModel.collectionStats.collectAsStateWithLifecycle()
+    val forYouPreview by viewModel.forYouPreview.collectAsStateWithLifecycle()
+    val criticalDarlingsPreview by viewModel.criticalDarlingsPreview.collectAsStateWithLifecycle()
+    val freshDropsPreview by viewModel.freshDropsPreview.collectAsStateWithLifecycle()
 
     val audioPermission = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
         Manifest.permission.READ_MEDIA_AUDIO
@@ -223,8 +241,13 @@ fun HomeScreen(
                 item { SectionHeader("Discover") }
                 item {
                     DiscoverGrid(
-                        onNavigateToRecommendations = { /* TODO */ },
-                        onNavigateToCharts = { /* TODO */ },
+                        forYouPreview = forYouPreview,
+                        criticalDarlingsPreview = criticalDarlingsPreview,
+                        freshDropsPreview = freshDropsPreview,
+                        onNavigateToRecommendations = onNavigateToRecommendations,
+                        onNavigateToCriticalDarlings = onNavigateToCriticalDarlings,
+                        onNavigateToPopOfTheTops = onNavigateToPopOfTheTops,
+                        onNavigateToFreshDrops = onNavigateToFreshDrops,
                     )
                     Spacer(modifier = Modifier.height(8.dp))
                 }
@@ -248,12 +271,19 @@ fun HomeScreen(
                 // ── Collection Stats ─────────────────────────────────────
                 item { SectionHeader("Your Collection") }
                 item {
-                    StatsRow(stats = stats)
+                    StatsRow(
+                        stats = stats,
+                        onSongsClick = { onNavigateToCollection(2) },
+                        onAlbumsClick = { onNavigateToCollection(1) },
+                        onArtistsClick = { onNavigateToCollection(0) },
+                        onPlaylistsClick = onNavigateToPlaylists,
+                        onFriendsClick = { onNavigateToCollection(3) },
+                    )
                 }
 
-                // ── Recent Tracks ────────────────────────────────────────
+                // ── Recent Loves ─────────────────────────────────────────
                 if (recentTracks.isNotEmpty()) {
-                    item { SectionHeader("Recent Tracks") }
+                    item { SectionHeader("Recent Loves") }
                     items(recentTracks.take(10), key = { it.id }) { track ->
                         TrackRow(
                             title = track.title,
@@ -349,8 +379,13 @@ private fun PlaylistCard(
 
 @Composable
 private fun DiscoverGrid(
+    forYouPreview: DiscoverPreview?,
+    criticalDarlingsPreview: DiscoverPreview?,
+    freshDropsPreview: DiscoverPreview?,
     onNavigateToRecommendations: () -> Unit,
-    onNavigateToCharts: () -> Unit,
+    onNavigateToCriticalDarlings: () -> Unit,
+    onNavigateToPopOfTheTops: () -> Unit,
+    onNavigateToFreshDrops: () -> Unit,
 ) {
     Column(
         modifier = Modifier.padding(horizontal = 16.dp),
@@ -362,26 +397,28 @@ private fun DiscoverGrid(
         ) {
             DiscoverCard(
                 title = "For You",
-                subtitle = "Personalized picks",
                 icon = Icons.Filled.Star,
                 gradient = listOf(
                     Color(0xFF6366F1), // indigo
                     Color(0xFF8B5CF6), // purple
                     Color(0xFFEC4899), // pink
                 ),
+                preview = forYouPreview,
+                fallbackSubtitle = "Personalized picks",
                 onClick = onNavigateToRecommendations,
                 modifier = Modifier.weight(1f),
             )
             DiscoverCard(
                 title = "Critical Darlings",
-                subtitle = "Staff picks",
                 icon = Icons.Filled.Favorite,
                 gradient = listOf(
                     Color(0xFFF59E0B), // amber
                     Color(0xFFF97316), // orange
                     Color(0xFFEF4444), // red
                 ),
-                onClick = { /* TODO */ },
+                preview = criticalDarlingsPreview,
+                fallbackSubtitle = "Staff picks",
+                onClick = onNavigateToCriticalDarlings,
                 modifier = Modifier.weight(1f),
             )
         }
@@ -391,26 +428,28 @@ private fun DiscoverGrid(
         ) {
             DiscoverCard(
                 title = "Pop of the Tops",
-                subtitle = "What's trending",
                 icon = Icons.AutoMirrored.Filled.TrendingUp,
                 gradient = listOf(
                     Color(0xFFF97316), // orange
                     Color(0xFFEC4899), // pink
                     Color(0xFF8B5CF6), // purple
                 ),
-                onClick = onNavigateToCharts,
+                preview = null,
+                fallbackSubtitle = "Coming soon",
+                onClick = onNavigateToPopOfTheTops,
                 modifier = Modifier.weight(1f),
             )
             DiscoverCard(
                 title = "Fresh Drops",
-                subtitle = "New releases",
                 icon = Icons.Filled.Explore,
                 gradient = listOf(
                     Color(0xFF10B981), // emerald
                     Color(0xFF14B8A6), // teal
                     Color(0xFF06B6D4), // cyan
                 ),
-                onClick = { /* TODO */ },
+                preview = freshDropsPreview,
+                fallbackSubtitle = "New releases",
+                onClick = onNavigateToFreshDrops,
                 modifier = Modifier.weight(1f),
             )
         }
@@ -420,9 +459,10 @@ private fun DiscoverGrid(
 @Composable
 private fun DiscoverCard(
     title: String,
-    subtitle: String,
     icon: ImageVector,
     gradient: List<Color>,
+    preview: DiscoverPreview?,
+    fallbackSubtitle: String,
     onClick: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
@@ -432,28 +472,69 @@ private fun DiscoverCard(
             .clip(RoundedCornerShape(12.dp))
             .background(Brush.linearGradient(gradient))
             .clickable(onClick = onClick)
-            .padding(14.dp),
+            .padding(12.dp),
     ) {
         Column(
             modifier = Modifier.fillMaxSize(),
             verticalArrangement = Arrangement.SpaceBetween,
         ) {
-            Icon(
-                imageVector = icon,
-                contentDescription = null,
-                tint = Color.White.copy(alpha = 0.9f),
-                modifier = Modifier.size(22.dp),
-            )
-            Column {
+            // Header: icon + title
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Icon(
+                    imageVector = icon,
+                    contentDescription = null,
+                    tint = Color.White.copy(alpha = 0.9f),
+                    modifier = Modifier.size(16.dp),
+                )
+                Spacer(modifier = Modifier.width(5.dp))
                 Text(
                     text = title,
-                    fontSize = 14.sp,
+                    fontSize = 13.sp,
                     fontWeight = FontWeight.SemiBold,
                     color = Color.White,
                     maxLines = 1,
                 )
+            }
+            // Preview content or fallback
+            if (preview != null) {
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    if (preview.artworkUrl != null) {
+                        AlbumArtCard(
+                            artworkUrl = preview.artworkUrl,
+                            size = 36.dp,
+                            cornerRadius = 4.dp,
+                        )
+                        Spacer(modifier = Modifier.width(8.dp))
+                    }
+                    Column(modifier = Modifier.weight(1f)) {
+                        Text(
+                            text = preview.label,
+                            fontSize = 9.sp,
+                            fontWeight = FontWeight.Medium,
+                            color = Color.White.copy(alpha = 0.6f),
+                            maxLines = 1,
+                            letterSpacing = 0.5.sp,
+                        )
+                        Text(
+                            text = preview.title,
+                            fontSize = 12.sp,
+                            fontWeight = FontWeight.SemiBold,
+                            color = Color.White,
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis,
+                        )
+                        Text(
+                            text = preview.subtitle,
+                            fontSize = 10.sp,
+                            color = Color.White.copy(alpha = 0.7f),
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis,
+                        )
+                    }
+                }
+            } else {
                 Text(
-                    text = subtitle,
+                    text = fallbackSubtitle,
                     fontSize = 11.sp,
                     color = Color.White.copy(alpha = 0.75f),
                     maxLines = 1,
@@ -466,34 +547,71 @@ private fun DiscoverCard(
 // ── Friend Activity Row ──────────────────────────────────────────
 
 private val OnAirGreen = Color(0xFF22C55E)
+private val LastFmRed = Color(0xFFD51007)
+private val ListenBrainzOrange = Color(0xFFE8702A)
+private val HomeMiniPlaybarBg = Color(0xF2262626)
+
+/** Hexagonal clip path matching the desktop's friend avatar treatment. */
+private val HomeHexagonShape = object : Shape {
+    override fun createOutline(size: Size, layoutDirection: LayoutDirection, density: Density): Outline {
+        val w = size.width
+        val h = size.height
+        val path = Path().apply {
+            moveTo(w * 0.5f, 0f)
+            lineTo(w, h * 0.25f)
+            lineTo(w, h * 0.75f)
+            lineTo(w * 0.5f, h)
+            lineTo(0f, h * 0.75f)
+            lineTo(0f, h * 0.25f)
+            close()
+        }
+        return Outline.Generic(path)
+    }
+}
 
 @Composable
 private fun FriendActivityRow(
     friend: FriendEntity,
     onClick: () -> Unit,
 ) {
+    val surfaceColor = MaterialTheme.colorScheme.surface
+
     Row(
         modifier = Modifier
             .fillMaxWidth()
             .clickable(onClick = onClick)
             .padding(vertical = 10.dp),
-        verticalAlignment = Alignment.CenterVertically,
+        verticalAlignment = Alignment.Top,
     ) {
-        // Avatar with on-air indicator
-        Box {
-            AlbumArtCard(
-                artworkUrl = friend.avatarUrl,
-                size = 40.dp,
-                cornerRadius = 20.dp,
-                placeholderName = friend.displayName,
-            )
+        // Hexagonal avatar with on-air indicator
+        Box(modifier = Modifier.padding(top = 2.dp)) {
+            Box(
+                modifier = Modifier
+                    .size(44.dp)
+                    .clip(HomeHexagonShape),
+                contentAlignment = Alignment.Center,
+            ) {
+                if (!friend.avatarUrl.isNullOrBlank()) {
+                    SubcomposeAsyncImage(
+                        model = friend.avatarUrl,
+                        contentDescription = friend.displayName,
+                        contentScale = ContentScale.Crop,
+                        modifier = Modifier.size(44.dp),
+                        loading = { HomeHexFallback(friend.displayName) },
+                        error = { HomeHexFallback(friend.displayName) },
+                    )
+                } else {
+                    HomeHexFallback(friend.displayName)
+                }
+            }
             if (friend.isOnAir) {
                 Box(
                     modifier = Modifier
                         .align(Alignment.BottomEnd)
-                        .size(12.dp)
+                        .offset(x = 1.dp, y = 1.dp)
+                        .size(14.dp)
                         .clip(CircleShape)
-                        .background(MaterialTheme.colorScheme.surface)
+                        .background(surfaceColor)
                         .padding(2.dp)
                         .clip(CircleShape)
                         .background(OnAirGreen),
@@ -504,58 +622,173 @@ private fun FriendActivityRow(
         Spacer(modifier = Modifier.width(12.dp))
 
         Column(modifier = Modifier.weight(1f)) {
-            Text(
-                text = friend.displayName,
-                style = MaterialTheme.typography.bodyMedium,
-                fontWeight = FontWeight.Medium,
-                maxLines = 1,
-                overflow = TextOverflow.Ellipsis,
-            )
-            friend.cachedTrackName?.let { track ->
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Text(
+                    text = friend.displayName,
+                    style = MaterialTheme.typography.bodyMedium,
+                    fontWeight = FontWeight.Medium,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                    modifier = Modifier.weight(1f, fill = false),
+                )
+                Spacer(modifier = Modifier.width(6.dp))
+                // Service badge
+                val (badgeText, badgeColor) = when (friend.service) {
+                    "lastfm" -> "Last.fm" to LastFmRed
+                    "listenbrainz" -> "LB" to ListenBrainzOrange
+                    else -> friend.service to MaterialTheme.colorScheme.outline
+                }
+                Text(
+                    text = badgeText,
+                    style = MaterialTheme.typography.labelSmall,
+                    color = badgeColor,
+                    modifier = Modifier
+                        .background(
+                            color = badgeColor.copy(alpha = 0.12f),
+                            shape = RoundedCornerShape(4.dp),
+                        )
+                        .padding(horizontal = 6.dp, vertical = 2.dp),
+                )
+            }
+
+            // On-air: mini playbar pill. Offline: plain muted text.
+            if (friend.isOnAir && friend.cachedTrackName != null) {
+                Spacer(modifier = Modifier.height(4.dp))
+                HomeMiniPlaybar(
+                    trackName = friend.cachedTrackName!!,
+                    artistName = friend.cachedTrackArtist,
+                    artworkUrl = friend.cachedTrackArtworkUrl,
+                )
+            } else if (friend.cachedTrackName != null) {
                 Text(
                     text = buildString {
-                        append(track)
+                        append(friend.cachedTrackName)
                         friend.cachedTrackArtist?.let { append("  ·  $it") }
+                        if (friend.cachedTrackTimestamp > 0) {
+                            append("  ·  ")
+                            append(formatTimeAgo(friend.cachedTrackTimestamp))
+                        }
                     },
                     style = MaterialTheme.typography.bodySmall,
-                    color = if (friend.isOnAir) OnAirGreen
-                    else MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.7f),
+                    color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.6f),
                     maxLines = 1,
                     overflow = TextOverflow.Ellipsis,
                 )
             }
         }
 
-        if (friend.isOnAir) {
-            Text(
-                text = "LIVE",
-                fontSize = 10.sp,
-                fontWeight = FontWeight.Bold,
-                color = OnAirGreen,
-                modifier = Modifier
-                    .background(
-                        color = OnAirGreen.copy(alpha = 0.12f),
-                        shape = RoundedCornerShape(4.dp),
-                    )
-                    .padding(horizontal = 6.dp, vertical = 2.dp),
-            )
-        } else if (friend.cachedTrackTimestamp > 0) {
-            Text(
-                text = formatTimeAgo(friend.cachedTrackTimestamp),
-                style = MaterialTheme.typography.labelSmall,
-                color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.5f),
-            )
+    }
+}
+
+@Composable
+private fun HomeMiniPlaybar(
+    trackName: String,
+    artistName: String?,
+    artworkUrl: String?,
+) {
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .height(24.dp)
+            .clip(RoundedCornerShape(4.dp))
+            .background(HomeMiniPlaybarBg),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Box(
+            modifier = Modifier
+                .size(24.dp)
+                .clip(RoundedCornerShape(topStart = 4.dp, bottomStart = 4.dp)),
+            contentAlignment = Alignment.Center,
+        ) {
+            if (!artworkUrl.isNullOrBlank()) {
+                SubcomposeAsyncImage(
+                    model = artworkUrl,
+                    contentDescription = null,
+                    contentScale = ContentScale.Crop,
+                    modifier = Modifier.size(24.dp),
+                    loading = { HomeMiniArtFallback() },
+                    error = { HomeMiniArtFallback() },
+                )
+            } else {
+                HomeMiniArtFallback()
+            }
         }
+        Text(
+            text = buildString {
+                append(trackName)
+                artistName?.let { append("  ·  $it") }
+            },
+            fontSize = 11.sp,
+            fontWeight = FontWeight.Medium,
+            lineHeight = 24.sp,
+            color = Color(0xFFD1D5DB),
+            maxLines = 1,
+            overflow = TextOverflow.Ellipsis,
+            modifier = Modifier
+                .weight(1f)
+                .padding(horizontal = 8.dp),
+        )
+        Box(
+            modifier = Modifier
+                .padding(end = 6.dp)
+                .size(6.dp)
+                .clip(CircleShape)
+                .background(OnAirGreen),
+        )
+    }
+}
+
+@Composable
+private fun HomeMiniArtFallback() {
+    Box(
+        modifier = Modifier
+            .size(24.dp)
+            .background(Color(0xFF4B5563)),
+        contentAlignment = Alignment.Center,
+    ) {
+        Icon(
+            Icons.Filled.MusicNote,
+            contentDescription = null,
+            tint = Color(0xFF9CA3AF),
+            modifier = Modifier.size(12.dp),
+        )
+    }
+}
+
+@Composable
+private fun HomeHexFallback(name: String) {
+    Box(
+        modifier = Modifier
+            .size(44.dp)
+            .background(
+                brush = Brush.linearGradient(
+                    listOf(Color(0xFF6366F1), Color(0xFF8B5CF6)),
+                ),
+            ),
+        contentAlignment = Alignment.Center,
+    ) {
+        Text(
+            text = name.take(1).uppercase(),
+            fontSize = 18.sp,
+            fontWeight = FontWeight.Bold,
+            color = Color.White,
+        )
     }
 }
 
 // ── Collection Stats Row ─────────────────────────────────────────
 
 @Composable
-private fun StatsRow(stats: CollectionStats) {
+private fun StatsRow(
+    stats: CollectionStats,
+    onSongsClick: () -> Unit = {},
+    onAlbumsClick: () -> Unit = {},
+    onArtistsClick: () -> Unit = {},
+    onPlaylistsClick: () -> Unit = {},
+    onFriendsClick: () -> Unit = {},
+) {
     val isDark = isSystemInDarkTheme()
     val cardBg = if (isDark) Color(0xFF1E1E1E) else Color(0xFFF3F4F6)
-    val cardBorder = if (isDark) Color(0xFF2A2A2A) else Color(0xFFE5E7EB)
 
     LazyRow(
         contentPadding = PaddingValues(horizontal = 16.dp),
@@ -567,7 +800,7 @@ private fun StatsRow(stats: CollectionStats) {
                 count = stats.tracks,
                 label = "Songs",
                 bg = cardBg,
-                border = cardBorder,
+                onClick = onSongsClick,
             )
         }
         item {
@@ -576,7 +809,7 @@ private fun StatsRow(stats: CollectionStats) {
                 count = stats.albums,
                 label = "Albums",
                 bg = cardBg,
-                border = cardBorder,
+                onClick = onAlbumsClick,
             )
         }
         item {
@@ -585,7 +818,7 @@ private fun StatsRow(stats: CollectionStats) {
                 count = stats.artists,
                 label = "Artists",
                 bg = cardBg,
-                border = cardBorder,
+                onClick = onArtistsClick,
             )
         }
         item {
@@ -594,7 +827,7 @@ private fun StatsRow(stats: CollectionStats) {
                 count = stats.playlists,
                 label = "Playlists",
                 bg = cardBg,
-                border = cardBorder,
+                onClick = onPlaylistsClick,
             )
         }
         item {
@@ -603,7 +836,7 @@ private fun StatsRow(stats: CollectionStats) {
                 count = stats.friends,
                 label = "Friends",
                 bg = cardBg,
-                border = cardBorder,
+                onClick = onFriendsClick,
             )
         }
     }
@@ -615,13 +848,14 @@ private fun StatCard(
     count: Int,
     label: String,
     bg: Color,
-    border: Color,
+    onClick: () -> Unit = {},
 ) {
     Column(
         modifier = Modifier
             .width(90.dp)
             .clip(RoundedCornerShape(10.dp))
             .background(bg)
+            .clickable(onClick = onClick)
             .padding(12.dp),
         horizontalAlignment = Alignment.CenterHorizontally,
     ) {
