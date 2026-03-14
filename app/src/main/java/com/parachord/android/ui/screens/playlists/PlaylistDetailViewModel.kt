@@ -12,6 +12,7 @@ import com.parachord.android.playback.PlaybackController
 import dagger.hilt.android.lifecycle.HiltViewModel
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
 import javax.inject.Inject
@@ -22,12 +23,18 @@ class PlaylistDetailViewModel @Inject constructor(
     private val playlistDao: PlaylistDao,
     private val libraryRepository: LibraryRepository,
     private val playbackController: PlaybackController,
+    private val playbackStateHolder: com.parachord.android.playback.PlaybackStateHolder,
 ) : ViewModel() {
 
     private val playlistId: String = savedStateHandle["playlistId"] ?: ""
 
     val playlist: StateFlow<PlaylistEntity?> = playlistDao.getByIdFlow(playlistId)
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), null)
+
+    /** Title of the currently playing track (for highlight). */
+    val nowPlayingTitle: StateFlow<String?> = playbackStateHolder.state
+        .map { it.currentTrack?.title }
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), null)
 
     val tracks: StateFlow<List<PlaylistTrackEntity>> =
         libraryRepository.getPlaylistTracks(playlistId)

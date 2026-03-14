@@ -2,6 +2,7 @@ package com.parachord.android.ui.screens.album
 
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
@@ -80,6 +81,7 @@ fun AlbumScreen(
     val isResolving by viewModel.isResolving.collectAsStateWithLifecycle()
     val trackResolvers by viewModel.trackResolvers.collectAsStateWithLifecycle()
     val playlists by viewModel.playlists.collectAsStateWithLifecycle()
+    val nowPlayingTitle by viewModel.nowPlayingTitle.collectAsStateWithLifecycle()
     val contextMenuState = rememberTrackContextMenuState()
     var showAlbumMenu by remember { mutableStateOf(false) }
 
@@ -149,7 +151,7 @@ fun AlbumScreen(
                         ) {
                             AlbumArtCard(
                                 artworkUrl = detail.artworkUrl,
-                                size = 160.dp,
+                                size = 140.dp,
                                 cornerRadius = 8.dp,
                                 elevation = 4.dp,
                             )
@@ -157,22 +159,43 @@ fun AlbumScreen(
                             Column {
                                 Text(
                                     text = detail.title,
-                                    style = MaterialTheme.typography.headlineSmall,
+                                    style = MaterialTheme.typography.titleMedium,
                                     maxLines = 2,
                                     overflow = TextOverflow.Ellipsis,
                                 )
                                 Spacer(modifier = Modifier.height(4.dp))
                                 Text(
                                     text = detail.artist,
-                                    style = MaterialTheme.typography.bodyLarge,
-                                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                    style = MaterialTheme.typography.bodyMedium,
+                                    color = MaterialTheme.colorScheme.primary,
+                                    modifier = Modifier.clickable { onNavigateToArtist(detail.artist) },
                                 )
-                                detail.year?.let { year ->
-                                    Text(
-                                        text = "$year",
-                                        style = MaterialTheme.typography.bodyMedium,
-                                        color = MaterialTheme.colorScheme.outline,
-                                    )
+                                Row(
+                                    verticalAlignment = Alignment.CenterVertically,
+                                    horizontalArrangement = Arrangement.spacedBy(6.dp),
+                                    modifier = Modifier.padding(top = 2.dp),
+                                ) {
+                                    detail.releaseType?.let { type ->
+                                        val badgeColor = releaseTypeBadgeColor(type)
+                                        Text(
+                                            text = type.uppercase(),
+                                            fontSize = 10.sp,
+                                            fontWeight = FontWeight.SemiBold,
+                                            letterSpacing = 0.5.sp,
+                                            color = badgeColor,
+                                            modifier = Modifier
+                                                .clip(RoundedCornerShape(4.dp))
+                                                .background(badgeColor.copy(alpha = 0.1f))
+                                                .padding(horizontal = 6.dp, vertical = 2.dp),
+                                        )
+                                    }
+                                    detail.year?.let { year ->
+                                        Text(
+                                            text = "$year",
+                                            fontSize = 11.sp,
+                                            color = MaterialTheme.colorScheme.outline,
+                                        )
+                                    }
                                 }
                                 Spacer(modifier = Modifier.height(12.dp))
                                 Row(verticalAlignment = Alignment.CenterVertically) {
@@ -217,6 +240,7 @@ fun AlbumScreen(
                             artworkUrl = track.artworkUrl ?: detail.artworkUrl,
                             duration = track.duration,
                             trackNumber = index + 1,
+                            isPlaying = nowPlayingTitle == track.title,
                             resolvers = trackResolvers["${track.title.lowercase().trim()}|${track.artist.lowercase().trim()}"]?.ifEmpty { null },
                             onClick = { viewModel.playTrack(index) },
                             onLongClick = {
@@ -355,6 +379,15 @@ private fun AlbumOptionsSheet(
             )
         }
     }
+}
+
+private fun releaseTypeBadgeColor(type: String): Color = when (type.lowercase()) {
+    "album" -> Color(0xFF6366F1)        // indigo
+    "ep" -> Color(0xFFA855F7)           // purple
+    "single" -> Color(0xFFEC4899)       // pink
+    "live" -> Color(0xFFF59E0B)         // amber
+    "compilation" -> Color(0xFF14B8A6)  // teal
+    else -> Color(0xFF9CA3AF)           // gray
 }
 
 private fun formatDuration(ms: Long): String {

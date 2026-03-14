@@ -28,9 +28,10 @@ fun SwipeableTabLayout(
     tabs: List<String>,
     modifier: Modifier = Modifier,
     counts: List<Int>? = null,
+    initialPage: Int = 0,
     content: @Composable (page: Int) -> Unit,
 ) {
-    val pagerState = rememberPagerState(pageCount = { tabs.size })
+    val pagerState = rememberPagerState(initialPage = initialPage, pageCount = { tabs.size })
     val scope = rememberCoroutineScope()
 
     val tabBarBackground = MaterialTheme.colorScheme.surface

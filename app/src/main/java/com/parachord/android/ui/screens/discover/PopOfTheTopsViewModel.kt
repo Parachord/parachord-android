@@ -89,28 +89,45 @@ class PopOfTheTopsViewModel @Inject constructor(
         }
     }
 
-    fun playSong(song: ChartSong) {
+    fun playSong(song: ChartSong, allSongs: List<ChartSong>) {
         viewModelScope.launch {
             try {
-                val query = "${song.artist} - ${song.title}"
-                val sources = resolverManager.resolveWithHints(query = query)
-                val best = resolverScoring.selectBest(sources) ?: return@launch
-                val entity = TrackEntity(
-                    id = song.id,
-                    title = song.title,
-                    artist = song.artist,
-                    album = song.album,
-                    artworkUrl = song.artworkUrl,
-                    sourceType = best.sourceType,
-                    sourceUrl = best.url,
-                    resolver = best.resolver,
-                    spotifyUri = best.spotifyUri,
-                    soundcloudId = best.soundcloudId,
-                )
-                playbackController.playTrack(entity)
+                // Resolve all songs concurrently
+                val entities = allSongs.mapNotNull { s -> resolveSong(s) }
+                if (entities.isEmpty()) return@launch
+                // Find the tapped song's index in the resolved list
+                val resolvedIndex = entities.indexOfFirst { it.title == song.title && it.artist == song.artist }
+                    .coerceAtLeast(0)
+                playbackController.playQueue(entities, resolvedIndex)
             } catch (e: Exception) {
                 Log.e(TAG, "Failed to play '${song.title}'", e)
             }
+        }
+    }
+
+    private suspend fun resolveSong(song: ChartSong): TrackEntity? {
+        return try {
+            val query = "${song.artist} - ${song.title}"
+            val sources = resolverManager.resolveWithHints(
+                query = query,
+                spotifyId = song.spotifyId,
+            )
+            val best = resolverScoring.selectBest(sources) ?: return null
+            TrackEntity(
+                id = song.id,
+                title = song.title,
+                artist = song.artist,
+                album = song.album,
+                artworkUrl = song.artworkUrl,
+                sourceType = best.sourceType,
+                sourceUrl = best.url,
+                resolver = best.resolver,
+                spotifyUri = best.spotifyUri,
+                soundcloudId = best.soundcloudId,
+            )
+        } catch (e: Exception) {
+            Log.e(TAG, "Failed to resolve '${song.title}'", e)
+            null
         }
     }
 

@@ -4,7 +4,16 @@ import android.Manifest
 import android.os.Build
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
+import androidx.compose.animation.core.LinearEasing
+import androidx.compose.animation.core.RepeatMode
+import androidx.compose.animation.core.animateFloat
+import androidx.compose.animation.core.animateFloatAsState
+import androidx.compose.animation.core.infiniteRepeatable
+import androidx.compose.animation.core.rememberInfiniteTransition
+import androidx.compose.animation.core.tween
+import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.background
+import androidx.compose.foundation.basicMarquee
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.isSystemInDarkTheme
 import androidx.compose.foundation.layout.Arrangement
@@ -48,10 +57,16 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.material3.TopAppBar
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.foundation.Canvas
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
@@ -120,6 +135,12 @@ fun HomeScreen(
         if (granted) viewModel.scanLocalMusic()
     }
 
+    // Show splash while hasLibrary is still loading (null)
+    if (hasLibrary == null) {
+        SplashScreen()
+        return
+    }
+
     Column(modifier = modifier.fillMaxSize()) {
         TopAppBar(
             title = {
@@ -139,7 +160,7 @@ fun HomeScreen(
             windowInsets = WindowInsets(0),
         )
 
-        if (!hasLibrary) {
+        if (hasLibrary == false) {
             Column(
                 modifier = Modifier
                     .fillMaxSize()
@@ -476,7 +497,6 @@ private fun DiscoverCard(
     ) {
         Column(
             modifier = Modifier.fillMaxSize(),
-            verticalArrangement = Arrangement.SpaceBetween,
         ) {
             // Header: icon + title
             Row(verticalAlignment = Alignment.CenterVertically) {
@@ -495,6 +515,7 @@ private fun DiscoverCard(
                     maxLines = 1,
                 )
             }
+            Spacer(modifier = Modifier.height(8.dp))
             // Preview content or fallback
             if (preview != null) {
                 Row(verticalAlignment = Alignment.CenterVertically) {
@@ -508,28 +529,24 @@ private fun DiscoverCard(
                     }
                     Column(modifier = Modifier.weight(1f)) {
                         Text(
-                            text = preview.label,
-                            fontSize = 9.sp,
-                            fontWeight = FontWeight.Medium,
-                            color = Color.White.copy(alpha = 0.6f),
-                            maxLines = 1,
-                            letterSpacing = 0.5.sp,
-                        )
-                        Text(
                             text = preview.title,
                             fontSize = 12.sp,
                             fontWeight = FontWeight.SemiBold,
                             color = Color.White,
                             maxLines = 1,
                             overflow = TextOverflow.Ellipsis,
+                            lineHeight = 14.sp,
                         )
-                        Text(
-                            text = preview.subtitle,
-                            fontSize = 10.sp,
-                            color = Color.White.copy(alpha = 0.7f),
-                            maxLines = 1,
-                            overflow = TextOverflow.Ellipsis,
-                        )
+                        if (preview.subtitle.isNotBlank()) {
+                            Text(
+                                text = preview.subtitle,
+                                fontSize = 10.sp,
+                                color = Color.White.copy(alpha = 0.8f),
+                                maxLines = 1,
+                                overflow = TextOverflow.Ellipsis,
+                                lineHeight = 12.sp,
+                            )
+                        }
                     }
                 }
             } else {
@@ -680,6 +697,7 @@ private fun FriendActivityRow(
     }
 }
 
+@OptIn(ExperimentalFoundationApi::class)
 @Composable
 private fun HomeMiniPlaybar(
     trackName: String,
@@ -723,10 +741,13 @@ private fun HomeMiniPlaybar(
             lineHeight = 24.sp,
             color = Color(0xFFD1D5DB),
             maxLines = 1,
-            overflow = TextOverflow.Ellipsis,
             modifier = Modifier
                 .weight(1f)
-                .padding(horizontal = 8.dp),
+                .padding(horizontal = 8.dp)
+                .basicMarquee(
+                    iterations = Int.MAX_VALUE,
+                    initialDelayMillis = 1000,
+                ),
         )
         Box(
             modifier = Modifier
@@ -891,5 +912,78 @@ private fun formatTimeAgo(timestampSeconds: Long): String {
         diff < 86400 -> "${diff / 3600}h"
         diff < 604800 -> "${diff / 86400}d"
         else -> "${diff / 604800}w"
+    }
+}
+
+// ── Splash Screen ───────────────────────────────────────────────
+
+@Composable
+private fun SplashScreen() {
+    // Fade-in + slide-up animation matching desktop's loadingFadeInUp
+    var visible by remember { mutableStateOf(false) }
+    LaunchedEffect(Unit) { visible = true }
+
+    val alpha by animateFloatAsState(
+        targetValue = if (visible) 1f else 0f,
+        animationSpec = tween(durationMillis = 700),
+        label = "splashAlpha",
+    )
+    val offsetY by animateFloatAsState(
+        targetValue = if (visible) 0f else 24f,
+        animationSpec = tween(durationMillis = 700),
+        label = "splashOffset",
+    )
+
+    // Pulsing dots animation
+    val infiniteTransition = rememberInfiniteTransition(label = "dots")
+    val dotAlphas = (0..2).map { index ->
+        infiniteTransition.animateFloat(
+            initialValue = 0.3f,
+            targetValue = 1f,
+            animationSpec = infiniteRepeatable(
+                animation = tween(600, delayMillis = index * 200, easing = LinearEasing),
+                repeatMode = RepeatMode.Reverse,
+            ),
+            label = "dot$index",
+        )
+    }
+
+    val isDark = isSystemInDarkTheme()
+    val bg = if (isDark) Color(0xFF161616) else Color(0xFFFFFFFF)
+    val textColor = if (isDark) Color(0xFFF3F4F6) else Color(0xFF111827)
+    val dotColor = if (isDark) Color(0xFF9CA3AF) else Color(0xFF6B7280)
+
+    Box(
+        modifier = Modifier
+            .fillMaxSize()
+            .background(bg),
+        contentAlignment = Alignment.Center,
+    ) {
+        Column(
+            horizontalAlignment = Alignment.CenterHorizontally,
+            modifier = Modifier.graphicsLayer {
+                this.alpha = alpha
+                translationY = offsetY
+            },
+        ) {
+            Text(
+                text = "PARACHORD",
+                fontSize = 28.sp,
+                fontWeight = FontWeight.Light,
+                letterSpacing = 0.3.em,
+                color = textColor,
+            )
+            Spacer(modifier = Modifier.height(32.dp))
+            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                dotAlphas.forEach { dotAlpha ->
+                    Canvas(modifier = Modifier.size(6.dp)) {
+                        drawCircle(
+                            color = dotColor,
+                            alpha = dotAlpha.value,
+                        )
+                    }
+                }
+            }
+        }
     }
 }

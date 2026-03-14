@@ -102,6 +102,7 @@ fun CollectionScreen(
     onNavigateToFriend: (String) -> Unit = {},
     onNavigateToArtist: (String) -> Unit = {},
     onNavigateToAlbum: (albumTitle: String, artistName: String) -> Unit = { _, _ -> },
+    initialTab: Int = 0,
     modifier: Modifier = Modifier,
     viewModel: LibraryViewModel = hiltViewModel(),
     friendsViewModel: FriendsViewModel = hiltViewModel(),
@@ -168,6 +169,7 @@ fun CollectionScreen(
         SwipeableTabLayout(
             tabs = listOf("Artists", "Albums", "Songs", "Friends"),
             counts = listOf(rawArtists.size, rawAlbums.size, rawTracks.size, friends.size),
+            initialPage = initialTab,
             modifier = Modifier.fillMaxSize(),
         ) { page ->
             when (page) {

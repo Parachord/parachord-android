@@ -85,6 +85,15 @@ interface LastFmApi {
     ): LfmTopAlbumsResponse
 
     @GET(".")
+    suspend fun getTrackInfo(
+        @Query("method") method: String = "track.getInfo",
+        @Query("track") track: String,
+        @Query("artist") artist: String,
+        @Query("api_key") apiKey: String,
+        @Query("format") format: String = "json",
+    ): LfmTrackInfoResponse
+
+    @GET(".")
     suspend fun getAlbumInfo(
         @Query("method") method: String = "album.getinfo",
         @Query("album") album: String,
@@ -622,4 +631,29 @@ data class LfmChartTrackArtist(
     val name: String,
     val mbid: String? = null,
     val url: String? = null,
+)
+
+// --- Track info (track.getInfo) ---
+
+@Serializable
+data class LfmTrackInfoResponse(
+    val track: LfmTrackInfoDetail? = null,
+)
+
+@Serializable
+data class LfmTrackInfoDetail(
+    val name: String? = null,
+    val artist: LfmTrackInfoArtist? = null,
+    val album: LfmTrackInfoAlbum? = null,
+)
+
+@Serializable
+data class LfmTrackInfoArtist(
+    val name: String? = null,
+)
+
+@Serializable
+data class LfmTrackInfoAlbum(
+    val title: String? = null,
+    val image: List<LfmImage> = emptyList(),
 )

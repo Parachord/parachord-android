@@ -326,13 +326,13 @@ private fun ParachordAppContent(mainViewModel: MainViewModel) {
                                                 modifier = Modifier
                                                     .size(32.dp)
                                                     .clip(CircleShape)
-                                                    .background(MaterialTheme.colorScheme.primary),
+                                                    .background(Color.White.copy(alpha = 0.55f)),
                                                 contentAlignment = Alignment.Center,
                                             ) {
                                                 Icon(
                                                     item.icon,
                                                     contentDescription = item.label,
-                                                    tint = Color.White,
+                                                    tint = MaterialTheme.colorScheme.primary,
                                                     modifier = Modifier.size(20.dp),
                                                 )
                                             }

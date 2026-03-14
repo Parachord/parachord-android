@@ -103,6 +103,7 @@ class MusicBrainzProvider @Inject constructor(
                 artist = detail.artistName,
                 artworkUrl = artwork,
                 year = detail.year,
+                releaseType = normalizeReleaseType(release.releaseGroup),
                 tracks = tracks.map { t ->
                     TrackSearchResult(
                         title = t.recording?.title ?: t.title,
@@ -131,17 +132,34 @@ class MusicBrainzProvider @Inject constructor(
         try {
             val artistMbid = resolveArtistMbid(artistName) ?: return emptyList()
             val response = api.browseReleaseGroups(artistId = artistMbid, limit = limit)
-            response.releaseGroups.map { rg ->
-                AlbumSearchResult(
-                    title = rg.title,
-                    artist = rg.artistName.ifBlank { artistName },
-                    artworkUrl = releaseGroupArtUrl(rg.id),
-                    year = rg.year,
-                    mbid = rg.id,
-                    releaseType = normalizeReleaseGroupEntry(rg),
-                    provider = name,
-                )
-            }
+            val artistLower = artistName.lowercase()
+            response.releaseGroups
+                // Filter out releases where the artist credit doesn't match
+                // (e.g. "Various Artists" compilations the artist merely appears on)
+                .filter { rg ->
+                    val creditLower = rg.artistName.lowercase()
+                    creditLower == artistLower ||
+                        creditLower.contains(artistLower) ||
+                        artistLower.contains(creditLower)
+                }
+                // Filter out DJ-mixes, remixes, etc.
+                .filter { rg ->
+                    val secondaryLower = rg.secondaryTypes.map { it.lowercase() }
+                    "dj-mix" !in secondaryLower &&
+                        "remix" !in secondaryLower &&
+                        "mixtape/street" !in secondaryLower
+                }
+                .map { rg ->
+                    AlbumSearchResult(
+                        title = rg.title,
+                        artist = rg.artistName.ifBlank { artistName },
+                        artworkUrl = releaseGroupArtUrl(rg.id),
+                        year = rg.year,
+                        mbid = rg.id,
+                        releaseType = normalizeReleaseGroupEntry(rg),
+                        provider = name,
+                    )
+                }
         } catch (_: Exception) {
             emptyList()
         }

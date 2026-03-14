@@ -135,7 +135,7 @@ fun PopOfTheTopsScreen(
                     onCountryChange = viewModel::setCountry,
                     onSourceChange = viewModel::setSongsSource,
                     onSearchQueryChange = viewModel::setSearchQuery,
-                    onSongClick = viewModel::playSong,
+                    onSongClick = { song, allSongs -> viewModel.playSong(song, allSongs) },
                     onArtistClick = onNavigateToArtist,
                 )
             }
@@ -499,7 +499,7 @@ private fun SongsTab(
     onCountryChange: (String) -> Unit,
     onSourceChange: (String) -> Unit,
     onSearchQueryChange: (String) -> Unit,
-    onSongClick: (ChartSong) -> Unit,
+    onSongClick: (ChartSong, List<ChartSong>) -> Unit,
     onArtistClick: (String) -> Unit,
 ) {
     Column(modifier = Modifier.fillMaxSize()) {
@@ -533,7 +533,7 @@ private fun SongsTab(
                 items(songs, key = { it.id }) { song ->
                     SongRow(
                         song = song,
-                        onClick = { onSongClick(song) },
+                        onClick = { onSongClick(song, songs) },
                         onArtistClick = { onArtistClick(song.artist) },
                     )
                 }

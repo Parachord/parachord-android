@@ -16,7 +16,7 @@ enum class BottomNavItem(
 ) {
     HOME(Routes.HOME, "Home", Icons.Default.Home),
     SEARCH(Routes.SEARCH, "Search", Icons.Default.Search),
-    COLLECTION(Routes.COLLECTION, "Collection", Icons.Default.Inventory2),
+    COLLECTION(Routes.COLLECTION_BASE, "Collection", Icons.Default.Inventory2),
     PLAYLISTS(Routes.PLAYLISTS, "Playlists", Icons.AutoMirrored.Filled.ViewList),
     ADD(null, "+", Icons.Default.Add, isAction = true),
 }

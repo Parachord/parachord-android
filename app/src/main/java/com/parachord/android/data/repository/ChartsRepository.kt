@@ -5,6 +5,9 @@ import com.parachord.android.BuildConfig
 import com.parachord.android.data.api.LastFmApi
 import com.parachord.android.data.api.bestImageUrl
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.async
+import kotlinx.coroutines.awaitAll
+import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.withContext
 import okhttp3.OkHttpClient
 import okhttp3.Request
@@ -123,13 +126,54 @@ class ChartsRepository @Inject constructor(
                         mbid = t.mbid?.takeIf { it.isNotBlank() },
                     )
                 }
-                songsCache[cacheKey] = songs to System.currentTimeMillis()
-                songs
+                // Enrich missing artwork via track.getInfo (concurrent, batched)
+                val enriched = enrichArtwork(songs)
+                songsCache[cacheKey] = enriched to System.currentTimeMillis()
+                enriched
             } catch (e: Exception) {
                 Log.e(TAG, "Failed to fetch Last.fm charts ($countryCode)", e)
                 songsCache[cacheKey]?.first ?: emptyList()
             }
         }
+
+    private suspend fun enrichArtwork(songs: List<ChartSong>): List<ChartSong> = coroutineScope {
+        // Only enrich songs that are missing artwork
+        val needsArt = songs.mapIndexedNotNull { i, s -> if (s.artworkUrl == null) i else null }
+        if (needsArt.isEmpty()) return@coroutineScope songs
+
+        val result = songs.toMutableList()
+        // Fetch in batches of 10 to avoid hammering the API
+        needsArt.chunked(10).forEach { batch ->
+            val deferred = batch.map { idx ->
+                async {
+                    idx to fetchTrackArtwork(result[idx].artist, result[idx].title)
+                }
+            }
+            deferred.awaitAll().forEach { (idx, artInfo) ->
+                if (artInfo != null) {
+                    result[idx] = result[idx].copy(
+                        artworkUrl = artInfo.first ?: result[idx].artworkUrl,
+                        album = artInfo.second ?: result[idx].album,
+                    )
+                }
+            }
+        }
+        result
+    }
+
+    /** Returns (artworkUrl, albumTitle) or null on failure. */
+    private suspend fun fetchTrackArtwork(artist: String, track: String): Pair<String?, String?>? {
+        return try {
+            val response = lastFmApi.getTrackInfo(track = track, artist = artist, apiKey = apiKey)
+            val album = response.track?.album
+            val artUrl = album?.image?.bestImageUrl()
+            if (artUrl != null || album?.title != null) {
+                artUrl to album?.title
+            } else null
+        } catch (_: Exception) {
+            null
+        }
+    }
 
     private fun fetchJson(url: String): JSONObject? {
         val request = Request.Builder().url(url).get().build()

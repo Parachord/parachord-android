@@ -197,6 +197,7 @@ class MetadataService @Inject constructor(
             tracks = tracksWithArt,
             artworkUrl = mergedArtwork,
             year = base.year ?: others.firstNotNullOfOrNull { it.year },
+            releaseType = base.releaseType ?: others.firstNotNullOfOrNull { it.releaseType },
             provider = results.joinToString("+") { it.provider },
         )
     }
@@ -212,13 +213,31 @@ class MetadataService @Inject constructor(
             .values
             .map { group -> group.reduce { acc, t -> acc.mergeWith(t) } }
 
-    /** Deduplicate albums by normalized title+artist+releaseType.
-     *  Release type is included so that a single and album with the same name
-     *  (e.g. "3D Country" single vs "3D Country" album) are kept as separate entries. */
-    private fun deduplicateAlbums(albums: List<AlbumSearchResult>): List<AlbumSearchResult> =
-        albums.groupBy { "${it.title.lowercase()}|${it.artist.lowercase()}|${it.releaseType?.lowercase()}" }
-            .values
-            .map { group -> group.reduce { acc, a -> acc.mergeWith(a) } }
+    /** Deduplicate albums by normalized title+artist.
+     *  Within each title+artist group, typed entries (album/single/ep) are kept separate,
+     *  but entries with null releaseType are merged into the best-matching typed entry
+     *  (or kept as a single entry if no typed match exists). */
+    private fun deduplicateAlbums(albums: List<AlbumSearchResult>): List<AlbumSearchResult> {
+        // Phase 1: group by title+artist
+        val byTitleArtist = albums.groupBy { "${it.title.lowercase()}|${it.artist.lowercase()}" }
+        return byTitleArtist.values.flatMap { group ->
+            val typed = group.filter { it.releaseType != null }
+            val untyped = group.filter { it.releaseType == null }
+            if (typed.isEmpty()) {
+                // No typed entries — merge all untyped into one
+                listOf(group.reduce { acc, a -> acc.mergeWith(a) })
+            } else {
+                // Merge untyped entries into the first typed entry, then dedup typed by releaseType
+                val merged = if (untyped.isEmpty()) typed
+                else listOf(typed.first().let { base -> untyped.fold(base) { acc, a -> acc.mergeWith(a) } }) +
+                    typed.drop(1)
+                // Dedup remaining typed entries by releaseType
+                merged.groupBy { it.releaseType?.lowercase() }
+                    .values
+                    .map { sub -> sub.reduce { acc, a -> acc.mergeWith(a) } }
+            }
+        }
+    }
 
     /** Deduplicate artists by normalized name. */
     private fun deduplicateArtists(artists: List<ArtistInfo>): List<ArtistInfo> =

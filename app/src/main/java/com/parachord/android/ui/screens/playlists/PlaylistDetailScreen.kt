@@ -41,13 +41,17 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
+import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.em
 import androidx.compose.ui.unit.sp
+import coil.compose.AsyncImage
 import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.parachord.android.ui.components.AlbumArtCard
@@ -74,6 +78,7 @@ fun PlaylistDetailScreen(
     val playlist by viewModel.playlist.collectAsStateWithLifecycle()
     val tracks by viewModel.tracks.collectAsStateWithLifecycle()
     val allPlaylists by viewModel.allPlaylists.collectAsStateWithLifecycle()
+    val nowPlayingTitle by viewModel.nowPlayingTitle.collectAsStateWithLifecycle()
     val contextMenuState = rememberTrackContextMenuState()
     var showPlaylistMenu by remember { mutableStateOf(false) }
     var showDeleteConfirm by remember { mutableStateOf(false) }
@@ -123,18 +128,25 @@ fun PlaylistDetailScreen(
                         .padding(horizontal = 16.dp, vertical = 8.dp),
                     horizontalAlignment = Alignment.CenterHorizontally,
                 ) {
-                    AlbumArtCard(
-                        artworkUrl = playlist?.artworkUrl,
-                        size = 180.dp,
-                        cornerRadius = 8.dp,
-                        elevation = 4.dp,
-                    )
+                    if (!playlist?.artworkUrl.isNullOrBlank()) {
+                        AlbumArtCard(
+                            artworkUrl = playlist?.artworkUrl,
+                            size = 160.dp,
+                            cornerRadius = 8.dp,
+                            elevation = 4.dp,
+                        )
+                    } else {
+                        PlaylistMosaic(
+                            trackArtworkUrls = tracks.mapNotNull { it.trackArtworkUrl },
+                            size = 160.dp,
+                        )
+                    }
 
-                    Spacer(modifier = Modifier.height(12.dp))
+                    Spacer(modifier = Modifier.height(10.dp))
 
                     Text(
                         text = playlist?.name ?: "",
-                        style = MaterialTheme.typography.headlineSmall.copy(
+                        style = MaterialTheme.typography.titleMedium.copy(
                             fontWeight = FontWeight.SemiBold,
                         ),
                         maxLines = 2,
@@ -149,7 +161,7 @@ fun PlaylistDetailScreen(
                     }
                     Text(
                         text = metaParts.joinToString(" · "),
-                        style = MaterialTheme.typography.bodyMedium,
+                        style = MaterialTheme.typography.bodySmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                     )
 
@@ -196,6 +208,7 @@ fun PlaylistDetailScreen(
                     resolver = track.trackResolver,
                     duration = track.trackDuration,
                     trackNumber = index + 1,
+                    isPlaying = nowPlayingTitle == track.trackTitle,
                     onClick = { viewModel.playTrack(index) },
                     onLongClick = {
                         val entity = viewModel.trackEntityAt(index)
@@ -261,6 +274,50 @@ fun PlaylistDetailScreen(
                     }
                 },
             )
+        }
+    }
+}
+
+@Composable
+private fun PlaylistMosaic(
+    trackArtworkUrls: List<String>,
+    size: Dp,
+) {
+    val uniqueUrls = trackArtworkUrls.distinct().take(4)
+    val halfSize = size / 2
+
+    Box(
+        modifier = Modifier
+            .size(size)
+            .clip(RoundedCornerShape(8.dp)),
+    ) {
+        if (uniqueUrls.size >= 4) {
+            Column {
+                Row {
+                    AsyncImage(model = uniqueUrls[0], contentDescription = null, contentScale = ContentScale.Crop, modifier = Modifier.size(halfSize))
+                    AsyncImage(model = uniqueUrls[1], contentDescription = null, contentScale = ContentScale.Crop, modifier = Modifier.size(halfSize))
+                }
+                Row {
+                    AsyncImage(model = uniqueUrls[2], contentDescription = null, contentScale = ContentScale.Crop, modifier = Modifier.size(halfSize))
+                    AsyncImage(model = uniqueUrls[3], contentDescription = null, contentScale = ContentScale.Crop, modifier = Modifier.size(halfSize))
+                }
+            }
+        } else if (uniqueUrls.isNotEmpty()) {
+            // Less than 4 unique artworks — just show the first one full size
+            AsyncImage(model = uniqueUrls[0], contentDescription = null, contentScale = ContentScale.Crop, modifier = Modifier.fillMaxSize())
+        } else {
+            // No artwork at all — gray placeholder
+            Box(
+                modifier = Modifier.fillMaxSize().background(Color(0xFF2D2D2D)),
+                contentAlignment = Alignment.Center,
+            ) {
+                Icon(
+                    Icons.AutoMirrored.Filled.QueueMusic,
+                    contentDescription = null,
+                    tint = Color(0xFF6B7280),
+                    modifier = Modifier.size(48.dp),
+                )
+            }
         }
     }
 }

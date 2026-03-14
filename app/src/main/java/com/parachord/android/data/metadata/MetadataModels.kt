@@ -58,6 +58,7 @@ data class AlbumDetail(
     val artist: String,
     val artworkUrl: String? = null,
     val year: Int? = null,
+    val releaseType: String? = null,
     val tracks: List<TrackSearchResult> = emptyList(),
     val provider: String = "",
 )

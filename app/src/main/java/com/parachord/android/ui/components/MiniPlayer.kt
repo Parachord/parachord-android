@@ -110,7 +110,7 @@ fun MiniPlayer(
                 onClick = onToggleFavorite,
                 modifier = Modifier.size(36.dp),
                 colors = IconButtonDefaults.iconButtonColors(
-                    contentColor = if (isFavorited) PurpleDark else PlayerTextSecondary,
+                    contentColor = if (isFavorited) Color(0xFFEF4444) else PlayerTextSecondary,
                 ),
             ) {
                 Icon(

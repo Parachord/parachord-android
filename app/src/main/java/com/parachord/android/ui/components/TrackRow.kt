@@ -47,6 +47,9 @@ fun TrackRow(
         if (resolver != null && !contains(resolver)) add(resolver)
     }
 
+    val artSize = 40.dp
+    val vertPad = 7.dp
+
     Row(
         modifier = modifier
             .fillMaxWidth()
@@ -54,7 +57,7 @@ fun TrackRow(
                 onClick = onClick,
                 onLongClick = onLongClick,
             )
-            .padding(horizontal = 16.dp, vertical = 10.dp),
+            .padding(horizontal = 16.dp, vertical = vertPad),
         verticalAlignment = Alignment.CenterVertically,
     ) {
         // Optional track number (for album tracklists)
@@ -70,7 +73,7 @@ fun TrackRow(
         // Album art with gradient placeholder
         AlbumArtCard(
             artworkUrl = artworkUrl,
-            size = 48.dp,
+            size = artSize,
             cornerRadius = 4.dp,
             elevation = 1.dp,
             placeholderName = artist.ifBlank { title },
@@ -82,7 +85,7 @@ fun TrackRow(
         Column(modifier = Modifier.weight(1f)) {
             Text(
                 text = title,
-                style = MaterialTheme.typography.bodyLarge,
+                style = MaterialTheme.typography.bodyMedium,
                 color = if (isPlaying) {
                     MaterialTheme.colorScheme.primary
                 } else {
@@ -93,7 +96,7 @@ fun TrackRow(
             )
             Text(
                 text = artist,
-                style = MaterialTheme.typography.bodySmall,
+                style = MaterialTheme.typography.labelSmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
                 maxLines = 1,
                 overflow = TextOverflow.Ellipsis,

@@ -67,7 +67,11 @@ import androidx.compose.ui.unit.em
 import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.parachord.android.data.db.entity.TrackEntity
+import androidx.compose.foundation.isSystemInDarkTheme
+import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.unit.sp
 import com.parachord.android.ui.components.AlbumArtCard
+import com.parachord.android.ui.components.AlbumArtCardFill
 import com.parachord.android.ui.components.FaceAwareImage
 import com.parachord.android.ui.components.SectionHeader
 import com.parachord.android.ui.components.ShimmerTrackRow
@@ -185,7 +189,7 @@ fun ArtistScreen(
                     Icon(
                         imageVector = if (isSaved) Icons.Filled.Star else Icons.Outlined.StarOutline,
                         contentDescription = if (isSaved) "Remove from collection" else "Save to collection",
-                        tint = if (isSaved) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant,
+                        tint = if (isSaved) Color(0xFFF59E0B) else MaterialTheme.colorScheme.onSurfaceVariant,
                     )
                 }
             },
@@ -308,7 +312,17 @@ private val RELEASE_FILTERS = listOf(
     ReleaseFilter("single", "Singles"),
     ReleaseFilter("ep", "EPs"),
     ReleaseFilter("live", "Live"),
+    ReleaseFilter("compilation", "Compilations"),
 )
+
+private fun releaseTypeBadgeColor(type: String?): Color = when (type?.lowercase()) {
+    "album" -> Color(0xFF6366F1)        // indigo
+    "ep" -> Color(0xFFA855F7)           // purple
+    "single" -> Color(0xFFEC4899)       // pink
+    "live" -> Color(0xFFF59E0B)         // amber
+    "compilation" -> Color(0xFF14B8A6)  // teal
+    else -> Color(0xFF9CA3AF)           // gray
+}
 
 @Composable
 private fun DiscographyTab(
@@ -321,8 +335,13 @@ private fun DiscographyTab(
 ) {
     var selectedFilter by remember { mutableStateOf("all") }
 
-    // Determine which filters have matching content
-    val availableFilters = remember(albums) {
+    // Calculate counts per type
+    val typeCounts = remember(albums) {
+        albums.groupBy { it.releaseType?.lowercase() ?: "album" }
+            .mapValues { it.value.size }
+    }
+
+    val availableFilters = remember(albums, typeCounts) {
         val types = albums.mapNotNull { it.releaseType?.lowercase() }.toSet()
         RELEASE_FILTERS.filter { it.key == "all" || it.key in types }
     }
@@ -331,6 +350,8 @@ private fun DiscographyTab(
         if (selectedFilter == "all") albums
         else albums.filter { it.releaseType?.lowercase() == selectedFilter }
     }
+
+    val cardBg = if (isSystemInDarkTheme()) Color(0xFF252525) else Color(0xFFF3F4F6)
 
     LazyColumn(modifier = Modifier.fillMaxSize()) {
         // Filter chips row (only show if we have more than one filter available)
@@ -342,13 +363,18 @@ private fun DiscographyTab(
                     horizontalArrangement = Arrangement.spacedBy(8.dp),
                 ) {
                     lazyItems(availableFilters, key = { it.key }) { filter ->
+                        val chipColor = releaseTypeBadgeColor(
+                            if (filter.key == "all") null else filter.key,
+                        )
+                        val count = if (filter.key == "all") null else typeCounts[filter.key]
+                        val chipLabel = if (count != null) "${filter.label} ($count)" else filter.label
                         FilterChip(
                             selected = selectedFilter == filter.key,
                             onClick = { selectedFilter = filter.key },
-                            label = { Text(filter.label) },
+                            label = { Text(chipLabel) },
                             colors = FilterChipDefaults.filterChipColors(
-                                selectedContainerColor = MaterialTheme.colorScheme.primary.copy(alpha = 0.15f),
-                                selectedLabelColor = MaterialTheme.colorScheme.primary,
+                                selectedContainerColor = chipColor.copy(alpha = 0.15f),
+                                selectedLabelColor = chipColor,
                             ),
                         )
                     }
@@ -357,60 +383,81 @@ private fun DiscographyTab(
         }
 
         if (filteredAlbums.isNotEmpty()) {
-            items(
-                count = filteredAlbums.size,
-                key = { idx -> "album-$idx-${filteredAlbums[idx].title}-${filteredAlbums[idx].artist}" },
-            ) { idx ->
-                val album = filteredAlbums[idx]
-                Row(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .clickable { onNavigateToAlbum(album.title, album.artist) }
-                        .padding(horizontal = 16.dp, vertical = 10.dp),
-                    verticalAlignment = Alignment.CenterVertically,
+            item {
+                Column(
+                    modifier = Modifier.padding(horizontal = 12.dp),
+                    verticalArrangement = Arrangement.spacedBy(10.dp),
                 ) {
-                    AlbumArtCard(
-                        artworkUrl = album.artworkUrl,
-                        size = 56.dp,
-                        cornerRadius = 4.dp,
-                        elevation = 1.dp,
-                    )
-                    Spacer(modifier = Modifier.width(12.dp))
-                    Column(modifier = Modifier.weight(1f)) {
-                        Text(
-                            text = album.title,
-                            style = MaterialTheme.typography.bodyLarge,
-                            maxLines = 1,
-                            overflow = TextOverflow.Ellipsis,
-                        )
-                        val info = buildString {
-                            album.year?.let { append("$it") }
-                            album.releaseType?.let { type ->
-                                if (type.lowercase() != "album") {
-                                    if (isNotEmpty()) append(" \u2022 ")
-                                    append(type.replaceFirstChar { it.uppercase() })
+                    filteredAlbums.chunked(2).forEach { rowAlbums ->
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.spacedBy(10.dp),
+                        ) {
+                            rowAlbums.forEach { album ->
+                                Box(modifier = Modifier.weight(1f)) {
+                                    Column(
+                                        modifier = Modifier
+                                            .fillMaxWidth()
+                                            .clip(RoundedCornerShape(10.dp))
+                                            .background(cardBg)
+                                            .clickable { onNavigateToAlbum(album.title, album.artist) }
+                                            .padding(10.dp),
+                                    ) {
+                                        AlbumArtCardFill(
+                                            artworkUrl = album.artworkUrl,
+                                            modifier = Modifier.fillMaxWidth(),
+                                            cornerRadius = 6.dp,
+                                            elevation = 1.dp,
+                                        )
+                                        Spacer(modifier = Modifier.height(10.dp))
+                                        Text(
+                                            text = album.title,
+                                            fontSize = 13.sp,
+                                            fontWeight = FontWeight.Medium,
+                                            maxLines = 1,
+                                            overflow = TextOverflow.Ellipsis,
+                                        )
+                                        Spacer(modifier = Modifier.height(4.dp))
+                                        Row(
+                                            verticalAlignment = Alignment.CenterVertically,
+                                            horizontalArrangement = Arrangement.spacedBy(6.dp),
+                                        ) {
+                                            album.releaseType?.let { type ->
+                                                val badgeColor = releaseTypeBadgeColor(type)
+                                                Text(
+                                                    text = type.uppercase(),
+                                                    fontSize = 10.sp,
+                                                    fontWeight = FontWeight.SemiBold,
+                                                    letterSpacing = 0.5.sp,
+                                                    color = badgeColor,
+                                                    modifier = Modifier
+                                                        .clip(RoundedCornerShape(4.dp))
+                                                        .background(badgeColor.copy(alpha = 0.1f))
+                                                        .padding(horizontal = 8.dp, vertical = 3.dp),
+                                                )
+                                            }
+                                            album.year?.let { year ->
+                                                Text(
+                                                    text = "$year",
+                                                    fontSize = 11.sp,
+                                                    color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.6f),
+                                                )
+                                            }
+                                        }
+                                    }
                                 }
                             }
-                            album.trackCount?.let {
-                                if (isNotEmpty()) append(" \u2022 ")
-                                append("$it tracks")
+                            // Fill empty space if odd number
+                            if (rowAlbums.size == 1) {
+                                Spacer(modifier = Modifier.weight(1f))
                             }
-                        }
-                        if (info.isNotEmpty()) {
-                            Text(
-                                text = info,
-                                style = MaterialTheme.typography.bodySmall,
-                                color = MaterialTheme.colorScheme.onSurfaceVariant,
-                                maxLines = 1,
-                                overflow = TextOverflow.Ellipsis,
-                            )
                         }
                     }
                 }
             }
         }
 
-        if (topTracks.isNotEmpty()) {
+        if (topTracks.isNotEmpty() && selectedFilter == "all") {
             item {
                 if (filteredAlbums.isNotEmpty()) HorizontalDivider()
                 SectionHeader("TOP TRACKS")
@@ -427,7 +474,7 @@ private fun DiscographyTab(
             }
         }
 
-        if (filteredAlbums.isEmpty() && topTracks.isEmpty()) {
+        if (filteredAlbums.isEmpty() && (topTracks.isEmpty() || selectedFilter != "all")) {
             item {
                 Box(
                     modifier = Modifier.fillMaxWidth().padding(32.dp),
