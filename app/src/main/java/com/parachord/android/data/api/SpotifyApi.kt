@@ -25,7 +25,15 @@ interface SpotifyApi {
         @Query("q") query: String,
         @Query("type") type: String,
         @Query("limit") limit: Int = 20,
+        @Query("market") market: String = "from_token",
     ): SpSearchResponse
+
+    @GET("v1/tracks/{id}")
+    suspend fun getTrack(
+        @Header("Authorization") auth: String,
+        @Path("id") trackId: String,
+        @Query("market") market: String = "from_token",
+    ): SpTrack
 
     @GET("v1/artists/{id}")
     suspend fun getArtist(
@@ -125,6 +133,8 @@ data class SpTrack(
     val album: SpAlbumRef? = null,
     @SerialName("duration_ms") val durationMs: Long? = null,
     @SerialName("preview_url") val previewUrl: String? = null,
+    /** Whether the track is playable in the user's market. Only present when market param is set. */
+    @SerialName("is_playable") val isPlayable: Boolean? = null,
 ) {
     val artistName: String get() = artists.joinToString(", ") { it.name }
 }

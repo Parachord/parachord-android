@@ -410,6 +410,16 @@ class SettingsStore @Inject constructor(
         return dataStore.data.first()[key] ?: ""
     }
 
+    fun getAiProviderModelFlow(providerId: String): Flow<String> {
+        val key = when (providerId) {
+            "chatgpt" -> CHATGPT_MODEL
+            "claude" -> CLAUDE_MODEL
+            "gemini" -> GEMINI_MODEL
+            else -> return kotlinx.coroutines.flow.flowOf("")
+        }
+        return dataStore.data.map { it[key] ?: "" }
+    }
+
     suspend fun setAiProviderModel(providerId: String, model: String) {
         val key = when (providerId) {
             "chatgpt" -> CHATGPT_MODEL

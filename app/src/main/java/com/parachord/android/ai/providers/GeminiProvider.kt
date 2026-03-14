@@ -60,7 +60,7 @@ class GeminiProvider @Inject constructor(
     ): AiChatResponse = withContext(Dispatchers.IO) {
         if (config.apiKey.isBlank()) throw Exception("Google AI API key not configured")
 
-        val model = config.model.ifBlank { "gemini-2.0-flash-001" }
+        val model = config.model.ifBlank { "gemini-2.0-flash" }
 
         // Convert messages to Gemini format
         var systemInstruction: JsonElement? = null

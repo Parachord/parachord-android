@@ -60,6 +60,7 @@ import androidx.hilt.navigation.compose.hiltViewModel
 import com.parachord.android.data.repository.FreshDrop
 import com.parachord.android.data.repository.Resource
 import com.parachord.android.ui.components.AlbumArtCard
+import com.parachord.android.ui.components.shimmerBrush
 
 // Desktop gradient: emerald → teal → cyan
 private val HeaderGradient = Brush.horizontalGradient(
@@ -122,7 +123,8 @@ fun FreshDropsScreen(
         // Content
         when (val resource = releasesResource) {
             is Resource.Loading -> {
-                // Shimmer rows
+                // Animated shimmer skeleton rows
+                val brush = shimmerBrush()
                 LazyColumn(
                     contentPadding = PaddingValues(vertical = 8.dp),
                 ) {
@@ -136,9 +138,7 @@ fun FreshDropsScreen(
                                 modifier = Modifier
                                     .size(80.dp)
                                     .clip(RoundedCornerShape(8.dp))
-                                    .background(
-                                        MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f),
-                                    ),
+                                    .background(brush),
                             )
                             Spacer(modifier = Modifier.width(12.dp))
                             Column(modifier = Modifier.weight(1f)) {
@@ -147,9 +147,7 @@ fun FreshDropsScreen(
                                         .width(160.dp)
                                         .height(16.dp)
                                         .clip(RoundedCornerShape(4.dp))
-                                        .background(
-                                            MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.4f),
-                                        ),
+                                        .background(brush),
                                 )
                                 Spacer(modifier = Modifier.height(6.dp))
                                 Box(
@@ -157,9 +155,7 @@ fun FreshDropsScreen(
                                         .width(100.dp)
                                         .height(12.dp)
                                         .clip(RoundedCornerShape(4.dp))
-                                        .background(
-                                            MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.3f),
-                                        ),
+                                        .background(brush),
                                 )
                                 Spacer(modifier = Modifier.height(8.dp))
                                 Box(
@@ -167,9 +163,7 @@ fun FreshDropsScreen(
                                         .width(80.dp)
                                         .height(10.dp)
                                         .clip(RoundedCornerShape(4.dp))
-                                        .background(
-                                            MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.2f),
-                                        ),
+                                        .background(brush),
                                 )
                             }
                         }

@@ -188,6 +188,15 @@ class SettingsViewModel @Inject constructor(
         }
     }
 
+    fun saveAiModel(providerId: String, model: String) {
+        viewModelScope.launch { settingsStore.setAiProviderModel(providerId, model) }
+    }
+
+    /** Get the currently saved model for a provider (for UI initialization). */
+    fun getAiModel(providerId: String): StateFlow<String> =
+        settingsStore.getAiProviderModelFlow(providerId)
+            .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), "")
+
     fun clearAiProvider(providerId: String) {
         viewModelScope.launch { settingsStore.clearAiProviderApiKey(providerId) }
     }

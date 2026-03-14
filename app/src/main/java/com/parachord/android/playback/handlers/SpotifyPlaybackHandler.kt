@@ -76,57 +76,100 @@ class SpotifyPlaybackHandler @Inject constructor(
         }
         Log.d(TAG, "play() via Web API for '${track.title}' uri=$uri")
 
-        val success = withAuth { auth ->
-            val devices = spotifyApi.getDevices(auth).devices
-            Log.d(TAG, "Devices: ${devices.map { "${it.name}(active=${it.isActive}, type=${it.type})" }}")
+        // Attempt playback with retry — mirrors the desktop's spotify.axe play() flow:
+        // 1. Get devices
+        // 2. Pick best device (desktop: computer > phone > speaker > any)
+        // 3. Transfer if not active, wait for device to settle
+        // 4. Start playback with device_id
+        // On failure, retry the whole flow (token refresh, device re-check)
+        val success = playWithRetry(track, uri)
 
-            if (devices.isEmpty()) {
-                Log.e(TAG, "No Spotify devices available — open Spotify app first")
-                return@withAuth false
-            }
-
-            // Pick a Smartphone device only — never fall back to other device types
-            val targetDevice = pickDevice(devices)
-            if (targetDevice == null) {
-                Log.e(TAG, "No Smartphone device available — cannot play")
-                return@withAuth false
-            }
-            Log.d(TAG, "Target device: '${targetDevice.name}' (type=${targetDevice.type})")
-
-            // Transfer playback to the target device if it's not already active
-            if (!targetDevice.isActive) {
-                Log.d(TAG, "Transferring playback to '${targetDevice.name}'")
-                spotifyApi.transferPlayback(auth, SpTransferRequest(deviceIds = listOf(targetDevice.id)))
-                delay(500) // Give Spotify a moment to switch
-            }
-
-            // Force device_id in the play call itself — this is the key mechanism
-            // from the desktop app that ensures playback goes to the right device
-            // even if the transfer hasn't fully settled.
-            val response = spotifyApi.startPlayback(
-                auth,
-                SpPlaybackRequest(uris = listOf(uri)),
-                deviceId = targetDevice.id,
-            )
-            if (response.isSuccessful) {
-                Log.d(TAG, "Playback started on '${targetDevice.name}' for $uri")
-                true
-            } else {
-                Log.e(TAG, "Start playback failed: ${response.code()}")
-                false
-            }
-        }
-
-        if (success == true) {
+        if (success) {
             _isConnected = true
             cachedIsPlaying = true
             cachedPosition = 0L
             cachedDuration = track.duration ?: 0L
-            expectedTrackId = track.spotifyUri?.substringAfterLast(":")
+            expectedTrackId = uri.substringAfterLast(":")
             currentItemId = expectedTrackId
             playStartedAt = System.currentTimeMillis()
             pausedByUs = false
             startStatePolling()
+        } else {
+            Log.e(TAG, "Failed to play '${track.title}' after retries")
+        }
+    }
+
+    /**
+     * Attempt the full play flow with retries.
+     * Each attempt re-checks devices and token freshness.
+     */
+    private suspend fun playWithRetry(track: TrackEntity, uri: String): Boolean {
+        for (attempt in 1..3) {
+            try {
+                val result = withAuth { auth -> attemptPlay(auth, uri) }
+                if (result == true) return true
+
+                if (attempt < 3) {
+                    Log.d(TAG, "Play attempt $attempt failed, retrying in ${attempt}s...")
+                    delay(attempt * 1000L)
+                }
+            } catch (e: Exception) {
+                Log.w(TAG, "Play attempt $attempt error: ${e.message}")
+                if (attempt < 3) delay(attempt * 1000L)
+            }
+        }
+        return false
+    }
+
+    /**
+     * Single attempt to find a device and start playback.
+     * Mirrors the desktop's spotify.axe play() logic:
+     * 1. Get devices, pick best one
+     * 2. Transfer if not active (wait 1000ms like desktop)
+     * 3. Start playback with device_id
+     */
+    private suspend fun attemptPlay(auth: String, uri: String): Boolean {
+        val devices = spotifyApi.getDevices(auth).devices
+        Log.d(TAG, "Devices: ${devices.map { "${it.name}(active=${it.isActive}, type=${it.type})" }}")
+
+        if (devices.isEmpty()) {
+            Log.w(TAG, "No Spotify devices available — is Spotify running?")
+            return false
+        }
+
+        val targetDevice = pickDevice(devices)
+        if (targetDevice == null) {
+            Log.w(TAG, "No suitable device found")
+            return false
+        }
+        Log.d(TAG, "Target device: '${targetDevice.name}' (type=${targetDevice.type}, active=${targetDevice.isActive})")
+
+        // Transfer playback to the target device if it's not already active
+        if (!targetDevice.isActive) {
+            Log.d(TAG, "Transferring playback to '${targetDevice.name}'")
+            try {
+                spotifyApi.transferPlayback(auth, SpTransferRequest(deviceIds = listOf(targetDevice.id)))
+            } catch (e: Exception) {
+                Log.w(TAG, "Transfer failed (non-fatal): ${e.message}")
+            }
+            // Desktop waits 1000ms — give Spotify time to activate the device
+            delay(1000)
+        }
+
+        // Force device_id in the play call (desktop pattern) — ensures playback
+        // goes to the right device even if transfer hasn't fully settled
+        val response = spotifyApi.startPlayback(
+            auth,
+            SpPlaybackRequest(uris = listOf(uri)),
+            deviceId = targetDevice.id,
+        )
+
+        return if (response.isSuccessful || response.code() == 204) {
+            Log.d(TAG, "Playback started on '${targetDevice.name}' for $uri")
+            true
+        } else {
+            Log.w(TAG, "Start playback failed: ${response.code()}")
+            false
         }
     }
 
@@ -169,48 +212,67 @@ class SpotifyPlaybackHandler @Inject constructor(
     /**
      * Pick the best device to play on.
      *
-     * On Android we ONLY play on Smartphone devices — never computers, TVs, or speakers.
-     * Returns null if no Smartphone device is available.
+     * Adapted from the desktop's device selection for Android — we strongly prefer
+     * THIS phone as the playback target. Remote devices (TVs, speakers, Chromecasts)
+     * are excluded from automatic selection since they're typically on other networks
+     * or in other rooms and shouldn't be hijacked by the phone app.
      *
-     * 1. Filter out restricted devices
-     * 2. Match THIS phone by device name (Build.MODEL or MANUFACTURER + MODEL)
-     * 3. Any Smartphone-type device
+     * Priority:
+     * 1. THIS phone by device name (Build.MODEL)
+     * 2. Any Smartphone-type device
+     * 3. Any Computer-type device (e.g. tablet registered as Computer)
+     * 4. Never auto-select: TV, Speaker, CastVideo, CastAudio, GameConsole
      */
     private fun pickDevice(devices: List<SpDevice>): SpDevice? {
         val controllable = devices.filter { !it.isRestricted }
         val available = controllable.ifEmpty { devices }
 
-        Log.d(TAG, "pickDevice: localModel='${Build.MODEL}', manufacturer='${Build.MANUFACTURER}', " +
-                "devices=${available.map { "'${it.name}'(type=${it.type})" }}")
-
-        // Best match: this exact phone by name
         val localModel = Build.MODEL
         val localFull = "${Build.MANUFACTURER} ${Build.MODEL}"
-        available.firstOrNull {
-            it.type == "Smartphone" && (
-                it.name.contains(localModel, ignoreCase = true) ||
-                it.name.contains(localFull, ignoreCase = true)
-            )
+        Log.d(TAG, "pickDevice: localModel='$localModel', " +
+                "devices=${available.map { "'${it.name}'(type=${it.type}, active=${it.isActive})" }}")
+
+        // Remote device types that should NEVER be auto-selected from the phone app.
+        // These are typically on other networks, in other rooms, or shared devices.
+        val remoteTypes = setOf("TV", "Speaker", "CastVideo", "CastAudio", "GameConsole", "AVR")
+
+        // Filter to local-safe devices (phones, computers, unknown types — NOT TVs/speakers)
+        val localDevices = available.filter { it.type !in remoteTypes }
+
+        // Best match: this exact phone by name (check any type — Spotify sometimes
+        // reports phones as different types)
+        localDevices.firstOrNull {
+            it.name.contains(localModel, ignoreCase = true) ||
+            it.name.contains(localFull, ignoreCase = true)
         }?.let { return it }
 
         // Any Smartphone device
-        available.firstOrNull { it.type == "Smartphone" }?.let { return it }
+        localDevices.firstOrNull { it.type == "Smartphone" }?.let { return it }
 
-        Log.e(TAG, "No Smartphone device found. Available: " +
-                available.joinToString { "'${it.name}'(${it.type})" } +
-                " — ensure Spotify is open on this phone.")
+        // Any Computer-type device (tablet, etc.)
+        localDevices.firstOrNull { it.type == "Computer" }?.let { return it }
+
+        // Any remaining non-remote device
+        localDevices.firstOrNull()?.let { return it }
+
+        // If ONLY remote devices exist, log warning and return null —
+        // don't hijack a TV/speaker the user isn't using from this phone
+        Log.w(TAG, "Only remote devices available (${available.map { "${it.name}(${it.type})" }})" +
+                " — not auto-selecting. Ensure Spotify is open on this phone.")
         return null
     }
 
     /**
      * Detect whether the track we started has finished playing.
      *
-     * Handles four end-of-track scenarios:
-     * 1. Spotify stopped naturally (isPlaying=false, position near duration)
-     * 2. Spotify autoplay kicked in (playing a different track than expected)
-     * 3. Spotify cleared the item (isPlaying=false, item=null)
-     * 4. Spotify stopped and we didn't pause it (catch-all for tracks that end
-     *    without position reaching duration exactly)
+     * Handles three end-of-track scenarios:
+     * 1. Spotify auto-advanced to a different track (autoplay)
+     * 2. Spotify stopped naturally (isPlaying=false, position near duration end)
+     * 3. Spotify cleared the item entirely (no track playing)
+     *
+     * Does NOT treat mid-track pauses as "done" — Spotify can pause due to
+     * audio focus loss (voice typing, phone calls, notifications) which is
+     * not a track-ended event.
      */
     fun isOurTrackDone(): Boolean {
         val expected = expectedTrackId ?: return false
@@ -222,8 +284,10 @@ class SpotifyPlaybackHandler @Inject constructor(
             return true
         }
 
-        // Track ended naturally — not playing and position near end
-        if (!cachedIsPlaying && cachedDuration > 0 && cachedPosition >= cachedDuration - 1500) {
+        // Track ended naturally — not playing and position near end.
+        // Use a generous threshold (3s) since the Spotify API position
+        // doesn't always reach exactly the duration value.
+        if (!cachedIsPlaying && cachedDuration > 0 && cachedPosition >= cachedDuration - 3000) {
             Log.d(TAG, "Track ended naturally: pos=$cachedPosition, dur=$cachedDuration")
             return true
         }
@@ -234,12 +298,9 @@ class SpotifyPlaybackHandler @Inject constructor(
             return true
         }
 
-        // Spotify stopped but we didn't pause — track likely ended. This catches
-        // cases where the API position doesn't reach exactly near duration.
-        if (!cachedIsPlaying && !pausedByUs && cachedPosition > 0) {
-            Log.d(TAG, "Track stopped (not by us): pos=$cachedPosition, dur=$cachedDuration")
-            return true
-        }
+        // If Spotify is paused mid-track and we didn't pause it, it's likely
+        // an external event (audio focus loss, phone call, etc.) — NOT track end.
+        // Don't skip. The user can resume manually or it'll resume when focus returns.
 
         return false
     }

@@ -74,7 +74,8 @@ class ResolverManager @Inject constructor(
 
     /**
      * Resolve using pre-existing IDs (from metadata providers).
-     * This avoids redundant searches when we already have direct track IDs.
+     * Verifies that ID-based sources are actually playable before trusting them.
+     * Falls back to search-based resolution for all enabled resolvers.
      */
     suspend fun resolveWithHints(
         query: String,
@@ -83,18 +84,15 @@ class ResolverManager @Inject constructor(
     ): List<ResolvedSource> = coroutineScope {
         val results = mutableListOf<ResolvedSource>()
 
-        // If we have a Spotify ID from metadata, use it directly
+        // If we have a Spotify ID from metadata, verify it's actually playable
+        // before trusting it (metadata IDs can reference tracks unavailable in
+        // the user's market)
         if (spotifyId != null) {
-            results.add(
-                ResolvedSource(
-                    url = "spotify:track:$spotifyId",
-                    sourceType = "spotify",
-                    resolver = "spotify",
-                    spotifyUri = "spotify:track:$spotifyId",
-                    spotifyId = spotifyId,
-                    confidence = 0.95, // High confidence — direct ID match
-                )
-            )
+            val verified = async { verifySpotifyTrack(spotifyId) }
+            val source = verified.await()
+            if (source != null) {
+                results.add(source)
+            }
         }
 
         // If we have a SoundCloud ID, use it directly
@@ -143,13 +141,18 @@ class ResolverManager @Inject constructor(
     }
 
     private suspend fun searchSpotifyTrack(query: String, token: String): ResolvedSource? {
+        // Use field-qualified search for better precision (matches desktop spotify.axe)
         val response = spotifyApi.search(
             auth = "Bearer $token",
             query = query,
             type = "track",
-            limit = 1,
+            limit = 5, // Get a few results so we can filter to playable ones
         )
-        val track = response.tracks?.items?.firstOrNull() ?: return null
+        // Filter to tracks that are actually playable in the user's market
+        // (market=from_token is passed by default, which sets is_playable)
+        val track = response.tracks?.items
+            ?.firstOrNull { it.isPlayable != false }
+            ?: return null
         return ResolvedSource(
             url = "spotify:track:${track.id}",
             sourceType = "spotify",
@@ -158,6 +161,36 @@ class ResolverManager @Inject constructor(
             spotifyId = track.id,
             confidence = 0.9,
         )
+    }
+
+    /**
+     * Verify a Spotify track ID is actually playable in the user's market.
+     * Returns a ResolvedSource if playable, null if not available.
+     */
+    private suspend fun verifySpotifyTrack(spotifyId: String): ResolvedSource? {
+        val token = settingsStore.getSpotifyAccessToken()
+        if (token.isNullOrBlank()) return null
+        return try {
+            val track = spotifyApi.getTrack(
+                auth = "Bearer $token",
+                trackId = spotifyId,
+            )
+            if (track.isPlayable == false) {
+                Log.d(TAG, "Spotify track $spotifyId is not playable in user's market")
+                return null
+            }
+            ResolvedSource(
+                url = "spotify:track:${track.id}",
+                sourceType = "spotify",
+                resolver = "spotify",
+                spotifyUri = "spotify:track:${track.id}",
+                spotifyId = track.id,
+                confidence = 0.95, // High confidence — verified ID match
+            )
+        } catch (e: Exception) {
+            Log.w(TAG, "Failed to verify Spotify track $spotifyId: ${e.message}")
+            null
+        }
     }
 
     // ── SoundCloud Resolver ─────────────────────────────────────────────

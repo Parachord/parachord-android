@@ -277,6 +277,9 @@ class PlaybackController @Inject constructor(
                 stopPositionUpdates()
                 controller?.stop()
 
+                // Set UI state optimistically — show the track as playing immediately
+                // so the user gets instant feedback. The state polling will correct
+                // this if playback actually fails.
                 stateHolder.update {
                     copy(
                         currentTrack = track,

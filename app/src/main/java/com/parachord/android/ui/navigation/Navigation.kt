@@ -23,6 +23,7 @@ object Routes {
     const val COLLECTION = "collection"
     const val SEARCH = "search"
     const val PLAYLISTS = "playlists"
+    const val PLAYLIST_DETAIL = "playlist/{playlistId}"
     const val NOW_PLAYING = "now_playing"
     const val SETTINGS = "settings"
     const val ARTIST = "artist/{artistName}"
@@ -45,6 +46,9 @@ object Routes {
 
     fun album(albumTitle: String, artistName: String): String =
         "album/${Uri.encode(albumTitle)}/${Uri.encode(artistName)}"
+
+    fun playlistDetail(playlistId: String): String =
+        "playlist/${Uri.encode(playlistId)}"
 
     fun friendDetail(friendId: String): String =
         "friend/${Uri.encode(friendId)}"
@@ -105,6 +109,17 @@ fun ParachordNavHost(
         composable(Routes.PLAYLISTS) {
             com.parachord.android.ui.screens.playlists.PlaylistsScreen(
                 onOpenDrawer = onOpenDrawer,
+                onNavigateToPlaylist = { playlistId ->
+                    navController.navigate(Routes.playlistDetail(playlistId))
+                },
+            )
+        }
+        composable(
+            route = Routes.PLAYLIST_DETAIL,
+            arguments = listOf(navArgument("playlistId") { type = NavType.StringType }),
+        ) {
+            com.parachord.android.ui.screens.playlists.PlaylistDetailScreen(
+                onBack = { navController.popBackStack() },
             )
         }
         composable(Routes.SEARCH) {

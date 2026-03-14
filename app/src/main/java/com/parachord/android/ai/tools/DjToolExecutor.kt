@@ -192,12 +192,12 @@ class DjToolExecutor @Inject constructor(
             id = playlistId,
             name = name,
             trackCount = resolvedTracks.size,
+            artworkUrl = resolvedTracks.firstOrNull()?.artworkUrl,
         )
 
-        libraryRepository.addPlaylist(playlist)
-        if (resolvedTracks.isNotEmpty()) {
-            libraryRepository.addTracks(resolvedTracks)
-        }
+        // Store playlist and its tracks in the junction table — NOT in the
+        // Collection tracks table (which was the old broken behavior)
+        libraryRepository.createPlaylistWithTracks(playlist, resolvedTracks)
 
         return mapOf(
             "success" to true,

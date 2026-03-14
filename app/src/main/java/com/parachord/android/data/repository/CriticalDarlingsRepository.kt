@@ -222,7 +222,7 @@ class CriticalDarlingsRepository @Inject constructor(
         return regex.find(html)?.value
     }
 
-    /** Strip HTML tags and decode entities. */
+    /** Strip HTML tags, decode entities, and remove leftover URLs. */
     private fun cleanHtml(html: String): String {
         return html
             .replace(Regex("<[^>]+>"), "")
@@ -232,6 +232,10 @@ class CriticalDarlingsRepository @Inject constructor(
             .replace("&quot;", "\"")
             .replace("&#39;", "'")
             .replace("&apos;", "'")
+            // Remove URLs left over after stripping HTML (e.g. Spotify links)
+            .replace(Regex("""https?://\S+"""), "")
+            // Collapse multiple whitespace/newlines left by URL removal
+            .replace(Regex("""\s{2,}"""), " ")
             .trim()
     }
 

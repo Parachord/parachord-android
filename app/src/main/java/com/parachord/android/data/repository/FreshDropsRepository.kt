@@ -51,29 +51,38 @@ class FreshDropsRepository @Inject constructor(
 
     /**
      * Get fresh drops with progressive loading.
-     * First emits cached data if available, then fetches fresh data.
+     *
+     * Matches the desktop's loadNewReleases() approach:
+     * - Show cached data immediately while refreshing
+     * - Emit progressive results as each artist is processed
+     * - Merge new results with prior cache (each fetch only covers a subset
+     *   of the user's library due to the artist cap + shuffling)
+     * - Cache results in memory for the session
      */
     fun getFreshDrops(forceRefresh: Boolean = false): Flow<Resource<List<FreshDrop>>> = flow {
-        emit(Resource.Loading)
+        val now = System.currentTimeMillis()
+        val isStale = now - lastFetchedAt > STALE_THRESHOLD
+
+        // Return cache if fresh
+        if (!forceRefresh && !isStale && cachedReleases != null) {
+            Log.d(TAG, "Using ${cachedReleases!!.size} cached fresh drops")
+            emit(Resource.Success(cachedReleases!!))
+            return@flow
+        }
+
+        // Show stale cache immediately while refreshing (desktop pattern)
+        if (cachedReleases != null) {
+            Log.d(TAG, "Showing ${cachedReleases!!.size} stale cached releases while refreshing...")
+            emit(Resource.Success(cachedReleases!!))
+        } else {
+            emit(Resource.Loading)
+        }
 
         try {
-            val now = System.currentTimeMillis()
-            val isStale = now - lastFetchedAt > STALE_THRESHOLD
-
-            // Return cache if fresh
-            if (!forceRefresh && !isStale && cachedReleases != null) {
-                emit(Resource.Success(cachedReleases!!))
-                return@flow
-            }
-
-            // Show stale cache while refreshing
-            if (cachedReleases != null && isStale && !forceRefresh) {
-                emit(Resource.Success(cachedReleases!!))
-            }
-
             // 1. Gather artists from multiple sources
             val artists = withContext(Dispatchers.IO) { gatherArtists() }
             if (artists.isEmpty()) {
+                Log.d(TAG, "No artists found in collection or history")
                 if (cachedReleases == null) {
                     emit(Resource.Error("Add artists to your library or connect Last.fm/ListenBrainz to discover new releases"))
                 }
@@ -82,16 +91,29 @@ class FreshDropsRepository @Inject constructor(
 
             Log.d(TAG, "Checking ${artists.size} artists for new releases...")
 
+            // Snapshot prior cached releases before fetch starts (desktop pattern:
+            // merge new + prior so we don't lose results from artists not in this
+            // run's selection — the artist cap means each fetch only covers a subset)
+            val priorCachedReleases = cachedReleases?.toList() ?: emptyList()
+
             // 2. Fetch releases for each artist from MusicBrainz
             val sixMonthsAgo = LocalDate.now().minusMonths(6)
             val allReleases = mutableListOf<FreshDrop>()
 
-            for (artist in artists) {
+            for ((index, artist) in artists.withIndex()) {
                 try {
                     val releases = withContext(Dispatchers.IO) {
                         fetchReleasesForArtist(artist.name, sixMonthsAgo)
                     }
-                    allReleases.addAll(releases.map { it.copy(artistSource = artist.source) })
+                    val withSource = releases.map { it.copy(artistSource = artist.source) }
+                    allReleases.addAll(withSource)
+
+                    // Emit progressive results every 5 artists (desktop pattern:
+                    // show releases as they come in, merged with prior cache)
+                    if (allReleases.isNotEmpty() && (index + 1) % 5 == 0) {
+                        val progressMerged = mergeAndDedupe(allReleases, priorCachedReleases)
+                        emit(Resource.Success(progressMerged))
+                    }
 
                     // Rate limit MusicBrainz (1 req/sec policy — 2 calls per artist)
                     delay(1100)
@@ -100,31 +122,44 @@ class FreshDropsRepository @Inject constructor(
                 }
             }
 
-            // 3. Deduplicate and sort by date DESC
-            val seen = mutableSetOf<String>()
-            val deduped = allReleases.filter { release ->
-                val key = "${release.artist.lowercase()}|${release.title.lowercase()}"
-                seen.add(key)
-            }.sortedByDescending { it.date ?: "" }
+            // 3. Final merge: new results + prior cache, deduplicated and sorted
+            val finalReleases = mergeAndDedupe(allReleases, priorCachedReleases)
 
-            Log.d(TAG, "Found ${deduped.size} fresh drops from ${artists.size} artists")
+            Log.d(TAG, "Found ${allReleases.size} fresh + ${priorCachedReleases.size} cached → ${finalReleases.size} unique releases from ${artists.size} artists")
 
-            // 4. Assign Cover Art Archive URLs
-            val withArt = deduped.map { release ->
-                if (release.mbid != null) {
-                    release.copy(albumArt = MusicBrainzProvider.releaseGroupArtUrl(release.mbid))
-                } else release
-            }
-
-            cachedReleases = withArt
+            cachedReleases = finalReleases
             lastFetchedAt = System.currentTimeMillis()
-            emit(Resource.Success(withArt))
+            emit(Resource.Success(finalReleases))
         } catch (e: Exception) {
             Log.e(TAG, "Failed to load fresh drops", e)
             if (cachedReleases == null) {
                 emit(Resource.Error("Failed to load new releases"))
             }
         }
+    }
+
+    /**
+     * Merge fresh releases with prior cached releases, deduplicate, assign
+     * Cover Art Archive URLs, and sort by date descending.
+     * Fresh results take priority (listed first before dedup).
+     */
+    private fun mergeAndDedupe(
+        freshReleases: List<FreshDrop>,
+        priorReleases: List<FreshDrop>,
+    ): List<FreshDrop> {
+        val merged = freshReleases + priorReleases
+        val seen = mutableSetOf<String>()
+        return merged
+            .filter { release ->
+                val key = "${release.artist.lowercase()}|${release.title.lowercase()}"
+                seen.add(key)
+            }
+            .map { release ->
+                if (release.albumArt == null && release.mbid != null) {
+                    release.copy(albumArt = MusicBrainzProvider.releaseGroupArtUrl(release.mbid))
+                } else release
+            }
+            .sortedByDescending { it.date ?: "" }
     }
 
     /**

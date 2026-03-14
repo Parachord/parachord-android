@@ -87,6 +87,8 @@ import com.parachord.android.ui.components.SectionHeader
 import com.parachord.android.ui.components.SwipeableTabLayout
 import com.parachord.android.ui.theme.Success
 import kotlin.math.roundToInt
+import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.StateFlow
 
 // ── Plugin Data Model ──────────────────────────────────────────────
 
@@ -286,6 +288,10 @@ fun SettingsScreen(
                     onSaveAiConfig = { providerId, apiKey, model ->
                         viewModel.saveAiProviderConfig(providerId, apiKey, model)
                     },
+                    onSaveAiModel = { providerId, model ->
+                        viewModel.saveAiModel(providerId, model)
+                    },
+                    getAiModel = { viewModel.getAiModel(it) },
                     onClearAiProvider = { viewModel.clearAiProvider(it) },
                 )
                 1 -> GeneralTab(
@@ -331,6 +337,8 @@ private fun PlugInsTab(
     claudeConnected: Boolean = false,
     geminiConnected: Boolean = false,
     onSaveAiConfig: (String, String, String) -> Unit = { _, _, _ -> },
+    onSaveAiModel: (String, String) -> Unit = { _, _ -> },
+    getAiModel: (String) -> StateFlow<String> = { MutableStateFlow("") },
     onClearAiProvider: (String) -> Unit = {},
 ) {
     var selectedPlugin by remember { mutableStateOf<PluginInfo?>(null) }
@@ -459,6 +467,8 @@ private fun PlugInsTab(
             onLibreFmDisconnect = onLibreFmDisconnect,
             libreFmAuthError = libreFmAuthError,
             onSaveAiConfig = onSaveAiConfig,
+            onSaveAiModel = onSaveAiModel,
+            getAiModel = getAiModel,
             onClearAiProvider = onClearAiProvider,
         )
     }
@@ -664,6 +674,8 @@ private fun PluginConfigSheet(
     onLibreFmDisconnect: () -> Unit = {},
     libreFmAuthError: String? = null,
     onSaveAiConfig: (String, String, String) -> Unit = { _, _, _ -> },
+    onSaveAiModel: (String, String) -> Unit = { _, _ -> },
+    getAiModel: (String) -> StateFlow<String> = { MutableStateFlow("") },
     onClearAiProvider: (String) -> Unit = {},
 ) {
     val sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
@@ -801,12 +813,17 @@ private fun PluginConfigSheet(
                     enabledText = "Wikipedia metadata provider is active",
                     disabledText = "Enable Wikipedia to get encyclopedia-style artist bios and images via Wikidata.",
                 )
-                "chatgpt", "claude", "gemini" -> AiProviderConfig(
-                    providerId = plugin.id,
-                    isConnected = isConnected,
-                    onSaveConfig = onSaveAiConfig,
-                    onClear = onClearAiProvider,
-                )
+                "chatgpt", "claude", "gemini" -> {
+                    val currentModel by getAiModel(plugin.id).collectAsStateWithLifecycle()
+                    AiProviderConfig(
+                        providerId = plugin.id,
+                        isConnected = isConnected,
+                        onSaveConfig = onSaveAiConfig,
+                        onSaveModel = onSaveAiModel,
+                        onClear = onClearAiProvider,
+                        currentModel = currentModel,
+                    )
+                }
             }
         }
     }
@@ -1447,7 +1464,9 @@ private fun AiProviderConfig(
     providerId: String,
     isConnected: Boolean,
     onSaveConfig: (String, String, String) -> Unit,
+    onSaveModel: (String, String) -> Unit = { _, _ -> },
     onClear: (String) -> Unit,
+    currentModel: String = "",
 ) {
     val uriHandler = LocalUriHandler.current
 
@@ -1461,7 +1480,7 @@ private fun AiProviderConfig(
     val models = when (providerId) {
         "chatgpt" -> listOf("gpt-4o-mini", "gpt-4o", "gpt-4-turbo", "gpt-3.5-turbo")
         "claude" -> listOf("claude-sonnet-4-20250514", "claude-3-5-sonnet-20241022", "claude-3-5-haiku-20241022")
-        "gemini" -> listOf("gemini-2.0-flash-001", "gemini-1.5-pro-latest", "gemini-1.5-flash-latest")
+        "gemini" -> listOf("gemini-2.0-flash", "gemini-2.0-flash-lite", "gemini-1.5-pro", "gemini-1.5-flash")
         else -> emptyList()
     }
 
@@ -1511,7 +1530,13 @@ private fun AiProviderConfig(
     Spacer(modifier = Modifier.height(12.dp))
 
     var apiKey by remember { mutableStateOf("") }
-    var selectedModel by remember { mutableStateOf(models.firstOrNull() ?: "") }
+    // Initialize to the currently saved model, falling back to the first available
+    var selectedModel by remember {
+        mutableStateOf(
+            if (currentModel.isNotBlank() && currentModel in models) currentModel
+            else models.firstOrNull() ?: ""
+        )
+    }
     var modelDropdownExpanded by remember { mutableStateOf(false) }
 
     OutlinedTextField(
@@ -1551,6 +1576,8 @@ private fun AiProviderConfig(
                     onClick = {
                         selectedModel = model
                         modelDropdownExpanded = false
+                        // Auto-save model change (no need to re-enter API key)
+                        if (isConnected) onSaveModel(providerId, model)
                     },
                 )
             }
