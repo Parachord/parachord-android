@@ -4,6 +4,7 @@ import android.util.Log
 import com.parachord.android.auth.OAuthManager
 import com.parachord.android.data.api.SpotifyApi
 import com.parachord.android.data.store.SettingsStore
+import com.parachord.android.playback.handlers.MusicKitWebBridge
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.async
 import kotlinx.coroutines.coroutineScope
@@ -34,6 +35,7 @@ class ResolverManager @Inject constructor(
     private val oAuthManager: OAuthManager,
     private val okHttpClient: OkHttpClient,
     private val json: Json,
+    private val musicKitBridge: MusicKitWebBridge,
 ) {
     companion object {
         private const val TAG = "ResolverManager"
@@ -43,6 +45,7 @@ class ResolverManager @Inject constructor(
     private val _resolvers = MutableStateFlow(
         listOf(
             ResolverInfo(id = "spotify", name = "Spotify", enabled = true),
+            ResolverInfo(id = "applemusic", name = "Apple Music", enabled = true),
             ResolverInfo(id = "soundcloud", name = "SoundCloud", enabled = true),
         )
     )
@@ -61,6 +64,9 @@ class ResolverManager @Inject constructor(
         val tasks = buildList {
             if (activeResolvers.isEmpty() || "spotify" in activeResolvers) {
                 add(async { resolveSpotify(query) })
+            }
+            if (activeResolvers.isEmpty() || "applemusic" in activeResolvers) {
+                add(async { resolveAppleMusic(query) })
             }
             if (activeResolvers.isEmpty() || "soundcloud" in activeResolvers) {
                 add(async { resolveSoundCloud(query) })
@@ -81,6 +87,7 @@ class ResolverManager @Inject constructor(
         query: String,
         spotifyId: String? = null,
         soundcloudId: String? = null,
+        appleMusicId: String? = null,
     ): List<ResolvedSource> = coroutineScope {
         val results = mutableListOf<ResolvedSource>()
 
@@ -103,6 +110,19 @@ class ResolverManager @Inject constructor(
                     sourceType = "soundcloud",
                     resolver = "soundcloud",
                     soundcloudId = soundcloudId,
+                    confidence = 0.95, // High confidence — direct ID match
+                )
+            )
+        }
+
+        // If we have an Apple Music ID, use it directly
+        if (appleMusicId != null) {
+            results.add(
+                ResolvedSource(
+                    url = "applemusic:song:$appleMusicId",
+                    sourceType = "applemusic",
+                    resolver = "applemusic",
+                    appleMusicId = appleMusicId,
                     confidence = 0.95, // High confidence — direct ID match
                 )
             )
@@ -193,6 +213,69 @@ class ResolverManager @Inject constructor(
         }
     }
 
+    // ── Apple Music Resolver ────────────────────────────────────────
+
+    private suspend fun resolveAppleMusic(query: String): ResolvedSource? {
+        // Tier 1: MusicKit JS (requires developer token + auth)
+        if (musicKitBridge.configured.value) {
+            try {
+                val results = musicKitBridge.search(query, limit = 5)
+                val best = results.firstOrNull()
+                if (best != null) {
+                    Log.d(TAG, "Apple Music (MusicKit) matched '${best.title}' by ${best.artist}")
+                    return ResolvedSource(
+                        url = best.appleMusicUrl ?: "applemusic:song:${best.id}",
+                        sourceType = "applemusic",
+                        resolver = "applemusic",
+                        appleMusicId = best.id,
+                        confidence = 0.9,
+                    )
+                }
+            } catch (e: Exception) {
+                Log.w(TAG, "MusicKit search failed, falling back to iTunes: ${e.message}")
+            }
+        }
+
+        // Tier 2: iTunes Search API (no auth, metadata-only)
+        return resolveViaiTunes(query)
+    }
+
+    private suspend fun resolveViaiTunes(query: String): ResolvedSource? =
+        withContext(Dispatchers.IO) {
+            try {
+                val url = okhttp3.HttpUrl.Builder()
+                    .scheme("https")
+                    .host("itunes.apple.com")
+                    .addPathSegment("search")
+                    .addQueryParameter("term", query)
+                    .addQueryParameter("media", "music")
+                    .addQueryParameter("entity", "song")
+                    .addQueryParameter("limit", "5")
+                    .build()
+
+                val request = Request.Builder().url(url).get().build()
+                val response = okHttpClient.newCall(request).execute()
+                if (!response.isSuccessful) return@withContext null
+
+                val body = response.body?.string() ?: return@withContext null
+                val result = json.decodeFromString<ITunesSearchResponse>(body)
+                val best = result.results.firstOrNull() ?: return@withContext null
+
+                Log.d(TAG, "Apple Music (iTunes) matched '${best.trackName}' by ${best.artistName}")
+
+                ResolvedSource(
+                    url = best.trackViewUrl ?: "applemusic:song:${best.trackId}",
+                    sourceType = "applemusic",
+                    resolver = "applemusic",
+                    appleMusicId = best.trackId.toString(),
+                    confidence = 0.85,
+                )
+            } catch (e: Exception) {
+                Log.w(TAG, "iTunes search failed for '$query': ${e.message}")
+                null
+            }
+        }
+
     // ── SoundCloud Resolver ─────────────────────────────────────────────
 
     /**
@@ -282,6 +365,28 @@ class ResolverManager @Inject constructor(
             )
         }
 }
+
+// ── SoundCloud API Response Models ──────────────────────────────────
+
+// ── iTunes API Response Models ──────────────────────────────────────
+
+@Serializable
+private data class ITunesSearchResponse(
+    val resultCount: Int = 0,
+    val results: List<ITunesTrack> = emptyList(),
+)
+
+@Serializable
+private data class ITunesTrack(
+    val trackId: Long,
+    val trackName: String,
+    val artistName: String,
+    val collectionName: String? = null,
+    val trackViewUrl: String? = null,
+    val artworkUrl100: String? = null,
+    val trackTimeMillis: Long? = null,
+    val previewUrl: String? = null,
+)
 
 // ── SoundCloud API Response Models ──────────────────────────────────
 
