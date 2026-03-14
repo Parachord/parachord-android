@@ -12,4 +12,8 @@ data class PlaylistEntity(
     val trackCount: Int = 0,
     val createdAt: Long = System.currentTimeMillis(),
     val updatedAt: Long = System.currentTimeMillis(),
+    val spotifyId: String? = null,
+    val snapshotId: String? = null,
+    val lastModified: Long = 0L,
+    val locallyModified: Boolean = false,
 )

@@ -12,13 +12,17 @@ import com.parachord.android.data.db.dao.FriendDao
 import com.parachord.android.data.db.dao.PlaylistDao
 import com.parachord.android.data.db.dao.PlaylistTrackDao
 import com.parachord.android.data.db.dao.SearchHistoryDao
+import com.parachord.android.data.db.dao.ArtistDao
+import com.parachord.android.data.db.dao.SyncSourceDao
 import com.parachord.android.data.db.dao.TrackDao
 import com.parachord.android.data.db.entity.AlbumEntity
+import com.parachord.android.data.db.entity.ArtistEntity
 import com.parachord.android.data.db.entity.ChatMessageEntity
 import com.parachord.android.data.db.entity.FriendEntity
 import com.parachord.android.data.db.entity.PlaylistEntity
 import com.parachord.android.data.db.entity.PlaylistTrackEntity
 import com.parachord.android.data.db.entity.SearchHistoryEntity
+import com.parachord.android.data.db.entity.SyncSourceEntity
 import com.parachord.android.data.db.entity.TrackEntity
 
 @Database(
@@ -30,8 +34,10 @@ import com.parachord.android.data.db.entity.TrackEntity
         SearchHistoryEntity::class,
         FriendEntity::class,
         ChatMessageEntity::class,
+        SyncSourceEntity::class,
+        ArtistEntity::class,
     ],
-    version = 6,
+    version = 7,
     exportSchema = false,
 )
 abstract class ParachordDatabase : RoomDatabase() {
@@ -42,6 +48,8 @@ abstract class ParachordDatabase : RoomDatabase() {
     abstract fun searchHistoryDao(): SearchHistoryDao
     abstract fun friendDao(): FriendDao
     abstract fun chatMessageDao(): ChatMessageDao
+    abstract fun syncSourceDao(): SyncSourceDao
+    abstract fun artistDao(): ArtistDao
 
     companion object {
         /**
@@ -102,6 +110,51 @@ abstract class ParachordDatabase : RoomDatabase() {
          * that are NOT part of any album — these are metadata stubs from the AI
          * playlist tool. Real user-imported tracks always have albumId set.
          */
+        private val MIGRATION_6_7 = object : Migration(6, 7) {
+            override fun migrate(db: SupportSQLiteDatabase) {
+                db.execSQL("""
+                    CREATE TABLE IF NOT EXISTS `sync_sources` (
+                        `itemId` TEXT NOT NULL,
+                        `itemType` TEXT NOT NULL,
+                        `providerId` TEXT NOT NULL,
+                        `externalId` TEXT,
+                        `addedAt` INTEGER NOT NULL DEFAULT 0,
+                        `syncedAt` INTEGER NOT NULL DEFAULT 0,
+                        PRIMARY KEY(`itemId`, `itemType`, `providerId`)
+                    )
+                """.trimIndent())
+
+                db.execSQL("""
+                    CREATE TABLE IF NOT EXISTS `artists` (
+                        `id` TEXT NOT NULL,
+                        `name` TEXT NOT NULL,
+                        `imageUrl` TEXT,
+                        `spotifyId` TEXT,
+                        `genres` TEXT,
+                        `addedAt` INTEGER NOT NULL DEFAULT 0,
+                        PRIMARY KEY(`id`)
+                    )
+                """.trimIndent())
+
+                db.execSQL("ALTER TABLE `tracks` ADD COLUMN `spotifyId` TEXT")
+                db.execSQL("ALTER TABLE `albums` ADD COLUMN `spotifyId` TEXT")
+                db.execSQL("ALTER TABLE `playlists` ADD COLUMN `spotifyId` TEXT")
+                db.execSQL("ALTER TABLE `playlists` ADD COLUMN `snapshotId` TEXT")
+                db.execSQL("ALTER TABLE `playlists` ADD COLUMN `lastModified` INTEGER NOT NULL DEFAULT 0")
+                db.execSQL("ALTER TABLE `playlists` ADD COLUMN `locallyModified` INTEGER NOT NULL DEFAULT 0")
+
+                // Backfill: create 'manual' sync sources for existing collection items
+                db.execSQL("""
+                    INSERT OR IGNORE INTO sync_sources (itemId, itemType, providerId, addedAt, syncedAt)
+                    SELECT id, 'track', 'manual', addedAt, addedAt FROM tracks
+                """.trimIndent())
+                db.execSQL("""
+                    INSERT OR IGNORE INTO sync_sources (itemId, itemType, providerId, addedAt, syncedAt)
+                    SELECT id, 'album', 'manual', addedAt, addedAt FROM albums
+                """.trimIndent())
+            }
+        }
+
         private val MIGRATION_5_6 = object : Migration(5, 6) {
             override fun migrate(db: SupportSQLiteDatabase) {
                 // Clean up orphaned playlist tracks from the old broken behavior
@@ -141,7 +194,7 @@ abstract class ParachordDatabase : RoomDatabase() {
                 ParachordDatabase::class.java,
                 "parachord.db"
             )
-                .addMigrations(MIGRATION_4_5, MIGRATION_5_6)
+                .addMigrations(MIGRATION_4_5, MIGRATION_5_6, MIGRATION_6_7)
                 // Only fall back to destructive for very old versions (pre-v4)
                 // that we can't reasonably migrate from
                 .fallbackToDestructiveMigrationFrom(1, 2, 3)

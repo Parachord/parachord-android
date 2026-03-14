@@ -26,6 +26,9 @@ interface PlaylistDao {
     @Update
     suspend fun update(playlist: PlaylistEntity)
 
+    @Query("SELECT * FROM playlists ORDER BY updatedAt DESC")
+    suspend fun getAllSync(): List<PlaylistEntity>
+
     @Delete
     suspend fun delete(playlist: PlaylistEntity)
 }

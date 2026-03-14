@@ -12,4 +12,5 @@ data class AlbumEntity(
     val year: Int? = null,
     val trackCount: Int? = null,
     val addedAt: Long = System.currentTimeMillis(),
+    val spotifyId: String? = null,
 )

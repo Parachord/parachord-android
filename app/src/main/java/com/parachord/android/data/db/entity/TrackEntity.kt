@@ -21,4 +21,6 @@ data class TrackEntity(
     val spotifyUri: String? = null,
     /** SoundCloud track ID for streaming via their API. */
     val soundcloudId: String? = null,
+    /** Spotify track ID (e.g. "6rqhFgbbKwnb9MLmUQDhG6"). */
+    val spotifyId: String? = null,
 )
