@@ -1,0 +1,188 @@
+package com.parachord.android.ui.screens.library
+
+import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.animation.expandHorizontally
+import androidx.compose.animation.fadeIn
+import androidx.compose.animation.fadeOut
+import androidx.compose.animation.shrinkHorizontally
+import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.ArrowDropDown
+import androidx.compose.material.icons.filled.Check
+import androidx.compose.material.icons.filled.Close
+import androidx.compose.material.icons.filled.Search
+import androidx.compose.material3.DropdownMenu
+import androidx.compose.material3.DropdownMenuItem
+import androidx.compose.material3.HorizontalDivider
+import androidx.compose.material3.Icon
+import androidx.compose.material3.IconButton
+import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.OutlinedTextField
+import androidx.compose.material3.OutlinedTextFieldDefaults
+import androidx.compose.material3.Surface
+import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
+import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
+import androidx.compose.ui.Alignment
+import androidx.compose.ui.Modifier
+import androidx.compose.ui.focus.FocusRequester
+import androidx.compose.ui.focus.focusRequester
+import androidx.compose.ui.unit.dp
+
+/**
+ * Sticky sort/filter bar displayed at the top of each Collection tab.
+ *
+ * Left side: sort dropdown showing the current sort label with a chevron.
+ * Right side: search icon that expands into a pill-shaped text field.
+ */
+@Composable
+fun CollectionFilterBar(
+    sortLabel: String,
+    sortOptions: List<Pair<String, () -> Unit>>,
+    selectedSortLabel: String,
+    searchQuery: String,
+    onSearchQueryChange: (String) -> Unit,
+    onClearSearch: () -> Unit,
+    modifier: Modifier = Modifier,
+) {
+    var sortExpanded by remember { mutableStateOf(false) }
+    var searchExpanded by remember { mutableStateOf(false) }
+    val focusRequester = remember { FocusRequester() }
+
+    // Auto-focus the search field when it expands
+    LaunchedEffect(searchExpanded) {
+        if (searchExpanded) {
+            focusRequester.requestFocus()
+        }
+    }
+
+    Surface(
+        color = MaterialTheme.colorScheme.surface,
+        modifier = modifier,
+    ) {
+        Column {
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(horizontal = 12.dp, vertical = 6.dp),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                // Sort dropdown button
+                TextButton(onClick = { sortExpanded = true }) {
+                    Text(
+                        text = sortLabel,
+                        style = MaterialTheme.typography.labelLarge,
+                        color = MaterialTheme.colorScheme.onSurface,
+                    )
+                    Icon(
+                        imageVector = Icons.Default.ArrowDropDown,
+                        contentDescription = "Sort options",
+                        modifier = Modifier.size(20.dp),
+                        tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+
+                    DropdownMenu(
+                        expanded = sortExpanded,
+                        onDismissRequest = { sortExpanded = false },
+                    ) {
+                        sortOptions.forEach { (label, onClick) ->
+                            DropdownMenuItem(
+                                text = { Text(label) },
+                                onClick = {
+                                    onClick()
+                                    sortExpanded = false
+                                },
+                                leadingIcon = if (label == selectedSortLabel) {
+                                    {
+                                        Icon(
+                                            imageVector = Icons.Default.Check,
+                                            contentDescription = "Selected",
+                                            modifier = Modifier.size(18.dp),
+                                            tint = MaterialTheme.colorScheme.primary,
+                                        )
+                                    }
+                                } else {
+                                    // Invisible spacer to keep text aligned
+                                    {
+                                        Spacer(modifier = Modifier.size(18.dp))
+                                    }
+                                },
+                            )
+                        }
+                    }
+                }
+
+                Spacer(modifier = Modifier.weight(1f))
+
+                // Search: expanded text field or icon
+                AnimatedVisibility(
+                    visible = searchExpanded,
+                    enter = expandHorizontally(expandFrom = Alignment.End) + fadeIn(),
+                    exit = shrinkHorizontally(shrinkTowards = Alignment.End) + fadeOut(),
+                ) {
+                    OutlinedTextField(
+                        value = searchQuery,
+                        onValueChange = onSearchQueryChange,
+                        placeholder = {
+                            Text(
+                                "Filter...",
+                                style = MaterialTheme.typography.bodyMedium,
+                            )
+                        },
+                        singleLine = true,
+                        textStyle = MaterialTheme.typography.bodyMedium,
+                        shape = RoundedCornerShape(50),
+                        colors = OutlinedTextFieldDefaults.colors(
+                            focusedBorderColor = MaterialTheme.colorScheme.primary,
+                            unfocusedBorderColor = MaterialTheme.colorScheme.outline.copy(alpha = 0.5f),
+                        ),
+                        trailingIcon = {
+                            IconButton(onClick = {
+                                onClearSearch()
+                                searchExpanded = false
+                            }) {
+                                Icon(
+                                    imageVector = Icons.Default.Close,
+                                    contentDescription = "Close search",
+                                    modifier = Modifier.size(18.dp),
+                                )
+                            }
+                        },
+                        modifier = Modifier
+                            .width(200.dp)
+                            .height(44.dp)
+                            .focusRequester(focusRequester),
+                    )
+                }
+
+                if (!searchExpanded) {
+                    IconButton(onClick = { searchExpanded = true }) {
+                        Icon(
+                            imageVector = Icons.Default.Search,
+                            contentDescription = "Search",
+                            tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                        )
+                    }
+                }
+            }
+            HorizontalDivider(
+                modifier = Modifier.fillMaxWidth(),
+                thickness = 1.dp,
+                color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.5f),
+            )
+        }
+    }
+}

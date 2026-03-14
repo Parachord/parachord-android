@@ -33,4 +33,7 @@ interface ArtistDao {
 
     @Query("DELETE FROM artists WHERE id = :id")
     suspend fun deleteById(id: String)
+
+    @Query("UPDATE artists SET imageUrl = :imageUrl WHERE name = :name AND (imageUrl IS NULL OR imageUrl = '')")
+    suspend fun updateImageByName(name: String, imageUrl: String)
 }

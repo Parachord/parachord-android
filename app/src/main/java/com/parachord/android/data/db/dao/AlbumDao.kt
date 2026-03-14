@@ -27,4 +27,7 @@ interface AlbumDao {
 
     @Delete
     suspend fun delete(album: AlbumEntity)
+
+    @Query("UPDATE albums SET artworkUrl = :artworkUrl WHERE title = :title AND artist = :artist AND (artworkUrl IS NULL OR artworkUrl = '')")
+    suspend fun updateArtworkByTitleAndArtist(title: String, artist: String, artworkUrl: String)
 }

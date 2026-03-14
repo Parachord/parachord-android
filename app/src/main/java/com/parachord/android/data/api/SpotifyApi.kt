@@ -278,7 +278,7 @@ data class SpArtistRef(
 data class SpAlbumRef(
     val id: String,
     val name: String,
-    val images: List<SpImage> = emptyList(),
+    val images: List<SpImage>? = null,
     @SerialName("release_date") val releaseDate: String? = null,
     @SerialName("total_tracks") val totalTracks: Int? = null,
 )
@@ -288,7 +288,7 @@ data class SpAlbum(
     val id: String,
     val name: String,
     val artists: List<SpArtistRef> = emptyList(),
-    val images: List<SpImage> = emptyList(),
+    val images: List<SpImage>? = null,
     @SerialName("release_date") val releaseDate: String? = null,
     @SerialName("total_tracks") val totalTracks: Int? = null,
     @SerialName("album_type") val albumType: String? = null,
@@ -314,7 +314,7 @@ data class SpArtist(
     val id: String,
     val name: String,
     val genres: List<String> = emptyList(),
-    val images: List<SpImage> = emptyList(),
+    val images: List<SpImage>? = null,
 )
 
 @Serializable
@@ -325,9 +325,9 @@ data class SpImage(
 )
 
 /** Get the best image URL (prefer medium ~300px, fall back to first available). */
-fun List<SpImage>.bestImageUrl(): String? =
-    sortedBy { it.width ?: 0 }.firstOrNull { (it.width ?: 0) >= 300 }?.url
-        ?: firstOrNull()?.url
+fun List<SpImage>?.bestImageUrl(): String? =
+    this?.sortedBy { it.width ?: 0 }?.firstOrNull { (it.width ?: 0) >= 300 }?.url
+        ?: this?.firstOrNull()?.url
 
 // --- Playback Control models ---
 
@@ -420,7 +420,7 @@ data class SpPlaylistSimple(
     val id: String,
     val name: String,
     val description: String? = null,
-    val images: List<SpImage> = emptyList(),
+    val images: List<SpImage>? = null,
     val owner: SpUser? = null,
     @SerialName("snapshot_id") val snapshotId: String? = null,
     val tracks: SpPlaylistTracksRef? = null,
@@ -460,7 +460,7 @@ data class SpPlaylistFull(
     val id: String,
     val name: String,
     val description: String? = null,
-    val images: List<SpImage> = emptyList(),
+    val images: List<SpImage>? = null,
     val owner: SpUser? = null,
     @SerialName("snapshot_id") val snapshotId: String? = null,
     val tracks: SpPlaylistTracksResponse? = null,
