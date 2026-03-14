@@ -87,6 +87,11 @@ import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.parachord.android.BuildConfig
 import com.parachord.android.ui.components.ResolverIconSquare
+import com.parachord.android.ui.components.ModalBg
+import com.parachord.android.ui.components.ModalBgDarker
+import com.parachord.android.ui.components.ModalTextActive
+import com.parachord.android.ui.components.ModalTextPrimary
+import com.parachord.android.ui.components.ModalScrim
 import com.parachord.android.ui.components.SectionHeader
 import com.parachord.android.ui.components.SwipeableTabLayout
 import com.parachord.android.ui.screens.sync.SyncSetupSheet
@@ -767,6 +772,19 @@ private fun PluginConfigSheet(
     ModalBottomSheet(
         onDismissRequest = onDismiss,
         sheetState = sheetState,
+        containerColor = ModalBg,
+        scrimColor = ModalScrim,
+        dragHandle = {
+            Box(
+                modifier = Modifier
+                    .padding(vertical = 10.dp)
+                    .size(width = 32.dp, height = 4.dp)
+                    .background(
+                        color = Color.White.copy(alpha = 0.2f),
+                        shape = RoundedCornerShape(2.dp),
+                    ),
+            )
+        },
     ) {
         Column(
             modifier = Modifier
@@ -1861,19 +1879,22 @@ private fun GeneralTab(
     if (showStopSyncDialog) {
         AlertDialog(
             onDismissRequest = { showStopSyncDialog = false },
+            containerColor = ModalBg,
+            titleContentColor = ModalTextActive,
+            textContentColor = ModalTextPrimary,
             title = { Text("Stop Syncing") },
             text = { Text("Do you want to keep or remove the synced items from your Collection?") },
             confirmButton = {
                 TextButton(onClick = {
                     syncViewModel.stopSyncing(removeItems = true)
                     showStopSyncDialog = false
-                }) { Text("Remove Items") }
+                }) { Text("Remove Items", color = Color(0xFFEF4444)) }
             },
             dismissButton = {
                 TextButton(onClick = {
                     syncViewModel.stopSyncing(removeItems = false)
                     showStopSyncDialog = false
-                }) { Text("Keep Items") }
+                }) { Text("Keep Items", color = ModalTextPrimary) }
             },
         )
     }

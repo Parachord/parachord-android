@@ -1,12 +1,16 @@
 package com.parachord.android.ui.components
 
+import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.rememberLazyListState
@@ -33,6 +37,7 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
@@ -87,11 +92,25 @@ fun PlaylistPickerSheet(
     ModalBottomSheet(
         onDismissRequest = onDismiss,
         sheetState = sheetState,
+        containerColor = ModalBg,
+        scrimColor = ModalScrim,
+        dragHandle = {
+            Box(
+                modifier = Modifier
+                    .padding(vertical = 10.dp)
+                    .size(width = 32.dp, height = 4.dp)
+                    .background(
+                        color = Color.White.copy(alpha = 0.2f),
+                        shape = RoundedCornerShape(2.dp),
+                    ),
+            )
+        },
     ) {
         Column(modifier = Modifier.padding(bottom = 32.dp)) {
             Text(
                 text = "Add to Playlist",
                 style = MaterialTheme.typography.titleMedium,
+                color = ModalTextActive,
                 modifier = Modifier.padding(horizontal = 16.dp, vertical = 12.dp),
             )
 
@@ -128,9 +147,9 @@ fun PlaylistPickerSheet(
                         Text(
                             text = option.label,
                             color = if (sort == option) {
-                                MaterialTheme.colorScheme.primary
+                                Color(0xFF7C3AED)
                             } else {
-                                MaterialTheme.colorScheme.onSurfaceVariant
+                                ModalTextSecondary
                             },
                             style = if (sort == option) {
                                 MaterialTheme.typography.labelLarge
@@ -142,7 +161,7 @@ fun PlaylistPickerSheet(
                 }
             }
 
-            HorizontalDivider()
+            HorizontalDivider(color = ModalDivider)
 
             // Create new playlist option
             Row(
@@ -155,17 +174,17 @@ fun PlaylistPickerSheet(
                 Icon(
                     imageVector = Icons.Filled.Add,
                     contentDescription = "Create new playlist",
-                    tint = MaterialTheme.colorScheme.primary,
+                    tint = Color(0xFF7C3AED),
                 )
                 Spacer(modifier = Modifier.width(16.dp))
                 Text(
                     text = "New Playlist\u2026",
                     style = MaterialTheme.typography.bodyLarge,
-                    color = MaterialTheme.colorScheme.primary,
+                    color = Color(0xFF7C3AED),
                 )
             }
 
-            HorizontalDivider()
+            HorizontalDivider(color = ModalDivider)
 
             LazyColumn(state = listState) {
                 items(filteredPlaylists, key = { it.id }) { playlist ->
@@ -187,13 +206,14 @@ fun PlaylistPickerSheet(
                             Text(
                                 text = playlist.name,
                                 style = MaterialTheme.typography.bodyLarge,
+                                color = ModalTextPrimary,
                                 maxLines = 1,
                                 overflow = TextOverflow.Ellipsis,
                             )
                             Text(
                                 text = "${playlist.trackCount} tracks",
                                 style = MaterialTheme.typography.bodySmall,
-                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                color = ModalTextSecondary,
                             )
                         }
                     }

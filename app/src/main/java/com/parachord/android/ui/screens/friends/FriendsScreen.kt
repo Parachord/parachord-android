@@ -57,6 +57,10 @@ import androidx.hilt.navigation.compose.hiltViewModel
 import com.parachord.android.data.db.entity.FriendEntity
 import com.parachord.android.data.repository.Resource
 import com.parachord.android.ui.components.AlbumArtCard
+import com.parachord.android.ui.components.ModalBg
+import com.parachord.android.ui.components.ModalTextActive
+import com.parachord.android.ui.components.ModalTextPrimary
+import com.parachord.android.ui.components.ModalTextSecondary
 
 private val OnAirGreen = Color(0xFF22C55E)
 private val LastFmRed = Color(0xFFD51007)

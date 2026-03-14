@@ -7,6 +7,7 @@ import androidx.compose.foundation.layout.height
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
+import androidx.compose.material3.OutlinedTextFieldDefaults
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
@@ -18,6 +19,7 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.focus.focusRequester
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.unit.dp
 
 /**
@@ -38,13 +40,16 @@ fun CreatePlaylistDialog(
 
     AlertDialog(
         onDismissRequest = onDismiss,
+        containerColor = ModalBg,
+        titleContentColor = ModalTextActive,
+        textContentColor = ModalTextPrimary,
         title = { Text("Create Playlist") },
         text = {
             Column {
                 Text(
                     text = "Give your playlist a name",
                     style = MaterialTheme.typography.bodyMedium,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    color = ModalTextSecondary,
                 )
                 Spacer(modifier = Modifier.height(12.dp))
                 OutlinedTextField(
@@ -53,8 +58,15 @@ fun CreatePlaylistDialog(
                     modifier = Modifier
                         .fillMaxWidth()
                         .focusRequester(focusRequester),
-                    placeholder = { Text("Playlist name") },
+                    placeholder = { Text("Playlist name", color = ModalTextSecondary) },
                     singleLine = true,
+                    colors = OutlinedTextFieldDefaults.colors(
+                        focusedTextColor = ModalTextActive,
+                        unfocusedTextColor = ModalTextPrimary,
+                        cursorColor = Color(0xFF7C3AED),
+                        focusedBorderColor = Color(0xFF7C3AED),
+                        unfocusedBorderColor = ModalDivider,
+                    ),
                 )
             }
         },
@@ -67,12 +79,12 @@ fun CreatePlaylistDialog(
                 },
                 enabled = playlistName.isNotBlank(),
             ) {
-                Text("Create")
+                Text("Create", color = Color(0xFF7C3AED))
             }
         },
         dismissButton = {
             TextButton(onClick = onDismiss) {
-                Text("Cancel")
+                Text("Cancel", color = ModalTextPrimary)
             }
         },
     )

@@ -51,6 +51,9 @@ import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import kotlinx.coroutines.launch
 import com.parachord.android.ui.components.AlbumArtCard
+import com.parachord.android.ui.components.ModalBg
+import com.parachord.android.ui.components.ModalTextActive
+import com.parachord.android.ui.components.ModalTextPrimary
 import com.parachord.android.ui.screens.library.CollectionFilterBar
 
 @OptIn(ExperimentalMaterial3Api::class)
@@ -136,6 +139,9 @@ fun PlaylistsScreen(
             pendingDeletePlaylist?.let { playlist ->
                 AlertDialog(
                     onDismissRequest = { pendingDeletePlaylist = null },
+                    containerColor = ModalBg,
+                    titleContentColor = ModalTextActive,
+                    textContentColor = ModalTextPrimary,
                     title = { Text("Delete Playlist") },
                     text = { Text("Are you sure you want to delete \"${playlist.name}\"?") },
                     confirmButton = {
@@ -143,12 +149,12 @@ fun PlaylistsScreen(
                             viewModel.deletePlaylist(playlist)
                             pendingDeletePlaylist = null
                         }) {
-                            Text("Delete", color = MaterialTheme.colorScheme.error)
+                            Text("Delete", color = Color(0xFFEF4444))
                         }
                     },
                     dismissButton = {
                         TextButton(onClick = { pendingDeletePlaylist = null }) {
-                            Text("Cancel")
+                            Text("Cancel", color = ModalTextPrimary)
                         }
                     },
                 )

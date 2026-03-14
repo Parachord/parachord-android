@@ -41,6 +41,9 @@ class SpotifyPlaybackHandler @Inject constructor(
 
     companion object {
         private const val TAG = "SpotifyPlayback"
+        private const val MAX_POLL_FAILURES = 10
+        /** ~8 seconds of stale position (8 polls at 1s interval). */
+        private const val MAX_STALE_POSITION = 8
     }
 
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Main)
@@ -64,6 +67,11 @@ class SpotifyPlaybackHandler @Inject constructor(
     // Track previous poll state for reset-after-end detection (matches desktop pattern)
     private var lastProgressMs = 0L
     private var lastPercentComplete = 0f
+
+    /** Consecutive state-polling failures — used for watchdog auto-advance. */
+    private var consecutivePollFailures = 0
+    /** Consecutive polls where position didn't change while "playing". */
+    private var stalePositionCount = 0
 
     override val isConnected: Boolean get() = _isConnected
 
@@ -99,6 +107,8 @@ class SpotifyPlaybackHandler @Inject constructor(
             pausedByUs = false
             lastProgressMs = 0L
             lastPercentComplete = 0f
+            consecutivePollFailures = 0
+            stalePositionCount = 0
             startStatePolling()
         } else {
             Log.e(TAG, "Failed to play '${track.title}' after retries")
@@ -320,6 +330,25 @@ class SpotifyPlaybackHandler @Inject constructor(
             return true
         }
 
+        // 6. Poll failures watchdog: if we can't reach the API for ~10s,
+        // the track likely ended and Spotify went idle.
+        if (consecutivePollFailures >= MAX_POLL_FAILURES) {
+            Log.w(TAG, "Watchdog: $consecutivePollFailures consecutive poll failures, treating as done")
+            return true
+        }
+
+        // 7. Stale-position watchdog: if position hasn't changed across multiple
+        // polls while supposedly playing, the track is stuck or ended silently.
+        if (cachedIsPlaying && cachedPosition > 0 && cachedPosition == lastProgressMs) {
+            stalePositionCount++
+            if (stalePositionCount >= MAX_STALE_POSITION) {
+                Log.w(TAG, "Watchdog: position stale at ${cachedPosition}ms for $stalePositionCount polls, treating as done")
+                return true
+            }
+        } else {
+            stalePositionCount = 0
+        }
+
         // Update last-known progress for reset-after-end detection
         lastProgressMs = cachedPosition
         lastPercentComplete = percentComplete
@@ -334,6 +363,7 @@ class SpotifyPlaybackHandler @Inject constructor(
                 try {
                     val state = fetchPlaybackState()
                     if (state != null) {
+                        consecutivePollFailures = 0
                         val apiItemId = state.item?.id
                         val elapsed = System.currentTimeMillis() - playStartedAt
 
@@ -356,8 +386,13 @@ class SpotifyPlaybackHandler @Inject constructor(
                                 cachedDuration = state.item.durationMs
                             }
                         }
+                    } else {
+                        consecutivePollFailures++
                     }
-                } catch (_: Exception) { /* ignore polling errors */ }
+                } catch (e: Exception) {
+                    consecutivePollFailures++
+                    Log.w(TAG, "State poll failed ($consecutivePollFailures): ${e.message}")
+                }
                 delay(1000)
             }
         }

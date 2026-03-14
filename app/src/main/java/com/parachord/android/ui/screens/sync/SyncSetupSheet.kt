@@ -29,6 +29,8 @@ import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.parachord.android.sync.SyncEngine
 import com.parachord.android.ui.components.AlbumArtCard
+import com.parachord.android.ui.components.ModalBg
+import com.parachord.android.ui.components.ModalScrim
 
 private val SpotifyGreen = Color(0xFF1DB954)
 
@@ -46,6 +48,19 @@ fun SyncSetupSheet(
             if (currentStep != SyncViewModel.SetupStep.SYNCING) onDismiss()
         },
         sheetState = sheetState,
+        containerColor = ModalBg,
+        scrimColor = ModalScrim,
+        dragHandle = {
+            Box(
+                modifier = Modifier
+                    .padding(vertical = 10.dp)
+                    .size(width = 32.dp, height = 4.dp)
+                    .background(
+                        color = Color.White.copy(alpha = 0.2f),
+                        shape = RoundedCornerShape(2.dp),
+                    ),
+            )
+        },
     ) {
         when (currentStep) {
             SyncViewModel.SetupStep.OPTIONS -> OptionsStep(viewModel)

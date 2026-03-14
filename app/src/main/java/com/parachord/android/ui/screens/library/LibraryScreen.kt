@@ -23,13 +23,16 @@ import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.Album
 import androidx.compose.material.icons.filled.Delete
+import androidx.compose.material.icons.filled.Favorite
 import androidx.compose.material.icons.filled.Headphones
 import androidx.compose.material.icons.filled.Menu
 import androidx.compose.material.icons.filled.MusicNote
 import androidx.compose.material.icons.filled.People
 import androidx.compose.material.icons.filled.Person
 import androidx.compose.material.icons.filled.PersonRemove
+import androidx.compose.material.icons.filled.PlayArrow
 import androidx.compose.material.icons.filled.PushPin
 import androidx.compose.material.icons.filled.Sync
 import androidx.compose.material3.AlertDialog
@@ -91,7 +94,7 @@ import com.parachord.android.ui.components.rememberTrackContextMenuState
 import com.parachord.android.ui.screens.friends.FriendsViewModel
 import com.parachord.android.ui.screens.sync.SyncSetupSheet
 
-@OptIn(ExperimentalMaterial3Api::class)
+@OptIn(ExperimentalMaterial3Api::class, ExperimentalFoundationApi::class)
 @Composable
 fun CollectionScreen(
     onOpenDrawer: () -> Unit = {},
@@ -202,10 +205,15 @@ fun CollectionScreen(
                                         }
                                     }
 
+                                    var showMenu by remember { mutableStateOf(false) }
+
                                     Row(
                                         modifier = Modifier
                                             .fillMaxWidth()
-                                            .clickable { onNavigateToArtist(artist.name) }
+                                            .combinedClickable(
+                                                onClick = { onNavigateToArtist(artist.name) },
+                                                onLongClick = { showMenu = true },
+                                            )
                                             .padding(horizontal = 16.dp, vertical = 10.dp),
                                         verticalAlignment = Alignment.CenterVertically,
                                     ) {
@@ -221,6 +229,22 @@ fun CollectionScreen(
                                             style = MaterialTheme.typography.bodyLarge,
                                             maxLines = 1,
                                             overflow = TextOverflow.Ellipsis,
+                                        )
+                                    }
+
+                                    if (showMenu) {
+                                        ArtistContextMenu(
+                                            artistName = artist.name,
+                                            imageUrl = artist.imageUrl,
+                                            onDismiss = { showMenu = false },
+                                            onGoToArtist = {
+                                                showMenu = false
+                                                onNavigateToArtist(artist.name)
+                                            },
+                                            onRemoveFromCollection = {
+                                                showMenu = false
+                                                viewModel.removeArtistFromCollection(artist)
+                                            },
                                         )
                                     }
                                 }
@@ -262,10 +286,15 @@ fun CollectionScreen(
                                         }
                                     }
 
+                                    var showMenu by remember { mutableStateOf(false) }
+
                                     Row(
                                         modifier = Modifier
                                             .fillMaxWidth()
-                                            .clickable { onNavigateToAlbum(album.title, album.artist) }
+                                            .combinedClickable(
+                                                onClick = { onNavigateToAlbum(album.title, album.artist) },
+                                                onLongClick = { showMenu = true },
+                                            )
                                             .padding(horizontal = 16.dp, vertical = 10.dp),
                                         verticalAlignment = Alignment.CenterVertically,
                                     ) {
@@ -291,6 +320,27 @@ fun CollectionScreen(
                                                 overflow = TextOverflow.Ellipsis,
                                             )
                                         }
+                                    }
+
+                                    if (showMenu) {
+                                        AlbumContextMenu(
+                                            albumTitle = album.title,
+                                            artistName = album.artist,
+                                            artworkUrl = album.artworkUrl,
+                                            onDismiss = { showMenu = false },
+                                            onGoToAlbum = {
+                                                showMenu = false
+                                                onNavigateToAlbum(album.title, album.artist)
+                                            },
+                                            onGoToArtist = {
+                                                showMenu = false
+                                                onNavigateToArtist(album.artist)
+                                            },
+                                            onRemoveFromCollection = {
+                                                showMenu = false
+                                                viewModel.removeAlbumFromCollection(album)
+                                            },
+                                        )
                                     }
                                 }
                             }
@@ -813,6 +863,175 @@ private fun EmptyState(
                     Text("Sync Spotify")
                 }
             }
+        }
+    }
+}
+
+// ── Artist context menu ───────────────────────────────────────────
+
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+private fun ArtistContextMenu(
+    artistName: String,
+    imageUrl: String?,
+    onDismiss: () -> Unit,
+    onGoToArtist: () -> Unit,
+    onRemoveFromCollection: () -> Unit,
+) {
+    ModalBottomSheet(
+        onDismissRequest = onDismiss,
+        sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true),
+        containerColor = ModalBg,
+        scrimColor = Color.Black.copy(alpha = 0.4f),
+        dragHandle = {
+            Box(
+                modifier = Modifier
+                    .padding(vertical = 10.dp)
+                    .size(width = 32.dp, height = 4.dp)
+                    .background(
+                        color = Color.White.copy(alpha = 0.2f),
+                        shape = RoundedCornerShape(2.dp),
+                    ),
+            )
+        },
+    ) {
+        Column(
+            modifier = Modifier
+                .background(Brush.verticalGradient(listOf(ModalBg, ModalBgDarker)))
+                .padding(bottom = 32.dp),
+        ) {
+            // Header
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(horizontal = 20.dp, vertical = 8.dp),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                AlbumArtCard(
+                    artworkUrl = imageUrl,
+                    size = 48.dp,
+                    cornerRadius = 24.dp,
+                    placeholderName = artistName,
+                )
+                Spacer(modifier = Modifier.width(12.dp))
+                Text(
+                    text = artistName,
+                    fontSize = 15.sp,
+                    fontWeight = FontWeight.Medium,
+                    color = ModalTextActive,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                )
+            }
+
+            HorizontalDivider(color = ModalDivider, modifier = Modifier.padding(vertical = 8.dp))
+
+            ContextMenuItem(
+                icon = Icons.Filled.Person,
+                label = "Go to Artist",
+                onClick = onGoToArtist,
+            )
+
+            HorizontalDivider(color = ModalDivider, modifier = Modifier.padding(vertical = 4.dp))
+
+            ContextMenuItem(
+                icon = Icons.Filled.Favorite,
+                label = "Remove from Collection",
+                onClick = onRemoveFromCollection,
+            )
+        }
+    }
+}
+
+// ── Album context menu ────────────────────────────────────────────
+
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+private fun AlbumContextMenu(
+    albumTitle: String,
+    artistName: String,
+    artworkUrl: String?,
+    onDismiss: () -> Unit,
+    onGoToAlbum: () -> Unit,
+    onGoToArtist: () -> Unit,
+    onRemoveFromCollection: () -> Unit,
+) {
+    ModalBottomSheet(
+        onDismissRequest = onDismiss,
+        sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true),
+        containerColor = ModalBg,
+        scrimColor = Color.Black.copy(alpha = 0.4f),
+        dragHandle = {
+            Box(
+                modifier = Modifier
+                    .padding(vertical = 10.dp)
+                    .size(width = 32.dp, height = 4.dp)
+                    .background(
+                        color = Color.White.copy(alpha = 0.2f),
+                        shape = RoundedCornerShape(2.dp),
+                    ),
+            )
+        },
+    ) {
+        Column(
+            modifier = Modifier
+                .background(Brush.verticalGradient(listOf(ModalBg, ModalBgDarker)))
+                .padding(bottom = 32.dp),
+        ) {
+            // Header
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(horizontal = 20.dp, vertical = 8.dp),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                AlbumArtCard(
+                    artworkUrl = artworkUrl,
+                    size = 48.dp,
+                    cornerRadius = 4.dp,
+                    elevation = 1.dp,
+                    placeholderName = artistName,
+                )
+                Spacer(modifier = Modifier.width(12.dp))
+                Column(modifier = Modifier.weight(1f)) {
+                    Text(
+                        text = albumTitle,
+                        fontSize = 15.sp,
+                        fontWeight = FontWeight.Medium,
+                        color = ModalTextActive,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis,
+                    )
+                    Text(
+                        text = artistName,
+                        fontSize = 13.sp,
+                        color = ModalTextPrimary,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis,
+                    )
+                }
+            }
+
+            HorizontalDivider(color = ModalDivider, modifier = Modifier.padding(vertical = 8.dp))
+
+            ContextMenuItem(
+                icon = Icons.Filled.Album,
+                label = "Go to Album",
+                onClick = onGoToAlbum,
+            )
+            ContextMenuItem(
+                icon = Icons.Filled.Person,
+                label = "Go to Artist",
+                onClick = onGoToArtist,
+            )
+
+            HorizontalDivider(color = ModalDivider, modifier = Modifier.padding(vertical = 4.dp))
+
+            ContextMenuItem(
+                icon = Icons.Filled.Favorite,
+                label = "Remove from Collection",
+                onClick = onRemoveFromCollection,
+            )
         }
     }
 }
