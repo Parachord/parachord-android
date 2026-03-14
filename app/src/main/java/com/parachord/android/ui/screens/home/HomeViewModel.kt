@@ -238,6 +238,24 @@ class HomeViewModel @Inject constructor(
         }
     }
 
+    val playlists: StateFlow<List<PlaylistEntity>> =
+        repository.getAllPlaylists()
+            .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), emptyList())
+
+    fun playNext(track: TrackEntity) {
+        playbackController.insertNext(listOf(track))
+    }
+
+    fun addToQueue(track: TrackEntity) {
+        playbackController.addToQueue(listOf(track))
+    }
+
+    fun addToPlaylist(playlist: PlaylistEntity, track: TrackEntity) {
+        viewModelScope.launch {
+            repository.addTracksToPlaylist(playlist.id, listOf(track))
+        }
+    }
+
     fun togglePin(friend: FriendEntity) {
         viewModelScope.launch {
             friendsRepository.pinFriend(friend.id, !friend.pinnedToSidebar)

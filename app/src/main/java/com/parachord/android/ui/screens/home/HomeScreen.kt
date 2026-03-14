@@ -104,7 +104,10 @@ import com.parachord.android.ui.components.ModalDivider
 import com.parachord.android.ui.components.ParachordCard
 import com.parachord.android.ui.components.SectionHeader
 import com.parachord.android.ui.components.ShimmerTrackRow
+import com.parachord.android.ui.components.TrackContextInfo
+import com.parachord.android.ui.components.TrackContextMenuHost
 import com.parachord.android.ui.components.TrackRow
+import com.parachord.android.ui.components.rememberTrackContextMenuState
 import com.parachord.android.ai.AiAlbumSuggestion
 import com.parachord.android.ai.AiArtistSuggestion
 import com.parachord.android.ai.AiRecommendations
@@ -144,6 +147,19 @@ fun HomeScreen(
     val hasAiPlugins by viewModel.hasAiPlugins.collectAsStateWithLifecycle()
     val aiRecommendations by viewModel.aiRecommendations.collectAsStateWithLifecycle()
     val aiLoading by viewModel.aiLoading.collectAsStateWithLifecycle()
+    val playlists by viewModel.playlists.collectAsStateWithLifecycle()
+    val contextMenuState = rememberTrackContextMenuState()
+
+    // Track context menu host (for Recent Loves long-press)
+    TrackContextMenuHost(
+        state = contextMenuState,
+        playlists = playlists,
+        onPlayNext = { viewModel.playNext(it) },
+        onAddToQueue = { viewModel.addToQueue(it) },
+        onAddToPlaylist = { playlist, track -> viewModel.addToPlaylist(playlist, track) },
+        onNavigateToArtist = onNavigateToArtist,
+        onNavigateToAlbum = onNavigateToAlbum,
+    )
 
     val audioPermission = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
         Manifest.permission.READ_MEDIA_AUDIO
@@ -378,6 +394,19 @@ fun HomeScreen(
                             onClick = {
                                 viewModel.playTrack(track)
                                 onNavigateToNowPlaying()
+                            },
+                            onLongClick = {
+                                contextMenuState.show(
+                                    TrackContextInfo(
+                                        title = track.title,
+                                        artist = track.artist,
+                                        album = track.album,
+                                        artworkUrl = track.artworkUrl,
+                                        duration = track.duration,
+                                        isInCollection = true,
+                                    ),
+                                    track,
+                                )
                             },
                         )
                     }
