@@ -269,19 +269,17 @@ private fun FriendRow(
                     ServiceBadge(service = friend.service)
                 }
                 if (friend.isOnAir && friend.cachedTrackName != null) {
-                    Text(
-                        text = "▶ ${friend.cachedTrackArtist ?: ""} — ${friend.cachedTrackName}",
-                        style = MaterialTheme.typography.bodySmall,
-                        color = OnAirGreen,
-                        maxLines = 1,
-                        overflow = TextOverflow.Ellipsis,
+                    Spacer(modifier = Modifier.height(4.dp))
+                    FriendsMiniPlaybar(
+                        trackName = friend.cachedTrackName!!,
+                        artistName = friend.cachedTrackArtist,
+                        artworkUrl = friend.cachedTrackArtworkUrl,
                     )
                 } else if (friend.cachedTrackName != null) {
                     Text(
                         text = buildString {
-                            append(friend.cachedTrackArtist ?: "")
-                            append(" — ")
                             append(friend.cachedTrackName)
+                            friend.cachedTrackArtist?.let { append("  ·  $it") }
                             if (friend.cachedTrackTimestamp > 0) {
                                 append("  ·  ")
                                 append(formatTimeAgo(friend.cachedTrackTimestamp))
@@ -326,8 +324,9 @@ private fun formatTimeAgo(timestampSeconds: Long): String {
 }
 
 /**
- * Mini playbar pill for the Friends list — matches the sidebar FriendMiniPlaybar
- * with dark pill background, mini album art, marquee scrolling text, and on-air dot.
+ * Mini playbar pill for on-air friends — matches the sidebar FriendMiniPlaybar.
+ * Dark pill background, mini album art, marquee scrolling text, green on-air dot.
+ * Only shown for friends currently on-air; offline friends get plain muted text instead.
  */
 @OptIn(ExperimentalFoundationApi::class)
 @Composable
@@ -335,8 +334,6 @@ private fun FriendsMiniPlaybar(
     trackName: String,
     artistName: String?,
     artworkUrl: String?,
-    isOnAir: Boolean,
-    timestamp: Long,
 ) {
     val isDark = isSystemInDarkTheme()
     val pillBg = if (isDark) MiniPlaybarBgDark else MiniPlaybarBgLight
@@ -394,23 +391,14 @@ private fun FriendsMiniPlaybar(
                 ),
         )
 
-        // On-air dot or time ago
-        if (isOnAir) {
-            Box(
-                modifier = Modifier
-                    .padding(end = 6.dp)
-                    .size(6.dp)
-                    .clip(CircleShape)
-                    .background(OnAirGreen),
-            )
-        } else if (timestamp > 0) {
-            Text(
-                text = formatTimeAgo(timestamp),
-                fontSize = 9.sp,
-                color = Color(0xFF9CA3AF),
-                modifier = Modifier.padding(end = 6.dp),
-            )
-        }
+        // On-air green dot
+        Box(
+            modifier = Modifier
+                .padding(end = 6.dp)
+                .size(6.dp)
+                .clip(CircleShape)
+                .background(OnAirGreen),
+        )
     }
 }
 

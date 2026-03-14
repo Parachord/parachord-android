@@ -612,15 +612,28 @@ private fun FriendsTab(
                                     )
                                 }
 
-                                // Mini playbar for now-playing / last-played
-                                if (friend.cachedTrackName != null) {
+                                // On-air: mini playbar pill. Offline: plain muted text.
+                                if (friend.isOnAir && friend.cachedTrackName != null) {
                                     Spacer(modifier = Modifier.height(4.dp))
                                     FriendListMiniPlaybar(
                                         trackName = friend.cachedTrackName!!,
                                         artistName = friend.cachedTrackArtist,
                                         artworkUrl = friend.cachedTrackArtworkUrl,
-                                        isOnAir = friend.isOnAir,
-                                        timestamp = friend.cachedTrackTimestamp,
+                                    )
+                                } else if (friend.cachedTrackName != null) {
+                                    Text(
+                                        text = buildString {
+                                            append(friend.cachedTrackName)
+                                            friend.cachedTrackArtist?.let { append("  ·  $it") }
+                                            if (friend.cachedTrackTimestamp > 0) {
+                                                append("  ·  ")
+                                                append(formatFriendTimeAgo(friend.cachedTrackTimestamp))
+                                            }
+                                        },
+                                        style = MaterialTheme.typography.bodySmall,
+                                        color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.6f),
+                                        maxLines = 1,
+                                        overflow = TextOverflow.Ellipsis,
                                     )
                                 }
                             }
@@ -697,14 +710,12 @@ private fun FriendsTab(
     }
 }
 
-/** Mini playbar pill for friends list — larger than sidebar version. */
+/** Mini playbar pill for on-air friends — only shown when friend is currently playing. */
 @Composable
 private fun FriendListMiniPlaybar(
     trackName: String,
     artistName: String?,
     artworkUrl: String?,
-    isOnAir: Boolean,
-    timestamp: Long,
 ) {
     val isDark = isSystemInDarkTheme()
     val pillBg = if (isDark) MiniPlaybarBgDark else MiniPlaybarBgLight
@@ -757,23 +768,14 @@ private fun FriendListMiniPlaybar(
                 .padding(horizontal = 8.dp),
         )
 
-        // On-air dot or time ago
-        if (isOnAir) {
-            Box(
-                modifier = Modifier
-                    .padding(end = 6.dp)
-                    .size(6.dp)
-                    .clip(CircleShape)
-                    .background(OnAirGreen),
-            )
-        } else if (timestamp > 0) {
-            Text(
-                text = formatFriendTimeAgo(timestamp),
-                fontSize = 9.sp,
-                color = Color(0xFF9CA3AF),
-                modifier = Modifier.padding(end = 6.dp),
-            )
-        }
+        // On-air green dot
+        Box(
+            modifier = Modifier
+                .padding(end = 6.dp)
+                .size(6.dp)
+                .clip(CircleShape)
+                .background(OnAirGreen),
+        )
     }
 }
 
