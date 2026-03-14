@@ -362,6 +362,9 @@ private fun ParachordAppContent(mainViewModel: MainViewModel) {
                         navController = navController,
                         onOpenDrawer = onOpenDrawer,
                         onOpenChat = onOpenChat,
+                        onListenAlong = { friend ->
+                            mainViewModel.startListenAlong(friend)
+                        },
                     )
                 }
             }

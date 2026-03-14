@@ -5,6 +5,7 @@ import androidx.compose.foundation.clickable
 import androidx.compose.foundation.gestures.detectVerticalDragGestures
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
@@ -36,6 +37,7 @@ import androidx.compose.material3.TopAppBar
 import androidx.compose.material3.TopAppBarDefaults
 import androidx.compose.material3.rememberBottomSheetScaffoldState
 import androidx.compose.material3.rememberStandardBottomSheetState
+import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.rememberCoroutineScope
@@ -137,6 +139,18 @@ fun NowPlayingScreen(
                 onMoveInQueue = { from, to -> viewModel.moveInQueue(from, to) },
                 onRemoveFromQueue = { viewModel.removeFromQueue(it) },
                 onClearQueue = { viewModel.clearQueue() },
+                queueSuspended = playbackState.spinoffMode ||
+                    playbackState.playbackContext?.type == "listen-along",
+                onNavigateToContext = { ctx ->
+                    when (ctx.type) {
+                        "album" -> {
+                            val artist = track?.artist ?: return@QueueSheet
+                            onNavigateToAlbum(ctx.name, artist)
+                        }
+                        "artist" -> onNavigateToArtist(ctx.name)
+                        "playlist" -> { /* playlist navigation not yet wired */ }
+                    }
+                },
             )
         },
     ) {
@@ -314,11 +328,13 @@ fun NowPlayingScreen(
                     horizontalArrangement = Arrangement.Center,
                     verticalAlignment = Alignment.CenterVertically,
                 ) {
-                    // Shuffle
+                    // Shuffle (disabled during spinoff)
                     IconButton(
                         onClick = { viewModel.toggleShuffle() },
+                        enabled = !playbackState.spinoffMode,
                         colors = IconButtonDefaults.iconButtonColors(
                             contentColor = if (playbackState.shuffleEnabled) ActiveControlColor else InactiveControlColor,
+                            disabledContentColor = InactiveControlColor.copy(alpha = 0.3f),
                         ),
                     ) {
                         Icon(
@@ -442,33 +458,50 @@ fun NowPlayingScreen(
                                 Box(
                                     modifier = Modifier
                                         .align(Alignment.TopEnd)
-                                        .size(16.dp)
+                                        .offset(x = 6.dp, y = (-6).dp)
+                                        .size(14.dp)
                                         .background(PurpleDark, CircleShape),
                                     contentAlignment = Alignment.Center,
                                 ) {
                                     Text(
                                         text = "${upNext.size}",
-                                        style = MaterialTheme.typography.labelSmall,
                                         color = Color.White,
-                                        fontSize = 9.sp,
+                                        fontSize = 8.sp,
+                                        lineHeight = 8.sp,
                                     )
                                 }
                             }
                         }
                     }
 
-                    // Spinoff button
+                    // Spinoff button — states: loading (spinner), active (purple), available (gray), unavailable (dim)
                     IconButton(
-                        onClick = { /* TODO: toggle spinoff mode */ },
+                        onClick = { viewModel.toggleSpinoff() },
+                        enabled = !playbackState.spinoffLoading && playbackState.spinoffAvailable != false,
                         colors = IconButtonDefaults.iconButtonColors(
-                            contentColor = InactiveControlColor,
+                            contentColor = when {
+                                playbackState.spinoffMode -> ActiveControlColor
+                                playbackState.spinoffAvailable == false -> PlayerTextSecondary.copy(alpha = 0.3f)
+                                else -> PlayerTextSecondary
+                            },
+                            disabledContentColor = PlayerTextSecondary.copy(alpha = 0.3f),
                         ),
                     ) {
-                        Icon(
-                            imageVector = ParachordIcons.Spinoff,
-                            contentDescription = "Spinoff",
-                            modifier = Modifier.size(22.dp),
-                        )
+                        if (playbackState.spinoffLoading) {
+                            CircularProgressIndicator(
+                                modifier = Modifier.size(18.dp),
+                                color = ActiveControlColor,
+                                strokeWidth = 2.dp,
+                            )
+                        } else {
+                            Icon(
+                                imageVector = ParachordIcons.Spinoff,
+                                contentDescription = if (playbackState.spinoffMode) "Exit Spinoff" else "Spinoff",
+                                modifier = Modifier
+                                    .size(22.dp)
+                                    .offset(y = (-1).dp),
+                            )
+                        }
                     }
                 }
             }

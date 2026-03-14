@@ -62,6 +62,7 @@ import com.parachord.android.data.repository.ChartSong
 import com.parachord.android.data.repository.CHARTS_COUNTRIES
 import com.parachord.android.ui.components.AlbumArtCard
 import com.parachord.android.ui.components.SwipeableTabLayout
+import com.parachord.android.ui.components.TrackRow
 
 private val OrangeAccent = Color(0xFFF97316)
 
@@ -89,6 +90,7 @@ fun PopOfTheTopsScreen(
     val selectedCountry by viewModel.selectedCountry.collectAsState()
     val songsSource by viewModel.songsSource.collectAsState()
     val searchQuery by viewModel.searchQuery.collectAsState()
+    val trackResolvers by viewModel.trackResolvers.collectAsState()
 
     Column(modifier = modifier.fillMaxSize()) {
         TopAppBar(
@@ -132,6 +134,7 @@ fun PopOfTheTopsScreen(
                     selectedCountry = selectedCountry,
                     songsSource = songsSource,
                     searchQuery = searchQuery,
+                    trackResolvers = trackResolvers,
                     onCountryChange = viewModel::setCountry,
                     onSourceChange = viewModel::setSongsSource,
                     onSearchQueryChange = viewModel::setSearchQuery,
@@ -496,6 +499,7 @@ private fun SongsTab(
     selectedCountry: String,
     songsSource: String,
     searchQuery: String,
+    trackResolvers: Map<String, List<String>>,
     onCountryChange: (String) -> Unit,
     onSourceChange: (String) -> Unit,
     onSearchQueryChange: (String) -> Unit,
@@ -531,77 +535,17 @@ private fun SongsTab(
                 contentPadding = PaddingValues(vertical = 4.dp),
             ) {
                 items(songs, key = { it.id }) { song ->
-                    SongRow(
-                        song = song,
+                    val key = "${song.title.lowercase().trim()}|${song.artist.lowercase().trim()}"
+                    TrackRow(
+                        title = song.title,
+                        artist = song.artist,
+                        artworkUrl = song.artworkUrl,
+                        trackNumber = song.rank,
+                        resolvers = trackResolvers[key]?.ifEmpty { null },
                         onClick = { onSongClick(song, songs) },
-                        onArtistClick = { onArtistClick(song.artist) },
                     )
                 }
             }
-        }
-    }
-}
-
-@Composable
-private fun SongRow(
-    song: ChartSong,
-    onClick: () -> Unit,
-    onArtistClick: () -> Unit,
-) {
-    Row(
-        modifier = Modifier
-            .fillMaxWidth()
-            .clickable(onClick = onClick)
-            .padding(horizontal = 16.dp, vertical = 10.dp),
-        verticalAlignment = Alignment.CenterVertically,
-    ) {
-        // Rank
-        Text(
-            text = "${song.rank}",
-            style = MaterialTheme.typography.bodyMedium.copy(fontWeight = FontWeight.Bold),
-            color = MaterialTheme.colorScheme.onSurfaceVariant,
-            modifier = Modifier.width(32.dp),
-            textAlign = TextAlign.Center,
-        )
-
-        // Artwork (small)
-        if (song.artworkUrl != null) {
-            AlbumArtCard(
-                artworkUrl = song.artworkUrl,
-                size = 40.dp,
-                cornerRadius = 4.dp,
-                placeholderName = song.title,
-            )
-            Spacer(modifier = Modifier.width(10.dp))
-        }
-
-        // Title + Artist
-        Column(modifier = Modifier.weight(1f)) {
-            Text(
-                text = song.title,
-                style = MaterialTheme.typography.bodyMedium,
-                fontWeight = FontWeight.Medium,
-                maxLines = 1,
-                overflow = TextOverflow.Ellipsis,
-            )
-            Text(
-                text = song.artist,
-                style = MaterialTheme.typography.bodySmall,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-                maxLines = 1,
-                overflow = TextOverflow.Ellipsis,
-                modifier = Modifier.clickable(onClick = onArtistClick),
-            )
-        }
-
-        // Listeners (Last.fm only)
-        if (song.listeners != null && song.listeners > 0) {
-            Spacer(modifier = Modifier.width(8.dp))
-            Text(
-                text = formatListeners(song.listeners),
-                style = MaterialTheme.typography.labelSmall,
-                color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.7f),
-            )
         }
     }
 }

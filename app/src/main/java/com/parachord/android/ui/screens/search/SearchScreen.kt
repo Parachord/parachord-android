@@ -291,9 +291,9 @@ fun SearchScreen(
                     item {
                         Text(
                             text = "No results for \"$query\"",
-                            style = MaterialTheme.typography.bodyLarge,
+                            style = MaterialTheme.typography.bodyMedium,
                             color = MaterialTheme.colorScheme.onSurfaceVariant,
-                            modifier = Modifier.padding(16.dp),
+                            modifier = Modifier.padding(32.dp),
                         )
                     }
                 }

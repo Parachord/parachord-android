@@ -43,10 +43,9 @@ class FreshDropsViewModel @Inject constructor(
     private var loadJob: Job? = null
 
     init {
-        // Only fetch if cache is stale or empty — don't re-fetch on every navigation
-        if (repository.cached == null || repository.isCacheStale) {
-            loadReleases()
-        }
+        // Always trigger load — the repository's flow handles cache-hit fast path.
+        // This ensures interrupted fetches (user navigated away mid-load) are retried.
+        loadReleases()
     }
 
     fun refresh() {

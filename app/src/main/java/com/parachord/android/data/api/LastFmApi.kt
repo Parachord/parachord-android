@@ -94,6 +94,16 @@ interface LastFmApi {
     ): LfmTrackInfoResponse
 
     @GET(".")
+    suspend fun getSimilarTracks(
+        @Query("method") method: String = "track.getsimilar",
+        @Query("track") track: String,
+        @Query("artist") artist: String,
+        @Query("api_key") apiKey: String,
+        @Query("limit") limit: Int = 20,
+        @Query("format") format: String = "json",
+    ): LfmSimilarTracksResponse
+
+    @GET(".")
     suspend fun getAlbumInfo(
         @Query("method") method: String = "album.getinfo",
         @Query("album") album: String,
@@ -656,4 +666,29 @@ data class LfmTrackInfoArtist(
 data class LfmTrackInfoAlbum(
     val title: String? = null,
     val image: List<LfmImage> = emptyList(),
+)
+
+// --- Similar tracks (track.getsimilar) ---
+
+@Serializable
+data class LfmSimilarTracksResponse(
+    val similartracks: LfmSimilarTracksList? = null,
+)
+
+@Serializable
+data class LfmSimilarTracksList(
+    val track: List<LfmSimilarTrack> = emptyList(),
+)
+
+@Serializable
+data class LfmSimilarTrack(
+    val name: String,
+    val artist: LfmSimilarTrackArtist? = null,
+    val match: Double? = null,
+    val image: List<LfmImage> = emptyList(),
+)
+
+@Serializable
+data class LfmSimilarTrackArtist(
+    val name: String,
 )

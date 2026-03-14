@@ -3,6 +3,7 @@ package com.parachord.android.playback
 import android.content.ComponentName
 import android.content.Context
 import android.util.Log
+import android.widget.Toast
 import androidx.media3.common.MediaItem
 import androidx.media3.common.MediaMetadata
 import androidx.media3.common.Player
@@ -10,9 +11,13 @@ import androidx.media3.session.MediaController
 import androidx.media3.session.SessionToken
 import com.google.common.util.concurrent.ListenableFuture
 import com.google.common.util.concurrent.MoreExecutors
+import com.parachord.android.BuildConfig
+import com.parachord.android.data.api.LastFmApi
 import com.parachord.android.data.db.entity.TrackEntity
 import com.parachord.android.data.metadata.ImageEnrichmentService
 import com.parachord.android.playback.handlers.PlaybackAction
+import com.parachord.android.resolver.ResolverManager
+import com.parachord.android.resolver.ResolverScoring
 import dagger.hilt.android.qualifiers.ApplicationContext
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -21,6 +26,7 @@ import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 import javax.inject.Inject
 import javax.inject.Singleton
 
@@ -44,9 +50,13 @@ class PlaybackController @Inject constructor(
     private val queuePersistence: QueuePersistence,
     private val scrobbleManager: ScrobbleManager,
     private val imageEnrichment: ImageEnrichmentService,
+    private val lastFmApi: LastFmApi,
+    private val resolverManager: ResolverManager,
+    private val resolverScoring: ResolverScoring,
 ) {
     companion object {
         private const val TAG = "PlaybackController"
+        private const val SPINOFF_SIMILAR_LIMIT = 20
     }
 
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Main)
@@ -63,6 +73,15 @@ class PlaybackController @Inject constructor(
 
     /** Listener called when the user manually changes playback (skip, play different track). */
     var onUserPlaybackActionListener: (() -> Unit)? = null
+
+    // ── Spinoff state ──────────────────────────────────────────────────────
+    /** Separate pool of resolved similar tracks (NOT in the queue — desktop behavior). */
+    private val spinoffPool = mutableListOf<TrackEntity>()
+    /** The track that was playing when spinoff was activated. */
+    private var spinoffSourceTrack: TrackEntity? = null
+    /** Previous playback context to restore on exit (queue itself is never modified). */
+    private var preSpinoffContext: PlaybackContext? = null
+    private var spinoffJob: Job? = null
 
     fun connect() {
         if (controllerFuture != null) return
@@ -150,6 +169,24 @@ class PlaybackController @Inject constructor(
         } else {
             onTrackEndedListener?.invoke()
         }
+
+        // Spinoff mode: pull from separate pool, bypass queue entirely (desktop behavior)
+        if (stateHolder.state.value.spinoffMode) {
+            if (spinoffPool.isNotEmpty()) {
+                val next = spinoffPool.removeAt(0)
+                Log.d(TAG, "Spinoff: playing next '${next.title}' by ${next.artist} (${spinoffPool.size} remaining)")
+                scope.launch {
+                    if (isExternalPlayback) router.stopExternalPlayback()
+                    playTrackInternal(next)
+                }
+                return
+            } else {
+                // Pool exhausted — exit spinoff, fall through to regular queue
+                Log.d(TAG, "Spinoff: pool exhausted, returning to queue")
+                exitSpinoff()
+            }
+        }
+
         val currentTrack = stateHolder.state.value.currentTrack
         val next = queueManager.skipNext(currentTrack)
         if (next == null) {
@@ -241,6 +278,8 @@ class PlaybackController @Inject constructor(
     }
 
     fun toggleShuffle() {
+        // Shuffle is disabled during spinoff mode (desktop behavior)
+        if (stateHolder.state.value.spinoffMode) return
         val newState = queueManager.toggleShuffle()
         stateHolder.update { copy(shuffleEnabled = newState) }
         if (!isExternalPlayback) {
@@ -320,6 +359,11 @@ class PlaybackController @Inject constructor(
 
         // If the track has no artwork, try to fetch it in the background
         enrichArtworkIfMissing(track)
+
+        // Check spinoff availability for the new track (unless in spinoff mode)
+        if (!stateHolder.state.value.spinoffMode) {
+            checkSpinoffAvailability()
+        }
     }
 
     /** Fallback: play directly via ExoPlayer when no handler matches. */
@@ -459,6 +503,179 @@ class PlaybackController @Inject constructor(
 
     private fun stopSpotifyStatePolling() {
         spotifyStateJob?.cancel()
+    }
+
+    // ── Spinoff public API ────────────────────────────────────────────────
+
+    /**
+     * Start spinoff mode: fetch similar tracks for the current track from
+     * Last.fm, shuffle them, resolve each one, and begin playing from the pool.
+     * Matches the desktop's startSpinoff() logic.
+     */
+    fun startSpinoff() {
+        val track = stateHolder.state.value.currentTrack ?: return
+        if (stateHolder.state.value.spinoffMode) return // already active
+
+        spinoffJob?.cancel()
+        stateHolder.update { copy(spinoffLoading = true) }
+
+        spinoffJob = scope.launch(Dispatchers.IO) {
+            try {
+                // 1. Fetch similar tracks from Last.fm
+                val response = lastFmApi.getSimilarTracks(
+                    track = track.title,
+                    artist = track.artist,
+                    apiKey = BuildConfig.LASTFM_API_KEY,
+                    limit = SPINOFF_SIMILAR_LIMIT,
+                )
+                val similarTracks = response.similartracks?.track ?: emptyList()
+
+                if (similarTracks.isEmpty()) {
+                    Log.d(TAG, "Spinoff: no similar tracks found for '${track.title}'")
+                    withContext(Dispatchers.Main) {
+                        Toast.makeText(context, "No similar tracks found for \"${track.title}\"", Toast.LENGTH_SHORT).show()
+                    }
+                    stateHolder.update { copy(spinoffLoading = false, spinoffAvailable = false) }
+                    return@launch
+                }
+
+                Log.d(TAG, "Spinoff: found ${similarTracks.size} similar tracks, resolving...")
+
+                // 2. Convert to TrackEntities and resolve each
+                // Skip Last.fm images — they're almost always placeholder/blank.
+                // Album art will be enriched via metadata providers on playback.
+                val resolvedTracks = mutableListOf<TrackEntity>()
+                for (similar in similarTracks.shuffled()) {
+                    val artistName = similar.artist?.name ?: continue
+                    val query = "${similar.name} ${artistName}"
+                    try {
+                        val sources = resolverManager.resolve(query)
+                        val best = resolverScoring.selectBest(sources) ?: continue
+
+                        resolvedTracks.add(
+                            TrackEntity(
+                                id = "spinoff_${similar.name}_${artistName}".hashCode().toString(),
+                                title = similar.name,
+                                artist = artistName,
+                                sourceUrl = best.url,
+                                resolver = best.resolver,
+                                spotifyUri = best.spotifyUri,
+                                spotifyId = best.spotifyId,
+                            )
+                        )
+                    } catch (e: Exception) {
+                        Log.w(TAG, "Spinoff: failed to resolve '${similar.name}'", e)
+                    }
+                }
+
+                if (resolvedTracks.isEmpty()) {
+                    Log.d(TAG, "Spinoff: no tracks could be resolved")
+                    withContext(Dispatchers.Main) {
+                        Toast.makeText(context, "No similar tracks found for \"${track.title}\"", Toast.LENGTH_SHORT).show()
+                    }
+                    stateHolder.update { copy(spinoffLoading = false, spinoffAvailable = false) }
+                    return@launch
+                }
+
+                Log.d(TAG, "Spinoff: resolved ${resolvedTracks.size} tracks, starting playback")
+
+                // 3. Save previous playback context (queue is NOT modified — desktop behavior)
+                preSpinoffContext = queueManager.playbackContext
+                spinoffSourceTrack = track
+
+                // 4. Populate spinoff pool (separate from queue)
+                spinoffPool.clear()
+                spinoffPool.addAll(resolvedTracks)
+
+                // Pop first track to play immediately
+                val firstTrack = spinoffPool.removeAt(0)
+
+                // Set playback context to spinoff (queue contents untouched)
+                queueManager.setContext(PlaybackContext(type = "spinoff", name = "Spinoff from ${track.title}"))
+
+                stateHolder.update {
+                    copy(
+                        spinoffMode = true,
+                        spinoffLoading = false,
+                        spinoffAvailable = true,
+                    )
+                }
+
+                withContext(Dispatchers.Main) {
+                    Toast.makeText(context, "Spinning off of ${track.title} - ${track.artist}", Toast.LENGTH_SHORT).show()
+                }
+
+                // 5. Start playing the first spinoff track
+                playTrackInternal(firstTrack)
+            } catch (e: Exception) {
+                Log.e(TAG, "Spinoff: failed to start", e)
+                withContext(Dispatchers.Main) {
+                    Toast.makeText(context, "Failed to fetch similar tracks", Toast.LENGTH_SHORT).show()
+                }
+                stateHolder.update { copy(spinoffLoading = false) }
+            }
+        }
+    }
+
+    /**
+     * Exit spinoff mode and restore the previous queue context.
+     * Matches the desktop's exitSpinoff() logic.
+     */
+    fun exitSpinoff() {
+        if (!stateHolder.state.value.spinoffMode) return
+
+        spinoffJob?.cancel()
+        spinoffPool.clear()
+        spinoffSourceTrack = null
+
+        // Restore previous playback context (queue was never modified)
+        queueManager.setContext(preSpinoffContext)
+        preSpinoffContext = null
+
+        stateHolder.update {
+            copy(
+                spinoffMode = false,
+                spinoffLoading = false,
+            )
+        }
+        syncQueueState()
+
+        Log.d(TAG, "Spinoff: exited, restored previous context")
+    }
+
+    /** Toggle spinoff on/off. */
+    fun toggleSpinoff() {
+        if (stateHolder.state.value.spinoffMode) {
+            exitSpinoff()
+        } else {
+            startSpinoff()
+        }
+    }
+
+    /**
+     * Check whether spinoff is available for the current track.
+     * Lightweight call with limit=1 — called on track change.
+     */
+    fun checkSpinoffAvailability() {
+        val track = stateHolder.state.value.currentTrack ?: return
+        // Don't check during spinoff mode
+        if (stateHolder.state.value.spinoffMode) return
+
+        scope.launch(Dispatchers.IO) {
+            try {
+                val response = lastFmApi.getSimilarTracks(
+                    track = track.title,
+                    artist = track.artist,
+                    apiKey = BuildConfig.LASTFM_API_KEY,
+                    limit = 1,
+                )
+                val available = !response.similartracks?.track.isNullOrEmpty()
+                stateHolder.update { copy(spinoffAvailable = available) }
+            } catch (e: Exception) {
+                Log.w(TAG, "Spinoff availability check failed", e)
+                stateHolder.update { copy(spinoffAvailable = null) }
+            }
+        }
     }
 
     /**

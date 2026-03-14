@@ -124,7 +124,7 @@ fun PlaylistsScreen(
                     Spacer(modifier = Modifier.size(12.dp))
                     Text(
                         text = "No playlists yet \u2014 tap + to create one",
-                        style = MaterialTheme.typography.bodyLarge,
+                        style = MaterialTheme.typography.bodyMedium,
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                     )
                 }
@@ -179,7 +179,7 @@ fun PlaylistsScreen(
                 ) {
                     Text(
                         text = "No playlists match your search",
-                        style = MaterialTheme.typography.bodyLarge,
+                        style = MaterialTheme.typography.bodyMedium,
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                     )
                 }

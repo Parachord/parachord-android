@@ -31,6 +31,7 @@ import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import com.parachord.android.data.db.entity.TrackEntity
@@ -55,6 +56,10 @@ fun QueueSheet(
     onRemoveFromQueue: (Int) -> Unit,
     onClearQueue: () -> Unit,
     modifier: Modifier = Modifier,
+    /** True when queue is "paused" (spinoff or listen-along) — dims tracks to show they'll resume later. */
+    queueSuspended: Boolean = false,
+    /** Navigate to the source context (album, playlist, artist page). */
+    onNavigateToContext: ((PlaybackContext) -> Unit)? = null,
 ) {
     Column(
         modifier = modifier
@@ -71,9 +76,9 @@ fun QueueSheet(
             Column(modifier = Modifier.weight(1f)) {
                 Row(verticalAlignment = Alignment.CenterVertically) {
                     Text(
-                        text = "UP NEXT",
+                        text = if (queueSuspended) "YOUR QUEUE" else "UP NEXT",
                         style = MaterialTheme.typography.titleSmall,
-                        color = PlayerTextPrimary,
+                        color = if (queueSuspended) PlayerTextSecondary else PlayerTextPrimary,
                     )
                     if (upNext.isNotEmpty()) {
                         Spacer(modifier = Modifier.width(8.dp))
@@ -85,22 +90,28 @@ fun QueueSheet(
                     }
                 }
                 if (playbackContext != null) {
-                    val contextLabel = if (playbackContext.type == "listen-along") {
-                        "Listening along with ${playbackContext.name}"
-                    } else {
-                        "Playing from: ${playbackContext.name}"
+                    val contextLabel = when (playbackContext.type) {
+                        "listen-along" -> "Listening along with ${playbackContext.name}"
+                        "spinoff" -> playbackContext.name // "Spinoff from {track}"
+                        else -> "Playing from: ${playbackContext.name}"
                     }
-                    val contextColor = if (playbackContext.type == "listen-along") {
-                        Color(0xFF34D399) // Green for listen-along, matching desktop
-                    } else {
-                        PurpleDark
+                    val contextColor = when (playbackContext.type) {
+                        "listen-along" -> Color(0xFF34D399) // Green, matching desktop
+                        "spinoff" -> Color(0xFFC084FC) // Purple, matching spinoff button
+                        else -> PurpleDark
                     }
+                    // Navigable context types link to their source page
+                    val isNavigable = onNavigateToContext != null &&
+                        playbackContext.type in listOf("album", "playlist", "artist")
                     Text(
                         text = contextLabel,
                         style = MaterialTheme.typography.bodySmall,
                         color = contextColor,
                         maxLines = 1,
                         overflow = TextOverflow.Ellipsis,
+                        modifier = if (isNavigable) {
+                            Modifier.clickable { onNavigateToContext?.invoke(playbackContext) }
+                        } else Modifier,
                     )
                 }
             }
@@ -137,6 +148,8 @@ fun QueueSheet(
                 ) { index, track ->
                     QueueTrackRow(
                         track = track,
+                        index = index,
+                        suspended = queueSuspended,
                         onTap = { onPlayFromQueue(index) },
                         onRemove = { onRemoveFromQueue(index) },
                     )
@@ -149,10 +162,14 @@ fun QueueSheet(
 @Composable
 private fun QueueTrackRow(
     track: TrackEntity,
+    index: Int,
+    suspended: Boolean,
     onTap: () -> Unit,
     onRemove: () -> Unit,
 ) {
     val dismissState = rememberSwipeToDismissBoxState()
+    // When queue is suspended (spinoff/listen-along), dim tracks to show they'll resume later
+    val dimAlpha = if (suspended) 0.5f else 1f
 
     LaunchedEffect(dismissState.currentValue) {
         if (dismissState.currentValue != SwipeToDismissBoxValue.Settled) {
@@ -186,12 +203,12 @@ private fun QueueTrackRow(
                 .padding(horizontal = 12.dp, vertical = 8.dp),
             verticalAlignment = Alignment.CenterVertically,
         ) {
-            // Drag handle
-            Icon(
-                Icons.Default.DragHandle,
-                contentDescription = "Reorder",
-                tint = PlayerTextSecondary.copy(alpha = 0.5f),
-                modifier = Modifier.size(20.dp),
+            // Track number or ·· when suspended (desktop behavior)
+            Text(
+                text = if (suspended) "··" else String.format("%02d", index + 1),
+                style = MaterialTheme.typography.bodySmall,
+                color = PlayerTextSecondary.copy(alpha = if (suspended) 0.5f else 0.7f),
+                modifier = Modifier.width(24.dp),
             )
 
             Spacer(modifier = Modifier.width(8.dp))
@@ -199,6 +216,7 @@ private fun QueueTrackRow(
             // Album art
             AlbumArtCard(
                 artworkUrl = track.artworkUrl,
+                modifier = Modifier.graphicsLayer { alpha = dimAlpha },
                 size = 40.dp,
                 cornerRadius = 4.dp,
                 elevation = 0.dp,
@@ -212,14 +230,14 @@ private fun QueueTrackRow(
                 Text(
                     text = track.title,
                     style = MaterialTheme.typography.bodyMedium,
-                    color = PlayerTextPrimary,
+                    color = PlayerTextPrimary.copy(alpha = dimAlpha),
                     maxLines = 1,
                     overflow = TextOverflow.Ellipsis,
                 )
                 Text(
                     text = track.artist,
                     style = MaterialTheme.typography.bodySmall,
-                    color = PlayerTextSecondary,
+                    color = PlayerTextSecondary.copy(alpha = if (suspended) 0.35f else 1f),
                     maxLines = 1,
                     overflow = TextOverflow.Ellipsis,
                 )
@@ -228,7 +246,11 @@ private fun QueueTrackRow(
             // Resolver badge
             if (track.resolver != null) {
                 Spacer(modifier = Modifier.width(8.dp))
-                ResolverIconSquare(resolver = track.resolver!!, size = 20.dp)
+                ResolverIconSquare(
+                    resolver = track.resolver!!,
+                    size = 20.dp,
+                    modifier = Modifier.graphicsLayer { alpha = dimAlpha },
+                )
             }
         }
     }

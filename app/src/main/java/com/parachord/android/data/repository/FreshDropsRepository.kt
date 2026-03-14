@@ -116,6 +116,9 @@ class FreshDropsRepository @Inject constructor(
                     // show releases as they come in, merged with prior cache)
                     if (allReleases.isNotEmpty() && (index + 1) % 5 == 0) {
                         val progressMerged = mergeAndDedupe(allReleases, priorCachedReleases)
+                        // Save partial results so cache survives if collector is cancelled
+                        cachedReleases = progressMerged
+                        lastFetchedAt = System.currentTimeMillis()
                         emit(Resource.Success(progressMerged))
                     }
 
@@ -259,6 +262,8 @@ class FreshDropsRepository @Inject constructor(
                 val date = rg.firstReleaseDate ?: return@filter false
                 // Must be after cutoff (last 6 months)
                 date >= cutoffStr
+                    // Exclude broadcast as primary type
+                    && rg.primaryType?.lowercase() != "broadcast"
                     // Exclude compilations, broadcasts, live, DJ-mix, remix, etc.
                     && rg.secondaryTypes.none { type ->
                     type.lowercase() in listOf(

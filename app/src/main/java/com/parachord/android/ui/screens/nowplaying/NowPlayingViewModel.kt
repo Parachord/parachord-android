@@ -85,4 +85,9 @@ class NowPlayingViewModel @Inject constructor(
             libraryRepository.addTrack(track)
         }
     }
+
+    // Spinoff
+    fun toggleSpinoff() {
+        playbackController.toggleSpinoff()
+    }
 }

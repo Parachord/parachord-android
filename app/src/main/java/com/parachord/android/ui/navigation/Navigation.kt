@@ -63,6 +63,7 @@ fun ParachordNavHost(
     navController: NavHostController,
     onOpenDrawer: () -> Unit,
     onOpenChat: () -> Unit = {},
+    onListenAlong: (com.parachord.android.data.db.entity.FriendEntity) -> Unit = {},
     modifier: Modifier = Modifier,
 ) {
     NavHost(
@@ -104,6 +105,7 @@ fun ParachordNavHost(
                 onNavigateToFriend = { friendId ->
                     navController.navigate(Routes.friendDetail(friendId))
                 },
+                onListenAlong = onListenAlong,
                 onNavigateToRecommendations = { navController.navigate(Routes.RECOMMENDATIONS) },
                 onNavigateToCriticalDarlings = { navController.navigate(Routes.CRITICAL_DARLINGS) },
                 onNavigateToPopOfTheTops = { navController.navigate(Routes.POP_OF_THE_TOPS) },

@@ -15,6 +15,7 @@ import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.background
 import androidx.compose.foundation.basicMarquee
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.isSystemInDarkTheme
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -42,8 +43,10 @@ import androidx.compose.material.icons.filled.Explore
 import androidx.compose.material.icons.filled.Favorite
 import androidx.compose.material.icons.filled.Menu
 import androidx.compose.material.icons.filled.MusicNote
+import androidx.compose.material.icons.filled.Headphones
 import androidx.compose.material.icons.filled.People
 import androidx.compose.material.icons.filled.Person
+import androidx.compose.material.icons.filled.PushPin
 import androidx.compose.material.icons.filled.Pause
 import androidx.compose.material.icons.filled.PlayArrow
 import androidx.compose.material.icons.automirrored.filled.QueueMusic
@@ -52,11 +55,14 @@ import androidx.compose.material.icons.automirrored.filled.TrendingUp
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.ExperimentalMaterial3Api
+import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.ModalBottomSheet
 import androidx.compose.material3.Text
 import androidx.compose.material3.TopAppBar
+import androidx.compose.material3.rememberModalBottomSheetState
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
@@ -91,6 +97,10 @@ import com.parachord.android.data.db.entity.AlbumEntity
 import com.parachord.android.data.db.entity.FriendEntity
 import com.parachord.android.data.db.entity.PlaylistEntity
 import com.parachord.android.ui.components.AlbumArtCard
+import com.parachord.android.ui.components.ContextMenuItem
+import com.parachord.android.ui.components.ModalBg
+import com.parachord.android.ui.components.ModalBgDarker
+import com.parachord.android.ui.components.ModalDivider
 import com.parachord.android.ui.components.ParachordCard
 import com.parachord.android.ui.components.SectionHeader
 import com.parachord.android.ui.components.ShimmerTrackRow
@@ -106,6 +116,7 @@ fun HomeScreen(
     onNavigateToPlaylist: (playlistId: String) -> Unit = {},
     onNavigateToArtist: (String) -> Unit = {},
     onNavigateToFriend: (String) -> Unit = {},
+    onListenAlong: (FriendEntity) -> Unit = {},
     onNavigateToRecommendations: () -> Unit = {},
     onNavigateToCriticalDarlings: () -> Unit = {},
     onNavigateToPopOfTheTops: () -> Unit = {},
@@ -299,6 +310,7 @@ fun HomeScreen(
                                 FriendActivityRow(
                                     friend = friend,
                                     onClick = { onNavigateToFriend(friend.id) },
+                                    onListenAlong = { onListenAlong(friend) },
                                 )
                             }
                         }
@@ -612,17 +624,24 @@ private val HomeHexagonShape = object : Shape {
     }
 }
 
+@OptIn(ExperimentalFoundationApi::class, ExperimentalMaterial3Api::class)
 @Composable
 private fun FriendActivityRow(
     friend: FriendEntity,
     onClick: () -> Unit,
+    onListenAlong: () -> Unit = {},
 ) {
     val surfaceColor = MaterialTheme.colorScheme.surface
+    var showMenu by remember { mutableStateOf(false) }
 
+    Box {
     Row(
         modifier = Modifier
             .fillMaxWidth()
-            .clickable(onClick = onClick)
+            .combinedClickable(
+                onClick = onClick,
+                onLongClick = { showMenu = true },
+            )
             .padding(vertical = 10.dp),
         verticalAlignment = Alignment.Top,
     ) {
@@ -720,6 +739,54 @@ private fun FriendActivityRow(
             }
         }
 
+    }
+
+    // Always-dark context menu bottom sheet (matches sidebar friend menu)
+    if (showMenu) {
+        ModalBottomSheet(
+            onDismissRequest = { showMenu = false },
+            sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true),
+            containerColor = ModalBg,
+            scrimColor = Color.Black.copy(alpha = 0.4f),
+            dragHandle = {
+                Box(
+                    modifier = Modifier
+                        .padding(vertical = 10.dp)
+                        .size(width = 32.dp, height = 4.dp)
+                        .background(
+                            color = Color.White.copy(alpha = 0.2f),
+                            shape = RoundedCornerShape(2.dp),
+                        ),
+                )
+            },
+        ) {
+            Column(
+                modifier = Modifier
+                    .background(Brush.verticalGradient(listOf(ModalBg, ModalBgDarker)))
+                    .padding(bottom = 32.dp),
+            ) {
+                if (friend.isOnAir && friend.cachedTrackName != null) {
+                    ContextMenuItem(
+                        icon = Icons.Filled.Headphones,
+                        label = "Listen Along",
+                        onClick = {
+                            showMenu = false
+                            onListenAlong()
+                        },
+                    )
+                    HorizontalDivider(color = ModalDivider, modifier = Modifier.padding(vertical = 4.dp))
+                }
+                ContextMenuItem(
+                    icon = Icons.Filled.Person,
+                    label = "View Profile",
+                    onClick = {
+                        showMenu = false
+                        onClick()
+                    },
+                )
+            }
+        }
+    }
     }
 }
 

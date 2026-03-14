@@ -16,7 +16,10 @@ import com.parachord.android.resolver.ResolverScoring
 import dagger.hilt.android.lifecycle.HiltViewModel
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.map
+import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
 import javax.inject.Inject
 
@@ -55,6 +58,11 @@ class PopOfTheTopsViewModel @Inject constructor(
 
     /** Pre-resolved sources keyed by "title|artist" */
     private val _trackSources = MutableStateFlow<Map<String, List<ResolvedSource>>>(emptyMap())
+
+    /** Resolver badge names for UI display, derived from cached sources */
+    val trackResolvers: StateFlow<Map<String, List<String>>> = _trackSources
+        .map { sources -> sources.mapValues { (_, v) -> v.map { it.resolver }.distinct() } }
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), emptyMap())
 
     private var resolveJob: Job? = null
 

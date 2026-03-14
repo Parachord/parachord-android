@@ -56,13 +56,13 @@ fun ConcertsScreen(
             Icon(
                 imageVector = Icons.Filled.ConfirmationNumber,
                 contentDescription = null,
-                modifier = Modifier.size(64.dp),
-                tint = Color(0xFF14B8A6),
+                modifier = Modifier.size(48.dp),
+                tint = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.5f),
             )
-            Spacer(modifier = Modifier.height(16.dp))
+            Spacer(modifier = Modifier.height(12.dp))
             Text(
                 text = "Coming soon",
-                style = MaterialTheme.typography.titleMedium,
+                style = MaterialTheme.typography.bodyMedium,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
         }

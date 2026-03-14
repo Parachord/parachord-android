@@ -97,30 +97,13 @@ fun FriendDetailScreen(
     Column(modifier = modifier.fillMaxSize()) {
         TopAppBar(
             title = {
-                Row(verticalAlignment = Alignment.CenterVertically) {
-                    Text(
-                        text = currentFriend?.displayName?.uppercase() ?: "FRIEND",
-                        style = MaterialTheme.typography.titleLarge.copy(
-                            fontWeight = FontWeight.Light,
-                            letterSpacing = 0.2.em,
-                        ),
-                    )
-                    if (currentFriend?.isOnAir == true) {
-                        Spacer(modifier = Modifier.width(8.dp))
-                        Text(
-                            text = "ON AIR",
-                            style = MaterialTheme.typography.labelSmall,
-                            color = OnAirGreen,
-                            fontWeight = FontWeight.Bold,
-                            modifier = Modifier
-                                .background(
-                                    color = OnAirGreen.copy(alpha = 0.12f),
-                                    shape = RoundedCornerShape(4.dp),
-                                )
-                                .padding(horizontal = 6.dp, vertical = 2.dp),
-                        )
-                    }
-                }
+                Text(
+                    text = currentFriend?.displayName?.uppercase() ?: "FRIEND",
+                    style = MaterialTheme.typography.titleLarge.copy(
+                        fontWeight = FontWeight.Light,
+                        letterSpacing = 0.2.em,
+                    ),
+                )
             },
             navigationIcon = {
                 IconButton(onClick = onBack) {
@@ -150,22 +133,20 @@ fun FriendDetailScreen(
                     .padding(vertical = 12.dp),
                 horizontalAlignment = Alignment.CenterHorizontally,
             ) {
-                Box {
-                    AlbumArtCard(
-                        artworkUrl = currentFriend.avatarUrl,
-                        size = 80.dp,
-                        cornerRadius = 40.dp,
-                        placeholderName = currentFriend.displayName,
+                AlbumArtCard(
+                    artworkUrl = currentFriend.avatarUrl,
+                    size = 80.dp,
+                    cornerRadius = 40.dp,
+                    placeholderName = currentFriend.displayName,
+                )
+                if (currentFriend.isOnAir) {
+                    Spacer(modifier = Modifier.height(6.dp))
+                    Text(
+                        text = "● ON AIR",
+                        style = MaterialTheme.typography.labelSmall,
+                        color = OnAirGreen,
+                        fontWeight = FontWeight.Bold,
                     )
-                    if (currentFriend.isOnAir) {
-                        Box(
-                            modifier = Modifier
-                                .align(Alignment.BottomEnd)
-                                .size(18.dp)
-                                .clip(CircleShape)
-                                .background(OnAirGreen),
-                        )
-                    }
                 }
                 Spacer(modifier = Modifier.height(8.dp))
                 Text(
@@ -289,21 +270,24 @@ private fun RecentTrackRow(track: RecentTrack, resolvers: List<String>? = null, 
     ) {
         AlbumArtCard(
             artworkUrl = track.artworkUrl,
-            size = 48.dp,
+            size = 44.dp,
+            cornerRadius = 4.dp,
+            elevation = 1.dp,
             placeholderName = track.title,
         )
         Spacer(modifier = Modifier.width(12.dp))
         Column(modifier = Modifier.weight(1f)) {
             Text(
                 text = if (track.nowPlaying) "▶ ${track.title}" else track.title,
-                style = MaterialTheme.typography.bodyLarge,
+                style = MaterialTheme.typography.bodyMedium,
+                fontWeight = FontWeight.Medium,
                 maxLines = 1,
                 overflow = TextOverflow.Ellipsis,
                 color = if (track.nowPlaying) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurface,
             )
             Text(
                 text = track.artist,
-                style = MaterialTheme.typography.bodyMedium,
+                style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
                 maxLines = 1,
                 overflow = TextOverflow.Ellipsis,
@@ -415,36 +399,38 @@ private fun AlbumRow(album: HistoryAlbum, onClick: () -> Unit = {}) {
     ) {
         Text(
             text = "${album.rank}",
-            style = MaterialTheme.typography.bodyMedium,
+            style = MaterialTheme.typography.bodySmall,
             color = MaterialTheme.colorScheme.onSurfaceVariant,
-            modifier = Modifier.width(32.dp),
-            textAlign = TextAlign.Center,
+            modifier = Modifier.width(28.dp),
         )
         AlbumArtCard(
             artworkUrl = album.artworkUrl,
-            size = 56.dp,
-            cornerRadius = 6.dp,
+            size = 44.dp,
+            cornerRadius = 4.dp,
+            elevation = 1.dp,
             placeholderName = album.name,
         )
         Spacer(modifier = Modifier.width(12.dp))
         Column(modifier = Modifier.weight(1f)) {
             Text(
                 text = album.name,
-                style = MaterialTheme.typography.bodyLarge,
+                style = MaterialTheme.typography.bodyMedium,
+                fontWeight = FontWeight.Medium,
                 maxLines = 1,
                 overflow = TextOverflow.Ellipsis,
             )
             Text(
                 text = album.artist,
-                style = MaterialTheme.typography.bodyMedium,
+                style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
                 maxLines = 1,
                 overflow = TextOverflow.Ellipsis,
             )
         }
+        Spacer(modifier = Modifier.width(8.dp))
         Text(
             text = formatPlayCount(album.playCount),
-            style = MaterialTheme.typography.labelSmall,
+            style = MaterialTheme.typography.bodySmall,
             color = MaterialTheme.colorScheme.onSurfaceVariant,
         )
     }

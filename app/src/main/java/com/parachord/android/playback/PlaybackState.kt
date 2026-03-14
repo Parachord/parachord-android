@@ -12,6 +12,9 @@ data class PlaybackState(
     val playbackContext: PlaybackContext? = null,
     val shuffleEnabled: Boolean = false,
     val repeatMode: RepeatMode = RepeatMode.OFF,
+    val spinoffMode: Boolean = false,
+    val spinoffLoading: Boolean = false,
+    val spinoffAvailable: Boolean? = null, // null=unchecked, true/false=checked
 )
 
 enum class RepeatMode { OFF, ALL, ONE }

@@ -603,7 +603,9 @@ private fun RelatedArtistsTab(
 ) {
     if (similarArtists.isEmpty()) {
         Box(
-            modifier = Modifier.fillMaxSize(),
+            modifier = Modifier
+                .fillMaxSize()
+                .padding(32.dp),
             contentAlignment = Alignment.Center,
         ) {
             Text(

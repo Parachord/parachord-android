@@ -270,17 +270,17 @@ private fun AlbumRow(album: HistoryAlbum, onClick: () -> Unit = {}) {
         // Rank number
         Text(
             text = "${album.rank}",
-            style = MaterialTheme.typography.bodyMedium,
+            style = MaterialTheme.typography.bodySmall,
             color = MaterialTheme.colorScheme.onSurfaceVariant,
-            modifier = Modifier.width(32.dp),
-            textAlign = TextAlign.Center,
+            modifier = Modifier.width(28.dp),
         )
 
         // Album art
         AlbumArtCard(
             artworkUrl = album.artworkUrl,
-            size = 56.dp,
-            cornerRadius = 6.dp,
+            size = 44.dp,
+            cornerRadius = 4.dp,
+            elevation = 1.dp,
             placeholderName = album.name,
         )
 
@@ -290,13 +290,14 @@ private fun AlbumRow(album: HistoryAlbum, onClick: () -> Unit = {}) {
         Column(modifier = Modifier.weight(1f)) {
             Text(
                 text = album.name,
-                style = MaterialTheme.typography.bodyLarge,
+                style = MaterialTheme.typography.bodyMedium,
+                fontWeight = FontWeight.Medium,
                 maxLines = 1,
                 overflow = TextOverflow.Ellipsis,
             )
             Text(
                 text = album.artist,
-                style = MaterialTheme.typography.bodyMedium,
+                style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
                 maxLines = 1,
                 overflow = TextOverflow.Ellipsis,
@@ -304,9 +305,10 @@ private fun AlbumRow(album: HistoryAlbum, onClick: () -> Unit = {}) {
         }
 
         // Play count
+        Spacer(modifier = Modifier.width(8.dp))
         Text(
             text = formatPlayCount(album.playCount),
-            style = MaterialTheme.typography.labelSmall,
+            style = MaterialTheme.typography.bodySmall,
             color = MaterialTheme.colorScheme.onSurfaceVariant,
         )
     }
@@ -481,7 +483,9 @@ private fun RecentTrackRow(track: RecentTrack, resolvers: List<String>? = null, 
     ) {
         AlbumArtCard(
             artworkUrl = track.artworkUrl,
-            size = 48.dp,
+            size = 44.dp,
+            cornerRadius = 4.dp,
+            elevation = 1.dp,
             placeholderName = track.title,
         )
 
@@ -490,7 +494,8 @@ private fun RecentTrackRow(track: RecentTrack, resolvers: List<String>? = null, 
         Column(modifier = Modifier.weight(1f)) {
             Text(
                 text = if (track.nowPlaying) "▶ ${track.title}" else track.title,
-                style = MaterialTheme.typography.bodyLarge,
+                style = MaterialTheme.typography.bodyMedium,
+                fontWeight = FontWeight.Medium,
                 maxLines = 1,
                 overflow = TextOverflow.Ellipsis,
                 color = if (track.nowPlaying) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurface,
@@ -498,7 +503,7 @@ private fun RecentTrackRow(track: RecentTrack, resolvers: List<String>? = null, 
             Row {
                 Text(
                     text = track.artist,
-                    style = MaterialTheme.typography.bodyMedium,
+                    style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                     maxLines = 1,
                     overflow = TextOverflow.Ellipsis,
