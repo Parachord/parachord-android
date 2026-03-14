@@ -1,13 +1,16 @@
 package com.parachord.android.data.repository
 
 import com.parachord.android.data.db.dao.AlbumDao
+import com.parachord.android.data.db.dao.ArtistDao
 import com.parachord.android.data.db.dao.PlaylistDao
 import com.parachord.android.data.db.dao.PlaylistTrackDao
 import com.parachord.android.data.db.dao.TrackDao
 import com.parachord.android.data.db.entity.AlbumEntity
+import com.parachord.android.data.db.entity.ArtistEntity
 import com.parachord.android.data.db.entity.PlaylistEntity
 import com.parachord.android.data.db.entity.PlaylistTrackEntity
 import com.parachord.android.data.db.entity.TrackEntity
+import com.parachord.android.sync.SyncEngine
 import kotlinx.coroutines.flow.Flow
 import java.util.UUID
 import javax.inject.Inject
@@ -17,11 +20,14 @@ import javax.inject.Singleton
 class LibraryRepository @Inject constructor(
     private val trackDao: TrackDao,
     private val albumDao: AlbumDao,
+    private val artistDao: ArtistDao,
     private val playlistDao: PlaylistDao,
     private val playlistTrackDao: PlaylistTrackDao,
+    private val syncEngine: SyncEngine,
 ) {
     fun getAllTracks(): Flow<List<TrackEntity>> = trackDao.getAll()
     fun getAllAlbums(): Flow<List<AlbumEntity>> = albumDao.getAll()
+    fun getAllArtists(): Flow<List<ArtistEntity>> = artistDao.getAll()
     fun getAllPlaylists(): Flow<List<PlaylistEntity>> = playlistDao.getAll()
 
     fun searchTracks(query: String): Flow<List<TrackEntity>> = trackDao.search(query)
@@ -33,11 +39,30 @@ class LibraryRepository @Inject constructor(
     suspend fun addTracks(tracks: List<TrackEntity>) = trackDao.insertAll(tracks)
     suspend fun addAlbum(album: AlbumEntity) = albumDao.insert(album)
     suspend fun addAlbums(albums: List<AlbumEntity>) = albumDao.insertAll(albums)
+    suspend fun addArtist(artist: ArtistEntity) = artistDao.insert(artist)
+    suspend fun addArtists(artists: List<ArtistEntity>) = artistDao.insertAll(artists)
     suspend fun addPlaylist(playlist: PlaylistEntity) = playlistDao.insert(playlist)
 
     suspend fun deleteTrack(track: TrackEntity) = trackDao.delete(track)
     suspend fun deleteAlbum(album: AlbumEntity) = albumDao.delete(album)
     suspend fun deletePlaylist(playlist: PlaylistEntity) = playlistDao.delete(playlist)
+
+    // ── Sync-aware deletions (push removal back to source) ───────────
+
+    suspend fun deleteTrackWithSync(track: TrackEntity) {
+        syncEngine.onTrackRemoved(track)
+        trackDao.delete(track)
+    }
+
+    suspend fun deleteAlbumWithSync(album: AlbumEntity) {
+        syncEngine.onAlbumRemoved(album)
+        albumDao.delete(album)
+    }
+
+    suspend fun deleteArtistWithSync(artist: ArtistEntity) {
+        syncEngine.onArtistRemoved(artist)
+        artistDao.delete(artist)
+    }
 
     // ── Playlist tracks ─────────────────────────────────────────────
 
