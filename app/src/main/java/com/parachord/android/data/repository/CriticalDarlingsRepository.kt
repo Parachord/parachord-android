@@ -45,20 +45,29 @@ class CriticalDarlingsRepository @Inject constructor(
     private var lastFetchedAt: Long = 0L
     private val STALE_THRESHOLD = 4 * 60 * 60 * 1000L // 4 hours (matching desktop)
 
+    /** Synchronous access to cached albums (for ViewModel initial state). */
+    val cached: List<CriticsPickAlbum>? get() = cachedAlbums
+
     /**
      * Get critics' picks albums, with progressive album art loading.
      * Emits an initial list (without art), then re-emits as each album's art is resolved.
      */
     fun getCriticsPicks(forceRefresh: Boolean = false): Flow<Resource<List<CriticsPickAlbum>>> = flow {
-        emit(Resource.Loading)
-
         try {
             val now = System.currentTimeMillis()
             val isStale = now - lastFetchedAt > STALE_THRESHOLD
 
+            // Return cache if fresh
             if (!forceRefresh && !isStale && cachedAlbums != null) {
                 emit(Resource.Success(cachedAlbums!!))
                 return@flow
+            }
+
+            // Show stale cache immediately while refreshing (stale-while-revalidate)
+            if (cachedAlbums != null) {
+                emit(Resource.Success(cachedAlbums!!))
+            } else {
+                emit(Resource.Loading)
             }
 
             val albums = withContext(Dispatchers.IO) { fetchAndParseRSS() }

@@ -91,6 +91,10 @@ class FreshDropsViewModel @Inject constructor(
         // Cancel any in-flight load to avoid duplicate collections
         loadJob?.cancel()
         loadJob = viewModelScope.launch {
+            // Show cached results immediately (stale-while-revalidate)
+            repository.cached?.let { cached ->
+                _releases.value = Resource.Success(cached)
+            }
             _isRefreshing.value = true
             repository.getFreshDrops(forceRefresh).collect {
                 _releases.value = it

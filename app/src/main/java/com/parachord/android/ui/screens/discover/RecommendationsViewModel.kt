@@ -31,8 +31,13 @@ class RecommendationsViewModel @Inject constructor(
         private const val TAG = "RecommendationsVM"
     }
 
-    private val _allArtists = MutableStateFlow<Resource<List<RecommendedArtist>>>(Resource.Loading)
-    private val _allTracks = MutableStateFlow<Resource<List<RecommendedTrack>>>(Resource.Loading)
+    // Initialize from singleton cache immediately — avoids flash of Loading state
+    private val _allArtists = MutableStateFlow<Resource<List<RecommendedArtist>>>(
+        recommendationsRepository.cachedArtistsList?.let { Resource.Success(it) } ?: Resource.Loading
+    )
+    private val _allTracks = MutableStateFlow<Resource<List<RecommendedTrack>>>(
+        recommendationsRepository.cachedTracksList?.let { Resource.Success(it) } ?: Resource.Loading
+    )
 
     /** Current source filter: "all", "lastfm", or "listenbrainz" */
     private val _sourceFilter = MutableStateFlow("all")

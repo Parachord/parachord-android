@@ -24,7 +24,10 @@ class CriticalDarlingsViewModel @Inject constructor(
     private val repository: CriticalDarlingsRepository,
 ) : ViewModel() {
 
-    private val _albums = MutableStateFlow<Resource<List<CriticsPickAlbum>>>(Resource.Loading)
+    // Initialize from singleton cache immediately — avoids flash of Loading state
+    private val _albums = MutableStateFlow<Resource<List<CriticsPickAlbum>>>(
+        repository.cached?.let { Resource.Success(it) } ?: Resource.Loading
+    )
     val albums: StateFlow<Resource<List<CriticsPickAlbum>>> = _albums
 
     private val _searchQuery = MutableStateFlow("")
@@ -72,6 +75,10 @@ class CriticalDarlingsViewModel @Inject constructor(
 
     private fun loadAlbums(forceRefresh: Boolean = false) {
         viewModelScope.launch {
+            // Show cached results immediately (stale-while-revalidate)
+            repository.cached?.let { cached ->
+                _albums.value = Resource.Success(cached)
+            }
             repository.getCriticsPicks(forceRefresh).collect {
                 _albums.value = it
             }

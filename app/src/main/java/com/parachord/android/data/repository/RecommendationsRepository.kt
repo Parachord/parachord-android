@@ -38,12 +38,25 @@ class RecommendationsRepository @Inject constructor(
         private const val TAG = "RecommendationsRepo"
     }
 
+    /** In-memory cache for stale-while-revalidate. */
+    private var cachedTracks: List<RecommendedTrack>? = null
+    private var cachedArtists: List<RecommendedArtist>? = null
+
+    /** Synchronous access to cached data (for ViewModel initial state). */
+    val cachedTracksList: List<RecommendedTrack>? get() = cachedTracks
+    val cachedArtistsList: List<RecommendedArtist>? get() = cachedArtists
+
     /**
      * Get recommended tracks from Last.fm and ListenBrainz.
      * Mirrors desktop's parallel fetch + merge approach.
      */
     fun getRecommendedTracks(): Flow<Resource<List<RecommendedTrack>>> = flow {
-        emit(Resource.Loading)
+        // Show stale cache immediately while refreshing
+        if (cachedTracks != null) {
+            emit(Resource.Success(cachedTracks!!))
+        } else {
+            emit(Resource.Loading)
+        }
         try {
             val lastFmUsername = settingsStore.getLastFmUsername()
             val lbUsername = settingsStore.getListenBrainzUsername()
@@ -82,6 +95,7 @@ class RecommendationsRepository @Inject constructor(
             }
 
             Log.d(TAG, "Merged recommendations → ${deduped.size} unique tracks")
+            cachedTracks = deduped
             emit(Resource.Success(deduped))
         } catch (e: Exception) {
             Log.e(TAG, "Failed to load recommendations", e)
@@ -96,7 +110,12 @@ class RecommendationsRepository @Inject constructor(
      * updates state after each, so artists appear with images progressively.
      */
     fun getRecommendedArtists(): Flow<Resource<List<RecommendedArtist>>> = flow {
-        emit(Resource.Loading)
+        // Show stale cache immediately while refreshing
+        if (cachedArtists != null) {
+            emit(Resource.Success(cachedArtists!!))
+        } else {
+            emit(Resource.Loading)
+        }
         try {
             val lastFmUsername = settingsStore.getLastFmUsername()
             val lbUsername = settingsStore.getListenBrainzUsername()
@@ -137,6 +156,7 @@ class RecommendationsRepository @Inject constructor(
             }
 
             // Emit immediately without images so UI shows artist names right away
+            cachedArtists = artists
             emit(Resource.Success(artists))
 
             // Progressively resolve artist images (matching desktop's sequential approach).
@@ -155,6 +175,7 @@ class RecommendationsRepository @Inject constructor(
                     val imageUrl = info?.imageUrl
                     if (imageUrl != null) {
                         mutableArtists[index] = artist.copy(imageUrl = imageUrl)
+                        cachedArtists = mutableArtists.toList()
                         emit(Resource.Success(mutableArtists.toList()))
                     }
                 } catch (_: Exception) { /* skip */ }
