@@ -27,6 +27,7 @@ import kotlinx.coroutines.launch
 fun SwipeableTabLayout(
     tabs: List<String>,
     modifier: Modifier = Modifier,
+    counts: List<Int>? = null,
     content: @Composable (page: Int) -> Unit,
 ) {
     val pagerState = rememberPagerState(pageCount = { tabs.size })
@@ -53,13 +54,19 @@ fun SwipeableTabLayout(
         ) {
             tabs.forEachIndexed { index, title ->
                 val selected = pagerState.currentPage == index
+                val count = counts?.getOrNull(index)
+                val label = if (count != null && count > 0) {
+                    "${title.uppercase()} ($count)"
+                } else {
+                    title.uppercase()
+                }
                 Tab(
                     selected = selected,
                     onClick = { scope.launch { pagerState.animateScrollToPage(index) } },
                     modifier = Modifier.height(48.dp),
                     text = {
                         Text(
-                            text = title.uppercase(),
+                            text = label,
                             style = MaterialTheme.typography.labelLarge.copy(
                                 fontWeight = FontWeight.Light,
                                 letterSpacing = 0.1.em,

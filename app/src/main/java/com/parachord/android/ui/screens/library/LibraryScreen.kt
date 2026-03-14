@@ -73,7 +73,14 @@ fun CollectionScreen(
     val sortedAlbums by viewModel.sortedAlbums.collectAsStateWithLifecycle()
     val sortedTracks by viewModel.sortedTracks.collectAsStateWithLifecycle()
     val syncedArtists by viewModel.artists.collectAsStateWithLifecycle()
+    val rawTracks by viewModel.tracks.collectAsStateWithLifecycle()
+    val rawAlbums by viewModel.albums.collectAsStateWithLifecycle()
     val friends by friendsViewModel.friends.collectAsState()
+
+    // Unfiltered counts for tab labels
+    val artistCount = remember(rawTracks, syncedArtists) {
+        (rawTracks.map { it.artist } + syncedArtists.map { it.name }).distinct().size
+    }
 
     val artistSort by viewModel.artistSort.collectAsStateWithLifecycle()
     val albumSort by viewModel.albumSort.collectAsStateWithLifecycle()
@@ -112,6 +119,7 @@ fun CollectionScreen(
         )
         SwipeableTabLayout(
             tabs = listOf("Artists", "Albums", "Songs", "Friends"),
+            counts = listOf(artistCount, rawAlbums.size, rawTracks.size, friends.size),
             modifier = Modifier.fillMaxSize(),
         ) { page ->
             when (page) {
