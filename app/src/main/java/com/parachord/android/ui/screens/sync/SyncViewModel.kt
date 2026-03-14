@@ -92,7 +92,14 @@ class SyncViewModel @Inject constructor(
                 try {
                     val playlists = spotifyProvider.fetchPlaylists()
                     _availablePlaylists.value = playlists
-                    _selectedPlaylistIds.value = playlists.map { it.spotifyId }.toSet()
+                    // Restore previously saved selection; default to all if first time
+                    val saved = settingsStore.getSyncSettings().selectedPlaylistIds
+                    val allIds = playlists.map { it.spotifyId }.toSet()
+                    _selectedPlaylistIds.value = if (saved.isNotEmpty()) {
+                        saved.intersect(allIds) // keep only IDs that still exist
+                    } else {
+                        allIds
+                    }
                 } catch (e: Exception) {
                     _playlistsError.value = e.message ?: "Failed to load playlists"
                 } finally {
