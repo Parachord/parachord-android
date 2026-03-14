@@ -44,6 +44,7 @@ import androidx.compose.material.icons.filled.Menu
 import androidx.compose.material.icons.filled.MusicNote
 import androidx.compose.material.icons.filled.People
 import androidx.compose.material.icons.filled.Person
+import androidx.compose.material.icons.filled.Pause
 import androidx.compose.material.icons.filled.PlayArrow
 import androidx.compose.material.icons.automirrored.filled.QueueMusic
 import androidx.compose.material.icons.filled.Star
@@ -93,6 +94,7 @@ import com.parachord.android.ui.components.ParachordCard
 import com.parachord.android.ui.components.SectionHeader
 import com.parachord.android.ui.components.ShimmerTrackRow
 import com.parachord.android.ui.components.TrackRow
+import com.parachord.android.playback.PlaybackState
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -122,6 +124,8 @@ fun HomeScreen(
     val forYouPreview by viewModel.forYouPreview.collectAsStateWithLifecycle()
     val criticalDarlingsPreview by viewModel.criticalDarlingsPreview.collectAsStateWithLifecycle()
     val freshDropsPreview by viewModel.freshDropsPreview.collectAsStateWithLifecycle()
+    val popOfTheTopsPreview by viewModel.popOfTheTopsPreview.collectAsStateWithLifecycle()
+    val playbackState by viewModel.playbackState.collectAsStateWithLifecycle()
 
     val audioPermission = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
         Manifest.permission.READ_MEDIA_AUDIO
@@ -220,6 +224,17 @@ fun HomeScreen(
                 modifier = Modifier.fillMaxSize(),
                 contentPadding = PaddingValues(bottom = 24.dp),
             ) {
+                // ── Continue Listening ──────────────────────────────────
+                if (playbackState.currentTrack != null) {
+                    item {
+                        ContinueListeningCard(
+                            playbackState = playbackState,
+                            onPlayPause = { viewModel.togglePlayPause() },
+                            onClick = onNavigateToNowPlaying,
+                        )
+                    }
+                }
+
                 // ── Recently Added Albums ────────────────────────────────
                 if (recentAlbums.isNotEmpty()) {
                     item { SectionHeader("Recently Added") }
@@ -265,6 +280,7 @@ fun HomeScreen(
                         forYouPreview = forYouPreview,
                         criticalDarlingsPreview = criticalDarlingsPreview,
                         freshDropsPreview = freshDropsPreview,
+                        popOfTheTopsPreview = popOfTheTopsPreview,
                         onNavigateToRecommendations = onNavigateToRecommendations,
                         onNavigateToCriticalDarlings = onNavigateToCriticalDarlings,
                         onNavigateToPopOfTheTops = onNavigateToPopOfTheTops,
@@ -287,6 +303,14 @@ fun HomeScreen(
                         }
                         Spacer(modifier = Modifier.height(8.dp))
                     }
+                }
+
+                // ── Surprise Me / Shuffleupagus ──────────────────────────
+                item {
+                    SurpriseMeCard(
+                        modifier = Modifier.padding(horizontal = 16.dp),
+                    )
+                    Spacer(modifier = Modifier.height(8.dp))
                 }
 
                 // ── Collection Stats ─────────────────────────────────────
@@ -403,6 +427,7 @@ private fun DiscoverGrid(
     forYouPreview: DiscoverPreview?,
     criticalDarlingsPreview: DiscoverPreview?,
     freshDropsPreview: DiscoverPreview?,
+    popOfTheTopsPreview: DiscoverPreview?,
     onNavigateToRecommendations: () -> Unit,
     onNavigateToCriticalDarlings: () -> Unit,
     onNavigateToPopOfTheTops: () -> Unit,
@@ -455,8 +480,8 @@ private fun DiscoverGrid(
                     Color(0xFFEC4899), // pink
                     Color(0xFF8B5CF6), // purple
                 ),
-                preview = null,
-                fallbackSubtitle = "Coming soon",
+                preview = popOfTheTopsPreview,
+                fallbackSubtitle = "Top charts",
                 onClick = onNavigateToPopOfTheTops,
                 modifier = Modifier.weight(1f),
             )

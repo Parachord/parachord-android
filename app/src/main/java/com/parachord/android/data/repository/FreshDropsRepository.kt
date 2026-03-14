@@ -46,6 +46,10 @@ class FreshDropsRepository @Inject constructor(
     private var cachedReleases: List<FreshDrop>? = null
     private var lastFetchedAt: Long = 0L
 
+    /** Synchronous access to cached releases (for ViewModel initial state). */
+    val cached: List<FreshDrop>? get() = cachedReleases
+    val isCacheStale: Boolean get() = System.currentTimeMillis() - lastFetchedAt > STALE_THRESHOLD
+
     /** MBID cache to avoid repeated artist lookups. */
     private val mbidCache = mutableMapOf<String, String>()
 

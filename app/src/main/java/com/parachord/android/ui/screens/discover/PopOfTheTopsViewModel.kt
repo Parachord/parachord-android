@@ -10,9 +10,11 @@ import com.parachord.android.data.repository.ChartSong
 import com.parachord.android.data.repository.ChartsRepository
 import com.parachord.android.playback.PlaybackContext
 import com.parachord.android.playback.PlaybackController
+import com.parachord.android.resolver.ResolvedSource
 import com.parachord.android.resolver.ResolverManager
 import com.parachord.android.resolver.ResolverScoring
 import dagger.hilt.android.lifecycle.HiltViewModel
+import kotlinx.coroutines.Job
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.launch
@@ -50,6 +52,11 @@ class PopOfTheTopsViewModel @Inject constructor(
 
     private val _searchQuery = MutableStateFlow("")
     val searchQuery: StateFlow<String> = _searchQuery
+
+    /** Pre-resolved sources keyed by "title|artist" */
+    private val _trackSources = MutableStateFlow<Map<String, List<ResolvedSource>>>(emptyMap())
+
+    private var resolveJob: Job? = null
 
     val countries = CHARTS_COUNTRIES
 
@@ -90,44 +97,65 @@ class PopOfTheTopsViewModel @Inject constructor(
     }
 
     fun playSong(song: ChartSong, allSongs: List<ChartSong>) {
+        val index = allSongs.indexOfFirst { it.id == song.id }.coerceAtLeast(0)
         viewModelScope.launch {
             try {
-                // Resolve all songs concurrently
-                val entities = allSongs.mapNotNull { s -> resolveSong(s) }
-                if (entities.isEmpty()) return@launch
-                // Find the tapped song's index in the resolved list
-                val resolvedIndex = entities.indexOfFirst { it.title == song.title && it.artist == song.artist }
-                    .coerceAtLeast(0)
-                playbackController.playQueue(entities, resolvedIndex)
+                // 1. Resolve and play the tapped track immediately (use cache if available)
+                val tappedEntity = resolveChartSong(song) ?: return@launch
+                playbackController.playTrack(tappedEntity, PlaybackContext(type = "charts", name = "Top Songs"))
+
+                // 2. Resolve remaining tracks and add to queue
+                val remaining = allSongs.subList(index + 1, allSongs.size)
+                if (remaining.isNotEmpty()) {
+                    val entities = remaining.mapNotNull { s -> resolveChartSong(s) }
+                    if (entities.isNotEmpty()) {
+                        playbackController.addToQueue(entities)
+                    }
+                }
             } catch (e: Exception) {
                 Log.e(TAG, "Failed to play '${song.title}'", e)
             }
         }
     }
 
-    private suspend fun resolveSong(song: ChartSong): TrackEntity? {
-        return try {
-            val query = "${song.artist} - ${song.title}"
-            val sources = resolverManager.resolveWithHints(
-                query = query,
+    private suspend fun resolveChartSong(song: ChartSong): TrackEntity? {
+        val key = "${song.title.lowercase().trim()}|${song.artist.lowercase().trim()}"
+        val sources = _trackSources.value[key]
+            ?: resolverManager.resolveWithHints(
+                query = "${song.artist} - ${song.title}",
                 spotifyId = song.spotifyId,
             )
-            val best = resolverScoring.selectBest(sources) ?: return null
-            TrackEntity(
-                id = song.id,
-                title = song.title,
-                artist = song.artist,
-                album = song.album,
-                artworkUrl = song.artworkUrl,
-                sourceType = best.sourceType,
-                sourceUrl = best.url,
-                resolver = best.resolver,
-                spotifyUri = best.spotifyUri,
-                soundcloudId = best.soundcloudId,
-            )
-        } catch (e: Exception) {
-            Log.e(TAG, "Failed to resolve '${song.title}'", e)
-            null
+        val best = resolverScoring.selectBest(sources) ?: return null
+        return TrackEntity(
+            id = song.id,
+            title = song.title,
+            artist = song.artist,
+            album = song.album,
+            artworkUrl = song.artworkUrl,
+            sourceType = best.sourceType,
+            sourceUrl = best.url,
+            resolver = best.resolver,
+            spotifyUri = best.spotifyUri,
+            soundcloudId = best.soundcloudId,
+        )
+    }
+
+    private fun resolveTracksInBackground(songs: List<ChartSong>) {
+        resolveJob?.cancel()
+        resolveJob = viewModelScope.launch {
+            for (song in songs) {
+                val key = "${song.title.lowercase().trim()}|${song.artist.lowercase().trim()}"
+                if (_trackSources.value.containsKey(key)) continue
+                try {
+                    val sources = resolverManager.resolveWithHints(
+                        query = "${song.artist} - ${song.title}",
+                        spotifyId = song.spotifyId,
+                    )
+                    if (sources.isNotEmpty()) {
+                        _trackSources.value = _trackSources.value + (key to sources)
+                    }
+                } catch (_: Exception) { /* skip */ }
+            }
         }
     }
 
@@ -142,11 +170,14 @@ class PopOfTheTopsViewModel @Inject constructor(
     private fun loadSongs() {
         viewModelScope.launch {
             _songsLoading.value = true
+            _trackSources.value = emptyMap() // clear stale sources for new song list
             _songs.value = when (_songsSource.value) {
                 "lastfm" -> chartsRepository.getLastfmCharts(_selectedCountry.value)
                 else -> chartsRepository.getAppleMusicSongs(_selectedCountry.value)
             }
             _songsLoading.value = false
+            // Pre-resolve all songs in background
+            resolveTracksInBackground(_songs.value)
         }
     }
 }

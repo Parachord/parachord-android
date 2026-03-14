@@ -6,6 +6,7 @@ import com.parachord.android.data.repository.FreshDrop
 import com.parachord.android.data.repository.FreshDropsRepository
 import com.parachord.android.data.repository.Resource
 import dagger.hilt.android.lifecycle.HiltViewModel
+import kotlinx.coroutines.Job
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.launch
@@ -24,7 +25,10 @@ class FreshDropsViewModel @Inject constructor(
     private val repository: FreshDropsRepository,
 ) : ViewModel() {
 
-    private val _releases = MutableStateFlow<Resource<List<FreshDrop>>>(Resource.Loading)
+    // Initialize from singleton cache immediately — avoids flash of Loading state
+    private val _releases = MutableStateFlow<Resource<List<FreshDrop>>>(
+        repository.cached?.let { Resource.Success(it) } ?: Resource.Loading
+    )
     val releases: StateFlow<Resource<List<FreshDrop>>> = _releases
 
     private val _searchQuery = MutableStateFlow("")
@@ -33,8 +37,16 @@ class FreshDropsViewModel @Inject constructor(
     private val _filterType = MutableStateFlow("all")
     val filterType: StateFlow<String> = _filterType
 
+    private val _isRefreshing = MutableStateFlow(false)
+    val isRefreshing: StateFlow<Boolean> = _isRefreshing
+
+    private var loadJob: Job? = null
+
     init {
-        loadReleases()
+        // Only fetch if cache is stale or empty — don't re-fetch on every navigation
+        if (repository.cached == null || repository.isCacheStale) {
+            loadReleases()
+        }
     }
 
     fun refresh() {
@@ -77,10 +89,14 @@ class FreshDropsViewModel @Inject constructor(
     }
 
     private fun loadReleases(forceRefresh: Boolean = false) {
-        viewModelScope.launch {
+        // Cancel any in-flight load to avoid duplicate collections
+        loadJob?.cancel()
+        loadJob = viewModelScope.launch {
+            _isRefreshing.value = true
             repository.getFreshDrops(forceRefresh).collect {
                 _releases.value = it
             }
+            _isRefreshing.value = false
         }
     }
 }

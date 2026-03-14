@@ -6,6 +6,7 @@ import com.parachord.android.data.db.entity.AlbumEntity
 import com.parachord.android.data.db.entity.FriendEntity
 import com.parachord.android.data.db.entity.PlaylistEntity
 import com.parachord.android.data.db.entity.TrackEntity
+import com.parachord.android.data.repository.ChartsRepository
 import com.parachord.android.data.repository.CriticalDarlingsRepository
 import com.parachord.android.data.repository.FreshDropsRepository
 import com.parachord.android.data.repository.FriendsRepository
@@ -15,6 +16,7 @@ import com.parachord.android.data.repository.Resource
 import com.parachord.android.data.scanner.MediaScanner
 import com.parachord.android.data.scanner.ScanProgress
 import com.parachord.android.playback.PlaybackController
+import com.parachord.android.playback.PlaybackStateHolder
 import dagger.hilt.android.lifecycle.HiltViewModel
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
@@ -46,10 +48,12 @@ class HomeViewModel @Inject constructor(
     private val repository: LibraryRepository,
     private val friendsRepository: FriendsRepository,
     private val playbackController: PlaybackController,
+    private val playbackStateHolder: PlaybackStateHolder,
     private val mediaScanner: MediaScanner,
     private val recommendationsRepository: RecommendationsRepository,
     private val criticalDarlingsRepository: CriticalDarlingsRepository,
     private val freshDropsRepository: FreshDropsRepository,
+    private val chartsRepository: ChartsRepository,
 ) : ViewModel() {
 
     val recentTracks: StateFlow<List<TrackEntity>> = repository.getAllTracks()
@@ -95,6 +99,9 @@ class HomeViewModel @Inject constructor(
 
     val scanProgress: StateFlow<ScanProgress> = mediaScanner.progress
 
+    /** Current playback state for Continue Listening card. */
+    val playbackState = playbackStateHolder.state
+
     // ── Discover previews ───────────────────────────────────────────
 
     private val _forYouPreview = MutableStateFlow<DiscoverPreview?>(null)
@@ -105,6 +112,9 @@ class HomeViewModel @Inject constructor(
 
     private val _freshDropsPreview = MutableStateFlow<DiscoverPreview?>(null)
     val freshDropsPreview: StateFlow<DiscoverPreview?> = _freshDropsPreview
+
+    private val _popOfTheTopsPreview = MutableStateFlow<DiscoverPreview?>(null)
+    val popOfTheTopsPreview: StateFlow<DiscoverPreview?> = _popOfTheTopsPreview
 
     init {
         loadDiscoverPreviews()
@@ -156,6 +166,24 @@ class HomeViewModel @Inject constructor(
                 }
             }
         }
+        // Pop of the Tops — top charting album
+        viewModelScope.launch {
+            try {
+                val albums = chartsRepository.getAppleMusicAlbums("us")
+                albums.firstOrNull()?.let { album ->
+                    _popOfTheTopsPreview.value = DiscoverPreview(
+                        title = album.title,
+                        subtitle = album.artist,
+                        artworkUrl = album.artworkUrl,
+                        label = "#1 Album",
+                    )
+                }
+            } catch (_: Exception) { /* skip preview */ }
+        }
+    }
+
+    fun togglePlayPause() {
+        playbackController.togglePlayPause()
     }
 
     fun playTrack(track: TrackEntity) {

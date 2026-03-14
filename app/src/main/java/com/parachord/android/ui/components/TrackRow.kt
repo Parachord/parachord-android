@@ -13,8 +13,10 @@ import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
 import java.util.Locale
 
 /**
@@ -47,8 +49,8 @@ fun TrackRow(
         if (resolver != null && !contains(resolver)) add(resolver)
     }
 
-    val artSize = 40.dp
-    val vertPad = 7.dp
+    val artSize = 44.dp
+    val vertPad = 6.dp
 
     Row(
         modifier = modifier
@@ -86,6 +88,7 @@ fun TrackRow(
             Text(
                 text = title,
                 style = MaterialTheme.typography.bodyMedium,
+                fontWeight = FontWeight.Medium,
                 color = if (isPlaying) {
                     MaterialTheme.colorScheme.primary
                 } else {
@@ -96,7 +99,7 @@ fun TrackRow(
             )
             Text(
                 text = artist,
-                style = MaterialTheme.typography.labelSmall,
+                style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
                 maxLines = 1,
                 overflow = TextOverflow.Ellipsis,

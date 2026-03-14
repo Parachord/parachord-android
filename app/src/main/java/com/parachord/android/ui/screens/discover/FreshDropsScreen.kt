@@ -25,7 +25,6 @@ import androidx.compose.foundation.text.BasicTextField
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.Close
-import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material.icons.filled.Search
 import androidx.compose.material.icons.filled.WaterDrop
 import androidx.compose.material3.ExperimentalMaterial3Api
@@ -60,6 +59,7 @@ import androidx.hilt.navigation.compose.hiltViewModel
 import com.parachord.android.data.repository.FreshDrop
 import com.parachord.android.data.repository.Resource
 import com.parachord.android.ui.components.AlbumArtCard
+import com.parachord.android.ui.components.SpinningRefreshIcon
 import com.parachord.android.ui.components.shimmerBrush
 
 // Desktop gradient: emerald → teal → cyan
@@ -83,6 +83,7 @@ fun FreshDropsScreen(
     val releasesResource by viewModel.releases.collectAsState()
     val searchQuery by viewModel.searchQuery.collectAsState()
     val filterType by viewModel.filterType.collectAsState()
+    val isRefreshing by viewModel.isRefreshing.collectAsState()
     var searchOpen by remember { mutableStateOf(false) }
 
     Column(modifier = modifier.fillMaxSize()) {
@@ -118,6 +119,7 @@ fun FreshDropsScreen(
             filterType = filterType,
             onFilterTypeChange = viewModel::setFilterType,
             onRefresh = viewModel::refresh,
+            isRefreshing = isRefreshing,
         )
 
         // Content
@@ -280,6 +282,7 @@ private fun FreshDropsFilterBar(
     filterType: String,
     onFilterTypeChange: (String) -> Unit,
     onRefresh: () -> Unit,
+    isRefreshing: Boolean = false,
 ) {
     val filters = listOf("all" to "All", "album" to "Albums", "ep" to "EPs", "single" to "Singles")
 
@@ -320,13 +323,10 @@ private fun FreshDropsFilterBar(
                     modifier = Modifier.size(20.dp),
                 )
             }
-            IconButton(onClick = onRefresh) {
-                Icon(
-                    Icons.Filled.Refresh,
-                    contentDescription = "Refresh",
-                    modifier = Modifier.size(20.dp),
-                )
-            }
+            SpinningRefreshIcon(
+                isLoading = isRefreshing,
+                onClick = onRefresh,
+            )
         }
 
         // Expandable search field
