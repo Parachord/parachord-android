@@ -76,6 +76,12 @@ class FriendsViewModel @Inject constructor(
         }
     }
 
+    fun pinFriend(friendId: String) {
+        viewModelScope.launch {
+            friendsRepository.pinFriend(friendId, true)
+        }
+    }
+
     fun refreshAll() {
         viewModelScope.launch {
             friends.value.forEach { friend ->

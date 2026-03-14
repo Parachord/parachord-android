@@ -50,6 +50,10 @@ class LibraryRepository @Inject constructor(
     /** Backfill lastModified from updatedAt for playlists synced before tracking. */
     suspend fun backfillPlaylistLastModified() = playlistDao.backfillLastModified()
 
+    /** Reactive check whether a track exists in collection by title+artist. */
+    fun isTrackInCollection(title: String, artist: String): Flow<Boolean> =
+        trackDao.existsByTitleAndArtist(title, artist)
+
     suspend fun deleteTrack(track: TrackEntity) = trackDao.delete(track)
     suspend fun deleteAlbum(album: AlbumEntity) = albumDao.delete(album)
     suspend fun deletePlaylist(playlist: PlaylistEntity) = playlistDao.delete(playlist)

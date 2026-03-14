@@ -11,6 +11,8 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.Favorite
+import androidx.compose.material.icons.filled.FavoriteBorder
 import androidx.compose.material.icons.filled.Pause
 import androidx.compose.material.icons.filled.PlayArrow
 import androidx.compose.material.icons.filled.SkipNext
@@ -43,9 +45,11 @@ fun MiniPlayer(
     artistName: String,
     artworkUrl: String?,
     isPlaying: Boolean,
+    isFavorited: Boolean,
     progress: Float,
     onPlayPause: () -> Unit,
     onSkipNext: () -> Unit,
+    onToggleFavorite: () -> Unit,
     onClick: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
@@ -98,6 +102,21 @@ fun MiniPlayer(
                     fontSize = 12.sp,
                     maxLines = 1,
                     overflow = TextOverflow.Ellipsis,
+                )
+            }
+
+            // Heart/Favorite button
+            IconButton(
+                onClick = onToggleFavorite,
+                modifier = Modifier.size(36.dp),
+                colors = IconButtonDefaults.iconButtonColors(
+                    contentColor = if (isFavorited) PurpleDark else PlayerTextSecondary,
+                ),
+            ) {
+                Icon(
+                    imageVector = if (isFavorited) Icons.Default.Favorite else Icons.Default.FavoriteBorder,
+                    contentDescription = if (isFavorited) "Remove from Collection" else "Add to Collection",
+                    modifier = Modifier.size(18.dp),
                 )
             }
 

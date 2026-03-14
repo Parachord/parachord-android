@@ -62,6 +62,10 @@ interface TrackDao {
     """)
     suspend fun backfillAddedAtFromSyncSources()
 
+    /** Check if a track exists in the collection by title+artist (case-insensitive). */
+    @Query("SELECT COUNT(*) > 0 FROM tracks WHERE LOWER(title) = LOWER(:title) AND LOWER(artist) = LOWER(:artist)")
+    fun existsByTitleAndArtist(title: String, artist: String): Flow<Boolean>
+
     /** Remove synced tracks that have no corresponding sync_source entry (orphaned duplicates). */
     @Query("DELETE FROM tracks WHERE id LIKE 'spotify-%' AND id NOT IN (SELECT itemId FROM sync_sources WHERE itemType = 'track')")
     suspend fun deleteOrphanedSyncedTracks(): Int

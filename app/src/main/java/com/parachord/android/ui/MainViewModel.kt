@@ -24,6 +24,9 @@ import dagger.hilt.android.lifecycle.HiltViewModel
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.flatMapLatest
+import kotlinx.coroutines.flow.flowOf
+import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.stateIn
 import javax.inject.Inject
 
@@ -47,6 +50,19 @@ class MainViewModel @Inject constructor(
     }
 
     val playbackState: StateFlow<PlaybackState> = playbackStateHolder.state
+
+    /** Whether the currently playing track is in the user's collection. */
+    @OptIn(kotlinx.coroutines.ExperimentalCoroutinesApi::class)
+    val isCurrentTrackFavorited: StateFlow<Boolean> = playbackStateHolder.state
+        .map { it.currentTrack }
+        .flatMapLatest { track ->
+            if (track != null) {
+                libraryRepository.isTrackInCollection(track.title, track.artist)
+            } else {
+                flowOf(false)
+            }
+        }
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), false)
 
     val themeMode: StateFlow<String> = settingsStore.themeMode
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), "system")
@@ -85,6 +101,18 @@ class MainViewModel @Inject constructor(
 
     fun skipNext() {
         playbackController.skipNext()
+    }
+
+    /** Toggle the current track's collection status (heart/favorite). */
+    fun toggleCurrentTrackFavorite() {
+        val track = playbackState.value.currentTrack ?: return
+        viewModelScope.launch {
+            if (isCurrentTrackFavorited.value) {
+                libraryRepository.deleteTrackWithSync(track)
+            } else {
+                libraryRepository.addTrack(track)
+            }
+        }
     }
 
     /** Create a new empty playlist. */

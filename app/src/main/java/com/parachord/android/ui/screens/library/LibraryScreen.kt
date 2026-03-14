@@ -1,7 +1,10 @@
 package com.parachord.android.ui.screens.library
 
+import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.combinedClickable
+import androidx.compose.foundation.isSystemInDarkTheme
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
@@ -9,6 +12,7 @@ import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
@@ -20,22 +24,26 @@ import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Delete
+import androidx.compose.material.icons.filled.Headphones
 import androidx.compose.material.icons.filled.Menu
 import androidx.compose.material.icons.filled.MusicNote
 import androidx.compose.material.icons.filled.People
 import androidx.compose.material.icons.filled.Person
+import androidx.compose.material.icons.filled.PersonRemove
+import androidx.compose.material.icons.filled.PushPin
 import androidx.compose.material.icons.filled.Sync
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.ExperimentalMaterial3Api
+import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.SwipeToDismissBox
-import androidx.compose.material3.SwipeToDismissBoxValue
+import androidx.compose.material3.ModalBottomSheet
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.material3.TopAppBar
-import androidx.compose.material3.rememberSwipeToDismissBoxState
+import androidx.compose.material3.rememberModalBottomSheetState
+import androidx.compose.ui.graphics.Brush
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
@@ -46,18 +54,35 @@ import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.Outline
+import androidx.compose.ui.graphics.Path
+import androidx.compose.ui.graphics.Shape
+import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.unit.Density
+import androidx.compose.ui.unit.LayoutDirection
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.em
+import androidx.compose.ui.unit.sp
 import androidx.compose.ui.Alignment
 import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import coil.compose.SubcomposeAsyncImage
 import kotlinx.coroutines.launch
 import androidx.compose.ui.platform.LocalContext
 import com.parachord.android.data.db.entity.FriendEntity
 import com.parachord.android.ui.components.AlbumArtCard
+import com.parachord.android.ui.components.ContextMenuItem
+import com.parachord.android.ui.components.ModalBg
+import com.parachord.android.ui.components.ModalBgDarker
+import com.parachord.android.ui.components.ModalDivider
+import com.parachord.android.ui.components.ModalTextPrimary
+import com.parachord.android.ui.components.ModalTextActive
+import com.parachord.android.ui.components.ModalScrim
 import com.parachord.android.ui.components.SwipeableTabLayout
 import com.parachord.android.ui.components.TrackContextInfo
 import com.parachord.android.ui.components.TrackContextMenuHost
@@ -335,6 +360,8 @@ fun CollectionScreen(
                         onClearSearch = { viewModel.setSearchQuery("") },
                         onNavigateToFriend = onNavigateToFriend,
                         onRemoveFriend = { friendsViewModel.removeFriend(it) },
+                        onPinFriend = { friendsViewModel.pinFriend(it) },
+                        onListenAlong = { /* TODO: wire up listen-along */ },
                     )
                 }
             }
@@ -345,8 +372,30 @@ fun CollectionScreen(
 private val OnAirGreen = Color(0xFF22C55E)
 private val LastFmRed = Color(0xFFD51007)
 private val ListenBrainzOrange = Color(0xFFE8702A)
+private val MiniPlaybarBgLight = Color(0xF21F2937)
+private val MiniPlaybarBgDark = Color(0xF2262626)
 
-@OptIn(ExperimentalMaterial3Api::class)
+// Uses ModalBg, ModalBgDarker, ModalDivider from TrackContextMenu.kt
+
+/** Hexagonal clip path matching the desktop's friend avatar treatment. */
+private val HexagonShape = object : Shape {
+    override fun createOutline(size: Size, layoutDirection: LayoutDirection, density: Density): Outline {
+        val w = size.width
+        val h = size.height
+        val path = Path().apply {
+            moveTo(w * 0.5f, 0f)
+            lineTo(w, h * 0.25f)
+            lineTo(w, h * 0.75f)
+            lineTo(w * 0.5f, h)
+            lineTo(0f, h * 0.75f)
+            lineTo(0f, h * 0.25f)
+            close()
+        }
+        return Outline.Generic(path)
+    }
+}
+
+@OptIn(ExperimentalMaterial3Api::class, ExperimentalFoundationApi::class)
 @Composable
 private fun FriendsTab(
     friends: List<FriendEntity>,
@@ -357,8 +406,9 @@ private fun FriendsTab(
     onClearSearch: () -> Unit,
     onNavigateToFriend: (String) -> Unit,
     onRemoveFriend: (String) -> Unit,
+    onPinFriend: (String) -> Unit,
+    onListenAlong: (FriendEntity) -> Unit,
 ) {
-    // Apply filter and sort inline
     val sortedFriends = remember(friends, friendSort, searchQuery) {
         val filtered = if (searchQuery.isBlank()) friends else {
             friends.filter { it.displayName.contains(searchQuery, ignoreCase = true) }
@@ -399,6 +449,9 @@ private fun FriendsTab(
         pendingDeleteFriend?.let { f ->
             AlertDialog(
                 onDismissRequest = { pendingDeleteFriend = null },
+                containerColor = ModalBg,
+                titleContentColor = ModalTextActive,
+                textContentColor = ModalTextPrimary,
                 title = { Text("Remove Friend") },
                 text = { Text("Are you sure you want to remove ${f.displayName}?") },
                 confirmButton = {
@@ -406,12 +459,12 @@ private fun FriendsTab(
                         onRemoveFriend(f.id)
                         pendingDeleteFriend = null
                     }) {
-                        Text("Remove", color = MaterialTheme.colorScheme.error)
+                        Text("Remove", color = Color(0xFFEF4444))
                     }
                 },
                 dismissButton = {
                     TextButton(onClick = { pendingDeleteFriend = null }) {
-                        Text("Cancel")
+                        Text("Cancel", color = ModalTextPrimary)
                     }
                 },
             )
@@ -422,55 +475,51 @@ private fun FriendsTab(
         } else {
             LazyColumn(state = friendListState, modifier = Modifier.fillMaxSize()) {
                 items(sortedFriends, key = { it.id }) { friend ->
-                    val dismissState = rememberSwipeToDismissBoxState(
-                        confirmValueChange = { value ->
-                            if (value == SwipeToDismissBoxValue.EndToStart) {
-                                pendingDeleteFriend = friend
-                            }
-                            false // always snap back; dialog handles the delete
-                        },
-                    )
+                    var showMenu by remember { mutableStateOf(false) }
+                    val surfaceColor = MaterialTheme.colorScheme.surface
 
-                    SwipeToDismissBox(
-                        state = dismissState,
-                        backgroundContent = {
-                            Box(
-                                modifier = Modifier
-                                    .fillMaxSize()
-                                    .background(MaterialTheme.colorScheme.error)
-                                    .padding(horizontal = 20.dp),
-                                contentAlignment = Alignment.CenterEnd,
-                            ) {
-                                Icon(
-                                    Icons.Filled.Delete,
-                                    contentDescription = "Delete",
-                                    tint = MaterialTheme.colorScheme.onError,
-                                )
-                            }
-                        },
-                        enableDismissFromStartToEnd = false,
-                    ) {
+                    Box {
                         Row(
                             modifier = Modifier
                                 .fillMaxWidth()
-                                .background(MaterialTheme.colorScheme.surface)
-                                .clickable { onNavigateToFriend(friend.id) }
-                                .padding(horizontal = 16.dp, vertical = 10.dp),
-                            verticalAlignment = Alignment.CenterVertically,
-                        ) {
-                            // Avatar with on-air indicator
-                            Box {
-                                AlbumArtCard(
-                                    artworkUrl = friend.avatarUrl,
-                                    size = 48.dp,
-                                    cornerRadius = 24.dp,
-                                    placeholderName = friend.displayName,
+                                .background(surfaceColor)
+                                .combinedClickable(
+                                    onClick = { onNavigateToFriend(friend.id) },
+                                    onLongClick = { showMenu = true },
                                 )
+                                .padding(horizontal = 16.dp, vertical = 10.dp),
+                            verticalAlignment = Alignment.Top,
+                        ) {
+                            // Hexagonal avatar with on-air indicator
+                            Box(modifier = Modifier.padding(top = 2.dp)) {
+                                Box(
+                                    modifier = Modifier
+                                        .size(48.dp)
+                                        .clip(HexagonShape),
+                                    contentAlignment = Alignment.Center,
+                                ) {
+                                    if (!friend.avatarUrl.isNullOrBlank()) {
+                                        SubcomposeAsyncImage(
+                                            model = friend.avatarUrl,
+                                            contentDescription = friend.displayName,
+                                            contentScale = ContentScale.Crop,
+                                            modifier = Modifier.size(48.dp),
+                                            loading = { FriendHexFallback(friend.displayName) },
+                                            error = { FriendHexFallback(friend.displayName) },
+                                        )
+                                    } else {
+                                        FriendHexFallback(friend.displayName)
+                                    }
+                                }
                                 if (friend.isOnAir) {
                                     Box(
                                         modifier = Modifier
                                             .align(Alignment.BottomEnd)
+                                            .offset(x = 1.dp, y = 1.dp)
                                             .size(14.dp)
+                                            .clip(CircleShape)
+                                            .background(surfaceColor)
+                                            .padding(2.dp)
                                             .clip(CircleShape)
                                             .background(OnAirGreen),
                                     )
@@ -508,33 +557,82 @@ private fun FriendsTab(
                                             .padding(horizontal = 6.dp, vertical = 2.dp),
                                     )
                                 }
-                                if (friend.isOnAir && friend.cachedTrackName != null) {
-                                    Text(
-                                        text = "\u25B6 ${friend.cachedTrackArtist ?: ""} \u2014 ${friend.cachedTrackName}",
-                                        style = MaterialTheme.typography.bodySmall,
-                                        color = OnAirGreen,
-                                        maxLines = 1,
-                                        overflow = TextOverflow.Ellipsis,
+
+                                // Mini playbar for now-playing / last-played
+                                if (friend.cachedTrackName != null) {
+                                    Spacer(modifier = Modifier.height(4.dp))
+                                    FriendListMiniPlaybar(
+                                        trackName = friend.cachedTrackName!!,
+                                        artistName = friend.cachedTrackArtist,
+                                        artworkUrl = friend.cachedTrackArtworkUrl,
+                                        isOnAir = friend.isOnAir,
+                                        timestamp = friend.cachedTrackTimestamp,
                                     )
-                                } else if (friend.cachedTrackName != null) {
-                                    Row(verticalAlignment = Alignment.CenterVertically) {
-                                        Text(
-                                            text = "${friend.cachedTrackArtist ?: ""} \u2014 ${friend.cachedTrackName}",
-                                            style = MaterialTheme.typography.bodySmall,
-                                            color = MaterialTheme.colorScheme.onSurfaceVariant,
-                                            maxLines = 1,
-                                            overflow = TextOverflow.Ellipsis,
-                                            modifier = Modifier.weight(1f, fill = false),
+                                }
+                            }
+                        }
+
+                        // Always-dark context menu bottom sheet
+                        if (showMenu) {
+                            ModalBottomSheet(
+                                onDismissRequest = { showMenu = false },
+                                sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true),
+                                containerColor = ModalBg,
+                                scrimColor = Color.Black.copy(alpha = 0.4f),
+                                dragHandle = {
+                                    Box(
+                                        modifier = Modifier
+                                            .padding(vertical = 10.dp)
+                                            .size(width = 32.dp, height = 4.dp)
+                                            .background(
+                                                color = Color.White.copy(alpha = 0.2f),
+                                                shape = RoundedCornerShape(2.dp),
+                                            ),
+                                    )
+                                },
+                            ) {
+                                Column(
+                                    modifier = Modifier
+                                        .background(Brush.verticalGradient(listOf(ModalBg, ModalBgDarker)))
+                                        .padding(bottom = 32.dp),
+                                ) {
+                                    ContextMenuItem(
+                                        icon = Icons.Filled.Person,
+                                        label = "View Profile",
+                                        onClick = {
+                                            showMenu = false
+                                            onNavigateToFriend(friend.id)
+                                        },
+                                    )
+                                    if (friend.isOnAir && friend.cachedTrackName != null) {
+                                        ContextMenuItem(
+                                            icon = Icons.Filled.Headphones,
+                                            label = "Listen Along",
+                                            onClick = {
+                                                showMenu = false
+                                                onListenAlong(friend)
+                                            },
                                         )
-                                        if (friend.cachedTrackTimestamp > 0) {
-                                            Spacer(modifier = Modifier.width(6.dp))
-                                            Text(
-                                                text = formatFriendTimeAgo(friend.cachedTrackTimestamp),
-                                                style = MaterialTheme.typography.labelSmall,
-                                                color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.6f),
-                                            )
-                                        }
                                     }
+                                    if (!friend.pinnedToSidebar) {
+                                        ContextMenuItem(
+                                            icon = Icons.Filled.PushPin,
+                                            label = "Pin to Sidebar",
+                                            onClick = {
+                                                showMenu = false
+                                                onPinFriend(friend.id)
+                                            },
+                                        )
+                                    }
+                                    HorizontalDivider(color = ModalDivider, modifier = Modifier.padding(vertical = 4.dp))
+                                    ContextMenuItem(
+                                        icon = Icons.Filled.PersonRemove,
+                                        label = "Remove Friend",
+                                        onClick = {
+                                            showMenu = false
+                                            pendingDeleteFriend = friend
+                                        },
+                                    )
                                 }
                             }
                         }
@@ -542,6 +640,126 @@ private fun FriendsTab(
                 }
             }
         }
+    }
+}
+
+/** Mini playbar pill for friends list — larger than sidebar version. */
+@Composable
+private fun FriendListMiniPlaybar(
+    trackName: String,
+    artistName: String?,
+    artworkUrl: String?,
+    isOnAir: Boolean,
+    timestamp: Long,
+) {
+    val isDark = isSystemInDarkTheme()
+    val pillBg = if (isDark) MiniPlaybarBgDark else MiniPlaybarBgLight
+    val pillShape = RoundedCornerShape(4.dp)
+    val artistTextColor = Color(0xFFD1D5DB)
+
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .height(24.dp)
+            .clip(pillShape)
+            .background(pillBg),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        // Mini album art
+        Box(
+            modifier = Modifier
+                .size(24.dp)
+                .clip(RoundedCornerShape(topStart = 4.dp, bottomStart = 4.dp)),
+            contentAlignment = Alignment.Center,
+        ) {
+            if (!artworkUrl.isNullOrBlank()) {
+                SubcomposeAsyncImage(
+                    model = artworkUrl,
+                    contentDescription = null,
+                    contentScale = ContentScale.Crop,
+                    modifier = Modifier.size(24.dp),
+                    loading = { FriendMiniArtFallback() },
+                    error = { FriendMiniArtFallback() },
+                )
+            } else {
+                FriendMiniArtFallback()
+            }
+        }
+
+        // Track info
+        Text(
+            text = buildString {
+                append(trackName)
+                artistName?.let { append("  ·  $it") }
+            },
+            fontSize = 11.sp,
+            fontWeight = FontWeight.Medium,
+            lineHeight = 24.sp,
+            color = artistTextColor,
+            maxLines = 1,
+            overflow = TextOverflow.Ellipsis,
+            modifier = Modifier
+                .weight(1f)
+                .padding(horizontal = 8.dp),
+        )
+
+        // On-air dot or time ago
+        if (isOnAir) {
+            Box(
+                modifier = Modifier
+                    .padding(end = 6.dp)
+                    .size(6.dp)
+                    .clip(CircleShape)
+                    .background(OnAirGreen),
+            )
+        } else if (timestamp > 0) {
+            Text(
+                text = formatFriendTimeAgo(timestamp),
+                fontSize = 9.sp,
+                color = Color(0xFF9CA3AF),
+                modifier = Modifier.padding(end = 6.dp),
+            )
+        }
+    }
+}
+
+@Composable
+private fun FriendMiniArtFallback() {
+    Box(
+        modifier = Modifier
+            .size(24.dp)
+            .background(Color(0xFF4B5563)),
+        contentAlignment = Alignment.Center,
+    ) {
+        Icon(
+            Icons.Filled.MusicNote,
+            contentDescription = null,
+            tint = Color(0xFF9CA3AF),
+            modifier = Modifier.size(12.dp),
+        )
+    }
+}
+
+@Composable
+private fun FriendHexFallback(name: String) {
+    Box(
+        modifier = Modifier
+            .size(48.dp)
+            .background(
+                brush = androidx.compose.ui.graphics.Brush.linearGradient(
+                    colors = listOf(Color(0xFFA78BFA), Color(0xFFF472B6)),
+                    start = Offset.Zero,
+                    end = Offset(48f, 48f),
+                ),
+            ),
+        contentAlignment = Alignment.Center,
+    ) {
+        Text(
+            text = name.take(1).uppercase(),
+            fontSize = 18.sp,
+            fontWeight = FontWeight.SemiBold,
+            color = Color.White,
+        )
     }
 }
 

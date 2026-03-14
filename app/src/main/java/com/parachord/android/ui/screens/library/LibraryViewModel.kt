@@ -8,6 +8,7 @@ import com.parachord.android.data.db.entity.PlaylistEntity
 import com.parachord.android.data.db.entity.TrackEntity
 import com.parachord.android.data.metadata.ImageEnrichmentService
 import com.parachord.android.data.repository.LibraryRepository
+import com.parachord.android.data.store.SettingsStore
 import com.parachord.android.playback.PlaybackController
 import dagger.hilt.android.lifecycle.HiltViewModel
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -23,6 +24,7 @@ class LibraryViewModel @Inject constructor(
     private val repository: LibraryRepository,
     private val playbackController: PlaybackController,
     private val imageEnrichmentService: ImageEnrichmentService,
+    private val settingsStore: SettingsStore,
 ) : ViewModel() {
 
     // Track which items have been enriched this session to avoid re-triggering
@@ -60,10 +62,39 @@ class LibraryViewModel @Inject constructor(
     private val _searchQuery = MutableStateFlow("")
     val searchQuery: StateFlow<String> = _searchQuery
 
-    fun setArtistSort(sort: ArtistSort) { _artistSort.value = sort }
-    fun setAlbumSort(sort: AlbumSort) { _albumSort.value = sort }
-    fun setTrackSort(sort: TrackSort) { _trackSort.value = sort }
-    fun setFriendSort(sort: FriendSort) { _friendSort.value = sort }
+    init {
+        viewModelScope.launch {
+            settingsStore.getSortArtists()?.let { name ->
+                runCatching { ArtistSort.valueOf(name) }.getOrNull()?.let { _artistSort.value = it }
+            }
+            settingsStore.getSortAlbums()?.let { name ->
+                runCatching { AlbumSort.valueOf(name) }.getOrNull()?.let { _albumSort.value = it }
+            }
+            settingsStore.getSortTracks()?.let { name ->
+                runCatching { TrackSort.valueOf(name) }.getOrNull()?.let { _trackSort.value = it }
+            }
+            settingsStore.getSortFriends()?.let { name ->
+                runCatching { FriendSort.valueOf(name) }.getOrNull()?.let { _friendSort.value = it }
+            }
+        }
+    }
+
+    fun setArtistSort(sort: ArtistSort) {
+        _artistSort.value = sort
+        viewModelScope.launch { settingsStore.setSortArtists(sort.name) }
+    }
+    fun setAlbumSort(sort: AlbumSort) {
+        _albumSort.value = sort
+        viewModelScope.launch { settingsStore.setSortAlbums(sort.name) }
+    }
+    fun setTrackSort(sort: TrackSort) {
+        _trackSort.value = sort
+        viewModelScope.launch { settingsStore.setSortTracks(sort.name) }
+    }
+    fun setFriendSort(sort: FriendSort) {
+        _friendSort.value = sort
+        viewModelScope.launch { settingsStore.setSortFriends(sort.name) }
+    }
     fun setSearchQuery(query: String) { _searchQuery.value = query }
 
     // --- Sorted + filtered followed artists (ArtistEntity only) ---

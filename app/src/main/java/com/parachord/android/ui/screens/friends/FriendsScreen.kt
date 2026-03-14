@@ -79,6 +79,9 @@ fun FriendsScreen(
     pendingDeleteFriend?.let { friend ->
         AlertDialog(
             onDismissRequest = { pendingDeleteFriend = null },
+            containerColor = ModalBg,
+            titleContentColor = ModalTextActive,
+            textContentColor = ModalTextPrimary,
             title = { Text("Remove Friend") },
             text = { Text("Are you sure you want to remove ${friend.displayName}?") },
             confirmButton = {
@@ -86,12 +89,12 @@ fun FriendsScreen(
                     viewModel.removeFriend(friend.id)
                     pendingDeleteFriend = null
                 }) {
-                    Text("Remove", color = MaterialTheme.colorScheme.error)
+                    Text("Remove", color = Color(0xFFEF4444))
                 }
             },
             dismissButton = {
                 TextButton(onClick = { pendingDeleteFriend = null }) {
-                    Text("Cancel")
+                    Text("Cancel", color = ModalTextPrimary)
                 }
             },
         )
@@ -342,13 +345,16 @@ private fun AddFriendDialog(
 ) {
     AlertDialog(
         onDismissRequest = onDismiss,
+        containerColor = ModalBg,
+        titleContentColor = ModalTextActive,
+        textContentColor = ModalTextPrimary,
         title = { Text("Add Friend") },
         text = {
             Column {
                 Text(
                     text = "Enter a Last.fm or ListenBrainz username, or paste a profile URL",
                     style = MaterialTheme.typography.bodySmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    color = ModalTextSecondary,
                 )
                 Spacer(modifier = Modifier.height(12.dp))
                 OutlinedTextField(
@@ -383,12 +389,12 @@ private fun AddFriendDialog(
                 onClick = onAdd,
                 enabled = input.isNotBlank() && state !is Resource.Loading,
             ) {
-                Text("Add Friend")
+                Text("Add Friend", color = Color(0xFF7C3AED))
             }
         },
         dismissButton = {
             TextButton(onClick = onDismiss) {
-                Text("Cancel")
+                Text("Cancel", color = ModalTextPrimary)
             }
         },
     )

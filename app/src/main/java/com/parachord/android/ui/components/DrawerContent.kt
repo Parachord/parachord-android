@@ -43,12 +43,14 @@ import androidx.compose.material.icons.outlined.History
 import androidx.compose.material.icons.outlined.Settings
 import androidx.compose.material.icons.outlined.Star
 import androidx.compose.material.icons.outlined.WaterDrop
-import androidx.compose.material3.DropdownMenu
-import androidx.compose.material3.DropdownMenuItem
+import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.ModalBottomSheet
 import androidx.compose.material3.Text
+import androidx.compose.material3.rememberModalBottomSheetState
+import androidx.compose.ui.graphics.Brush
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -285,7 +287,10 @@ private fun DrawerNavItem(
     }
 }
 
-@OptIn(ExperimentalFoundationApi::class)
+// Uses ModalBg, ModalBgDarker, ModalDivider, ModalTextPrimary, ModalIconTint
+// from TrackContextMenu.kt (same package)
+
+@OptIn(ExperimentalFoundationApi::class, ExperimentalMaterial3Api::class)
 @Composable
 private fun DrawerFriendItem(
     friend: FriendEntity,
@@ -387,43 +392,59 @@ private fun DrawerFriendItem(
             }
         }
 
-        // Context menu
-        DropdownMenu(
-            expanded = showMenu,
-            onDismissRequest = { showMenu = false },
-        ) {
-            DropdownMenuItem(
-                text = { Text("View Profile") },
-                onClick = {
-                    showMenu = false
-                    onClick()
+        // Always-dark context menu bottom sheet
+        if (showMenu) {
+            ModalBottomSheet(
+                onDismissRequest = { showMenu = false },
+                sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true),
+                containerColor = ModalBg,
+                scrimColor = Color.Black.copy(alpha = 0.4f),
+                dragHandle = {
+                    Box(
+                        modifier = Modifier
+                            .padding(vertical = 10.dp)
+                            .size(width = 32.dp, height = 4.dp)
+                            .background(
+                                color = Color.White.copy(alpha = 0.2f),
+                                shape = RoundedCornerShape(2.dp),
+                            ),
+                    )
                 },
-                leadingIcon = {
-                    Icon(Icons.Filled.Person, contentDescription = null, modifier = Modifier.size(20.dp))
-                },
-            )
-            if (friend.isOnAir && friend.cachedTrackName != null) {
-                DropdownMenuItem(
-                    text = { Text("Listen Along") },
-                    onClick = {
-                        showMenu = false
-                        onListenAlong()
-                    },
-                    leadingIcon = {
-                        Icon(Icons.Filled.Headphones, contentDescription = null, modifier = Modifier.size(20.dp))
-                    },
-                )
+            ) {
+                Column(
+                    modifier = Modifier
+                        .background(Brush.verticalGradient(listOf(ModalBg, ModalBgDarker)))
+                        .padding(bottom = 32.dp),
+                ) {
+                    ContextMenuItem(
+                        icon = Icons.Filled.Person,
+                        label = "View Profile",
+                        onClick = {
+                            showMenu = false
+                            onClick()
+                        },
+                    )
+                    if (friend.isOnAir && friend.cachedTrackName != null) {
+                        ContextMenuItem(
+                            icon = Icons.Filled.Headphones,
+                            label = "Listen Along",
+                            onClick = {
+                                showMenu = false
+                                onListenAlong()
+                            },
+                        )
+                    }
+                    HorizontalDivider(color = ModalDivider, modifier = Modifier.padding(vertical = 4.dp))
+                    ContextMenuItem(
+                        icon = Icons.Filled.PushPin,
+                        label = "Unpin from Sidebar",
+                        onClick = {
+                            showMenu = false
+                            onUnpin()
+                        },
+                    )
+                }
             }
-            DropdownMenuItem(
-                text = { Text("Unpin from Sidebar") },
-                onClick = {
-                    showMenu = false
-                    onUnpin()
-                },
-                leadingIcon = {
-                    Icon(Icons.Filled.PushPin, contentDescription = null, modifier = Modifier.size(20.dp))
-                },
-            )
         }
     }
 }

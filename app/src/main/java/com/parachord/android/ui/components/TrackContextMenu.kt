@@ -1,6 +1,8 @@
 package com.parachord.android.ui.components
 
+import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
@@ -13,24 +15,48 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.PlaylistAdd
 import androidx.compose.material.icons.automirrored.filled.QueueMusic
 import androidx.compose.material.icons.filled.Album
-import androidx.compose.material.icons.filled.LibraryAdd
-import androidx.compose.material.icons.filled.LibraryAddCheck
+import androidx.compose.material.icons.filled.Favorite
+import androidx.compose.material.icons.filled.FavoriteBorder
 import androidx.compose.material.icons.filled.Person
 import androidx.compose.material.icons.filled.PlaylistRemove
 import androidx.compose.material.icons.filled.SkipNext
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
-import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.ModalBottomSheet
 import androidx.compose.material3.Text
 import androidx.compose.material3.rememberModalBottomSheetState
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.Brush
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
+import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
+
+// ── Always-dark modal/menu colors (matching desktop) ────────────────
+// Desktop uses: linear-gradient(180deg, rgba(30,30,35,0.98), rgba(20,20,25,0.98))
+// These are used by all modals, dialogs, and context menus for a consistent always-dark look.
+
+/** Primary background for modals and context menus. */
+val ModalBg = Color(0xFA1E1E23)              // ~rgba(30,30,35,0.98)
+/** Darker gradient end for context menus. */
+val ModalBgDarker = Color(0xFA141419)         // ~rgba(20,20,25,0.98)
+/** Primary text in always-dark modals. */
+val ModalTextPrimary = Color(0xB3FFFFFF)      // rgba(255,255,255,0.7)
+/** Active/title text in always-dark modals. */
+val ModalTextActive = Color(0xFFFFFFFF)       // white
+/** Icon tint in always-dark modals. */
+val ModalIconTint = Color(0x99FFFFFF)         // rgba(255,255,255,0.6)
+/** Divider color in always-dark modals. */
+val ModalDivider = Color(0x0FFFFFFF)          // rgba(255,255,255,0.06)
+/** Secondary/muted text in always-dark modals. */
+val ModalTextSecondary = Color(0x66FFFFFF)    // rgba(255,255,255,0.4)
+/** Scrim overlay for modals. */
+val ModalScrim = Color(0x66000000)            // rgba(0,0,0,0.4)
 
 /**
  * Context data for a track long-press action.
@@ -51,17 +77,8 @@ data class TrackContextInfo(
 )
 
 /**
- * Modal bottom sheet context menu for tracks, matching the desktop app's
- * right-click menu functionality.
- *
- * Menu items (matching desktop):
- * - Play Next
- * - Add to Queue
- * - Add to Playlist...
- * - Go to Artist
- * - Go to Album (if album available)
- * - Add to Collection / Remove from Collection
- * - Remove from Playlist (if in a playlist context)
+ * Modal bottom sheet context menu for tracks — always-dark styling matching
+ * the desktop app's right-click menu.
  */
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -81,13 +98,35 @@ fun TrackContextMenu(
     ModalBottomSheet(
         onDismissRequest = onDismiss,
         sheetState = sheetState,
+        containerColor = ModalBg,
+        scrimColor = Color.Black.copy(alpha = 0.4f),
+        dragHandle = {
+            // Subtle drag handle matching the dark theme
+            Box(
+                modifier = Modifier
+                    .padding(vertical = 10.dp)
+                    .size(width = 32.dp, height = 4.dp)
+                    .background(
+                        color = Color.White.copy(alpha = 0.2f),
+                        shape = androidx.compose.foundation.shape.RoundedCornerShape(2.dp),
+                    ),
+            )
+        },
     ) {
-        Column(modifier = Modifier.padding(bottom = 32.dp)) {
+        Column(
+            modifier = Modifier
+                .background(
+                    Brush.verticalGradient(
+                        colors = listOf(ModalBg, ModalBgDarker),
+                    ),
+                )
+                .padding(bottom = 32.dp),
+        ) {
             // Track header
             Row(
                 modifier = Modifier
                     .fillMaxWidth()
-                    .padding(horizontal = 16.dp, vertical = 8.dp),
+                    .padding(horizontal = 20.dp, vertical = 8.dp),
                 verticalAlignment = Alignment.CenterVertically,
             ) {
                 AlbumArtCard(
@@ -101,21 +140,40 @@ fun TrackContextMenu(
                 Column(modifier = Modifier.weight(1f)) {
                     Text(
                         text = track.title,
-                        style = MaterialTheme.typography.titleMedium,
+                        fontSize = 15.sp,
+                        fontWeight = FontWeight.Medium,
+                        color = ModalTextActive,
                         maxLines = 1,
                         overflow = TextOverflow.Ellipsis,
                     )
                     Text(
                         text = track.artist,
-                        style = MaterialTheme.typography.bodyMedium,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        fontSize = 13.sp,
+                        color = ModalTextPrimary,
                         maxLines = 1,
                         overflow = TextOverflow.Ellipsis,
                     )
                 }
             }
 
-            HorizontalDivider(modifier = Modifier.padding(vertical = 8.dp))
+            HorizontalDivider(color = ModalDivider, modifier = Modifier.padding(vertical = 8.dp))
+
+            // Favorite / heart toggle
+            if (track.isInCollection) {
+                ContextMenuItem(
+                    icon = Icons.Filled.Favorite,
+                    label = "Remove from Collection",
+                    onClick = { onToggleCollection(); onDismiss() },
+                )
+            } else {
+                ContextMenuItem(
+                    icon = Icons.Filled.FavoriteBorder,
+                    label = "Add to Collection",
+                    onClick = { onToggleCollection(); onDismiss() },
+                )
+            }
+
+            HorizontalDivider(color = ModalDivider, modifier = Modifier.padding(vertical = 4.dp))
 
             // Menu items
             ContextMenuItem(
@@ -134,7 +192,7 @@ fun TrackContextMenu(
                 onClick = { onAddToPlaylist() },
             )
 
-            HorizontalDivider(modifier = Modifier.padding(vertical = 4.dp))
+            HorizontalDivider(color = ModalDivider, modifier = Modifier.padding(vertical = 4.dp))
 
             ContextMenuItem(
                 icon = Icons.Filled.Person,
@@ -149,23 +207,8 @@ fun TrackContextMenu(
                 )
             }
 
-            HorizontalDivider(modifier = Modifier.padding(vertical = 4.dp))
-
-            if (track.isInCollection) {
-                ContextMenuItem(
-                    icon = Icons.Filled.LibraryAddCheck,
-                    label = "Remove from Collection",
-                    onClick = { onToggleCollection(); onDismiss() },
-                )
-            } else {
-                ContextMenuItem(
-                    icon = Icons.Filled.LibraryAdd,
-                    label = "Add to Collection",
-                    onClick = { onToggleCollection(); onDismiss() },
-                )
-            }
-
             if (onRemoveFromPlaylist != null) {
+                HorizontalDivider(color = ModalDivider, modifier = Modifier.padding(vertical = 4.dp))
                 ContextMenuItem(
                     icon = Icons.Filled.PlaylistRemove,
                     label = "Remove from Playlist",
@@ -177,7 +220,8 @@ fun TrackContextMenu(
 }
 
 /**
- * A single row in a context menu bottom sheet.
+ * A single row in an always-dark context menu.
+ * Desktop: px-3 py-2, white text at 70%, icons at 60%.
  */
 @Composable
 fun ContextMenuItem(
@@ -185,6 +229,7 @@ fun ContextMenuItem(
     label: String,
     onClick: () -> Unit,
     modifier: Modifier = Modifier,
+    tint: Color = ModalIconTint,
 ) {
     Row(
         modifier = modifier
@@ -196,13 +241,14 @@ fun ContextMenuItem(
         Icon(
             imageVector = icon,
             contentDescription = label,
-            modifier = Modifier.size(24.dp),
-            tint = MaterialTheme.colorScheme.onSurfaceVariant,
+            modifier = Modifier.size(22.dp),
+            tint = tint,
         )
         Spacer(modifier = Modifier.width(16.dp))
         Text(
             text = label,
-            style = MaterialTheme.typography.bodyLarge,
+            fontSize = 14.sp,
+            color = ModalTextPrimary,
         )
     }
 }

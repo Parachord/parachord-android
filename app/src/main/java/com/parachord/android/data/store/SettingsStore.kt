@@ -59,6 +59,11 @@ class SettingsStore @Inject constructor(
         val SYNC_PUSH_LOCAL_PLAYLISTS = booleanPreferencesKey("sync_push_local_playlists")
         val SYNC_DATA_VERSION = stringPreferencesKey("sync_data_version")
         val DELETED_FRIEND_KEYS = stringSetPreferencesKey("deleted_friend_keys")
+        val SORT_ARTISTS = stringPreferencesKey("sort_artists")
+        val SORT_ALBUMS = stringPreferencesKey("sort_albums")
+        val SORT_TRACKS = stringPreferencesKey("sort_tracks")
+        val SORT_FRIENDS = stringPreferencesKey("sort_friends")
+        val SORT_PLAYLISTS = stringPreferencesKey("sort_playlists")
 
         /** Default canonical order matching the desktop app. */
         private const val DEFAULT_RESOLVER_ORDER = "spotify,applemusic,bandcamp,soundcloud,localfiles,youtube"
@@ -67,6 +72,20 @@ class SettingsStore @Inject constructor(
     val themeMode: Flow<String> = dataStore.data.map { it[THEME_MODE] ?: "system" }
     val scrobblingEnabled: Flow<Boolean> = dataStore.data.map { it[SCROBBLING_ENABLED] ?: false }
     val persistQueue: Flow<Boolean> = dataStore.data.map { it[PERSIST_QUEUE] ?: false }
+
+    // ── Sort preferences ─────────────────────────────────────────
+
+    suspend fun getSortArtists(): String? = dataStore.data.first()[SORT_ARTISTS]
+    suspend fun getSortAlbums(): String? = dataStore.data.first()[SORT_ALBUMS]
+    suspend fun getSortTracks(): String? = dataStore.data.first()[SORT_TRACKS]
+    suspend fun getSortFriends(): String? = dataStore.data.first()[SORT_FRIENDS]
+
+    suspend fun setSortArtists(sort: String) { dataStore.edit { it[SORT_ARTISTS] = sort } }
+    suspend fun setSortAlbums(sort: String) { dataStore.edit { it[SORT_ALBUMS] = sort } }
+    suspend fun setSortTracks(sort: String) { dataStore.edit { it[SORT_TRACKS] = sort } }
+    suspend fun setSortFriends(sort: String) { dataStore.edit { it[SORT_FRIENDS] = sort } }
+    suspend fun getSortPlaylists(): String? = dataStore.data.first()[SORT_PLAYLISTS]
+    suspend fun setSortPlaylists(sort: String) { dataStore.edit { it[SORT_PLAYLISTS] = sort } }
 
     suspend fun setThemeMode(mode: String) {
         dataStore.edit { it[THEME_MODE] = mode }

@@ -129,6 +129,7 @@ private fun ParachordAppContent(mainViewModel: MainViewModel) {
 
     val playbackState by mainViewModel.playbackState.collectAsStateWithLifecycle()
     val currentTrack = playbackState.currentTrack
+    val isCurrentTrackFavorited by mainViewModel.isCurrentTrackFavorited.collectAsStateWithLifecycle()
     val friends by mainViewModel.friends.collectAsStateWithLifecycle()
 
     // Observe toast events from ViewModel (listen-along notifications, etc.)
@@ -265,9 +266,11 @@ private fun ParachordAppContent(mainViewModel: MainViewModel) {
                                     artistName = currentTrack.artist,
                                     artworkUrl = currentTrack.artworkUrl,
                                     isPlaying = playbackState.isPlaying,
+                                    isFavorited = isCurrentTrackFavorited,
                                     progress = progress,
                                     onPlayPause = { mainViewModel.togglePlayPause() },
                                     onSkipNext = { mainViewModel.skipNext() },
+                                    onToggleFavorite = { mainViewModel.toggleCurrentTrackFavorite() },
                                     onClick = {
                                         navController.navigate(Routes.NOW_PLAYING) {
                                             launchSingleTop = true

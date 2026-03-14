@@ -7,6 +7,7 @@ import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
@@ -24,10 +25,10 @@ import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
+import androidx.compose.material3.OutlinedTextField
+import androidx.compose.material3.OutlinedTextFieldDefaults
 import androidx.compose.material3.TopAppBar
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.SearchBar
-import androidx.compose.material3.SearchBarDefaults
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
@@ -71,7 +72,6 @@ fun SearchScreen(
     val isSearchingRemote by viewModel.isSearchingRemote.collectAsStateWithLifecycle()
     val searchHistory by viewModel.searchHistory.collectAsStateWithLifecycle()
     val trackResolvers by viewModel.trackResolvers.collectAsState()
-    var active by remember { mutableStateOf(false) }
 
     Column(modifier = modifier.fillMaxSize()) {
         TopAppBar(
@@ -91,30 +91,41 @@ fun SearchScreen(
             },
             windowInsets = WindowInsets(0),
         )
-        SearchBar(
-            inputField = {
-                SearchBarDefaults.InputField(
-                    query = query,
-                    onQueryChange = viewModel::onQueryChange,
-                    onSearch = { active = false },
-                    expanded = active,
-                    onExpandedChange = { active = it },
-                    placeholder = { Text("Search tracks, albums, artists...") },
-                    leadingIcon = { Icon(Icons.Default.Search, contentDescription = "Search") },
-                )
-            },
-            expanded = active,
-            onExpandedChange = { active = it },
+
+        // Outlined search box matching desktop style
+        OutlinedTextField(
+            value = query,
+            onValueChange = viewModel::onQueryChange,
+            placeholder = { Text("Search tracks, albums, artists...") },
+            leadingIcon = { Icon(Icons.Default.Search, contentDescription = "Search") },
+            trailingIcon = if (query.isNotBlank()) {
+                {
+                    IconButton(onClick = { viewModel.onQueryChange("") }) {
+                        Icon(Icons.Default.Close, contentDescription = "Clear", modifier = Modifier.size(18.dp))
+                    }
+                }
+            } else null,
+            singleLine = true,
+            shape = RoundedCornerShape(8.dp),
+            colors = OutlinedTextFieldDefaults.colors(
+                focusedBorderColor = MaterialTheme.colorScheme.primary,
+                unfocusedBorderColor = MaterialTheme.colorScheme.outlineVariant,
+            ),
             modifier = Modifier
                 .fillMaxWidth()
-                .padding(horizontal = if (!active) 16.dp else 0.dp),
-        ) {
+                .padding(horizontal = 16.dp),
+        )
+
+        Spacer(modifier = Modifier.height(8.dp))
+
+        // Results inline (no expanding overlay)
+        if (query.isNotBlank()) {
             // Shimmer loading when searching remote
             if (isSearchingRemote && localTracks.isEmpty() && artists.isEmpty()) {
                 repeat(4) { ShimmerTrackRow() }
             }
 
-            LazyColumn {
+            LazyColumn(modifier = Modifier.weight(1f)) {
                 // ---- Local Library Results ----
                 if (localTracks.isNotEmpty()) {
                     item { SectionHeader("Library") }
@@ -290,7 +301,7 @@ fun SearchScreen(
         }
 
         // Show search history on the page when query is empty (like desktop)
-        if (query.isBlank() && searchHistory.isNotEmpty() && !active) {
+        if (query.isBlank() && searchHistory.isNotEmpty()) {
             SearchHistoryContent(
                 history = searchHistory,
                 onEntryClick = { entry ->
@@ -301,7 +312,6 @@ fun SearchScreen(
                         }
                         else -> {
                             viewModel.onQueryChange(entry.query)
-                            active = true
                         }
                     }
                 },
