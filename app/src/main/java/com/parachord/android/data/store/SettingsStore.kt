@@ -64,6 +64,8 @@ class SettingsStore @Inject constructor(
         val SORT_TRACKS = stringPreferencesKey("sort_tracks")
         val SORT_FRIENDS = stringPreferencesKey("sort_friends")
         val SORT_PLAYLISTS = stringPreferencesKey("sort_playlists")
+        val APPLE_MUSIC_DEVELOPER_TOKEN = stringPreferencesKey("apple_music_developer_token")
+        val APPLE_MUSIC_STOREFRONT = stringPreferencesKey("apple_music_storefront")
 
         /** Default canonical order matching the desktop app. */
         private const val DEFAULT_RESOLVER_ORDER = "spotify,applemusic,bandcamp,soundcloud,localfiles,youtube"
@@ -341,6 +343,22 @@ class SettingsStore @Inject constructor(
 
     suspend fun clearDiscogsToken() {
         dataStore.edit { it.remove(DISCOGS_TOKEN) }
+    }
+
+    // --- Apple Music ---
+
+    suspend fun getAppleMusicDeveloperToken(): String? =
+        dataStore.data.first()[APPLE_MUSIC_DEVELOPER_TOKEN]?.ifBlank { null }
+
+    suspend fun setAppleMusicDeveloperToken(token: String) {
+        dataStore.edit { it[APPLE_MUSIC_DEVELOPER_TOKEN] = token }
+    }
+
+    suspend fun getAppleMusicStorefront(): String? =
+        dataStore.data.first()[APPLE_MUSIC_STOREFRONT]?.ifBlank { null }
+
+    suspend fun setAppleMusicStorefront(storefront: String) {
+        dataStore.edit { it[APPLE_MUSIC_STOREFRONT] = storefront }
     }
 
     // --- Metadata provider enable/disable ---

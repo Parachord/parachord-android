@@ -1,0 +1,264 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <meta charset="utf-8">
+    <title>MusicKit Bridge</title>
+</head>
+<body>
+<script src="https://js-cdn.music.apple.com/musickit/v3/musickit.js"></script>
+<script>
+    let music = null;
+
+    /**
+     * Configure MusicKit with a developer token.
+     * Returns JSON: { success: bool, error?: string }
+     */
+    async function configure(developerToken, appName) {
+        try {
+            await MusicKit.configure({
+                developerToken: developerToken,
+                app: { name: appName || 'Parachord', build: '1.0.0' },
+            });
+            music = MusicKit.getInstance();
+            _attachListeners();
+            return JSON.stringify({ success: true });
+        } catch (e) {
+            return JSON.stringify({ success: false, error: e.message || String(e) });
+        }
+    }
+
+    /**
+     * Prompt Apple ID sign-in.
+     * Returns JSON: { success: bool, authorized: bool, error?: string }
+     */
+    async function authorize() {
+        try {
+            if (!music) return JSON.stringify({ success: false, error: 'Not configured' });
+            const token = await music.authorize();
+            return JSON.stringify({ success: true, authorized: !!token });
+        } catch (e) {
+            return JSON.stringify({ success: false, authorized: false, error: e.message || String(e) });
+        }
+    }
+
+    /**
+     * Search the Apple Music catalog for songs.
+     * Returns JSON: { success: bool, results: [...], error?: string }
+     */
+    async function search(query, limit, storefront) {
+        try {
+            if (!music) return JSON.stringify({ success: false, results: [], error: 'Not configured' });
+            const sf = storefront || 'us';
+            const l = limit || 10;
+            const response = await music.api.music(
+                '/v1/catalog/' + sf + '/search',
+                { term: query, types: 'songs', limit: l }
+            );
+            const songs = (response.data.results.songs && response.data.results.songs.data) || [];
+            const results = songs.map(function(song) {
+                var artwork = song.attributes.artwork;
+                var artworkUrl = null;
+                if (artwork && artwork.url) {
+                    artworkUrl = artwork.url.replace('{w}', '600').replace('{h}', '600');
+                }
+                return {
+                    id: song.id,
+                    title: song.attributes.name,
+                    artist: song.attributes.artistName,
+                    album: song.attributes.albumName || null,
+                    duration: song.attributes.durationInMillis || null,
+                    artworkUrl: artworkUrl,
+                    isrc: song.attributes.isrc || null,
+                    previewUrl: (song.attributes.previews && song.attributes.previews.length > 0)
+                        ? song.attributes.previews[0].url : null,
+                    appleMusicUrl: song.attributes.url || null,
+                };
+            });
+            return JSON.stringify({ success: true, results: results });
+        } catch (e) {
+            return JSON.stringify({ success: false, results: [], error: e.message || String(e) });
+        }
+    }
+
+    /**
+     * Play a song by Apple Music catalog ID.
+     * Returns JSON: { success: bool, error?: string }
+     */
+    async function play(songId) {
+        try {
+            if (!music) return JSON.stringify({ success: false, error: 'Not configured' });
+            await music.setQueue({ song: songId, startPlaying: true });
+            return JSON.stringify({ success: true });
+        } catch (e) {
+            return JSON.stringify({ success: false, error: e.message || String(e) });
+        }
+    }
+
+    /**
+     * Pause playback.
+     * Returns JSON: { success: bool, error?: string }
+     */
+    async function pause() {
+        try {
+            if (!music) return JSON.stringify({ success: false, error: 'Not configured' });
+            await music.pause();
+            return JSON.stringify({ success: true });
+        } catch (e) {
+            return JSON.stringify({ success: false, error: e.message || String(e) });
+        }
+    }
+
+    /**
+     * Resume playback.
+     * Returns JSON: { success: bool, error?: string }
+     */
+    async function resume() {
+        try {
+            if (!music) return JSON.stringify({ success: false, error: 'Not configured' });
+            await music.play();
+            return JSON.stringify({ success: true });
+        } catch (e) {
+            return JSON.stringify({ success: false, error: e.message || String(e) });
+        }
+    }
+
+    /**
+     * Stop playback.
+     * Returns JSON: { success: bool, error?: string }
+     */
+    async function stop() {
+        try {
+            if (!music) return JSON.stringify({ success: false, error: 'Not configured' });
+            await music.stop();
+            return JSON.stringify({ success: true });
+        } catch (e) {
+            return JSON.stringify({ success: false, error: e.message || String(e) });
+        }
+    }
+
+    /**
+     * Seek to a position in milliseconds.
+     * Returns JSON: { success: bool, error?: string }
+     */
+    async function seekTo(positionMs) {
+        try {
+            if (!music) return JSON.stringify({ success: false, error: 'Not configured' });
+            await music.seekToTime(positionMs / 1000.0);
+            return JSON.stringify({ success: true });
+        } catch (e) {
+            return JSON.stringify({ success: false, error: e.message || String(e) });
+        }
+    }
+
+    /**
+     * Get current playback state.
+     * Returns JSON: { state, position (ms), duration (ms), isPlaying }
+     */
+    function getPlaybackState() {
+        if (!music) {
+            return JSON.stringify({ state: 'none', position: 0, duration: 0, isPlaying: false });
+        }
+        var state = music.playbackState;
+        var positionMs = (music.currentPlaybackTime || 0) * 1000;
+        var durationMs = (music.currentPlaybackDuration || 0) * 1000;
+        var playing = (state === MusicKit.PlaybackStates.playing);
+        return JSON.stringify({
+            state: _playbackStateName(state),
+            position: positionMs,
+            duration: durationMs,
+            isPlaying: playing,
+        });
+    }
+
+    /**
+     * Get current auth status.
+     * Returns JSON: { configured: bool, authorized: bool }
+     */
+    function getAuthStatus() {
+        return JSON.stringify({
+            configured: !!music,
+            authorized: music ? music.isAuthorized : false,
+        });
+    }
+
+    // ── Internal helpers ──────────────────────────────────────────
+
+    function _playbackStateName(state) {
+        if (!music) return 'none';
+        var states = MusicKit.PlaybackStates;
+        switch (state) {
+            case states.none: return 'none';
+            case states.loading: return 'loading';
+            case states.playing: return 'playing';
+            case states.paused: return 'paused';
+            case states.stopped: return 'stopped';
+            case states.ended: return 'ended';
+            case states.seeking: return 'seeking';
+            case states.stalled: return 'stalled';
+            default: return 'unknown';
+        }
+    }
+
+    function _attachListeners() {
+        if (!music) return;
+
+        music.addEventListener('playbackStateDidChange', function(event) {
+            var state = music.playbackState;
+            var positionMs = (music.currentPlaybackTime || 0) * 1000;
+            var durationMs = (music.currentPlaybackDuration || 0) * 1000;
+            var playing = (state === MusicKit.PlaybackStates.playing);
+            var json = JSON.stringify({
+                state: _playbackStateName(state),
+                position: positionMs,
+                duration: durationMs,
+                isPlaying: playing,
+            });
+            if (window.MusicKitBridge) {
+                MusicKitBridge.onPlaybackStateChange(json);
+            }
+        });
+
+        music.addEventListener('authorizationStatusDidChange', function(event) {
+            var json = JSON.stringify({
+                configured: true,
+                authorized: music.isAuthorized,
+            });
+            if (window.MusicKitBridge) {
+                MusicKitBridge.onAuthChange(json);
+            }
+        });
+
+        music.addEventListener('nowPlayingItemDidChange', function(event) {
+            var item = music.nowPlayingItem;
+            var info = {};
+            if (item && item.attributes) {
+                var artwork = item.attributes.artwork;
+                var artworkUrl = null;
+                if (artwork && artwork.url) {
+                    artworkUrl = artwork.url.replace('{w}', '600').replace('{h}', '600');
+                }
+                info = {
+                    id: item.id,
+                    title: item.attributes.name,
+                    artist: item.attributes.artistName,
+                    album: item.attributes.albumName || null,
+                    duration: item.attributes.durationInMillis || null,
+                    artworkUrl: artworkUrl,
+                };
+            }
+            var json = JSON.stringify(info);
+            if (window.MusicKitBridge) {
+                MusicKitBridge.onNowPlayingChange(json);
+            }
+        });
+
+        music.addEventListener('mediaItemDidEndPlaying', function(event) {
+            var json = JSON.stringify({ ended: true });
+            if (window.MusicKitBridge) {
+                MusicKitBridge.onTrackEnded(json);
+            }
+        });
+    }
+</script>
+</body>
+</html>
