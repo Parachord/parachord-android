@@ -331,7 +331,13 @@ class SyncEngine @Inject constructor(
         val localSources = syncSourceDao.getByProvider(providerId, "playlist")
         val localByExternalId = localSources.associateBy { it.externalId }
 
-        for (remote in selectedRemote) {
+        for ((index, remote) in selectedRemote.withIndex()) {
+            onProgress(SyncProgress(
+                SyncPhase.PLAYLISTS,
+                index + 1,
+                selectedRemote.size,
+                "Syncing playlist: ${remote.entity.name}",
+            ))
             val existingSource = localByExternalId[remote.spotifyId]
 
             if (existingSource == null) {
