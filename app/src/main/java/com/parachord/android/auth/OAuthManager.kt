@@ -115,7 +115,17 @@ class OAuthManager @Inject constructor(
             .appendQueryParameter("client_id", clientId)
             .appendQueryParameter("response_type", "code")
             .appendQueryParameter("redirect_uri", "$REDIRECT_URI/spotify")
-            .appendQueryParameter("scope", "user-read-playback-state user-modify-playback-state user-library-read")
+            .appendQueryParameter("scope", listOf(
+                "user-read-playback-state",
+                "user-modify-playback-state",
+                "user-library-read",
+                "user-library-modify",
+                "user-follow-read",
+                "user-follow-modify",
+                "playlist-read-private",
+                "playlist-modify-public",
+                "playlist-modify-private",
+            ).joinToString(" "))
             .appendQueryParameter("code_challenge_method", "S256")
             .appendQueryParameter("code_challenge", challenge)
             .build()
