@@ -29,6 +29,9 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Check
 import androidx.compose.material.icons.filled.FolderOpen
 import androidx.compose.material.icons.outlined.Info
+import androidx.compose.material3.AlertDialog
+import androidx.compose.material3.Button
+import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.DropdownMenuItem
@@ -43,6 +46,7 @@ import androidx.compose.material3.Icon
 import androidx.compose.material3.ListItem
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.ModalBottomSheet
+import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
@@ -85,6 +89,8 @@ import com.parachord.android.BuildConfig
 import com.parachord.android.ui.components.ResolverIconSquare
 import com.parachord.android.ui.components.SectionHeader
 import com.parachord.android.ui.components.SwipeableTabLayout
+import com.parachord.android.ui.screens.sync.SyncSetupSheet
+import com.parachord.android.ui.screens.sync.SyncViewModel
 import com.parachord.android.ui.theme.Success
 import kotlin.math.roundToInt
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -299,6 +305,7 @@ fun SettingsScreen(
                     onThemeModeChanged = { viewModel.setThemeMode(it) },
                     persistQueue = persistQueue,
                     onPersistQueueChanged = { viewModel.setPersistQueue(it) },
+                    spotifyConnected = spotifyConnected,
                 )
                 2 -> AboutTab()
             }
@@ -1614,7 +1621,14 @@ private fun GeneralTab(
     onThemeModeChanged: (String) -> Unit,
     persistQueue: Boolean,
     onPersistQueueChanged: (Boolean) -> Unit,
+    spotifyConnected: Boolean,
 ) {
+    val syncViewModel: SyncViewModel = hiltViewModel()
+    val syncEnabled by syncViewModel.syncEnabled.collectAsStateWithLifecycle()
+    val lastSyncAt by syncViewModel.lastSyncAt.collectAsStateWithLifecycle()
+    var showSyncSetupSheet by remember { mutableStateOf(false) }
+    var showStopSyncDialog by remember { mutableStateOf(false) }
+
     LazyColumn(modifier = Modifier.fillMaxSize()) {
         item { SectionHeader("Appearance") }
         item {
@@ -1650,6 +1664,152 @@ private fun GeneralTab(
                 },
             )
         }
+
+        // Spotify Sync section — only shown when Spotify is connected
+        if (spotifyConnected) {
+            item { Spacer(modifier = Modifier.height(8.dp)) }
+            item { SectionHeader("Spotify Sync") }
+            item {
+                Card(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(horizontal = 16.dp),
+                    shape = RoundedCornerShape(8.dp),
+                    colors = CardDefaults.cardColors(
+                        containerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f),
+                    ),
+                ) {
+                    Column(modifier = Modifier.padding(16.dp)) {
+                        // Sync enable/disable toggle
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            verticalAlignment = Alignment.CenterVertically,
+                        ) {
+                            Column(modifier = Modifier.weight(1f)) {
+                                Text(
+                                    "Sync Library",
+                                    style = MaterialTheme.typography.bodyLarge,
+                                    fontWeight = FontWeight.Medium,
+                                )
+                                Text(
+                                    if (syncEnabled) "Syncing enabled" else "Syncing disabled",
+                                    style = MaterialTheme.typography.bodySmall,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                )
+                            }
+                            Switch(
+                                checked = syncEnabled,
+                                onCheckedChange = { enabled ->
+                                    if (enabled) {
+                                        showSyncSetupSheet = true
+                                    } else {
+                                        showStopSyncDialog = true
+                                    }
+                                },
+                            )
+                        }
+
+                        // Last synced timestamp
+                        Spacer(modifier = Modifier.height(12.dp))
+                        Text(
+                            "Last synced: ${formatRelativeTime(lastSyncAt)}",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        )
+
+                        if (syncEnabled) {
+                            Spacer(modifier = Modifier.height(16.dp))
+                            HorizontalDivider(
+                                color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.5f),
+                            )
+                            Spacer(modifier = Modifier.height(16.dp))
+
+                            // Sync Now button
+                            Button(
+                                onClick = {
+                                    syncViewModel.syncNow()
+                                    showSyncSetupSheet = true
+                                },
+                                modifier = Modifier.fillMaxWidth(),
+                                colors = ButtonDefaults.buttonColors(
+                                    containerColor = Color(0xFF1DB954),
+                                ),
+                                shape = RoundedCornerShape(8.dp),
+                            ) {
+                                Text("Sync Now")
+                            }
+
+                            Spacer(modifier = Modifier.height(8.dp))
+
+                            // Change sync settings button
+                            OutlinedButton(
+                                onClick = {
+                                    syncViewModel.resetSetup()
+                                    showSyncSetupSheet = true
+                                },
+                                modifier = Modifier.fillMaxWidth(),
+                                shape = RoundedCornerShape(8.dp),
+                            ) {
+                                Text("Change sync settings")
+                            }
+
+                            Spacer(modifier = Modifier.height(8.dp))
+
+                            // Stop syncing button
+                            TextButton(
+                                onClick = { showStopSyncDialog = true },
+                                modifier = Modifier.fillMaxWidth(),
+                            ) {
+                                Text(
+                                    "Stop syncing",
+                                    color = MaterialTheme.colorScheme.error,
+                                )
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    // Sync setup sheet
+    if (showSyncSetupSheet) {
+        SyncSetupSheet(
+            onDismiss = { showSyncSetupSheet = false },
+            viewModel = syncViewModel,
+        )
+    }
+
+    // Stop syncing confirmation dialog
+    if (showStopSyncDialog) {
+        AlertDialog(
+            onDismissRequest = { showStopSyncDialog = false },
+            title = { Text("Stop Syncing") },
+            text = { Text("Do you want to keep or remove the synced items from your Collection?") },
+            confirmButton = {
+                TextButton(onClick = {
+                    syncViewModel.stopSyncing(removeItems = true)
+                    showStopSyncDialog = false
+                }) { Text("Remove Items") }
+            },
+            dismissButton = {
+                TextButton(onClick = {
+                    syncViewModel.stopSyncing(removeItems = false)
+                    showStopSyncDialog = false
+                }) { Text("Keep Items") }
+            },
+        )
+    }
+}
+
+private fun formatRelativeTime(timestamp: Long): String {
+    if (timestamp == 0L) return "Never"
+    val diff = System.currentTimeMillis() - timestamp
+    return when {
+        diff < 60_000 -> "Just now"
+        diff < 3_600_000 -> "${diff / 60_000} minutes ago"
+        diff < 86_400_000 -> "${diff / 3_600_000} hours ago"
+        else -> "${diff / 86_400_000} days ago"
     }
 }
 
