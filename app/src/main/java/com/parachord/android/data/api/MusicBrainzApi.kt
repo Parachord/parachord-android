@@ -50,6 +50,14 @@ interface MusicBrainzApi {
         @Query("offset") offset: Int = 0,
         @Query("fmt") fmt: String = "json",
     ): MbReleaseGroupBrowseResponse
+
+    /** Look up an artist by MBID with URL relations (for Wikidata/Discogs links). */
+    @GET("artist/{id}")
+    suspend fun getArtist(
+        @Path("id") artistId: String,
+        @Query("inc") inc: String = "url-rels",
+        @Query("fmt") fmt: String = "json",
+    ): MbArtistDetail
 }
 
 // --- Response models ---
@@ -197,3 +205,23 @@ data class MbReleaseGroupEntry(
     val artistName: String get() = artistCredit.joinToString(", ") { it.name }
     val year: Int? get() = firstReleaseDate?.take(4)?.toIntOrNull()
 }
+
+// --- Artist detail (lookup with inc=url-rels) ---
+
+@Serializable
+data class MbArtistDetail(
+    val id: String,
+    val name: String,
+    val relations: List<MbRelation> = emptyList(),
+)
+
+@Serializable
+data class MbRelation(
+    val type: String = "",
+    val url: MbRelationUrl? = null,
+)
+
+@Serializable
+data class MbRelationUrl(
+    val resource: String = "",
+)

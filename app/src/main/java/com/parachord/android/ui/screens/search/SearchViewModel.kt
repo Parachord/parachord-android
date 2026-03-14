@@ -12,6 +12,8 @@ import com.parachord.android.data.metadata.TrackSearchResult
 import com.parachord.android.data.metadata.AlbumSearchResult
 import com.parachord.android.data.repository.LibraryRepository
 import com.parachord.android.playback.PlaybackController
+import com.parachord.android.resolver.ResolvedSource
+import com.parachord.android.resolver.ResolverManager
 import dagger.hilt.android.lifecycle.HiltViewModel
 import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.FlowPreview
@@ -22,6 +24,7 @@ import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.debounce
 import kotlinx.coroutines.flow.flatMapLatest
 import kotlinx.coroutines.flow.flowOf
+import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
 import javax.inject.Inject
@@ -33,6 +36,7 @@ class SearchViewModel @Inject constructor(
     private val metadataService: MetadataService,
     private val playbackController: PlaybackController,
     private val searchHistoryDao: SearchHistoryDao,
+    private val resolverManager: ResolverManager,
 ) : ViewModel() {
 
     private val _query = MutableStateFlow("")
@@ -66,6 +70,14 @@ class SearchViewModel @Inject constructor(
     private val _isSearchingRemote = MutableStateFlow(false)
     val isSearchingRemote: StateFlow<Boolean> = _isSearchingRemote.asStateFlow()
 
+    /** Cached resolved sources for remote tracks, keyed by "title|artist" */
+    private val _trackSources = MutableStateFlow<Map<String, List<ResolvedSource>>>(emptyMap())
+
+    /** Resolver badge names for UI display, derived from cached sources */
+    val trackResolvers: StateFlow<Map<String, List<String>>> = _trackSources
+        .map { sources -> sources.mapValues { (_, v) -> v.map { it.resolver }.distinct() } }
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), emptyMap())
+
     // Search history
     val searchHistory: StateFlow<List<SearchHistoryEntity>> = searchHistoryDao.getRecent()
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), emptyList())
@@ -79,6 +91,7 @@ class SearchViewModel @Inject constructor(
                     _remoteAlbumResults.value = emptyList()
                     _artistResults.value = emptyList()
                     _isSearchingRemote.value = false
+                    _trackSources.value = emptyMap()
                 } else {
                     searchRemote(q)
                 }
@@ -133,6 +146,24 @@ class SearchViewModel @Inject constructor(
         }
     }
 
+    private fun resolveTracksInBackground(tracks: List<TrackSearchResult>) {
+        viewModelScope.launch {
+            for (track in tracks) {
+                val key = "${track.title.lowercase().trim()}|${track.artist.lowercase().trim()}"
+                if (_trackSources.value.containsKey(key)) continue
+                try {
+                    val sources = resolverManager.resolveWithHints(
+                        query = "${track.title} ${track.artist}",
+                        spotifyId = track.spotifyId,
+                    )
+                    if (sources.isNotEmpty()) {
+                        _trackSources.value = _trackSources.value + (key to sources)
+                    }
+                } catch (_: Exception) { /* skip */ }
+            }
+        }
+    }
+
     private suspend fun searchRemote(query: String) {
         _isSearchingRemote.value = true
         try {
@@ -142,6 +173,7 @@ class SearchViewModel @Inject constructor(
 
             // Re-rank results using fuzzy matching (desktop formula: 60% fuzzy + 40% source)
             _remoteTrackResults.value = rankTracks(query, tracks)
+            resolveTracksInBackground(_remoteTrackResults.value)
             _remoteAlbumResults.value = rankAlbums(query, albums)
             _artistResults.value = rankArtists(query, artists)
         } catch (_: Exception) {

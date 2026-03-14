@@ -15,8 +15,11 @@ import com.parachord.android.resolver.ResolverManager
 import com.parachord.android.resolver.ResolverScoring
 import dagger.hilt.android.lifecycle.HiltViewModel
 import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.map
+import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
 import javax.inject.Inject
 
@@ -46,6 +49,14 @@ class AlbumViewModel @Inject constructor(
     private val _isResolving = MutableStateFlow(false)
     val isResolving: StateFlow<Boolean> = _isResolving.asStateFlow()
 
+    /** Cached resolved sources for tracks, keyed by "title|artist" */
+    private val _trackSources = MutableStateFlow<Map<String, List<ResolvedSource>>>(emptyMap())
+
+    /** Resolver badge names for UI display, derived from cached sources */
+    val trackResolvers: StateFlow<Map<String, List<String>>> = _trackSources
+        .map { sources -> sources.mapValues { (_, v) -> v.map { it.resolver }.distinct() } }
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), emptyMap())
+
     init {
         if (albumTitle.isNotBlank()) {
             loadAlbum()
@@ -57,10 +68,29 @@ class AlbumViewModel @Inject constructor(
             _isLoading.value = true
             try {
                 _albumDetail.value = metadataService.getAlbumTracks(albumTitle, artistName)
+                _albumDetail.value?.tracks?.let { resolveTracksInBackground(it) }
             } catch (_: Exception) {
                 // partial results still shown
             } finally {
                 _isLoading.value = false
+            }
+        }
+    }
+
+    private fun resolveTracksInBackground(tracks: List<TrackSearchResult>) {
+        viewModelScope.launch {
+            for (track in tracks) {
+                val key = "${track.title.lowercase().trim()}|${track.artist.lowercase().trim()}"
+                if (_trackSources.value.containsKey(key)) continue
+                try {
+                    val sources = resolverManager.resolveWithHints(
+                        query = "${track.title} ${track.artist}",
+                        spotifyId = track.spotifyId,
+                    )
+                    if (sources.isNotEmpty()) {
+                        _trackSources.value = _trackSources.value + (key to sources)
+                    }
+                } catch (_: Exception) { /* skip */ }
             }
         }
     }
@@ -78,10 +108,12 @@ class AlbumViewModel @Inject constructor(
                 val query = "${track.artist} - ${track.title}"
                 Log.d(TAG, "Playing track: '$query' (spotifyId=${track.spotifyId})")
 
-                val sources = resolverManager.resolveWithHints(
-                    query = query,
-                    spotifyId = track.spotifyId,
-                )
+                val key = "${track.title.lowercase().trim()}|${track.artist.lowercase().trim()}"
+                val sources = _trackSources.value[key]
+                    ?: resolverManager.resolveWithHints(
+                        query = query,
+                        spotifyId = track.spotifyId,
+                    )
                 Log.d(TAG, "Resolved ${sources.size} sources: ${sources.map { "${it.resolver}(${it.confidence})" }}")
 
                 val best = resolverScoring.selectBest(sources)
@@ -101,7 +133,9 @@ class AlbumViewModel @Inject constructor(
                     val context = PlaybackContext(type = "album", name = detail.title)
                     val entities = remaining.mapNotNull { t ->
                         val q = "${t.artist} - ${t.title}"
-                        val s = resolverManager.resolveWithHints(query = q, spotifyId = t.spotifyId)
+                        val k = "${t.title.lowercase().trim()}|${t.artist.lowercase().trim()}"
+                        val s = _trackSources.value[k]
+                            ?: resolverManager.resolveWithHints(query = q, spotifyId = t.spotifyId)
                         val b = resolverScoring.selectBest(s) ?: return@mapNotNull null
                         t.toTrackEntity(detail, b)
                     }
@@ -126,10 +160,12 @@ class AlbumViewModel @Inject constructor(
             try {
                 val entities = tracks.mapNotNull { track ->
                     val query = "${track.artist} - ${track.title}"
-                    val sources = resolverManager.resolveWithHints(
-                        query = query,
-                        spotifyId = track.spotifyId,
-                    )
+                    val key = "${track.title.lowercase().trim()}|${track.artist.lowercase().trim()}"
+                    val sources = _trackSources.value[key]
+                        ?: resolverManager.resolveWithHints(
+                            query = query,
+                            spotifyId = track.spotifyId,
+                        )
                     val best = resolverScoring.selectBest(sources) ?: return@mapNotNull null
                     track.toTrackEntity(detail, best)
                 }

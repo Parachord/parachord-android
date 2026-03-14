@@ -28,6 +28,8 @@ object Routes {
     const val ARTIST = "artist/{artistName}"
     const val ALBUM = "album/{albumTitle}/{artistName}"
 
+    const val CHAT = "chat"
+
     // Drawer destinations
     const val HISTORY = "history"
     const val FRESH_DROPS = "fresh_drops"
@@ -36,12 +38,16 @@ object Routes {
     const val CRITICAL_DARLINGS = "critical_darlings"
     const val CONCERTS = "concerts"
     const val FRIENDS = "friends"
+    const val FRIEND_DETAIL = "friend/{friendId}"
 
     fun artist(name: String): String =
         "artist/${Uri.encode(name)}"
 
     fun album(albumTitle: String, artistName: String): String =
         "album/${Uri.encode(albumTitle)}/${Uri.encode(artistName)}"
+
+    fun friendDetail(friendId: String): String =
+        "friend/${Uri.encode(friendId)}"
 }
 
 @Composable
@@ -85,6 +91,15 @@ fun ParachordNavHost(
         composable(Routes.COLLECTION) {
             com.parachord.android.ui.screens.library.CollectionScreen(
                 onOpenDrawer = onOpenDrawer,
+                onNavigateToFriend = { friendId ->
+                    navController.navigate(Routes.friendDetail(friendId))
+                },
+                onNavigateToArtist = { name ->
+                    navController.navigate(Routes.artist(name))
+                },
+                onNavigateToAlbum = { albumTitle, artistName ->
+                    navController.navigate(Routes.album(albumTitle, artistName))
+                },
             )
         }
         composable(Routes.PLAYLISTS) {
@@ -130,6 +145,10 @@ fun ParachordNavHost(
         ) {
             com.parachord.android.ui.screens.nowplaying.NowPlayingScreen(
                 onBack = { navController.popBackStack() },
+                onNavigateToArtist = { name -> navController.navigate(Routes.artist(name)) },
+                onNavigateToAlbum = { albumTitle, artistName ->
+                    navController.navigate(Routes.album(albumTitle, artistName))
+                },
             )
         }
         composable(Routes.SETTINGS) {
@@ -159,20 +178,71 @@ fun ParachordNavHost(
             )
         }
 
+        composable(
+            Routes.CHAT,
+            enterTransition = {
+                slideInHorizontally(
+                    initialOffsetX = { it },
+                    animationSpec = tween(350),
+                )
+            },
+            exitTransition = {
+                slideOutHorizontally(
+                    targetOffsetX = { it },
+                    animationSpec = tween(350),
+                )
+            },
+            popEnterTransition = {
+                slideInHorizontally(
+                    initialOffsetX = { it },
+                    animationSpec = tween(350),
+                )
+            },
+            popExitTransition = {
+                slideOutHorizontally(
+                    targetOffsetX = { it },
+                    animationSpec = tween(350),
+                )
+            },
+        ) {
+            com.parachord.android.ui.screens.chat.ChatScreen(
+                onBack = { navController.popBackStack() },
+                onNavigateToArtist = { name -> navController.navigate(Routes.artist(name)) },
+                onNavigateToAlbum = { albumTitle, artistName ->
+                    navController.navigate(Routes.album(albumTitle, artistName))
+                },
+            )
+        }
+
         // ── Drawer Destinations ─────────────────────────────────────────
         composable(Routes.HISTORY) {
             com.parachord.android.ui.screens.history.HistoryScreen(
                 onBack = { navController.popBackStack() },
+                onNavigateToAlbum = { albumTitle, artistName ->
+                    navController.navigate(Routes.album(albumTitle, artistName))
+                },
+                onNavigateToArtist = { name ->
+                    navController.navigate(Routes.artist(name))
+                },
             )
         }
         composable(Routes.FRESH_DROPS) {
             com.parachord.android.ui.screens.discover.FreshDropsScreen(
                 onBack = { navController.popBackStack() },
+                onNavigateToAlbum = { albumTitle, artistName ->
+                    navController.navigate(Routes.album(albumTitle, artistName))
+                },
+                onNavigateToArtist = { name ->
+                    navController.navigate(Routes.artist(name))
+                },
             )
         }
         composable(Routes.RECOMMENDATIONS) {
             com.parachord.android.ui.screens.discover.RecommendationsScreen(
                 onBack = { navController.popBackStack() },
+                onNavigateToArtist = { name ->
+                    navController.navigate(Routes.artist(name))
+                },
             )
         }
         composable(Routes.POP_OF_THE_TOPS) {
@@ -183,6 +253,12 @@ fun ParachordNavHost(
         composable(Routes.CRITICAL_DARLINGS) {
             com.parachord.android.ui.screens.discover.CriticalDarlingsScreen(
                 onBack = { navController.popBackStack() },
+                onNavigateToAlbum = { albumTitle, artistName ->
+                    navController.navigate(Routes.album(albumTitle, artistName))
+                },
+                onNavigateToArtist = { name ->
+                    navController.navigate(Routes.artist(name))
+                },
             )
         }
         composable(Routes.CONCERTS) {
@@ -193,6 +269,23 @@ fun ParachordNavHost(
         composable(Routes.FRIENDS) {
             com.parachord.android.ui.screens.friends.FriendsScreen(
                 onBack = { navController.popBackStack() },
+                onNavigateToFriend = { friendId ->
+                    navController.navigate(Routes.friendDetail(friendId))
+                },
+            )
+        }
+        composable(
+            route = Routes.FRIEND_DETAIL,
+            arguments = listOf(navArgument("friendId") { type = NavType.StringType }),
+        ) {
+            com.parachord.android.ui.screens.friends.FriendDetailScreen(
+                onBack = { navController.popBackStack() },
+                onNavigateToAlbum = { albumTitle, artistName ->
+                    navController.navigate(Routes.album(albumTitle, artistName))
+                },
+                onNavigateToArtist = { name ->
+                    navController.navigate(Routes.artist(name))
+                },
             )
         }
     }

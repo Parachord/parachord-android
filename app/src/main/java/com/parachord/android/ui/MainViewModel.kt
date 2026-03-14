@@ -2,6 +2,8 @@ package com.parachord.android.ui
 
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
+import com.parachord.android.data.db.entity.FriendEntity
+import com.parachord.android.data.repository.FriendsRepository
 import com.parachord.android.data.store.SettingsStore
 import com.parachord.android.playback.PlaybackController
 import com.parachord.android.playback.PlaybackState
@@ -16,6 +18,7 @@ import javax.inject.Inject
 class MainViewModel @Inject constructor(
     private val playbackStateHolder: PlaybackStateHolder,
     private val playbackController: PlaybackController,
+    friendsRepository: FriendsRepository,
     settingsStore: SettingsStore,
 ) : ViewModel() {
 
@@ -23,6 +26,10 @@ class MainViewModel @Inject constructor(
 
     val themeMode: StateFlow<String> = settingsStore.themeMode
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), "system")
+
+    /** Friends list for the sidebar drawer. */
+    val friends: StateFlow<List<FriendEntity>> = friendsRepository.getAllFriends()
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), emptyList())
 
     init {
         playbackController.connect()

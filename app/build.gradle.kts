@@ -15,7 +15,7 @@ val localProps = Properties().apply {
 }
 
 fun localProp(key: String): String =
-    localProps.getProperty(key) ?: System.getenv(key) ?: ""
+    (localProps.getProperty(key) ?: System.getenv(key) ?: "").trim()
 
 android {
     namespace = "com.parachord.android"
@@ -38,6 +38,8 @@ android {
         buildConfigField("String", "LASTFM_API_KEY", "\"${localProp("LASTFM_API_KEY")}\"")
         buildConfigField("String", "LASTFM_SHARED_SECRET", "\"${localProp("LASTFM_SHARED_SECRET")}\"")
         buildConfigField("String", "SPOTIFY_CLIENT_ID", "\"${localProp("SPOTIFY_CLIENT_ID")}\"")
+        buildConfigField("String", "SOUNDCLOUD_CLIENT_ID", "\"${localProp("SOUNDCLOUD_CLIENT_ID")}\"")
+        buildConfigField("String", "SOUNDCLOUD_CLIENT_SECRET", "\"${localProp("SOUNDCLOUD_CLIENT_SECRET")}\"")
     }
 
     buildTypes {

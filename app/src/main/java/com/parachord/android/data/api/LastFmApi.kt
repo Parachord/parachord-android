@@ -58,6 +58,15 @@ interface LastFmApi {
     ): LfmArtistInfoResponse
 
     @GET(".")
+    suspend fun getSimilarArtists(
+        @Query("method") method: String = "artist.getsimilar",
+        @Query("artist") artist: String,
+        @Query("api_key") apiKey: String,
+        @Query("limit") limit: Int = 20,
+        @Query("format") format: String = "json",
+    ): LfmSimilarArtistsResponse
+
+    @GET(".")
     suspend fun getArtistTopTracks(
         @Query("method") method: String = "artist.gettoptracks",
         @Query("artist") artist: String,
@@ -83,6 +92,55 @@ interface LastFmApi {
         @Query("api_key") apiKey: String,
         @Query("format") format: String = "json",
     ): LfmAlbumInfoResponse
+
+    @GET(".")
+    suspend fun getUserInfo(
+        @Query("method") method: String = "user.getinfo",
+        @Query("user") user: String,
+        @Query("api_key") apiKey: String,
+        @Query("format") format: String = "json",
+    ): LfmUserInfoResponse
+
+    // --- User-based endpoints ---
+
+    @GET(".")
+    suspend fun getUserTopTracks(
+        @Query("method") method: String = "user.gettoptracks",
+        @Query("user") user: String,
+        @Query("period") period: String = "overall",
+        @Query("limit") limit: Int = 50,
+        @Query("api_key") apiKey: String,
+        @Query("format") format: String = "json",
+    ): LfmUserTopTracksResponse
+
+    @GET(".")
+    suspend fun getUserTopAlbums(
+        @Query("method") method: String = "user.gettopalbums",
+        @Query("user") user: String,
+        @Query("period") period: String = "overall",
+        @Query("limit") limit: Int = 50,
+        @Query("api_key") apiKey: String,
+        @Query("format") format: String = "json",
+    ): LfmUserTopAlbumsResponse
+
+    @GET(".")
+    suspend fun getUserTopArtists(
+        @Query("method") method: String = "user.gettopartists",
+        @Query("user") user: String,
+        @Query("period") period: String = "overall",
+        @Query("limit") limit: Int = 50,
+        @Query("api_key") apiKey: String,
+        @Query("format") format: String = "json",
+    ): LfmUserTopArtistsResponse
+
+    @GET(".")
+    suspend fun getUserRecentTracks(
+        @Query("method") method: String = "user.getrecenttracks",
+        @Query("user") user: String,
+        @Query("limit") limit: Int = 50,
+        @Query("api_key") apiKey: String,
+        @Query("format") format: String = "json",
+    ): LfmUserRecentTracksResponse
 }
 
 // --- Response models ---
@@ -205,6 +263,11 @@ data class LfmSimilarArtist(
 )
 
 @Serializable
+data class LfmSimilarArtistsResponse(
+    val similarartists: LfmSimilar? = null,
+)
+
+@Serializable
 data class LfmAlbumInfoResponse(
     val album: LfmAlbumDetail? = null,
 )
@@ -309,6 +372,150 @@ data class LfmTopAlbum(
     val artist: LfmTopTrackArtist? = null,
     val image: List<LfmImage> = emptyList(),
     val mbid: String? = null,
+)
+
+// --- User top tracks ---
+
+@Serializable
+data class LfmUserTopTracksResponse(
+    val toptracks: LfmUserTopTracks? = null,
+)
+
+@Serializable
+data class LfmUserTopTracks(
+    val track: List<LfmUserTopTrack> = emptyList(),
+)
+
+@Serializable
+data class LfmUserTopTrack(
+    val name: String,
+    val playcount: String? = null,
+    val artist: LfmUserTopTrackArtist? = null,
+    val image: List<LfmImage> = emptyList(),
+    val mbid: String? = null,
+    val url: String? = null,
+    @SerialName("@attr") val attr: LfmUserRankAttr? = null,
+)
+
+@Serializable
+data class LfmUserTopTrackArtist(
+    val name: String,
+    val mbid: String? = null,
+)
+
+// --- User top albums ---
+
+@Serializable
+data class LfmUserTopAlbumsResponse(
+    val topalbums: LfmUserTopAlbums? = null,
+)
+
+@Serializable
+data class LfmUserTopAlbums(
+    val album: List<LfmUserTopAlbum> = emptyList(),
+)
+
+@Serializable
+data class LfmUserTopAlbum(
+    val name: String,
+    val playcount: String? = null,
+    val artist: LfmUserTopTrackArtist? = null,
+    val image: List<LfmImage> = emptyList(),
+    val mbid: String? = null,
+    val url: String? = null,
+    @SerialName("@attr") val attr: LfmUserRankAttr? = null,
+)
+
+// --- User top artists ---
+
+@Serializable
+data class LfmUserTopArtistsResponse(
+    val topartists: LfmUserTopArtists? = null,
+)
+
+@Serializable
+data class LfmUserTopArtists(
+    val artist: List<LfmUserTopArtist> = emptyList(),
+)
+
+@Serializable
+data class LfmUserTopArtist(
+    val name: String,
+    val playcount: String? = null,
+    val image: List<LfmImage> = emptyList(),
+    val mbid: String? = null,
+    val url: String? = null,
+    @SerialName("@attr") val attr: LfmUserRankAttr? = null,
+)
+
+// --- User recent tracks ---
+
+@Serializable
+data class LfmUserRecentTracksResponse(
+    val recenttracks: LfmUserRecentTracks? = null,
+)
+
+@Serializable
+data class LfmUserRecentTracks(
+    val track: List<LfmUserRecentTrack> = emptyList(),
+)
+
+@Serializable
+data class LfmUserRecentTrack(
+    val name: String,
+    val artist: LfmUserRecentTrackArtist? = null,
+    val album: LfmUserRecentTrackAlbum? = null,
+    val image: List<LfmImage> = emptyList(),
+    val url: String? = null,
+    val mbid: String? = null,
+    val date: LfmUserTrackDate? = null,
+    @SerialName("@attr") val attr: LfmUserNowPlayingAttr? = null,
+)
+
+@Serializable
+data class LfmUserRecentTrackArtist(
+    @SerialName("#text") val name: String,
+    val mbid: String? = null,
+)
+
+@Serializable
+data class LfmUserRecentTrackAlbum(
+    @SerialName("#text") val name: String,
+    val mbid: String? = null,
+)
+
+@Serializable
+data class LfmUserTrackDate(
+    val uts: String? = null,
+    @SerialName("#text") val text: String? = null,
+)
+
+@Serializable
+data class LfmUserNowPlayingAttr(
+    val nowplaying: String? = null,
+)
+
+// --- Shared user attr ---
+
+@Serializable
+data class LfmUserRankAttr(
+    val rank: String? = null,
+)
+
+// --- User info ---
+
+@Serializable
+data class LfmUserInfoResponse(
+    val user: LfmUserInfo? = null,
+)
+
+@Serializable
+data class LfmUserInfo(
+    val name: String,
+    val realname: String? = null,
+    val image: List<LfmImage> = emptyList(),
+    val url: String? = null,
+    val playcount: String? = null,
 )
 
 object LfmAlbumTrackListSerializer : KSerializer<LfmAlbumTrackList> {

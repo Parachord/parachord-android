@@ -31,6 +31,7 @@ import androidx.compose.material3.SearchBarDefaults
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -69,6 +70,7 @@ fun SearchScreen(
     val artists by viewModel.artistResults.collectAsStateWithLifecycle()
     val isSearchingRemote by viewModel.isSearchingRemote.collectAsStateWithLifecycle()
     val searchHistory by viewModel.searchHistory.collectAsStateWithLifecycle()
+    val trackResolvers by viewModel.trackResolvers.collectAsState()
     var active by remember { mutableStateOf(false) }
 
     Column(modifier = modifier.fillMaxSize()) {
@@ -207,6 +209,7 @@ fun SearchScreen(
                             title = track.title,
                             artist = track.artist,
                             artworkUrl = track.artworkUrl,
+                            resolvers = trackResolvers["${track.title.lowercase().trim()}|${track.artist.lowercase().trim()}"]?.ifEmpty { null },
                             onClick = {
                                 viewModel.saveHistoryEntry(
                                     resultType = "track",

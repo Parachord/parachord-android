@@ -2,6 +2,8 @@ package com.parachord.android.app
 
 import com.parachord.android.data.db.ParachordDatabase
 import com.parachord.android.data.db.dao.AlbumDao
+import com.parachord.android.data.db.dao.ChatMessageDao
+import com.parachord.android.data.db.dao.FriendDao
 import com.parachord.android.data.db.dao.PlaylistDao
 import com.parachord.android.data.db.dao.SearchHistoryDao
 import com.parachord.android.data.db.dao.TrackDao
@@ -25,4 +27,10 @@ object DatabaseModule {
 
     @Provides
     fun provideSearchHistoryDao(database: ParachordDatabase): SearchHistoryDao = database.searchHistoryDao()
+
+    @Provides
+    fun provideFriendDao(database: ParachordDatabase): FriendDao = database.friendDao()
+
+    @Provides
+    fun provideChatMessageDao(database: ParachordDatabase): ChatMessageDao = database.chatMessageDao()
 }

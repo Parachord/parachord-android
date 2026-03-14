@@ -1,6 +1,8 @@
 package com.parachord.android.ui.screens.nowplaying
 
 import androidx.compose.foundation.background
+import androidx.compose.foundation.clickable
+import androidx.compose.foundation.gestures.detectVerticalDragGestures
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -14,7 +16,7 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.WindowInsets
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.automirrored.filled.ArrowBack
+import androidx.compose.material.icons.filled.KeyboardArrowDown
 import androidx.compose.material.icons.filled.Pause
 import androidx.compose.material.icons.filled.PlayArrow
 import androidx.compose.material.icons.filled.SkipNext
@@ -40,6 +42,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.text.font.FontWeight
@@ -65,6 +68,8 @@ private val ActiveControlColor = Color(0xFFC084FC)
 @Composable
 fun NowPlayingScreen(
     onBack: () -> Unit,
+    onNavigateToArtist: (artistName: String) -> Unit = {},
+    onNavigateToAlbum: (albumTitle: String, artistName: String) -> Unit = { _, _ -> },
     modifier: Modifier = Modifier,
     viewModel: NowPlayingViewModel = hiltViewModel(),
 ) {
@@ -83,10 +88,25 @@ fun NowPlayingScreen(
 
     BottomSheetScaffold(
         scaffoldState = scaffoldState,
-        sheetPeekHeight = 0.dp,
+        sheetPeekHeight = 28.dp, // Small peek so swipe-up gesture is detected
         sheetContainerColor = PlayerSurface,
         sheetContentColor = PlayerTextPrimary,
-        sheetDragHandle = null,
+        sheetDragHandle = {
+            // Subtle drag handle indicator for swipe-up affordance
+            Box(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(vertical = 10.dp),
+                contentAlignment = Alignment.Center,
+            ) {
+                Box(
+                    modifier = Modifier
+                        .size(width = 36.dp, height = 4.dp)
+                        .clip(CircleShape)
+                        .background(PlayerTextSecondary.copy(alpha = 0.4f)),
+                )
+            }
+        },
         containerColor = PlayerSurface,
         modifier = modifier,
         sheetContent = {
@@ -103,13 +123,32 @@ fun NowPlayingScreen(
         Box(
             modifier = Modifier
                 .fillMaxSize()
-                .background(PlayerSurface),
+                .background(PlayerSurface)
+                .pointerInput(Unit) {
+                    var totalDrag = 0f
+                    detectVerticalDragGestures(
+                        onDragStart = { totalDrag = 0f },
+                        onVerticalDrag = { _, dragAmount ->
+                            totalDrag += dragAmount
+                        },
+                        onDragEnd = {
+                            // Negative = swipe up → expand queue
+                            if (totalDrag < -80f) {
+                                scope.launch { sheetState.expand() }
+                            }
+                            // Positive = swipe down → collapse to mini-player
+                            else if (totalDrag > 80f) {
+                                onBack()
+                            }
+                        },
+                    )
+                },
         ) {
             Column(
                 modifier = Modifier.fillMaxSize(),
                 horizontalAlignment = Alignment.CenterHorizontally,
             ) {
-                // Always-dark top app bar
+                // Always-dark top app bar — tap anywhere to collapse
                 TopAppBar(
                     title = {
                         Text(
@@ -124,9 +163,10 @@ fun NowPlayingScreen(
                     navigationIcon = {
                         IconButton(onClick = onBack) {
                             Icon(
-                                Icons.AutoMirrored.Filled.ArrowBack,
-                                contentDescription = "Back",
+                                Icons.Default.KeyboardArrowDown,
+                                contentDescription = "Close",
                                 tint = PlayerTextPrimary,
+                                modifier = Modifier.size(32.dp),
                             )
                         }
                     },
@@ -134,16 +174,24 @@ fun NowPlayingScreen(
                         containerColor = Color.Transparent,
                     ),
                     windowInsets = WindowInsets(0),
+                    modifier = Modifier.clickable { onBack() },
                 )
 
                 Spacer(modifier = Modifier.height(16.dp))
 
-                // Large album artwork with shadow
+                // Large album artwork with shadow — tap to open album page
                 AlbumArtCardFill(
                     artworkUrl = track?.artworkUrl,
                     modifier = Modifier
                         .fillMaxWidth(0.85f)
-                        .padding(horizontal = 8.dp),
+                        .padding(horizontal = 8.dp)
+                        .then(
+                            if (track?.album != null && track.artist.isNotBlank()) {
+                                Modifier.clickable {
+                                    onNavigateToAlbum(track.album, track.artist)
+                                }
+                            } else Modifier
+                        ),
                     cornerRadius = 12.dp,
                     elevation = 8.dp,
                     placeholderName = track?.artist ?: track?.title,
@@ -172,6 +220,9 @@ fun NowPlayingScreen(
                         textAlign = TextAlign.Center,
                         maxLines = 1,
                         overflow = TextOverflow.Ellipsis,
+                        modifier = if (track?.artist != null) {
+                            Modifier.clickable { onNavigateToArtist(track.artist) }
+                        } else Modifier,
                     )
 
                     // Resolver icon

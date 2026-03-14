@@ -109,11 +109,12 @@ private fun ParachordAppContent(mainViewModel: MainViewModel) {
     val navBackStackEntry by navController.currentBackStackEntryAsState()
     val currentDestination = navBackStackEntry?.destination
 
-    val fullScreenRoutes = setOf(Routes.NOW_PLAYING)
+    val fullScreenRoutes = setOf(Routes.NOW_PLAYING, Routes.CHAT)
     val showBottomBar = currentDestination?.route !in fullScreenRoutes
 
     val playbackState by mainViewModel.playbackState.collectAsStateWithLifecycle()
     val currentTrack = playbackState.currentTrack
+    val friends by mainViewModel.friends.collectAsStateWithLifecycle()
 
     var showActionOverlay by rememberSaveable { mutableStateOf(false) }
 
@@ -127,9 +128,20 @@ private fun ParachordAppContent(mainViewModel: MainViewModel) {
                 ModalDrawerSheet {
                     DrawerContent(
                         currentRoute = currentDestination?.route,
+                        friends = friends,
                         onItemClick = { route ->
                             scope.launch { drawerState.close() }
                             navController.navigate(route) {
+                                popUpTo(navController.graph.findStartDestination().id) {
+                                    saveState = true
+                                }
+                                launchSingleTop = true
+                                restoreState = true
+                            }
+                        },
+                        onFriendClick = { friendId ->
+                            scope.launch { drawerState.close() }
+                            navController.navigate(Routes.friendDetail(friendId)) {
                                 popUpTo(navController.graph.findStartDestination().id) {
                                     saveState = true
                                 }
@@ -247,8 +259,18 @@ private fun ParachordAppContent(mainViewModel: MainViewModel) {
             onDismiss = { showActionOverlay = false },
             onCreatePlaylist = { showActionOverlay = false },
             onImportPlaylist = { showActionOverlay = false },
-            onAddFriend = { showActionOverlay = false },
-            onChatWithShuffleupagus = { showActionOverlay = false },
+            onAddFriend = {
+                showActionOverlay = false
+                navController.navigate(Routes.FRIENDS) {
+                    launchSingleTop = true
+                }
+            },
+            onChatWithShuffleupagus = {
+                showActionOverlay = false
+                navController.navigate(Routes.CHAT) {
+                    launchSingleTop = true
+                }
+            },
         )
     }
 }

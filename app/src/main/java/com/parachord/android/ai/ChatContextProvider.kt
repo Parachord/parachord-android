@@ -1,0 +1,115 @@
+package com.parachord.android.ai
+
+import com.parachord.android.data.store.SettingsStore
+import com.parachord.android.playback.PlaybackStateHolder
+import java.text.SimpleDateFormat
+import java.util.Date
+import java.util.Locale
+import javax.inject.Inject
+import javax.inject.Singleton
+
+/**
+ * Gathers current app state and builds the AI system prompt,
+ * matching the desktop app's ai-chat.js approach.
+ */
+@Singleton
+class ChatContextProvider @Inject constructor(
+    private val playbackStateHolder: PlaybackStateHolder,
+    private val settingsStore: SettingsStore,
+) {
+
+    suspend fun buildSystemPrompt(): String {
+        val dateFormat = SimpleDateFormat("EEEE, MMMM d, yyyy", Locale.US)
+        val currentDate = dateFormat.format(Date())
+        val currentState = formatState()
+
+        return """
+            |You are a helpful music DJ assistant for Parachord, a multi-source music player.
+            |You can control playback, search for music, manage the queue, and answer questions about the user's music.
+            |
+            |TODAY'S DATE: $currentDate
+            |
+            |CURRENT STATE:
+            |$currentState
+            |
+            |GUIDELINES:
+            |- Be concise and helpful
+            |- When taking actions, confirm what you did
+            |- If you need to play or queue music, use the search tool first to find tracks, then use play or queue_add
+            |- For playback control (pause, skip, etc.), use the control tool
+            |- If a track isn't found, suggest alternatives or ask for clarification
+            |- Keep responses brief - this is a music app, not a chat app
+            |- When users ask about "recent" or "last X years", use today's date to calculate the correct time range
+            |
+            |CARD FORMATTING (MANDATORY — DO NOT SKIP):
+            |You MUST use card syntax for EVERY mention of a track, album, or artist. No exceptions.
+            |Never write a track name, album name, or artist name as plain text or bold text.
+            |
+            |Card syntax:
+            |- Track: {{track|Song Title|Artist Name|Album Name}}
+            |- Album: {{album|Album Title|Artist Name}}
+            |- Artist: {{artist|Artist Name}}
+            |
+            |Cards work inline within sentences. Examples:
+            |"I'd recommend {{track|Storm|Godspeed You! Black Emperor|Lift Your Skinny Fists}} and {{track|Your Hand in Mine|Explosions in the Sky|The Earth Is Not a Cold Dead Place}}."
+            |"You might enjoy {{artist|Mogwai}} or {{artist|Sigur Rós}}."
+            |"Check out {{album|In Rainbows|Radiohead}} — it's a masterpiece."
+            |"{{artist|Radiohead}} is one of the most influential bands of the 90s."
+            |
+            |IMPORTANT:
+            |- EVERY artist name MUST be wrapped as {{artist|Name}} — never use **bold** or plain text for artists
+            |- The album field is REQUIRED for tracks (it enables artwork display)
+            |- For track cards: {{track|SONG|ARTIST|ALBUM}} — do NOT swap artist and album
+            |- For album cards: {{album|ALBUM TITLE|ARTIST NAME}} — album first, then artist
+            |- NEVER use image markdown like ![Artist](url)
+            |- NEVER use bold (**Name**) for artist names — use {{artist|Name}} instead
+            |- Use cards inline, not on separate lines in lists
+        """.trimMargin()
+    }
+
+    private suspend fun formatState(): String {
+        val state = playbackStateHolder.state.value
+        val lines = mutableListOf<String>()
+
+        // Now playing
+        val track = state.currentTrack
+        if (track != null) {
+            val status = if (state.isPlaying) "playing" else "paused"
+            val albumPart = track.album?.let { " | Album: $it" } ?: ""
+            val resolverPart = track.resolver?.let { " | Source: $it" } ?: ""
+            lines.add("Now playing ($status): ${track.title} by ${track.artist}$albumPart$resolverPart")
+        } else {
+            lines.add("Nothing is currently playing.")
+        }
+
+        // Queue
+        val queue = state.upNext
+        if (queue.isNotEmpty()) {
+            lines.add("Queue:")
+            val displayCount = minOf(queue.size, 10)
+            for (i in 0 until displayCount) {
+                val t = queue[i]
+                lines.add("  ${i + 1}. ${t.title} by ${t.artist}")
+            }
+            if (queue.size > 10) {
+                lines.add("  ... and ${queue.size - 10} more")
+            }
+        } else {
+            lines.add("Queue is empty.")
+        }
+
+        // Shuffle
+        lines.add("Shuffle: ${if (state.shuffleEnabled) "On" else "Off"}")
+
+        // Blocked recommendations
+        val blocked = settingsStore.getBlockedRecommendations()
+        if (blocked.isNotEmpty()) {
+            lines.add("Blocked recommendations:")
+            for (entry in blocked) {
+                lines.add("  - $entry")
+            }
+        }
+
+        return lines.joinToString("\n")
+    }
+}

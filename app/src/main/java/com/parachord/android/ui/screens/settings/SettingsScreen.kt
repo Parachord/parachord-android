@@ -4,6 +4,7 @@ import androidx.compose.animation.core.animateDpAsState
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.text.selection.SelectionContainer
 import androidx.compose.foundation.gestures.detectDragGesturesAfterLongPress
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -30,7 +31,11 @@ import androidx.compose.material.icons.filled.FolderOpen
 import androidx.compose.material.icons.outlined.Info
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
+import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.ExperimentalMaterial3Api
+import androidx.compose.material3.ExposedDropdownMenuBox
+import androidx.compose.material3.ExposedDropdownMenuDefaults
+import androidx.compose.material3.MenuAnchorType
 import androidx.compose.material3.FilterChip
 import androidx.compose.material3.FilterChipDefaults
 import androidx.compose.material3.HorizontalDivider
@@ -38,6 +43,7 @@ import androidx.compose.material3.Icon
 import androidx.compose.material3.ListItem
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.ModalBottomSheet
+import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
@@ -57,9 +63,17 @@ import androidx.compose.ui.draw.shadow
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.platform.LocalUriHandler
+import androidx.compose.ui.text.LinkAnnotation
+import androidx.compose.ui.text.SpanStyle
+import androidx.compose.ui.text.buildAnnotatedString
+import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.text.style.TextAlign
+import androidx.compose.ui.text.style.TextDecoration
 import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.text.withStyle
 import androidx.compose.ui.unit.IntOffset
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.em
@@ -102,6 +116,15 @@ private val builtInPlugins = listOf(
         description = "Stream music from Spotify via Connect",
     ),
     PluginInfo(
+        id = "soundcloud",
+        name = "SoundCloud",
+        resolverId = "soundcloud",
+        bgColor = Color(0xFFFF5500),
+        category = PluginCategory.RESOLVER,
+        capabilities = listOf("Resolve", "Search", "Stream"),
+        description = "Search and stream tracks from SoundCloud",
+    ),
+    PluginInfo(
         id = "local-files",
         name = "Local Files",
         resolverId = "localfiles",
@@ -119,6 +142,69 @@ private val builtInPlugins = listOf(
         capabilities = listOf("Metadata", "Scrobble", "Recommendations"),
         description = "Scrobbling, artist info, and recommendations",
     ),
+    PluginInfo(
+        id = "listenbrainz",
+        name = "ListenBrainz",
+        resolverId = "listenbrainz",
+        bgColor = Color(0xFF353070),
+        category = PluginCategory.META_SERVICE,
+        capabilities = listOf("Scrobble", "Stats"),
+        description = "Open-source listening history and statistics",
+    ),
+    PluginInfo(
+        id = "librefm",
+        name = "Libre.fm",
+        resolverId = "librefm",
+        bgColor = Color(0xFF2E7D32),
+        category = PluginCategory.META_SERVICE,
+        capabilities = listOf("Scrobble"),
+        description = "Free and open music scrobbling service",
+    ),
+    PluginInfo(
+        id = "discogs",
+        name = "Discogs",
+        resolverId = "discogs",
+        bgColor = Color(0xFF333333),
+        category = PluginCategory.META_SERVICE,
+        capabilities = listOf("Metadata", "Bios", "Images"),
+        description = "Artist bios and images from the Discogs community database",
+    ),
+    PluginInfo(
+        id = "wikipedia",
+        name = "Wikipedia",
+        resolverId = "wikipedia",
+        bgColor = Color(0xFF636466),
+        category = PluginCategory.META_SERVICE,
+        capabilities = listOf("Metadata", "Bios", "Images"),
+        description = "Encyclopedia-style artist bios and images via Wikidata",
+    ),
+    PluginInfo(
+        id = "chatgpt",
+        name = "ChatGPT",
+        resolverId = "chatgpt",
+        bgColor = Color(0xFF10A37F),
+        category = PluginCategory.META_SERVICE,
+        capabilities = listOf("AI DJ", "Chat"),
+        description = "Generate playlists and chat with AI DJ using ChatGPT.",
+    ),
+    PluginInfo(
+        id = "claude",
+        name = "Claude",
+        resolverId = "claude",
+        bgColor = Color(0xFFD97757),
+        category = PluginCategory.META_SERVICE,
+        capabilities = listOf("AI DJ", "Chat"),
+        description = "Anthropic's Claude — thoughtful and capable AI assistant.",
+    ),
+    PluginInfo(
+        id = "gemini",
+        name = "Google Gemini",
+        resolverId = "gemini",
+        bgColor = Color(0xFF4285F4),
+        category = PluginCategory.META_SERVICE,
+        capabilities = listOf("AI DJ", "Chat"),
+        description = "Generate playlists and chat with AI DJ using Google Gemini.",
+    ),
 )
 
 // ── Settings Screen ────────────────────────────────────────────────
@@ -133,7 +219,17 @@ fun SettingsScreen(
     val scrobbling by viewModel.scrobblingEnabled.collectAsStateWithLifecycle()
     val spotifyConnected by viewModel.spotifyConnected.collectAsStateWithLifecycle()
     val lastFmConnected by viewModel.lastFmConnected.collectAsStateWithLifecycle()
+    val listenBrainzConnected by viewModel.listenBrainzConnected.collectAsStateWithLifecycle()
+    val libreFmConnected by viewModel.libreFmConnected.collectAsStateWithLifecycle()
+    val soundCloudConnected by viewModel.soundCloudConnected.collectAsStateWithLifecycle()
+    val soundCloudCredentialsSaved by viewModel.soundCloudCredentialsSaved.collectAsStateWithLifecycle()
     val persistQueue by viewModel.persistQueue.collectAsStateWithLifecycle()
+    val libreFmAuthError by viewModel.libreFmAuthError.collectAsStateWithLifecycle()
+    val listenBrainzAuthError by viewModel.listenBrainzAuthError.collectAsStateWithLifecycle()
+    val disabledMetaProviders by viewModel.disabledMetaProviders.collectAsStateWithLifecycle()
+    val chatGptConnected by viewModel.chatGptConnected.collectAsStateWithLifecycle()
+    val claudeConnected by viewModel.claudeConnected.collectAsStateWithLifecycle()
+    val geminiConnected by viewModel.geminiConnected.collectAsStateWithLifecycle()
 
     Column(modifier = modifier.fillMaxSize()) {
         TopAppBar(
@@ -156,6 +252,9 @@ fun SettingsScreen(
                 0 -> PlugInsTab(
                     spotifyConnected = spotifyConnected,
                     lastFmConnected = lastFmConnected,
+                    listenBrainzConnected = listenBrainzConnected,
+                    libreFmConnected = libreFmConnected,
+                    soundCloudConnected = soundCloudConnected,
                     onSpotifyToggle = {
                         if (spotifyConnected) viewModel.disconnectSpotify()
                         else viewModel.connectSpotify(BuildConfig.SPOTIFY_CLIENT_ID)
@@ -164,8 +263,30 @@ fun SettingsScreen(
                         if (lastFmConnected) viewModel.disconnectLastFm()
                         else viewModel.connectLastFm(BuildConfig.LASTFM_API_KEY)
                     },
+                    soundCloudCredentialsSaved = soundCloudCredentialsSaved,
+                    onSoundCloudSaveCredentials = { id, secret -> viewModel.saveSoundCloudCredentials(id, secret) },
+                    onSoundCloudConnect = { viewModel.connectSoundCloud() },
+                    onSoundCloudDisconnect = { viewModel.disconnectSoundCloud() },
+                    onSoundCloudClearCredentials = { viewModel.clearSoundCloudCredentials() },
+                    onListenBrainzTokenSubmit = { viewModel.setListenBrainzToken(it) },
+                    onListenBrainzDisconnect = { viewModel.disconnectListenBrainz() },
+                    listenBrainzAuthError = listenBrainzAuthError,
+                    onLibreFmConnect = { user, pass -> viewModel.connectLibreFm(user, pass) },
+                    onLibreFmDisconnect = { viewModel.disconnectLibreFm() },
+                    libreFmAuthError = libreFmAuthError,
                     scrobbling = scrobbling,
                     onScrobblingChanged = { viewModel.setScrobbling(it) },
+                    disabledMetaProviders = disabledMetaProviders,
+                    onMetaProviderToggle = { name, enabled ->
+                        viewModel.setMetaProviderEnabled(name, enabled)
+                    },
+                    chatGptConnected = chatGptConnected,
+                    claudeConnected = claudeConnected,
+                    geminiConnected = geminiConnected,
+                    onSaveAiConfig = { providerId, apiKey, model ->
+                        viewModel.saveAiProviderConfig(providerId, apiKey, model)
+                    },
+                    onClearAiProvider = { viewModel.clearAiProvider(it) },
                 )
                 1 -> GeneralTab(
                     themeMode = themeMode,
@@ -186,10 +307,31 @@ fun SettingsScreen(
 private fun PlugInsTab(
     spotifyConnected: Boolean,
     lastFmConnected: Boolean,
+    listenBrainzConnected: Boolean,
+    libreFmConnected: Boolean,
+    soundCloudConnected: Boolean,
     onSpotifyToggle: () -> Unit,
     onLastFmToggle: () -> Unit,
+    soundCloudCredentialsSaved: Boolean = false,
+    onSoundCloudSaveCredentials: (String, String) -> Unit = { _, _ -> },
+    onSoundCloudConnect: () -> Unit = {},
+    onSoundCloudDisconnect: () -> Unit = {},
+    onSoundCloudClearCredentials: () -> Unit = {},
+    onListenBrainzTokenSubmit: (String) -> Unit,
+    onListenBrainzDisconnect: () -> Unit,
+    listenBrainzAuthError: String?,
+    onLibreFmConnect: (String, String) -> Unit,
+    onLibreFmDisconnect: () -> Unit,
+    libreFmAuthError: String?,
     scrobbling: Boolean,
     onScrobblingChanged: (Boolean) -> Unit,
+    disabledMetaProviders: Set<String> = emptySet(),
+    onMetaProviderToggle: (String, Boolean) -> Unit = { _, _ -> },
+    chatGptConnected: Boolean = false,
+    claudeConnected: Boolean = false,
+    geminiConnected: Boolean = false,
+    onSaveAiConfig: (String, String, String) -> Unit = { _, _, _ -> },
+    onClearAiProvider: (String) -> Unit = {},
 ) {
     var selectedPlugin by remember { mutableStateOf<PluginInfo?>(null) }
 
@@ -200,8 +342,17 @@ private fun PlugInsTab(
 
     fun isConnected(pluginId: String): Boolean = when (pluginId) {
         "spotify" -> spotifyConnected
+        "soundcloud" -> soundCloudConnected
         "lastfm" -> lastFmConnected
+        "listenbrainz" -> listenBrainzConnected
+        "librefm" -> libreFmConnected
         "local-files" -> true // always available
+        // Discogs and Wikipedia are always available (no auth) — enabled by default
+        "discogs" -> pluginId !in disabledMetaProviders
+        "wikipedia" -> pluginId !in disabledMetaProviders
+        "chatgpt" -> chatGptConnected
+        "claude" -> claudeConnected
+        "gemini" -> geminiConnected
         else -> false
     }
 
@@ -248,25 +399,30 @@ private fun PlugInsTab(
             )
             Spacer(modifier = Modifier.height(12.dp))
         }
-        item {
-            Row(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .padding(horizontal = 16.dp),
-                horizontalArrangement = Arrangement.spacedBy(12.dp),
-            ) {
-                metaServices.forEach { plugin ->
-                    PluginTile(
-                        plugin = plugin,
-                        isConnected = isConnected(plugin.id),
-                        priorityNumber = null,
-                        onClick = { selectedPlugin = plugin },
-                        modifier = Modifier.weight(1f),
-                    )
-                }
-                // Fill remaining space
-                repeat(3 - metaServices.size) {
-                    Spacer(modifier = Modifier.weight(1f))
+        // Meta Services tiles: 3 per row
+        val rows = metaServices.chunked(3)
+        rows.forEach { rowPlugins ->
+            item {
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(horizontal = 16.dp)
+                        .padding(bottom = if (rowPlugins !== rows.last()) 12.dp else 0.dp),
+                    horizontalArrangement = Arrangement.spacedBy(12.dp),
+                ) {
+                    rowPlugins.forEach { plugin ->
+                        PluginTile(
+                            plugin = plugin,
+                            isConnected = isConnected(plugin.id),
+                            priorityNumber = null,
+                            onClick = { selectedPlugin = plugin },
+                            modifier = Modifier.weight(1f),
+                        )
+                    }
+                    // Fill remaining space in last row
+                    repeat(3 - rowPlugins.size) {
+                        Spacer(modifier = Modifier.weight(1f))
+                    }
                 }
             }
         }
@@ -283,11 +439,27 @@ private fun PlugInsTab(
             onToggleConnection = {
                 when (plugin.id) {
                     "spotify" -> onSpotifyToggle()
+                    "soundcloud" -> if (soundCloudConnected) onSoundCloudDisconnect() else onSoundCloudConnect()
                     "lastfm" -> onLastFmToggle()
+                    "discogs" -> onMetaProviderToggle("discogs", !isConnected("discogs"))
+                    "wikipedia" -> onMetaProviderToggle("wikipedia", !isConnected("wikipedia"))
                 }
             },
             scrobbling = scrobbling,
             onScrobblingChanged = onScrobblingChanged,
+            soundCloudCredentialsSaved = soundCloudCredentialsSaved,
+            onSoundCloudSaveCredentials = onSoundCloudSaveCredentials,
+            onSoundCloudConnect = onSoundCloudConnect,
+            onSoundCloudDisconnect = onSoundCloudDisconnect,
+            onSoundCloudClearCredentials = onSoundCloudClearCredentials,
+            onListenBrainzTokenSubmit = onListenBrainzTokenSubmit,
+            onListenBrainzDisconnect = onListenBrainzDisconnect,
+            listenBrainzAuthError = listenBrainzAuthError,
+            onLibreFmConnect = onLibreFmConnect,
+            onLibreFmDisconnect = onLibreFmDisconnect,
+            libreFmAuthError = libreFmAuthError,
+            onSaveAiConfig = onSaveAiConfig,
+            onClearAiProvider = onClearAiProvider,
         )
     }
 }
@@ -480,6 +652,19 @@ private fun PluginConfigSheet(
     onToggleConnection: () -> Unit,
     scrobbling: Boolean,
     onScrobblingChanged: (Boolean) -> Unit,
+    soundCloudCredentialsSaved: Boolean = false,
+    onSoundCloudSaveCredentials: (String, String) -> Unit = { _, _ -> },
+    onSoundCloudConnect: () -> Unit = {},
+    onSoundCloudDisconnect: () -> Unit = {},
+    onSoundCloudClearCredentials: () -> Unit = {},
+    onListenBrainzTokenSubmit: (String) -> Unit = {},
+    onListenBrainzDisconnect: () -> Unit = {},
+    listenBrainzAuthError: String? = null,
+    onLibreFmConnect: (String, String) -> Unit = { _, _ -> },
+    onLibreFmDisconnect: () -> Unit = {},
+    libreFmAuthError: String? = null,
+    onSaveAiConfig: (String, String, String) -> Unit = { _, _, _ -> },
+    onClearAiProvider: (String) -> Unit = {},
 ) {
     val sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
 
@@ -578,8 +763,50 @@ private fun PluginConfigSheet(
             // Plugin-specific config
             when (plugin.id) {
                 "spotify" -> SpotifyConfig(isConnected, onToggleConnection)
+                "soundcloud" -> SoundCloudConfig(
+                    isConnected = isConnected,
+                    credentialsSaved = soundCloudCredentialsSaved,
+                    onSaveCredentials = onSoundCloudSaveCredentials,
+                    onConnect = onSoundCloudConnect,
+                    onDisconnect = onSoundCloudDisconnect,
+                    onClearCredentials = onSoundCloudClearCredentials,
+                )
                 "local-files" -> LocalFilesConfig()
                 "lastfm" -> LastFmConfig(isConnected, onToggleConnection, scrobbling, onScrobblingChanged)
+                "listenbrainz" -> ListenBrainzConfig(
+                    isConnected = isConnected,
+                    onTokenSubmit = onListenBrainzTokenSubmit,
+                    onDisconnect = onListenBrainzDisconnect,
+                    authError = listenBrainzAuthError,
+                    scrobbling = scrobbling,
+                    onScrobblingChanged = onScrobblingChanged,
+                )
+                "librefm" -> LibreFmConfig(
+                    isConnected = isConnected,
+                    onConnect = onLibreFmConnect,
+                    onDisconnect = onLibreFmDisconnect,
+                    authError = libreFmAuthError,
+                    scrobbling = scrobbling,
+                    onScrobblingChanged = onScrobblingChanged,
+                )
+                "discogs" -> ToggleableMetaConfig(
+                    isEnabled = isConnected,
+                    onToggle = onToggleConnection,
+                    enabledText = "Discogs metadata provider is active",
+                    disabledText = "Enable Discogs to get artist bios and images from the Discogs community database.",
+                )
+                "wikipedia" -> ToggleableMetaConfig(
+                    isEnabled = isConnected,
+                    onToggle = onToggleConnection,
+                    enabledText = "Wikipedia metadata provider is active",
+                    disabledText = "Enable Wikipedia to get encyclopedia-style artist bios and images via Wikidata.",
+                )
+                "chatgpt", "claude", "gemini" -> AiProviderConfig(
+                    providerId = plugin.id,
+                    isConnected = isConnected,
+                    onSaveConfig = onSaveAiConfig,
+                    onClear = onClearAiProvider,
+                )
             }
         }
     }
@@ -628,6 +855,184 @@ private fun SpotifyConfig(isConnected: Boolean, onToggle: () -> Unit) {
         Spacer(modifier = Modifier.height(12.dp))
         TextButton(onClick = onToggle) {
             Text("Connect Spotify", color = MaterialTheme.colorScheme.primary)
+        }
+    }
+}
+
+// ── SoundCloud Config ──────────────────────────────────────────────
+
+@Composable
+private fun SoundCloudConfig(
+    isConnected: Boolean,
+    credentialsSaved: Boolean,
+    onSaveCredentials: (String, String) -> Unit,
+    onConnect: () -> Unit,
+    onDisconnect: () -> Unit,
+    onClearCredentials: () -> Unit,
+) {
+    Spacer(modifier = Modifier.height(16.dp))
+    HorizontalDivider()
+    Spacer(modifier = Modifier.height(16.dp))
+
+    // Connection status
+    Text(
+        text = "Connection",
+        style = MaterialTheme.typography.bodyMedium,
+        fontWeight = FontWeight.Medium,
+    )
+    Spacer(modifier = Modifier.height(8.dp))
+
+    if (isConnected) {
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            Icon(
+                imageVector = Icons.Filled.Check,
+                contentDescription = null,
+                tint = Success,
+                modifier = Modifier.size(16.dp),
+            )
+            Spacer(modifier = Modifier.width(8.dp))
+            Text(
+                text = "SoundCloud connected",
+                style = MaterialTheme.typography.bodySmall,
+                color = Success,
+            )
+        }
+        Spacer(modifier = Modifier.height(12.dp))
+        TextButton(onClick = onDisconnect) {
+            Text("Disconnect", color = MaterialTheme.colorScheme.error)
+        }
+    } else {
+        Text(
+            text = if (credentialsSaved) "Credentials saved. Tap Connect to authorize with SoundCloud."
+            else "Add your SoundCloud app credentials below, then connect.",
+            style = MaterialTheme.typography.bodySmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+        )
+        Spacer(modifier = Modifier.height(12.dp))
+        TextButton(
+            onClick = onConnect,
+            enabled = credentialsSaved,
+        ) {
+            Text(
+                "Connect SoundCloud",
+                color = if (credentialsSaved) MaterialTheme.colorScheme.primary
+                else MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+        }
+    }
+
+    Spacer(modifier = Modifier.height(16.dp))
+    HorizontalDivider()
+    Spacer(modifier = Modifier.height(12.dp))
+
+    // Advanced — Client ID & Secret
+    var advancedOpen by remember { mutableStateOf(!credentialsSaved && !isConnected) }
+    TextButton(onClick = { advancedOpen = !advancedOpen }) {
+        Text(
+            text = if (advancedOpen) "▾ Advanced" else "▸ Advanced",
+            style = MaterialTheme.typography.bodyMedium,
+            fontWeight = FontWeight.Medium,
+            color = MaterialTheme.colorScheme.onSurface,
+        )
+    }
+
+    if (advancedOpen) {
+        val uriHandler = LocalUriHandler.current
+        Text(
+            text = "Create a SoundCloud app to get your Client ID and Secret:",
+            style = MaterialTheme.typography.bodySmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+        )
+        Spacer(modifier = Modifier.height(4.dp))
+        Text(
+            text = "soundcloud.com/you/apps →",
+            style = MaterialTheme.typography.bodySmall,
+            fontWeight = FontWeight.Medium,
+            color = MaterialTheme.colorScheme.primary,
+            modifier = Modifier.clickable {
+                uriHandler.openUri("https://soundcloud.com/you/apps")
+            },
+        )
+        Spacer(modifier = Modifier.height(8.dp))
+        Text(
+            text = "Set the Redirect URI to:",
+            style = MaterialTheme.typography.bodySmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+        )
+        Spacer(modifier = Modifier.height(4.dp))
+        SelectionContainer {
+            Text(
+                text = "parachord://auth/callback/soundcloud",
+                style = MaterialTheme.typography.bodySmall,
+                fontWeight = FontWeight.Medium,
+                fontFamily = FontFamily.Monospace,
+                color = MaterialTheme.colorScheme.primary,
+            )
+        }
+        Spacer(modifier = Modifier.height(4.dp))
+        Text(
+            text = "SoundCloud only allows one redirect URI per app, so you'll need a separate app for Android.",
+            style = MaterialTheme.typography.bodySmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+        )
+        Spacer(modifier = Modifier.height(12.dp))
+
+        var clientId by remember { mutableStateOf("") }
+        var clientSecret by remember { mutableStateOf("") }
+
+        OutlinedTextField(
+            value = clientId,
+            onValueChange = { clientId = it },
+            label = { Text("Client ID") },
+            modifier = Modifier.fillMaxWidth(),
+            singleLine = true,
+        )
+        Spacer(modifier = Modifier.height(8.dp))
+        OutlinedTextField(
+            value = clientSecret,
+            onValueChange = { clientSecret = it },
+            label = { Text("Client Secret") },
+            modifier = Modifier.fillMaxWidth(),
+            singleLine = true,
+        )
+        Spacer(modifier = Modifier.height(12.dp))
+
+        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            TextButton(
+                onClick = {
+                    if (clientId.isNotBlank() && clientSecret.isNotBlank()) {
+                        onSaveCredentials(clientId.trim(), clientSecret.trim())
+                        clientId = ""
+                        clientSecret = ""
+                    }
+                },
+                enabled = clientId.isNotBlank() && clientSecret.isNotBlank(),
+            ) {
+                Text("Save Credentials", color = MaterialTheme.colorScheme.primary)
+            }
+            if (credentialsSaved) {
+                TextButton(onClick = onClearCredentials) {
+                    Text("Clear", color = MaterialTheme.colorScheme.error)
+                }
+            }
+        }
+
+        if (credentialsSaved) {
+            Spacer(modifier = Modifier.height(8.dp))
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Icon(
+                    imageVector = Icons.Filled.Check,
+                    contentDescription = null,
+                    tint = Success,
+                    modifier = Modifier.size(14.dp),
+                )
+                Spacer(modifier = Modifier.width(6.dp))
+                Text(
+                    text = "Client credentials saved",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = Success,
+                )
+            }
         }
     }
 }
@@ -747,6 +1152,430 @@ private fun LastFmConfig(
             onCheckedChange = onScrobblingChanged,
             enabled = isConnected,
         )
+    }
+}
+
+// ── ListenBrainz Config ────────────────────────────────────────────
+
+@Composable
+private fun ListenBrainzConfig(
+    isConnected: Boolean,
+    onTokenSubmit: (String) -> Unit,
+    onDisconnect: () -> Unit,
+    authError: String? = null,
+    scrobbling: Boolean,
+    onScrobblingChanged: (Boolean) -> Unit,
+) {
+    Spacer(modifier = Modifier.height(16.dp))
+    HorizontalDivider()
+    Spacer(modifier = Modifier.height(16.dp))
+
+    Text(
+        text = "Connection",
+        style = MaterialTheme.typography.bodyMedium,
+        fontWeight = FontWeight.Medium,
+    )
+    Spacer(modifier = Modifier.height(8.dp))
+
+    if (isConnected) {
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            Icon(
+                imageVector = Icons.Filled.Check,
+                contentDescription = null,
+                tint = Success,
+                modifier = Modifier.size(16.dp),
+            )
+            Spacer(modifier = Modifier.width(8.dp))
+            Text(
+                text = "ListenBrainz connected",
+                style = MaterialTheme.typography.bodySmall,
+                color = Success,
+            )
+        }
+        Spacer(modifier = Modifier.height(12.dp))
+        TextButton(onClick = onDisconnect) {
+            Text("Disconnect", color = MaterialTheme.colorScheme.error)
+        }
+    } else {
+        val uriHandler = LocalUriHandler.current
+        val linkColor = MaterialTheme.colorScheme.primary
+        val textColor = MaterialTheme.colorScheme.onSurfaceVariant
+        val annotatedText = remember(linkColor, textColor) {
+            buildAnnotatedString {
+                withStyle(SpanStyle(color = textColor)) {
+                    append("Enter your ListenBrainz user token to enable scrobbling. Find it at ")
+                }
+                pushLink(LinkAnnotation.Clickable("lb-settings") {
+                    uriHandler.openUri("https://listenbrainz.org/settings/")
+                })
+                withStyle(SpanStyle(color = linkColor, textDecoration = TextDecoration.Underline)) {
+                    append("listenbrainz.org/settings/")
+                }
+                pop()
+                withStyle(SpanStyle(color = textColor)) {
+                    append(".")
+                }
+            }
+        }
+        Text(
+            text = annotatedText,
+            style = MaterialTheme.typography.bodySmall,
+        )
+        Spacer(modifier = Modifier.height(12.dp))
+
+        var token by remember { mutableStateOf("") }
+        OutlinedTextField(
+            value = token,
+            onValueChange = { token = it },
+            label = { Text("User Token") },
+            singleLine = true,
+            modifier = Modifier.fillMaxWidth(),
+        )
+        Spacer(modifier = Modifier.height(8.dp))
+        TextButton(
+            onClick = {
+                if (token.isNotBlank()) {
+                    onTokenSubmit(token.trim())
+                    token = ""
+                }
+            },
+            enabled = token.isNotBlank(),
+        ) {
+            Text("Save Token", color = MaterialTheme.colorScheme.primary)
+        }
+
+        if (authError != null) {
+            Spacer(modifier = Modifier.height(8.dp))
+            Text(
+                text = authError,
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.error,
+            )
+        }
+    }
+
+    // Scrobbling toggle
+    Spacer(modifier = Modifier.height(16.dp))
+    HorizontalDivider()
+    Spacer(modifier = Modifier.height(16.dp))
+
+    Row(
+        modifier = Modifier.fillMaxWidth(),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Column(modifier = Modifier.weight(1f)) {
+            Text(
+                text = "Scrobbling",
+                style = MaterialTheme.typography.bodyMedium,
+                fontWeight = FontWeight.Medium,
+            )
+            Text(
+                text = "Send listening history to ListenBrainz",
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+        }
+        Switch(
+            checked = scrobbling,
+            onCheckedChange = onScrobblingChanged,
+            enabled = isConnected,
+        )
+    }
+}
+
+// ── Libre.fm Config ───────────────────────────────────────────────
+
+@Composable
+private fun LibreFmConfig(
+    isConnected: Boolean,
+    onConnect: (String, String) -> Unit,
+    onDisconnect: () -> Unit,
+    authError: String?,
+    scrobbling: Boolean,
+    onScrobblingChanged: (Boolean) -> Unit,
+) {
+    Spacer(modifier = Modifier.height(16.dp))
+    HorizontalDivider()
+    Spacer(modifier = Modifier.height(16.dp))
+
+    Text(
+        text = "Connection",
+        style = MaterialTheme.typography.bodyMedium,
+        fontWeight = FontWeight.Medium,
+    )
+    Spacer(modifier = Modifier.height(8.dp))
+
+    if (isConnected) {
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            Icon(
+                imageVector = Icons.Filled.Check,
+                contentDescription = null,
+                tint = Success,
+                modifier = Modifier.size(16.dp),
+            )
+            Spacer(modifier = Modifier.width(8.dp))
+            Text(
+                text = "Libre.fm connected",
+                style = MaterialTheme.typography.bodySmall,
+                color = Success,
+            )
+        }
+        Spacer(modifier = Modifier.height(12.dp))
+        TextButton(onClick = onDisconnect) {
+            Text("Disconnect", color = MaterialTheme.colorScheme.error)
+        }
+    } else {
+        Text(
+            text = "Sign in with your Libre.fm account to enable scrobbling.",
+            style = MaterialTheme.typography.bodySmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+        )
+        Spacer(modifier = Modifier.height(12.dp))
+
+        var username by remember { mutableStateOf("") }
+        var password by remember { mutableStateOf("") }
+
+        OutlinedTextField(
+            value = username,
+            onValueChange = { username = it },
+            label = { Text("Username") },
+            singleLine = true,
+            modifier = Modifier.fillMaxWidth(),
+        )
+        Spacer(modifier = Modifier.height(8.dp))
+        OutlinedTextField(
+            value = password,
+            onValueChange = { password = it },
+            label = { Text("Password") },
+            singleLine = true,
+            modifier = Modifier.fillMaxWidth(),
+            visualTransformation = PasswordVisualTransformation(),
+        )
+
+        if (authError != null) {
+            Spacer(modifier = Modifier.height(8.dp))
+            Text(
+                text = authError,
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.error,
+            )
+        }
+
+        Spacer(modifier = Modifier.height(8.dp))
+        TextButton(
+            onClick = {
+                if (username.isNotBlank() && password.isNotBlank()) {
+                    onConnect(username.trim(), password)
+                }
+            },
+            enabled = username.isNotBlank() && password.isNotBlank(),
+        ) {
+            Text("Sign In", color = MaterialTheme.colorScheme.primary)
+        }
+    }
+
+    // Scrobbling toggle
+    Spacer(modifier = Modifier.height(16.dp))
+    HorizontalDivider()
+    Spacer(modifier = Modifier.height(16.dp))
+
+    Row(
+        modifier = Modifier.fillMaxWidth(),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Column(modifier = Modifier.weight(1f)) {
+            Text(
+                text = "Scrobbling",
+                style = MaterialTheme.typography.bodyMedium,
+                fontWeight = FontWeight.Medium,
+            )
+            Text(
+                text = "Send listening history to Libre.fm",
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+        }
+        Switch(
+            checked = scrobbling,
+            onCheckedChange = onScrobblingChanged,
+            enabled = isConnected,
+        )
+    }
+}
+
+// ── Toggleable Meta Provider Config (Discogs, Wikipedia) ──────────
+
+@Composable
+private fun ToggleableMetaConfig(
+    isEnabled: Boolean,
+    onToggle: () -> Unit,
+    enabledText: String,
+    disabledText: String,
+) {
+    Spacer(modifier = Modifier.height(16.dp))
+    HorizontalDivider()
+    Spacer(modifier = Modifier.height(16.dp))
+
+    Row(
+        modifier = Modifier.fillMaxWidth(),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Column(modifier = Modifier.weight(1f)) {
+            Text(
+                text = "Enabled",
+                style = MaterialTheme.typography.bodyMedium,
+                fontWeight = FontWeight.Medium,
+            )
+            Text(
+                text = if (isEnabled) enabledText else disabledText,
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+        }
+        Switch(
+            checked = isEnabled,
+            onCheckedChange = { onToggle() },
+        )
+    }
+}
+
+// ── AI Provider Config ─────────────────────────────────────────────
+
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+private fun AiProviderConfig(
+    providerId: String,
+    isConnected: Boolean,
+    onSaveConfig: (String, String, String) -> Unit,
+    onClear: (String) -> Unit,
+) {
+    val uriHandler = LocalUriHandler.current
+
+    val (linkText, linkUrl) = when (providerId) {
+        "chatgpt" -> "platform.openai.com \u2192" to "https://platform.openai.com/api-keys"
+        "claude" -> "console.anthropic.com \u2192" to "https://console.anthropic.com/settings/keys"
+        "gemini" -> "ai.google.dev \u2192" to "https://aistudio.google.com/apikey"
+        else -> "" to ""
+    }
+
+    val models = when (providerId) {
+        "chatgpt" -> listOf("gpt-4o-mini", "gpt-4o", "gpt-4-turbo", "gpt-3.5-turbo")
+        "claude" -> listOf("claude-sonnet-4-20250514", "claude-3-5-sonnet-20241022", "claude-3-5-haiku-20241022")
+        "gemini" -> listOf("gemini-2.0-flash-001", "gemini-1.5-pro-latest", "gemini-1.5-flash-latest")
+        else -> emptyList()
+    }
+
+    Spacer(modifier = Modifier.height(16.dp))
+    HorizontalDivider()
+    Spacer(modifier = Modifier.height(16.dp))
+
+    Text(
+        text = "Connection",
+        style = MaterialTheme.typography.bodyMedium,
+        fontWeight = FontWeight.Medium,
+    )
+    Spacer(modifier = Modifier.height(8.dp))
+
+    if (isConnected) {
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            Icon(
+                imageVector = Icons.Filled.Check,
+                contentDescription = null,
+                tint = Success,
+                modifier = Modifier.size(16.dp),
+            )
+            Spacer(modifier = Modifier.width(8.dp))
+            Text(
+                text = "Connected",
+                style = MaterialTheme.typography.bodySmall,
+                color = Success,
+            )
+        }
+    } else {
+        Text(
+            text = "Add your API key below",
+            style = MaterialTheme.typography.bodySmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+        )
+    }
+
+    Spacer(modifier = Modifier.height(8.dp))
+    Text(
+        text = linkText,
+        style = MaterialTheme.typography.bodySmall,
+        fontWeight = FontWeight.Medium,
+        color = MaterialTheme.colorScheme.primary,
+        modifier = Modifier.clickable { uriHandler.openUri(linkUrl) },
+    )
+
+    Spacer(modifier = Modifier.height(12.dp))
+
+    var apiKey by remember { mutableStateOf("") }
+    var selectedModel by remember { mutableStateOf(models.firstOrNull() ?: "") }
+    var modelDropdownExpanded by remember { mutableStateOf(false) }
+
+    OutlinedTextField(
+        value = apiKey,
+        onValueChange = { apiKey = it },
+        label = { Text("API Key") },
+        singleLine = true,
+        visualTransformation = PasswordVisualTransformation(),
+        modifier = Modifier.fillMaxWidth(),
+    )
+
+    Spacer(modifier = Modifier.height(8.dp))
+
+    // Model dropdown
+    ExposedDropdownMenuBox(
+        expanded = modelDropdownExpanded,
+        onExpandedChange = { modelDropdownExpanded = it },
+    ) {
+        OutlinedTextField(
+            value = selectedModel,
+            onValueChange = {},
+            readOnly = true,
+            label = { Text("Model") },
+            trailingIcon = { ExposedDropdownMenuDefaults.TrailingIcon(expanded = modelDropdownExpanded) },
+            modifier = Modifier
+                .fillMaxWidth()
+                .menuAnchor(MenuAnchorType.PrimaryNotEditable),
+            singleLine = true,
+        )
+        ExposedDropdownMenu(
+            expanded = modelDropdownExpanded,
+            onDismissRequest = { modelDropdownExpanded = false },
+        ) {
+            models.forEach { model ->
+                DropdownMenuItem(
+                    text = { Text(model, style = MaterialTheme.typography.bodyMedium) },
+                    onClick = {
+                        selectedModel = model
+                        modelDropdownExpanded = false
+                    },
+                )
+            }
+        }
+    }
+
+    Spacer(modifier = Modifier.height(12.dp))
+
+    Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+        TextButton(
+            onClick = {
+                if (apiKey.isNotBlank()) {
+                    onSaveConfig(providerId, apiKey.trim(), selectedModel)
+                    apiKey = ""
+                }
+            },
+            enabled = apiKey.isNotBlank(),
+        ) {
+            Text("Save", color = MaterialTheme.colorScheme.primary)
+        }
+        if (isConnected) {
+            TextButton(onClick = { onClear(providerId) }) {
+                Text("Clear", color = MaterialTheme.colorScheme.error)
+            }
+        }
     }
 }
 

@@ -56,6 +56,7 @@ import androidx.compose.ui.input.nestedscroll.NestedScrollSource
 import androidx.compose.ui.input.nestedscroll.nestedScroll
 import androidx.compose.ui.layout.onSizeChanged
 import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.platform.LocalUriHandler
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
@@ -85,6 +86,7 @@ fun ArtistScreen(
     val topTracks by viewModel.topTracks.collectAsStateWithLifecycle()
     val albums by viewModel.albums.collectAsStateWithLifecycle()
     val isLoading by viewModel.isLoading.collectAsStateWithLifecycle()
+    val trackResolvers by viewModel.trackResolvers.collectAsStateWithLifecycle()
 
     val density = LocalDensity.current
 
@@ -216,9 +218,13 @@ fun ArtistScreen(
                             albums = albums,
                             topTracks = topTracks,
                             onNavigateToAlbum = onNavigateToAlbum,
+                            onPlayTrack = viewModel::playTrack,
+                            trackResolvers = trackResolvers,
                         )
                         1 -> BiographyTab(
                             bio = artistInfo?.bio,
+                            bioSource = artistInfo?.bioSource,
+                            bioUrl = artistInfo?.bioUrl,
                             tags = artistInfo?.tags ?: emptyList(),
                             provider = artistInfo?.provider,
                         )
@@ -252,6 +258,8 @@ private fun DiscographyTab(
     albums: List<AlbumSearchResult>,
     topTracks: List<TrackSearchResult>,
     onNavigateToAlbum: (albumTitle: String, artistName: String) -> Unit,
+    onPlayTrack: (TrackSearchResult) -> Unit = {},
+    trackResolvers: Map<String, List<String>> = emptyMap(),
 ) {
     var selectedFilter by remember { mutableStateOf("all") }
 
@@ -291,7 +299,11 @@ private fun DiscographyTab(
         }
 
         if (filteredAlbums.isNotEmpty()) {
-            items(filteredAlbums, key = { "album-${it.title}-${it.artist}" }) { album ->
+            items(
+                count = filteredAlbums.size,
+                key = { idx -> "album-$idx-${filteredAlbums[idx].title}-${filteredAlbums[idx].artist}" },
+            ) { idx ->
+                val album = filteredAlbums[idx]
                 Row(
                     modifier = Modifier
                         .fillMaxWidth()
@@ -350,6 +362,8 @@ private fun DiscographyTab(
                     title = track.title,
                     artist = track.album ?: "",
                     artworkUrl = track.artworkUrl,
+                    resolvers = trackResolvers[trackKey(track.title, track.artist)]?.ifEmpty { null },
+                    onClick = { onPlayTrack(track) },
                 )
             }
         }
@@ -375,9 +389,13 @@ private fun DiscographyTab(
 @Composable
 private fun BiographyTab(
     bio: String?,
+    bioSource: String?,
+    bioUrl: String?,
     tags: List<String>,
     provider: String?,
 ) {
+    val uriHandler = LocalUriHandler.current
+
     LazyColumn(modifier = Modifier.fillMaxSize()) {
         if (!bio.isNullOrBlank()) {
             item {
@@ -387,6 +405,41 @@ private fun BiographyTab(
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                     modifier = Modifier.padding(16.dp),
                 )
+            }
+
+            // Bio source attribution with optional "Read more" link
+            if (bioSource != null) {
+                item {
+                    val sourceName = when (bioSource) {
+                        "wikipedia" -> "Wikipedia"
+                        "discogs" -> "Discogs"
+                        "lastfm" -> "Last.fm"
+                        else -> bioSource
+                    }
+                    Row(
+                        modifier = Modifier.padding(horizontal = 16.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                    ) {
+                        Text(
+                            text = "From $sourceName",
+                            style = MaterialTheme.typography.labelSmall,
+                            color = MaterialTheme.colorScheme.outline,
+                        )
+                        if (bioUrl != null) {
+                            Text(
+                                text = " · ",
+                                style = MaterialTheme.typography.labelSmall,
+                                color = MaterialTheme.colorScheme.outline,
+                            )
+                            Text(
+                                text = "Read more",
+                                style = MaterialTheme.typography.labelSmall,
+                                color = MaterialTheme.colorScheme.primary,
+                                modifier = Modifier.clickable { uriHandler.openUri(bioUrl) },
+                            )
+                        }
+                    }
+                }
             }
         }
 
@@ -461,7 +514,11 @@ private fun RelatedArtistsTab(
             horizontalArrangement = Arrangement.spacedBy(12.dp),
             verticalArrangement = Arrangement.spacedBy(12.dp),
         ) {
-            items(similarArtists, key = { it.name }) { artist ->
+            items(
+                count = similarArtists.size,
+                key = { idx -> "similar-$idx-${similarArtists[idx].name}" },
+            ) { idx ->
+                val artist = similarArtists[idx]
                 Column(
                     modifier = Modifier
                         .fillMaxWidth()

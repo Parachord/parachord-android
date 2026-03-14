@@ -19,6 +19,8 @@ data class ArtistInfo(
     val mbid: String? = null,
     val imageUrl: String? = null,
     val bio: String? = null,
+    val bioSource: String? = null,
+    val bioUrl: String? = null,
     val tags: List<String> = emptyList(),
     val similarArtists: List<SimilarArtist> = emptyList(),
     val provider: String = "",

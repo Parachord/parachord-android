@@ -6,8 +6,8 @@ import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.pager.HorizontalPager
 import androidx.compose.foundation.pager.rememberPagerState
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.ScrollableTabRow
 import androidx.compose.material3.Tab
-import androidx.compose.material3.TabRow
 import androidx.compose.material3.TabRowDefaults
 import androidx.compose.material3.TabRowDefaults.tabIndicatorOffset
 import androidx.compose.material3.Text
@@ -37,10 +37,11 @@ fun SwipeableTabLayout(
     val inactiveColor = MaterialTheme.colorScheme.onSurfaceVariant
 
     Column(modifier = modifier) {
-        TabRow(
+        ScrollableTabRow(
             selectedTabIndex = pagerState.currentPage,
             modifier = Modifier.fillMaxWidth(),
             containerColor = tabBarBackground,
+            edgePadding = 16.dp,
             indicator = { tabPositions ->
                 if (pagerState.currentPage < tabPositions.size) {
                     TabRowDefaults.PrimaryIndicator(
@@ -66,7 +67,8 @@ fun SwipeableTabLayout(
                             ),
                             color = if (selected) activeColor else inactiveColor,
                             textAlign = TextAlign.Center,
-                            maxLines = 2,
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis,
                         )
                     },
                 )

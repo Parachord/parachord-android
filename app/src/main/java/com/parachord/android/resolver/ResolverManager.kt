@@ -4,12 +4,18 @@ import android.util.Log
 import com.parachord.android.auth.OAuthManager
 import com.parachord.android.data.api.SpotifyApi
 import com.parachord.android.data.store.SettingsStore
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.async
 import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.withContext
+import kotlinx.serialization.SerialName
 import kotlinx.serialization.Serializable
+import kotlinx.serialization.json.Json
+import okhttp3.OkHttpClient
+import okhttp3.Request
 import retrofit2.HttpException
 import javax.inject.Inject
 import javax.inject.Singleton
@@ -26,35 +32,54 @@ class ResolverManager @Inject constructor(
     private val spotifyApi: SpotifyApi,
     private val settingsStore: SettingsStore,
     private val oAuthManager: OAuthManager,
+    private val okHttpClient: OkHttpClient,
+    private val json: Json,
 ) {
     companion object {
         private const val TAG = "ResolverManager"
+        private const val SC_API_BASE = "https://api.soundcloud.com"
     }
 
     private val _resolvers = MutableStateFlow(
         listOf(
             ResolverInfo(id = "spotify", name = "Spotify", enabled = true),
+            ResolverInfo(id = "soundcloud", name = "SoundCloud", enabled = true),
         )
     )
     val resolvers: StateFlow<List<ResolverInfo>> = _resolvers.asStateFlow()
 
-    /** Resolve a track query through all available native resolvers in parallel. */
+    /**
+     * Resolve a track query through all enabled and configured resolvers in parallel.
+     * Only resolvers that are active (per user settings) and have valid credentials
+     * will be included in the pipeline.
+     */
     suspend fun resolve(query: String): List<ResolvedSource> = coroutineScope {
-        val results = listOf(
-            async { resolveSpotify(query) },
-        ).mapNotNull { it.await() }
+        val activeResolvers = settingsStore.getActiveResolvers()
 
+        // Build resolver tasks for enabled resolvers only.
+        // Empty activeResolvers list means all are enabled (no filtering).
+        val tasks = buildList {
+            if (activeResolvers.isEmpty() || "spotify" in activeResolvers) {
+                add(async { resolveSpotify(query) })
+            }
+            if (activeResolvers.isEmpty() || "soundcloud" in activeResolvers) {
+                add(async { resolveSoundCloud(query) })
+            }
+        }
+
+        val results = tasks.mapNotNull { it.await() }
         Log.d(TAG, "Resolved '$query' → ${results.size} sources: ${results.map { it.resolver }}")
         results
     }
 
     /**
-     * Resolve using a pre-existing spotifyId (from metadata providers).
-     * This avoids a redundant search when we already have the Spotify track ID.
+     * Resolve using pre-existing IDs (from metadata providers).
+     * This avoids redundant searches when we already have direct track IDs.
      */
     suspend fun resolveWithHints(
         query: String,
         spotifyId: String? = null,
+        soundcloudId: String? = null,
     ): List<ResolvedSource> = coroutineScope {
         val results = mutableListOf<ResolvedSource>()
 
@@ -67,6 +92,19 @@ class ResolverManager @Inject constructor(
                     resolver = "spotify",
                     spotifyUri = "spotify:track:$spotifyId",
                     spotifyId = spotifyId,
+                    confidence = 0.95, // High confidence — direct ID match
+                )
+            )
+        }
+
+        // If we have a SoundCloud ID, use it directly
+        if (soundcloudId != null) {
+            results.add(
+                ResolvedSource(
+                    url = "$SC_API_BASE/tracks/$soundcloudId",
+                    sourceType = "soundcloud",
+                    resolver = "soundcloud",
+                    soundcloudId = soundcloudId,
                     confidence = 0.95, // High confidence — direct ID match
                 )
             )
@@ -121,7 +159,118 @@ class ResolverManager @Inject constructor(
             confidence = 0.9,
         )
     }
+
+    // ── SoundCloud Resolver ─────────────────────────────────────────────
+
+    /**
+     * Search SoundCloud for a matching track.
+     * Mirrors the desktop's soundcloud.axe resolver: searches via the
+     * /tracks endpoint, filters to streamable non-blocked tracks, and
+     * returns the best match with default 0.9 confidence.
+     * Handles 401 by refreshing the OAuth token and retrying.
+     */
+    private suspend fun resolveSoundCloud(query: String): ResolvedSource? {
+        val token = settingsStore.getSoundCloudToken()
+        if (token.isNullOrBlank()) return null
+
+        return try {
+            val result = searchSoundCloudTrack(query, token)
+            // Check for 401 (token expired) — returned as null with a log warning
+            result
+        } catch (e: SoundCloudAuthException) {
+            // Token expired — try to refresh
+            if (oAuthManager.refreshSoundCloudToken()) {
+                val newToken = settingsStore.getSoundCloudToken() ?: return null
+                try {
+                    searchSoundCloudTrack(query, newToken)
+                } catch (e2: Exception) {
+                    Log.w(TAG, "SoundCloud resolve failed after refresh for '$query': ${e2.message}")
+                    null
+                }
+            } else {
+                Log.w(TAG, "SoundCloud token refresh failed for '$query'")
+                null
+            }
+        } catch (e: Exception) {
+            Log.w(TAG, "SoundCloud resolve failed for '$query': ${e.message}")
+            null
+        }
+    }
+
+    /** Thrown when SoundCloud API returns 401 (token expired). */
+    private class SoundCloudAuthException : Exception("SoundCloud token expired")
+
+    private suspend fun searchSoundCloudTrack(query: String, token: String): ResolvedSource? =
+        withContext(Dispatchers.IO) {
+            val url = okhttp3.HttpUrl.Builder()
+                .scheme("https")
+                .host("api.soundcloud.com")
+                .addPathSegment("tracks")
+                .addQueryParameter("q", query)
+                .addQueryParameter("limit", "20")
+                .build()
+
+            val request = Request.Builder()
+                .url(url)
+                .header("Authorization", "OAuth $token")
+                .get()
+                .build()
+
+            val response = okHttpClient.newCall(request).execute()
+            if (response.code == 401) {
+                throw SoundCloudAuthException()
+            }
+            if (!response.isSuccessful) {
+                Log.w(TAG, "SoundCloud search returned ${response.code}")
+                return@withContext null
+            }
+
+            val body = response.body?.string() ?: return@withContext null
+            val tracks = try {
+                json.decodeFromString<List<ScTrack>>(body)
+            } catch (e: Exception) {
+                Log.w(TAG, "Failed to parse SoundCloud search results: ${e.message}")
+                return@withContext null
+            }
+
+            // Filter to streamable, non-blocked tracks (matches desktop logic)
+            val streamable = tracks.filter { it.streamable == true && it.access != "blocked" }
+            val best = streamable.firstOrNull() ?: return@withContext null
+
+            Log.d(TAG, "SoundCloud matched '${best.title}' by ${best.user?.username}")
+
+            ResolvedSource(
+                url = best.permalinkUrl ?: "$SC_API_BASE/tracks/${best.id}",
+                sourceType = "soundcloud",
+                resolver = "soundcloud",
+                soundcloudId = best.id.toString(),
+                soundcloudUrl = best.permalinkUrl,
+                confidence = 0.9, // Desktop default for SoundCloud matches
+            )
+        }
 }
+
+// ── SoundCloud API Response Models ──────────────────────────────────
+
+@Serializable
+private data class ScTrack(
+    val id: Long,
+    val title: String? = null,
+    val user: ScUser? = null,
+    val duration: Long? = null,
+    @SerialName("permalink_url") val permalinkUrl: String? = null,
+    @SerialName("artwork_url") val artworkUrl: String? = null,
+    @SerialName("waveform_url") val waveformUrl: String? = null,
+    val streamable: Boolean? = null,
+    val access: String? = null,
+    @SerialName("label_name") val labelName: String? = null,
+)
+
+@Serializable
+private data class ScUser(
+    val username: String? = null,
+    @SerialName("avatar_url") val avatarUrl: String? = null,
+)
 
 @Serializable
 data class ResolverInfo(

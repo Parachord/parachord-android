@@ -140,15 +140,34 @@ class LastFmProvider @Inject constructor(
         try {
             val detail = api.getArtistInfo(artist = artistName, apiKey = apiKey).artist
             detail?.let { d ->
+                val bioText = d.bio?.summary?.stripHtmlTags()?.stripLastFmSuffix()
+
+                // Use the dedicated similar artists endpoint for more results (20)
+                // with images, instead of the limited set from artist.getinfo (~5, no images)
+                val similarArtists = try {
+                    api.getSimilarArtists(artist = artistName, apiKey = apiKey, limit = 20)
+                        .similarartists?.artist?.map { a ->
+                            SimilarArtist(
+                                name = a.name,
+                                imageUrl = a.image.bestImageUrl(),
+                            )
+                        } ?: emptyList()
+                } catch (_: Exception) {
+                    // Fall back to the limited set from artist.getinfo
+                    d.similar?.artist?.map { a ->
+                        SimilarArtist(name = a.name, imageUrl = a.image.bestImageUrl())
+                    } ?: emptyList()
+                }
+
                 ArtistInfo(
                     name = d.name,
                     mbid = d.mbid?.takeIf { it.isNotBlank() },
                     imageUrl = d.image.bestImageUrl(),
-                    bio = d.bio?.summary?.stripHtmlTags()?.stripLastFmSuffix(),
+                    bio = bioText,
+                    bioSource = if (bioText != null) "lastfm" else null,
+                    bioUrl = d.url?.takeIf { bioText != null },
                     tags = d.tags?.tag?.map { it.name } ?: emptyList(),
-                    similarArtists = d.similar?.artist?.map { a ->
-                        SimilarArtist(name = a.name)
-                    } ?: emptyList(),
+                    similarArtists = similarArtists,
                     provider = name,
                 )
             }

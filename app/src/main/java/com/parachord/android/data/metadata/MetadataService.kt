@@ -1,5 +1,6 @@
 package com.parachord.android.data.metadata
 
+import com.parachord.android.data.store.SettingsStore
 import kotlinx.coroutines.async
 import kotlinx.coroutines.awaitAll
 import kotlinx.coroutines.coroutineScope
@@ -23,11 +24,14 @@ import javax.inject.Singleton
 @Singleton
 class MetadataService @Inject constructor(
     private val musicBrainz: MusicBrainzProvider,
+    private val wikipedia: WikipediaProvider,
     private val lastFm: LastFmProvider,
+    private val discogs: DiscogsProvider,
     private val spotify: SpotifyProvider,
+    private val settingsStore: SettingsStore,
 ) {
     private val providers: List<MetadataProvider> by lazy {
-        listOf(musicBrainz, lastFm, spotify).sortedBy { it.priority }
+        listOf(musicBrainz, wikipedia, lastFm, discogs, spotify).sortedBy { it.priority }
     }
 
     /** Search tracks across all available providers in parallel, merge and deduplicate. */
@@ -84,8 +88,25 @@ class MetadataService @Inject constructor(
         // Cascade: start with the highest-priority result, fill gaps from others
         var merged = results.reduce { acc, info -> acc.mergeWith(info) }
 
+        // Bio source preference: Wikipedia > Discogs > Last.fm.
+        // The general cascade picks the first non-null bio (by provider priority),
+        // which means Last.fm (priority 10) always beats Discogs (priority 15).
+        // Override with the best available bio based on source quality.
+        val bioPreference = listOf("wikipedia", "discogs", "lastfm")
+        val bestBio = bioPreference.firstNotNullOfOrNull { preferredSource ->
+            results.firstOrNull { it.bioSource == preferredSource && !it.bio.isNullOrBlank() }
+        }
+        if (bestBio != null && merged.bioSource != bestBio.bioSource) {
+            merged = merged.copy(
+                bio = bestBio.bio,
+                bioSource = bestBio.bioSource,
+                bioUrl = bestBio.bioUrl,
+            )
+        }
+
         // Enrich similar artists with Spotify images (prefer Spotify over Last.fm which is often wrong)
-        if (merged.similarArtists.isNotEmpty() && spotify.isAvailable()) {
+        val disabled = settingsStore.getDisabledMetaProviders()
+        if (merged.similarArtists.isNotEmpty() && spotify.isAvailable() && "spotify" !in disabled) {
             val enriched = merged.similarArtists.map { similar ->
                 async {
                     try {
@@ -180,8 +201,10 @@ class MetadataService @Inject constructor(
         )
     }
 
-    private suspend fun availableProviders(): List<MetadataProvider> =
-        providers.filter { it.isAvailable() }
+    private suspend fun availableProviders(): List<MetadataProvider> {
+        val disabled = settingsStore.getDisabledMetaProviders()
+        return providers.filter { it.isAvailable() && it.name !in disabled }
+    }
 
     /** Deduplicate tracks by normalized title+artist, preferring results with more metadata. */
     private fun deduplicateTracks(tracks: List<TrackSearchResult>): List<TrackSearchResult> =
@@ -210,6 +233,8 @@ private fun ArtistInfo.mergeWith(other: ArtistInfo) = ArtistInfo(
     mbid = mbid ?: other.mbid,
     imageUrl = imageUrl ?: other.imageUrl,
     bio = bio ?: other.bio,
+    bioSource = if (bio != null) bioSource else other.bioSource,
+    bioUrl = if (bio != null) bioUrl else other.bioUrl,
     tags = tags.ifEmpty { other.tags },
     similarArtists = if (similarArtists.isNotEmpty()) similarArtists else other.similarArtists,
     provider = "$provider+${other.provider}",

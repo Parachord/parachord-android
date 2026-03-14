@@ -56,6 +56,7 @@ fun AlbumScreen(
     val albumDetail by viewModel.albumDetail.collectAsStateWithLifecycle()
     val isLoading by viewModel.isLoading.collectAsStateWithLifecycle()
     val isResolving by viewModel.isResolving.collectAsStateWithLifecycle()
+    val trackResolvers by viewModel.trackResolvers.collectAsStateWithLifecycle()
 
     Column(modifier = modifier.fillMaxSize()) {
         TopAppBar(
@@ -168,6 +169,7 @@ fun AlbumScreen(
                             artworkUrl = track.artworkUrl ?: detail.artworkUrl,
                             duration = track.duration,
                             trackNumber = index + 1,
+                            resolvers = trackResolvers["${track.title.lowercase().trim()}|${track.artist.lowercase().trim()}"]?.ifEmpty { null },
                             onClick = { viewModel.playTrack(index) },
                         )
                     }

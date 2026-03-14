@@ -56,6 +56,10 @@ class SpotifyPlaybackHandler @Inject constructor(
     private var expectedTrackId: String? = null
     /** The track ID currently reported by the Spotify API. */
     private var currentItemId: String? = null
+    /** Timestamp when we started playing — used to filter stale API responses during polling. */
+    private var playStartedAt: Long = 0L
+    /** True when WE initiated a pause (user tapped pause). False means Spotify stopped on its own. */
+    private var pausedByUs = false
 
     override val isConnected: Boolean get() = _isConnected
 
@@ -120,16 +124,20 @@ class SpotifyPlaybackHandler @Inject constructor(
             cachedDuration = track.duration ?: 0L
             expectedTrackId = track.spotifyUri?.substringAfterLast(":")
             currentItemId = expectedTrackId
+            playStartedAt = System.currentTimeMillis()
+            pausedByUs = false
             startStatePolling()
         }
     }
 
     override suspend fun pause() {
+        pausedByUs = true
         withAuth { auth -> spotifyApi.pausePlayback(auth) }
         cachedIsPlaying = false
     }
 
     override suspend fun resume() {
+        pausedByUs = false
         withAuth { auth -> spotifyApi.resumePlayback(auth) }
         cachedIsPlaying = true
     }
@@ -197,10 +205,12 @@ class SpotifyPlaybackHandler @Inject constructor(
     /**
      * Detect whether the track we started has finished playing.
      *
-     * Handles three end-of-track scenarios:
+     * Handles four end-of-track scenarios:
      * 1. Spotify stopped naturally (isPlaying=false, position near duration)
      * 2. Spotify autoplay kicked in (playing a different track than expected)
      * 3. Spotify cleared the item (isPlaying=false, item=null)
+     * 4. Spotify stopped and we didn't pause it (catch-all for tracks that end
+     *    without position reaching duration exactly)
      */
     fun isOurTrackDone(): Boolean {
         val expected = expectedTrackId ?: return false
@@ -224,6 +234,13 @@ class SpotifyPlaybackHandler @Inject constructor(
             return true
         }
 
+        // Spotify stopped but we didn't pause — track likely ended. This catches
+        // cases where the API position doesn't reach exactly near duration.
+        if (!cachedIsPlaying && !pausedByUs && cachedPosition > 0) {
+            Log.d(TAG, "Track stopped (not by us): pos=$cachedPosition, dur=$cachedDuration")
+            return true
+        }
+
         return false
     }
 
@@ -234,12 +251,27 @@ class SpotifyPlaybackHandler @Inject constructor(
                 try {
                     val state = fetchPlaybackState()
                     if (state != null) {
-                        cachedIsPlaying = state.isPlaying
-                        cachedPosition = state.progressMs ?: 0L
-                        currentItemId = state.item?.id
-                        // Preserve duration when item becomes null (track just ended)
-                        if (state.item?.durationMs != null) {
-                            cachedDuration = state.item.durationMs
+                        val apiItemId = state.item?.id
+                        val elapsed = System.currentTimeMillis() - playStartedAt
+
+                        // Guard against stale API responses during track transitions.
+                        // When we just called play(), Spotify may still report the previous
+                        // track's state for a few seconds. During this grace period, only
+                        // accept API state that matches our expected track. This prevents
+                        // stale isPlaying/position/itemId from triggering false auto-advance.
+                        val isStale = elapsed < 3000 && apiItemId != null && apiItemId != expectedTrackId
+
+                        if (isStale) {
+                            Log.d(TAG, "Ignoring stale API state: item=$apiItemId (expected=$expectedTrackId, ${elapsed}ms since play)")
+                        } else {
+                            cachedIsPlaying = state.isPlaying
+                            cachedPosition = state.progressMs ?: 0L
+                            currentItemId = apiItemId
+
+                            // Preserve duration when item becomes null (track just ended)
+                            if (state.item?.durationMs != null) {
+                                cachedDuration = state.item.durationMs
+                            }
                         }
                     }
                 } catch (_: Exception) { /* ignore polling errors */ }

@@ -1,47 +1,77 @@
 package com.parachord.android.ui.screens.discover
 
+import androidx.compose.foundation.clickable
+import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.PaddingValues
+import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.WindowInsets
 import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
-import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.grid.GridCells
+import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
+import androidx.compose.foundation.lazy.grid.items
+import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
-import androidx.compose.material.icons.filled.MusicNote
-import androidx.compose.material.icons.filled.Person
 import androidx.compose.material3.ExperimentalMaterial3Api
+import androidx.compose.material3.FilterChip
+import androidx.compose.material3.FilterChipDefaults
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Text
 import androidx.compose.material3.TopAppBar
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.collectAsState
+import androidx.compose.runtime.getValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextAlign
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.em
+import androidx.hilt.navigation.compose.hiltViewModel
+import com.parachord.android.data.repository.RecommendedArtist
+import com.parachord.android.data.repository.RecommendedTrack
+import com.parachord.android.data.repository.Resource
+import com.parachord.android.ui.components.AlbumArtCard
+import com.parachord.android.ui.components.ShimmerTrackRow
 import com.parachord.android.ui.components.SwipeableTabLayout
-
-private val AmberAccent = Color(0xFFF59E0B)
+import com.parachord.android.ui.components.TrackRow
 
 private val recommendationsTabs = listOf("Artists", "Songs")
 
-private val recommendationsTabIcons = listOf(
-    Icons.Filled.Person,
-    Icons.Filled.MusicNote,
-)
+// Source filter colors matching desktop:
+// ListenBrainz = orange, Last.fm = red, All = amber
+private val FilterColorAll = Color(0xFFF59E0B)         // amber-500
+private val FilterColorListenBrainz = Color(0xFFF97316) // orange-500
+private val FilterColorLastFm = Color(0xFFDC2626)       // red-600
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun RecommendationsScreen(
     onBack: () -> Unit,
+    onNavigateToArtist: (String) -> Unit = {},
     modifier: Modifier = Modifier,
+    viewModel: RecommendationsViewModel = hiltViewModel(),
 ) {
+    val recommendedArtists by viewModel.recommendedArtists.collectAsState()
+    val recommendedTracks by viewModel.recommendedTracks.collectAsState()
+    val sourceFilter by viewModel.sourceFilter.collectAsState()
+    val sourceCounts by viewModel.sourceCounts.collectAsState()
+
     Column(modifier = modifier.fillMaxSize()) {
         TopAppBar(
             title = {
@@ -60,31 +90,275 @@ fun RecommendationsScreen(
             },
             windowInsets = WindowInsets(0),
         )
+
+        // Source filter chips (matching desktop: All | ListenBrainz | Last.fm)
+        SourceFilterBar(
+            currentFilter = sourceFilter,
+            counts = sourceCounts,
+            onFilterChange = viewModel::setSourceFilter,
+        )
+
         SwipeableTabLayout(tabs = recommendationsTabs) { page ->
-            TabPlaceholder(icon = recommendationsTabIcons[page], accentColor = AmberAccent)
+            when (page) {
+                0 -> ArtistsTab(
+                    artists = recommendedArtists,
+                    onRefresh = viewModel::refresh,
+                    onArtistClick = onNavigateToArtist,
+                )
+                1 -> SongsTab(
+                    tracks = recommendedTracks,
+                    onRefresh = viewModel::refresh,
+                )
+            }
+        }
+    }
+}
+
+// ---------- Source Filter Bar ----------
+
+@Composable
+private fun SourceFilterBar(
+    currentFilter: String,
+    counts: SourceCounts,
+    onFilterChange: (String) -> Unit,
+) {
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(horizontal = 16.dp, vertical = 4.dp),
+        horizontalArrangement = Arrangement.spacedBy(8.dp),
+    ) {
+        SourceFilterChip(
+            label = "All",
+            count = counts.total,
+            selected = currentFilter == "all",
+            activeColor = FilterColorAll,
+            onClick = { onFilterChange("all") },
+        )
+        if (counts.listenbrainz > 0) {
+            SourceFilterChip(
+                label = "ListenBrainz",
+                count = counts.listenbrainz,
+                selected = currentFilter == "listenbrainz",
+                activeColor = FilterColorListenBrainz,
+                onClick = { onFilterChange("listenbrainz") },
+            )
+        }
+        if (counts.lastfm > 0) {
+            SourceFilterChip(
+                label = "Last.fm",
+                count = counts.lastfm,
+                selected = currentFilter == "lastfm",
+                activeColor = FilterColorLastFm,
+                onClick = { onFilterChange("lastfm") },
+            )
+        }
+    }
+}
+
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+private fun SourceFilterChip(
+    label: String,
+    count: Int,
+    selected: Boolean,
+    activeColor: Color,
+    onClick: () -> Unit,
+) {
+    FilterChip(
+        selected = selected,
+        onClick = onClick,
+        label = {
+            Text(
+                text = if (count > 0) "$label ($count)" else label,
+                style = MaterialTheme.typography.labelMedium,
+            )
+        },
+        colors = FilterChipDefaults.filterChipColors(
+            selectedContainerColor = activeColor,
+            selectedLabelColor = Color.White,
+        ),
+    )
+}
+
+// ---------- Artists Tab ----------
+
+@Composable
+private fun ArtistsTab(
+    artists: Resource<List<RecommendedArtist>>,
+    onRefresh: () -> Unit,
+    onArtistClick: (String) -> Unit = {},
+) {
+    when (artists) {
+        is Resource.Loading -> {
+            // Shimmer grid placeholder
+            LazyVerticalGrid(
+                columns = GridCells.Fixed(3),
+                contentPadding = PaddingValues(horizontal = 16.dp, vertical = 8.dp),
+                horizontalArrangement = Arrangement.spacedBy(12.dp),
+                verticalArrangement = Arrangement.spacedBy(16.dp),
+            ) {
+                items(12) {
+                    Column(
+                        horizontalAlignment = Alignment.CenterHorizontally,
+                        modifier = Modifier.fillMaxWidth(),
+                    ) {
+                        Box(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .height(96.dp)
+                                .clip(RoundedCornerShape(12.dp)),
+                        )
+                        Spacer(modifier = Modifier.height(6.dp))
+                        Text(
+                            text = "",
+                            style = MaterialTheme.typography.bodySmall,
+                        )
+                    }
+                }
+            }
+        }
+        is Resource.Error -> ErrorState(message = artists.message, onRetry = onRefresh)
+        is Resource.Success -> {
+            if (artists.data.isEmpty()) {
+                EmptyState("No recommendations yet.\nListen to more music to get personalized suggestions!")
+            } else {
+                Column {
+                    Text(
+                        text = "Based on your listening",
+                        style = MaterialTheme.typography.labelMedium,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        modifier = Modifier.padding(horizontal = 16.dp, vertical = 8.dp),
+                    )
+                    LazyVerticalGrid(
+                        columns = GridCells.Fixed(3),
+                        contentPadding = PaddingValues(horizontal = 16.dp, vertical = 4.dp),
+                        horizontalArrangement = Arrangement.spacedBy(12.dp),
+                        verticalArrangement = Arrangement.spacedBy(16.dp),
+                    ) {
+                        items(artists.data, key = { it.name }) { artist ->
+                            RecommendedArtistItem(
+                                artist = artist,
+                                onClick = { onArtistClick(artist.name) },
+                            )
+                        }
+                    }
+                }
+            }
         }
     }
 }
 
 @Composable
-private fun TabPlaceholder(icon: ImageVector, accentColor: Color) {
+private fun RecommendedArtistItem(artist: RecommendedArtist, onClick: () -> Unit = {}) {
+    Column(
+        horizontalAlignment = Alignment.CenterHorizontally,
+        modifier = Modifier
+            .fillMaxWidth()
+            .clickable(onClick = onClick),
+    ) {
+        AlbumArtCard(
+            artworkUrl = artist.imageUrl,
+            size = 96.dp,
+            cornerRadius = 12.dp,
+            placeholderName = artist.name,
+        )
+        Spacer(modifier = Modifier.height(6.dp))
+        Text(
+            text = artist.name,
+            style = MaterialTheme.typography.bodySmall,
+            maxLines = 1,
+            overflow = TextOverflow.Ellipsis,
+            textAlign = TextAlign.Center,
+            modifier = Modifier.fillMaxWidth(),
+        )
+        if (artist.reason != null) {
+            Text(
+                text = artist.reason,
+                style = MaterialTheme.typography.labelSmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
+                textAlign = TextAlign.Center,
+                modifier = Modifier.fillMaxWidth(),
+            )
+        }
+    }
+}
+
+// ---------- Songs Tab ----------
+
+@Composable
+private fun SongsTab(
+    tracks: Resource<List<RecommendedTrack>>,
+    onRefresh: () -> Unit,
+) {
+    when (tracks) {
+        is Resource.Loading -> {
+            LazyColumn(contentPadding = PaddingValues(bottom = 16.dp)) {
+                items(10) { ShimmerTrackRow(modifier = Modifier.padding(horizontal = 16.dp)) }
+            }
+        }
+        is Resource.Error -> ErrorState(message = tracks.message, onRetry = onRefresh)
+        is Resource.Success -> {
+            if (tracks.data.isEmpty()) {
+                EmptyState("No track recommendations yet.\nListen to more music to get personalized suggestions!")
+            } else {
+                LazyColumn(contentPadding = PaddingValues(bottom = 16.dp)) {
+                    items(tracks.data, key = { "${it.title}-${it.artist}" }) { track ->
+                        TrackRow(
+                            title = track.title,
+                            artist = track.artist,
+                            artworkUrl = track.artworkUrl,
+                            duration = track.duration,
+                            // Show content resolver badges (Spotify, YouTube, etc.) from the
+                            // resolver pipeline — NOT metadata source labels (Last.fm, ListenBrainz).
+                            resolvers = track.resolvers.ifEmpty { null },
+                            onClick = { /* TODO: resolve and play */ },
+                        )
+                    }
+                }
+            }
+        }
+    }
+}
+
+// ---------- Shared States ----------
+
+@Composable
+private fun ErrorState(message: String, onRetry: () -> Unit) {
     Box(
         modifier = Modifier.fillMaxSize(),
         contentAlignment = Alignment.Center,
     ) {
         Column(horizontalAlignment = Alignment.CenterHorizontally) {
-            Icon(
-                imageVector = icon,
-                contentDescription = null,
-                modifier = Modifier.size(48.dp),
-                tint = accentColor,
-            )
-            Spacer(modifier = Modifier.height(16.dp))
             Text(
-                text = "Coming soon",
-                style = MaterialTheme.typography.titleMedium,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                text = message,
+                style = MaterialTheme.typography.bodyMedium,
+                color = MaterialTheme.colorScheme.error,
+                textAlign = TextAlign.Center,
+                modifier = Modifier.padding(horizontal = 32.dp),
             )
+            Spacer(modifier = Modifier.height(12.dp))
+            OutlinedButton(onClick = onRetry) {
+                Text("Try Again")
+            }
         }
+    }
+}
+
+@Composable
+private fun EmptyState(message: String) {
+    Box(
+        modifier = Modifier.fillMaxSize(),
+        contentAlignment = Alignment.Center,
+    ) {
+        Text(
+            text = message,
+            style = MaterialTheme.typography.bodyMedium,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+            textAlign = TextAlign.Center,
+            modifier = Modifier.padding(horizontal = 32.dp),
+        )
     }
 }

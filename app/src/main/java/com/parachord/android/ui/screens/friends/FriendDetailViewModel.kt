@@ -1,0 +1,263 @@
+package com.parachord.android.ui.screens.friends
+
+import android.util.Log
+import androidx.lifecycle.SavedStateHandle
+import androidx.lifecycle.ViewModel
+import androidx.lifecycle.viewModelScope
+import com.parachord.android.data.db.entity.FriendEntity
+import com.parachord.android.data.db.entity.TrackEntity
+import com.parachord.android.data.repository.FriendsRepository
+import com.parachord.android.data.repository.HistoryAlbum
+import com.parachord.android.data.repository.HistoryArtist
+import com.parachord.android.data.repository.HistoryTrack
+import com.parachord.android.data.repository.RecentTrack
+import com.parachord.android.data.repository.Resource
+import com.parachord.android.playback.PlaybackContext
+import com.parachord.android.playback.PlaybackController
+import com.parachord.android.resolver.ResolvedSource
+import com.parachord.android.resolver.ResolverManager
+import com.parachord.android.resolver.ResolverScoring
+import dagger.hilt.android.lifecycle.HiltViewModel
+import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.SharingStarted
+import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.map
+import kotlinx.coroutines.flow.stateIn
+import kotlinx.coroutines.launch
+import javax.inject.Inject
+
+@HiltViewModel
+class FriendDetailViewModel @Inject constructor(
+    savedStateHandle: SavedStateHandle,
+    private val friendsRepository: FriendsRepository,
+    private val resolverManager: ResolverManager,
+    private val resolverScoring: ResolverScoring,
+    private val playbackController: PlaybackController,
+) : ViewModel() {
+
+    companion object {
+        private const val TAG = "FriendDetailVM"
+    }
+
+    private val friendId: String = savedStateHandle["friendId"] ?: ""
+
+    private val _friend = MutableStateFlow<FriendEntity?>(null)
+    val friend: StateFlow<FriendEntity?> = _friend
+
+    val selectedPeriod = MutableStateFlow("1month")
+
+    private val _recentTracks = MutableStateFlow<Resource<List<RecentTrack>>>(Resource.Loading)
+    val recentTracks: StateFlow<Resource<List<RecentTrack>>> = _recentTracks
+
+    private val _topTracks = MutableStateFlow<Resource<List<HistoryTrack>>>(Resource.Loading)
+    val topTracks: StateFlow<Resource<List<HistoryTrack>>> = _topTracks
+
+    private val _topAlbums = MutableStateFlow<Resource<List<HistoryAlbum>>>(Resource.Loading)
+    val topAlbums: StateFlow<Resource<List<HistoryAlbum>>> = _topAlbums
+
+    private val _topArtists = MutableStateFlow<Resource<List<HistoryArtist>>>(Resource.Loading)
+    val topArtists: StateFlow<Resource<List<HistoryArtist>>> = _topArtists
+
+    private val _isResolving = MutableStateFlow(false)
+    val isResolving: StateFlow<Boolean> = _isResolving
+
+    /** Cached resolved sources for tracks, keyed by "title|artist" */
+    private val _trackSources = MutableStateFlow<Map<String, List<ResolvedSource>>>(emptyMap())
+
+    /** Resolver badge names for UI display, derived from cached sources */
+    val trackResolvers: StateFlow<Map<String, List<String>>> = _trackSources
+        .map { sources -> sources.mapValues { (_, v) -> v.map { it.resolver }.distinct() } }
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), emptyMap())
+
+    init {
+        loadFriend()
+    }
+
+    private fun loadFriend() {
+        viewModelScope.launch {
+            val friend = friendsRepository.getFriendById(friendId) ?: return@launch
+            _friend.value = friend
+            loadRecentTracks(friend)
+            loadTopCharts(friend)
+        }
+    }
+
+    fun setPeriod(period: String) {
+        selectedPeriod.value = period
+        val friend = _friend.value ?: return
+        loadTopCharts(friend)
+    }
+
+    fun refresh() {
+        val friend = _friend.value ?: return
+        loadRecentTracks(friend)
+    }
+
+    /**
+     * Resolve and play a top track at the given index.
+     */
+    fun playTopTrack(index: Int) {
+        val resource = _topTracks.value
+        if (resource !is Resource.Success) return
+        val tracks = resource.data
+        if (index !in tracks.indices) return
+
+        viewModelScope.launch {
+            _isResolving.value = true
+            try {
+                val track = tracks[index]
+                val entity = resolveTrack(track.title, track.artist, track.artworkUrl)
+                if (entity == null) {
+                    Log.w(TAG, "No playable source for '${track.artist} - ${track.title}'")
+                    return@launch
+                }
+
+                playbackController.playTrack(entity)
+                _isResolving.value = false
+
+                // Queue remaining
+                val remaining = tracks.subList(index + 1, tracks.size)
+                if (remaining.isNotEmpty()) {
+                    val friendName = _friend.value?.displayName ?: "Friend"
+                    val entities = remaining.mapNotNull { t ->
+                        resolveTrack(t.title, t.artist, t.artworkUrl)
+                    }
+                    if (entities.isNotEmpty()) {
+                        playbackController.addToQueue(entities)
+                    }
+                }
+            } catch (e: Exception) {
+                Log.e(TAG, "Playback failed", e)
+            } finally {
+                _isResolving.value = false
+            }
+        }
+    }
+
+    /**
+     * Resolve and play a recent track at the given index.
+     */
+    fun playRecentTrack(index: Int) {
+        val resource = _recentTracks.value
+        if (resource !is Resource.Success) return
+        val tracks = resource.data
+        if (index !in tracks.indices) return
+
+        viewModelScope.launch {
+            _isResolving.value = true
+            try {
+                val track = tracks[index]
+                val entity = resolveTrack(track.title, track.artist, track.artworkUrl, track.album)
+                if (entity == null) {
+                    Log.w(TAG, "No playable source for '${track.artist} - ${track.title}'")
+                    return@launch
+                }
+
+                playbackController.playTrack(entity)
+                _isResolving.value = false
+
+                val remaining = tracks.subList(index + 1, tracks.size)
+                if (remaining.isNotEmpty()) {
+                    val entities = remaining.mapNotNull { t ->
+                        resolveTrack(t.title, t.artist, t.artworkUrl, t.album)
+                    }
+                    if (entities.isNotEmpty()) {
+                        playbackController.addToQueue(entities)
+                    }
+                }
+            } catch (e: Exception) {
+                Log.e(TAG, "Playback failed", e)
+            } finally {
+                _isResolving.value = false
+            }
+        }
+    }
+
+    private suspend fun resolveTrack(
+        title: String,
+        artist: String,
+        artworkUrl: String?,
+        album: String? = null,
+    ): TrackEntity? {
+        val key = "${title.lowercase().trim()}|${artist.lowercase().trim()}"
+        val sources = _trackSources.value[key]
+            ?: resolverManager.resolveWithHints(query = "$artist - $title")
+        val best = resolverScoring.selectBest(sources) ?: return null
+
+        return TrackEntity(
+            id = "friend-${title.hashCode()}-${artist.hashCode()}",
+            title = title,
+            artist = artist,
+            album = album,
+            artworkUrl = artworkUrl,
+            sourceType = best.sourceType,
+            sourceUrl = best.url,
+            resolver = best.resolver,
+            spotifyUri = best.spotifyUri,
+            soundcloudId = best.soundcloudId,
+        )
+    }
+
+    private fun resolveTracksInBackground(tracks: List<HistoryTrack>) {
+        viewModelScope.launch {
+            for (track in tracks) {
+                val key = "${track.title.lowercase().trim()}|${track.artist.lowercase().trim()}"
+                if (_trackSources.value.containsKey(key)) continue
+                try {
+                    val sources = resolverManager.resolveWithHints(
+                        query = "${track.title} ${track.artist}",
+                    )
+                    if (sources.isNotEmpty()) {
+                        _trackSources.value = _trackSources.value + (key to sources)
+                    }
+                } catch (_: Exception) { /* skip */ }
+            }
+        }
+    }
+
+    private fun resolveRecentTracksInBackground(tracks: List<RecentTrack>) {
+        viewModelScope.launch {
+            for (track in tracks) {
+                val key = "${track.title.lowercase().trim()}|${track.artist.lowercase().trim()}"
+                if (_trackSources.value.containsKey(key)) continue
+                try {
+                    val sources = resolverManager.resolveWithHints(
+                        query = "${track.title} ${track.artist}",
+                    )
+                    if (sources.isNotEmpty()) {
+                        _trackSources.value = _trackSources.value + (key to sources)
+                    }
+                } catch (_: Exception) { /* skip */ }
+            }
+        }
+    }
+
+    private fun loadRecentTracks(friend: FriendEntity) {
+        viewModelScope.launch {
+            friendsRepository.getFriendRecentTracks(friend.username, friend.service)
+                .collect {
+                    _recentTracks.value = it
+                    if (it is Resource.Success) resolveRecentTracksInBackground(it.data)
+                }
+        }
+    }
+
+    private fun loadTopCharts(friend: FriendEntity) {
+        val period = selectedPeriod.value
+        viewModelScope.launch {
+            friendsRepository.getFriendTopTracks(friend.username, friend.service, period)
+                .collect {
+                    _topTracks.value = it
+                    if (it is Resource.Success) resolveTracksInBackground(it.data)
+                }
+        }
+        viewModelScope.launch {
+            friendsRepository.getFriendTopAlbums(friend.username, friend.service, period)
+                .collect { _topAlbums.value = it }
+        }
+        viewModelScope.launch {
+            friendsRepository.getFriendTopArtists(friend.username, friend.service, period)
+                .collect { _topArtists.value = it }
+        }
+    }
+}

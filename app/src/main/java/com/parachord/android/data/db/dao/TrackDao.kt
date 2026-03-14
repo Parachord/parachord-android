@@ -37,4 +37,8 @@ interface TrackDao {
 
     @Query("DELETE FROM tracks")
     suspend fun deleteAll()
+
+    /** Get the most recent N tracks (non-reactive, for background jobs like Fresh Drops). */
+    @Query("SELECT * FROM tracks ORDER BY addedAt DESC LIMIT :limit")
+    suspend fun getRecentSync(limit: Int): List<TrackEntity>
 }
