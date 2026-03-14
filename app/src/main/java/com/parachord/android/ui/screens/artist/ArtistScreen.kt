@@ -67,7 +67,6 @@ import androidx.compose.ui.unit.em
 import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.parachord.android.data.db.entity.TrackEntity
-import androidx.compose.foundation.isSystemInDarkTheme
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.unit.sp
 import com.parachord.android.ui.components.AlbumArtCard
@@ -351,7 +350,7 @@ private fun DiscographyTab(
         else albums.filter { it.releaseType?.lowercase() == selectedFilter }
     }
 
-    val cardBg = if (isSystemInDarkTheme()) Color(0xFF252525) else Color(0xFFF3F4F6)
+    val cardBg = MaterialTheme.colorScheme.surfaceVariant
 
     LazyColumn(modifier = Modifier.fillMaxSize()) {
         // Filter chips row (only show if we have more than one filter available)
