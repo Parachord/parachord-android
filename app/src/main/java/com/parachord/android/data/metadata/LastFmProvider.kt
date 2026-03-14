@@ -140,7 +140,7 @@ class LastFmProvider @Inject constructor(
         try {
             val detail = api.getArtistInfo(artist = artistName, apiKey = apiKey).artist
             detail?.let { d ->
-                val bioText = d.bio?.summary?.stripHtmlTags()?.stripLastFmSuffix()
+                val bioText = (d.bio?.content ?: d.bio?.summary)?.stripHtmlTags()?.stripLastFmSuffix()
 
                 // Use the dedicated similar artists endpoint for more results (20)
                 // with images, instead of the limited set from artist.getinfo (~5, no images)

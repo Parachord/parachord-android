@@ -110,7 +110,7 @@ class WikipediaProvider @Inject constructor(
     private fun getWikipediaBio(wikiTitle: String): String? {
         val encodedTitle = java.net.URLEncoder.encode(wikiTitle, "UTF-8")
         val url = "https://en.wikipedia.org/w/api.php" +
-            "?action=query&titles=$encodedTitle&prop=extracts&exintro=1&explaintext=1&format=json"
+            "?action=query&titles=$encodedTitle&prop=extracts&explaintext=1&format=json"
         val request = Request.Builder().url(url).get().build()
 
         val response = okHttpClient.newCall(request).execute()
