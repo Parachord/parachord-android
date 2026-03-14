@@ -3,6 +3,7 @@ package com.parachord.android.ui.screens.library
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.parachord.android.data.db.entity.AlbumEntity
+import com.parachord.android.data.db.entity.ArtistEntity
 import com.parachord.android.data.db.entity.PlaylistEntity
 import com.parachord.android.data.db.entity.TrackEntity
 import com.parachord.android.data.repository.LibraryRepository
@@ -20,6 +21,9 @@ class LibraryViewModel @Inject constructor(
 ) : ViewModel() {
 
     val tracks: StateFlow<List<TrackEntity>> = repository.getAllTracks()
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), emptyList())
+
+    val artists: StateFlow<List<ArtistEntity>> = repository.getAllArtists()
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), emptyList())
 
     val albums: StateFlow<List<AlbumEntity>> = repository.getAllAlbums()

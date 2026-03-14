@@ -25,6 +25,7 @@ import androidx.compose.material.icons.filled.MusicNote
 import androidx.compose.material.icons.filled.People
 import androidx.compose.material.icons.filled.Person
 import androidx.compose.material.icons.filled.PersonAdd
+import androidx.compose.material.icons.filled.Sync
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
@@ -38,7 +39,9 @@ import androidx.compose.material3.rememberSwipeToDismissBoxState
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
@@ -54,6 +57,7 @@ import com.parachord.android.ui.components.AlbumArtCard
 import com.parachord.android.ui.components.SwipeableTabLayout
 import com.parachord.android.ui.components.TrackRow
 import com.parachord.android.ui.screens.friends.FriendsViewModel
+import com.parachord.android.ui.screens.sync.SyncSetupSheet
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -68,7 +72,13 @@ fun CollectionScreen(
 ) {
     val tracks by viewModel.tracks.collectAsStateWithLifecycle()
     val albums by viewModel.albums.collectAsStateWithLifecycle()
+    val syncedArtists by viewModel.artists.collectAsStateWithLifecycle()
     val friends by friendsViewModel.friends.collectAsState()
+    var showSyncSheet by remember { mutableStateOf(false) }
+
+    if (showSyncSheet) {
+        SyncSetupSheet(onDismiss = { showSyncSheet = false })
+    }
 
     Column(modifier = modifier.fillMaxSize()) {
         TopAppBar(
@@ -86,6 +96,11 @@ fun CollectionScreen(
                     Icon(Icons.Filled.Menu, contentDescription = "Menu")
                 }
             },
+            actions = {
+                IconButton(onClick = { showSyncSheet = true }) {
+                    Icon(Icons.Default.Sync, contentDescription = "Sync")
+                }
+            },
             windowInsets = WindowInsets(0),
         )
         SwipeableTabLayout(
@@ -94,11 +109,12 @@ fun CollectionScreen(
         ) { page ->
             when (page) {
                 0 -> {
-                    val artists = remember(tracks) {
-                        tracks.map { it.artist }.distinct().sorted()
+                    val artists = remember(tracks, syncedArtists) {
+                        (tracks.map { it.artist } + syncedArtists.map { it.name })
+                            .distinct().sorted()
                     }
                     if (artists.isEmpty()) {
-                        EmptyState("No artists yet", Icons.Default.Person)
+                        EmptyState("No artists yet", Icons.Default.Person, onSyncClick = { showSyncSheet = true })
                     } else {
                         LazyColumn(modifier = Modifier.fillMaxSize()) {
                             items(artists, key = { it }) { artist ->
@@ -129,7 +145,7 @@ fun CollectionScreen(
                 }
                 1 -> {
                     if (albums.isEmpty()) {
-                        EmptyState("No albums yet", Icons.Default.MusicNote)
+                        EmptyState("No albums yet", Icons.Default.MusicNote, onSyncClick = { showSyncSheet = true })
                     } else {
                         LazyColumn(modifier = Modifier.fillMaxSize()) {
                             items(albums, key = { it.id }) { album ->
@@ -169,7 +185,7 @@ fun CollectionScreen(
                 }
                 2 -> {
                     if (tracks.isEmpty()) {
-                        EmptyState("No songs yet", Icons.Default.MusicNote)
+                        EmptyState("No songs yet", Icons.Default.MusicNote, onSyncClick = { showSyncSheet = true })
                     } else {
                         LazyColumn(modifier = Modifier.fillMaxSize()) {
                             items(tracks, key = { it.id }) { track ->
@@ -330,6 +346,7 @@ private fun FriendsTab(
 private fun EmptyState(
     message: String,
     icon: androidx.compose.ui.graphics.vector.ImageVector,
+    onSyncClick: (() -> Unit)? = null,
 ) {
     Box(
         modifier = Modifier
@@ -350,6 +367,18 @@ private fun EmptyState(
                 style = MaterialTheme.typography.bodyLarge,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
+            if (onSyncClick != null) {
+                Spacer(modifier = Modifier.height(16.dp))
+                TextButton(onClick = onSyncClick) {
+                    Icon(
+                        imageVector = Icons.Default.Sync,
+                        contentDescription = null,
+                        modifier = Modifier.size(18.dp),
+                    )
+                    Spacer(modifier = Modifier.width(6.dp))
+                    Text("Sync Spotify")
+                }
+            }
         }
     }
 }
