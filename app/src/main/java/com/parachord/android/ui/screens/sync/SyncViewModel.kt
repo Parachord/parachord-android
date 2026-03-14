@@ -44,6 +44,12 @@ class SyncViewModel @Inject constructor(
     private val _availablePlaylists = MutableStateFlow<List<SpotifySyncProvider.SyncedPlaylist>>(emptyList())
     val availablePlaylists: StateFlow<List<SpotifySyncProvider.SyncedPlaylist>> = _availablePlaylists
 
+    private val _playlistsLoading = MutableStateFlow(false)
+    val playlistsLoading: StateFlow<Boolean> = _playlistsLoading
+
+    private val _playlistsError = MutableStateFlow<String?>(null)
+    val playlistsError: StateFlow<String?> = _playlistsError
+
     private val _selectedPlaylistIds = MutableStateFlow<Set<String>>(emptySet())
     val selectedPlaylistIds: StateFlow<Set<String>> = _selectedPlaylistIds
 
@@ -77,19 +83,30 @@ class SyncViewModel @Inject constructor(
 
     fun proceedFromOptions() {
         if (_syncPlaylists.value) {
+            // Transition immediately — show skeleton loaders while fetching
+            _playlistsLoading.value = true
+            _playlistsError.value = null
+            _availablePlaylists.value = emptyList()
+            _currentStep.value = SetupStep.PLAYLISTS
             viewModelScope.launch {
                 try {
                     val playlists = spotifyProvider.fetchPlaylists()
                     _availablePlaylists.value = playlists
                     _selectedPlaylistIds.value = playlists.map { it.spotifyId }.toSet()
-                    _currentStep.value = SetupStep.PLAYLISTS
                 } catch (e: Exception) {
-                    startSync()
+                    _playlistsError.value = e.message ?: "Failed to load playlists"
+                } finally {
+                    _playlistsLoading.value = false
                 }
             }
         } else {
             startSync()
         }
+    }
+
+    fun goBackToOptions() {
+        _currentStep.value = SetupStep.OPTIONS
+        _playlistsError.value = null
     }
 
     fun startSync() {

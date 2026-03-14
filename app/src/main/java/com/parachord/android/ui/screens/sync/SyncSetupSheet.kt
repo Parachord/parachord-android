@@ -1,5 +1,12 @@
 package com.parachord.android.ui.screens.sync
 
+import androidx.compose.animation.core.LinearEasing
+import androidx.compose.animation.core.RepeatMode
+import androidx.compose.animation.core.animateFloat
+import androidx.compose.animation.core.infiniteRepeatable
+import androidx.compose.animation.core.rememberInfiniteTransition
+import androidx.compose.animation.core.tween
+import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
@@ -12,6 +19,8 @@ import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
@@ -128,6 +137,8 @@ private fun PlaylistSelectionStep(viewModel: SyncViewModel) {
     val playlists by viewModel.availablePlaylists.collectAsStateWithLifecycle()
     val selectedIds by viewModel.selectedPlaylistIds.collectAsStateWithLifecycle()
     val filter by viewModel.playlistFilter.collectAsStateWithLifecycle()
+    val isLoading by viewModel.playlistsLoading.collectAsStateWithLifecycle()
+    val error by viewModel.playlistsError.collectAsStateWithLifecycle()
 
     val filteredPlaylists = remember(playlists, filter) {
         when (filter) {
@@ -158,68 +169,222 @@ private fun PlaylistSelectionStep(viewModel: SyncViewModel) {
                 label = { Text("Following") })
         }
 
-        Row(modifier = Modifier.fillMaxWidth().padding(vertical = 8.dp)) {
-            TextButton(onClick = {
-                viewModel.selectAllPlaylists(filteredPlaylists.map { it.spotifyId })
-            }) { Text("Select All") }
-            TextButton(onClick = {
-                viewModel.deselectAllPlaylists(filteredPlaylists.map { it.spotifyId })
-            }) { Text("Deselect All") }
+        if (!isLoading && error == null) {
+            Row(modifier = Modifier.fillMaxWidth().padding(vertical = 8.dp)) {
+                TextButton(onClick = {
+                    viewModel.selectAllPlaylists(filteredPlaylists.map { it.spotifyId })
+                }) { Text("Select All") }
+                TextButton(onClick = {
+                    viewModel.deselectAllPlaylists(filteredPlaylists.map { it.spotifyId })
+                }) { Text("Deselect All") }
+            }
+        } else {
+            Spacer(Modifier.height(8.dp))
         }
 
-        LazyColumn(
-            modifier = Modifier
-                .fillMaxWidth()
-                .weight(1f, fill = false)
-                .heightIn(max = 400.dp),
-        ) {
-            items(filteredPlaylists, key = { it.spotifyId }) { playlist ->
-                Row(
+        when {
+            error != null -> {
+                // Error state
+                Column(
                     modifier = Modifier
                         .fillMaxWidth()
-                        .clickable { viewModel.togglePlaylistSelection(playlist.spotifyId) }
-                        .padding(vertical = 8.dp),
-                    verticalAlignment = Alignment.CenterVertically,
+                        .heightIn(min = 200.dp)
+                        .padding(vertical = 24.dp),
+                    horizontalAlignment = Alignment.CenterHorizontally,
+                    verticalArrangement = Arrangement.Center,
                 ) {
-                    Checkbox(
-                        checked = playlist.spotifyId in selectedIds,
-                        onCheckedChange = { viewModel.togglePlaylistSelection(playlist.spotifyId) },
+                    Icon(
+                        Icons.Default.Error,
+                        contentDescription = null,
+                        modifier = Modifier.size(40.dp),
+                        tint = MaterialTheme.colorScheme.error,
                     )
-                    Spacer(Modifier.width(8.dp))
-                    AlbumArtCard(
-                        artworkUrl = playlist.entity.artworkUrl,
-                        size = 40.dp,
-                        cornerRadius = 4.dp,
+                    Spacer(Modifier.height(12.dp))
+                    Text(
+                        "Failed to load playlists",
+                        style = MaterialTheme.typography.bodyLarge,
+                        color = MaterialTheme.colorScheme.error,
                     )
-                    Spacer(Modifier.width(12.dp))
-                    Column(modifier = Modifier.weight(1f)) {
+                    Spacer(Modifier.height(4.dp))
+                    Text(
+                        error ?: "",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                    Spacer(Modifier.height(16.dp))
+                    TextButton(onClick = { viewModel.proceedFromOptions() }) {
+                        Icon(Icons.Default.Refresh, contentDescription = null, modifier = Modifier.size(18.dp))
+                        Spacer(Modifier.width(6.dp))
+                        Text("Retry")
+                    }
+                }
+            }
+            isLoading -> {
+                // Skeleton loading state — 6 shimmer rows matching desktop
+                LazyColumn(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .weight(1f, fill = false)
+                        .heightIn(max = 400.dp),
+                ) {
+                    items(6) {
+                        PlaylistSkeletonRow()
+                    }
+                }
+            }
+            else -> {
+                // Loaded state — real playlist rows
+                if (filteredPlaylists.isEmpty()) {
+                    Box(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .heightIn(min = 120.dp),
+                        contentAlignment = Alignment.Center,
+                    ) {
                         Text(
-                            playlist.entity.name,
+                            when (filter) {
+                                "owned" -> "No playlists created by you"
+                                "following" -> "No playlists you're following"
+                                else -> "No playlists found"
+                            },
                             style = MaterialTheme.typography.bodyMedium,
-                            fontWeight = FontWeight.Medium,
-                            maxLines = 1,
-                            overflow = TextOverflow.Ellipsis,
-                        )
-                        Text(
-                            "${playlist.trackCount} tracks",
-                            style = MaterialTheme.typography.bodySmall,
                             color = MaterialTheme.colorScheme.onSurfaceVariant,
                         )
+                    }
+                } else {
+                    LazyColumn(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .weight(1f, fill = false)
+                            .heightIn(max = 400.dp),
+                    ) {
+                        items(filteredPlaylists, key = { it.spotifyId }) { playlist ->
+                            Row(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .clickable { viewModel.togglePlaylistSelection(playlist.spotifyId) }
+                                    .padding(vertical = 8.dp),
+                                verticalAlignment = Alignment.CenterVertically,
+                            ) {
+                                Checkbox(
+                                    checked = playlist.spotifyId in selectedIds,
+                                    onCheckedChange = { viewModel.togglePlaylistSelection(playlist.spotifyId) },
+                                )
+                                Spacer(Modifier.width(8.dp))
+                                AlbumArtCard(
+                                    artworkUrl = playlist.entity.artworkUrl,
+                                    size = 40.dp,
+                                    cornerRadius = 4.dp,
+                                )
+                                Spacer(Modifier.width(12.dp))
+                                Column(modifier = Modifier.weight(1f)) {
+                                    Text(
+                                        playlist.entity.name,
+                                        style = MaterialTheme.typography.bodyMedium,
+                                        fontWeight = FontWeight.Medium,
+                                        maxLines = 1,
+                                        overflow = TextOverflow.Ellipsis,
+                                    )
+                                    Text(
+                                        buildString {
+                                            append("${playlist.trackCount} tracks")
+                                            if (!playlist.isOwned) append(" · Following")
+                                        },
+                                        style = MaterialTheme.typography.bodySmall,
+                                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                    )
+                                }
+                            }
+                        }
                     }
                 }
             }
         }
 
         Spacer(Modifier.height(16.dp))
-        Button(
-            onClick = { viewModel.startSync() },
-            modifier = Modifier.fillMaxWidth(),
-            colors = ButtonDefaults.buttonColors(containerColor = SpotifyGreen),
-            enabled = selectedIds.isNotEmpty(),
-        ) {
-            Text("Start Sync")
+        Row(modifier = Modifier.fillMaxWidth()) {
+            OutlinedButton(
+                onClick = { viewModel.goBackToOptions() },
+                modifier = Modifier.weight(1f),
+            ) {
+                Text("Back")
+            }
+            Spacer(Modifier.width(12.dp))
+            Button(
+                onClick = { viewModel.startSync() },
+                modifier = Modifier.weight(1f),
+                colors = ButtonDefaults.buttonColors(containerColor = SpotifyGreen),
+                enabled = selectedIds.isNotEmpty() && !isLoading,
+            ) {
+                Text("Start Sync")
+            }
         }
         Spacer(Modifier.height(16.dp))
+    }
+}
+
+/** Animated shimmer skeleton row matching a playlist row layout. */
+@Composable
+private fun PlaylistSkeletonRow() {
+    val shimmerTransition = rememberInfiniteTransition(label = "shimmer")
+    val shimmerOffset by shimmerTransition.animateFloat(
+        initialValue = -300f,
+        targetValue = 600f,
+        animationSpec = infiniteRepeatable(
+            animation = tween(durationMillis = 1200, easing = LinearEasing),
+            repeatMode = RepeatMode.Restart,
+        ),
+        label = "shimmerOffset",
+    )
+    val baseColor = MaterialTheme.colorScheme.surfaceVariant
+    val highlightColor = MaterialTheme.colorScheme.surface
+    val shimmerBrush = Brush.linearGradient(
+        colors = listOf(baseColor, highlightColor, baseColor),
+        start = Offset(shimmerOffset, 0f),
+        end = Offset(shimmerOffset + 300f, 0f),
+    )
+
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(vertical = 8.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        // Checkbox placeholder
+        Box(
+            modifier = Modifier
+                .size(48.dp)
+                .padding(12.dp)
+                .clip(RoundedCornerShape(4.dp))
+                .background(shimmerBrush),
+        )
+        Spacer(Modifier.width(8.dp))
+        // Image placeholder
+        Box(
+            modifier = Modifier
+                .size(40.dp)
+                .clip(RoundedCornerShape(4.dp))
+                .background(shimmerBrush),
+        )
+        Spacer(Modifier.width(12.dp))
+        // Text placeholders
+        Column(modifier = Modifier.weight(1f)) {
+            Box(
+                modifier = Modifier
+                    .fillMaxWidth(0.7f)
+                    .height(14.dp)
+                    .clip(RoundedCornerShape(4.dp))
+                    .background(shimmerBrush),
+            )
+            Spacer(Modifier.height(6.dp))
+            Box(
+                modifier = Modifier
+                    .fillMaxWidth(0.35f)
+                    .height(10.dp)
+                    .clip(RoundedCornerShape(4.dp))
+                    .background(shimmerBrush),
+            )
+        }
     }
 }
 
