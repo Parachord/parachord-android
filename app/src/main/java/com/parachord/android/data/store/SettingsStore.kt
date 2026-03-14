@@ -47,6 +47,15 @@ class SettingsStore @Inject constructor(
         val CLAUDE_MODEL = stringPreferencesKey("claude_model")
         val GEMINI_API_KEY = stringPreferencesKey("gemini_api_key")
         val GEMINI_MODEL = stringPreferencesKey("gemini_model")
+        val SYNC_ENABLED = booleanPreferencesKey("sync_enabled")
+        val SYNC_PROVIDER = stringPreferencesKey("sync_provider")
+        val SYNC_TRACKS = booleanPreferencesKey("sync_tracks")
+        val SYNC_ALBUMS = booleanPreferencesKey("sync_albums")
+        val SYNC_ARTISTS = booleanPreferencesKey("sync_artists")
+        val SYNC_PLAYLISTS = booleanPreferencesKey("sync_playlists")
+        val SYNC_SELECTED_PLAYLIST_IDS = stringPreferencesKey("sync_selected_playlist_ids")
+        val SYNC_LAST_COMPLETED_AT = stringPreferencesKey("sync_last_completed_at")
+        val SYNC_PUSH_LOCAL_PLAYLISTS = booleanPreferencesKey("sync_push_local_playlists")
 
         /** Default canonical order matching the desktop app. */
         private const val DEFAULT_RESOLVER_ORDER = "spotify,applemusic,bandcamp,soundcloud,localfiles,youtube"
@@ -428,6 +437,89 @@ class SettingsStore @Inject constructor(
             else -> return
         }
         dataStore.edit { it[key] = model }
+    }
+
+    // --- Sync Settings ---
+
+    data class SyncSettings(
+        val enabled: Boolean = false,
+        val provider: String = "spotify",
+        val syncTracks: Boolean = true,
+        val syncAlbums: Boolean = true,
+        val syncArtists: Boolean = true,
+        val syncPlaylists: Boolean = true,
+        val selectedPlaylistIds: Set<String> = emptySet(),
+        val pushLocalPlaylists: Boolean = true,
+    )
+
+    val syncEnabledFlow: Flow<Boolean> = dataStore.data.map { it[SYNC_ENABLED] ?: false }
+
+    val lastSyncAtFlow: Flow<Long> = dataStore.data.map {
+        it[SYNC_LAST_COMPLETED_AT]?.toLongOrNull() ?: 0L
+    }
+
+    fun getSyncSettingsFlow(): Flow<SyncSettings> = dataStore.data.map { prefs ->
+        SyncSettings(
+            enabled = prefs[SYNC_ENABLED] ?: false,
+            provider = prefs[SYNC_PROVIDER] ?: "spotify",
+            syncTracks = prefs[SYNC_TRACKS] ?: true,
+            syncAlbums = prefs[SYNC_ALBUMS] ?: true,
+            syncArtists = prefs[SYNC_ARTISTS] ?: true,
+            syncPlaylists = prefs[SYNC_PLAYLISTS] ?: true,
+            selectedPlaylistIds = (prefs[SYNC_SELECTED_PLAYLIST_IDS] ?: "")
+                .split(",").filter { it.isNotBlank() }.toSet(),
+            pushLocalPlaylists = prefs[SYNC_PUSH_LOCAL_PLAYLISTS] ?: true,
+        )
+    }
+
+    suspend fun getSyncSettings(): SyncSettings {
+        val prefs = dataStore.data.first()
+        return SyncSettings(
+            enabled = prefs[SYNC_ENABLED] ?: false,
+            provider = prefs[SYNC_PROVIDER] ?: "spotify",
+            syncTracks = prefs[SYNC_TRACKS] ?: true,
+            syncAlbums = prefs[SYNC_ALBUMS] ?: true,
+            syncArtists = prefs[SYNC_ARTISTS] ?: true,
+            syncPlaylists = prefs[SYNC_PLAYLISTS] ?: true,
+            selectedPlaylistIds = (prefs[SYNC_SELECTED_PLAYLIST_IDS] ?: "")
+                .split(",").filter { it.isNotBlank() }.toSet(),
+            pushLocalPlaylists = prefs[SYNC_PUSH_LOCAL_PLAYLISTS] ?: true,
+        )
+    }
+
+    suspend fun saveSyncSettings(settings: SyncSettings) {
+        dataStore.edit { prefs ->
+            prefs[SYNC_ENABLED] = settings.enabled
+            prefs[SYNC_PROVIDER] = settings.provider
+            prefs[SYNC_TRACKS] = settings.syncTracks
+            prefs[SYNC_ALBUMS] = settings.syncAlbums
+            prefs[SYNC_ARTISTS] = settings.syncArtists
+            prefs[SYNC_PLAYLISTS] = settings.syncPlaylists
+            prefs[SYNC_SELECTED_PLAYLIST_IDS] = settings.selectedPlaylistIds.joinToString(",")
+            prefs[SYNC_PUSH_LOCAL_PLAYLISTS] = settings.pushLocalPlaylists
+        }
+    }
+
+    suspend fun setSyncEnabled(enabled: Boolean) {
+        dataStore.edit { it[SYNC_ENABLED] = enabled }
+    }
+
+    suspend fun setLastSyncAt(timestamp: Long) {
+        dataStore.edit { it[SYNC_LAST_COMPLETED_AT] = timestamp.toString() }
+    }
+
+    suspend fun clearSyncSettings() {
+        dataStore.edit { prefs ->
+            prefs.remove(SYNC_ENABLED)
+            prefs.remove(SYNC_PROVIDER)
+            prefs.remove(SYNC_TRACKS)
+            prefs.remove(SYNC_ALBUMS)
+            prefs.remove(SYNC_ARTISTS)
+            prefs.remove(SYNC_PLAYLISTS)
+            prefs.remove(SYNC_SELECTED_PLAYLIST_IDS)
+            prefs.remove(SYNC_LAST_COMPLETED_AT)
+            prefs.remove(SYNC_PUSH_LOCAL_PLAYLISTS)
+        }
     }
 
     private fun defaultVolumeOffsets(): Map<String, Int> = mapOf(
