@@ -37,7 +37,7 @@ import com.parachord.android.data.db.entity.TrackEntity
         SyncSourceEntity::class,
         ArtistEntity::class,
     ],
-    version = 9,
+    version = 10,
     exportSchema = false,
 )
 abstract class ParachordDatabase : RoomDatabase() {
@@ -209,13 +209,23 @@ abstract class ParachordDatabase : RoomDatabase() {
             }
         }
 
+        /**
+         * Migration from v9 → v10: add appleMusicId column to tracks table
+         * for storing the Apple Music catalog song ID used by MusicKit playback.
+         */
+        private val MIGRATION_9_10 = object : Migration(9, 10) {
+            override fun migrate(db: SupportSQLiteDatabase) {
+                db.execSQL("ALTER TABLE `tracks` ADD COLUMN `appleMusicId` TEXT")
+            }
+        }
+
         fun create(context: Context): ParachordDatabase =
             Room.databaseBuilder(
                 context,
                 ParachordDatabase::class.java,
                 "parachord.db"
             )
-                .addMigrations(MIGRATION_4_5, MIGRATION_5_6, MIGRATION_6_7, MIGRATION_7_8, MIGRATION_8_9)
+                .addMigrations(MIGRATION_4_5, MIGRATION_5_6, MIGRATION_6_7, MIGRATION_7_8, MIGRATION_8_9, MIGRATION_9_10)
                 // Only fall back to destructive for very old versions (pre-v4)
                 // that we can't reasonably migrate from
                 .fallbackToDestructiveMigrationFrom(1, 2, 3)

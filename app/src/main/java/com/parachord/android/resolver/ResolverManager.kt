@@ -324,6 +324,7 @@ data class ResolvedSource(
     val spotifyId: String? = null,
     val soundcloudId: String? = null,
     val soundcloudUrl: String? = null,
+    val appleMusicId: String? = null,
     /** Match confidence from the resolver (0.0–1.0). Desktop defaults to 0.9 for successful resolves. */
     val confidence: Double? = null,
     /** Whether the resolver explicitly couldn't match this track. */

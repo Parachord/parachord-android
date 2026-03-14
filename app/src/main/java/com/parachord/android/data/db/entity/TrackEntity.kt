@@ -23,4 +23,6 @@ data class TrackEntity(
     val soundcloudId: String? = null,
     /** Spotify track ID (e.g. "6rqhFgbbKwnb9MLmUQDhG6"). */
     val spotifyId: String? = null,
+    /** Apple Music catalog song ID (e.g. "1440935467"). */
+    val appleMusicId: String? = null,
 )
