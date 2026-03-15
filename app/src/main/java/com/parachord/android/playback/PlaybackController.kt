@@ -2,6 +2,7 @@ package com.parachord.android.playback
 
 import android.content.ComponentName
 import android.content.Context
+import android.content.Intent
 import android.os.PowerManager
 import android.util.Log
 import android.widget.Toast
@@ -673,6 +674,30 @@ class PlaybackController @Inject constructor(
             wakeLock.release()
             Log.d(TAG, "Released WakeLock for external playback polling")
         }
+    }
+
+    /**
+     * Tell [PlaybackService] to promote itself to foreground with a persistent
+     * notification. This prevents Android from killing the process during
+     * external playback (Spotify/Apple Music) when the screen is off.
+     */
+    private fun sendExternalPlaybackStart(track: TrackEntity) {
+        val intent = Intent(context, PlaybackService::class.java).apply {
+            action = PlaybackService.ACTION_EXTERNAL_PLAYBACK_START
+            putExtra(PlaybackService.EXTRA_TRACK_TITLE, track.title)
+            putExtra(PlaybackService.EXTRA_TRACK_ARTIST, track.artist)
+        }
+        context.startService(intent)
+    }
+
+    /**
+     * Tell [PlaybackService] to demote from foreground when external playback ends.
+     */
+    private fun sendExternalPlaybackStop() {
+        val intent = Intent(context, PlaybackService::class.java).apply {
+            action = PlaybackService.ACTION_EXTERNAL_PLAYBACK_STOP
+        }
+        context.startService(intent)
     }
 
     // ── Spinoff public API ────────────────────────────────────────────────

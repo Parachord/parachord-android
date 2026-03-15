@@ -1,11 +1,21 @@
 package com.parachord.android.playback
 
+import android.app.Notification
+import android.app.NotificationChannel
+import android.app.NotificationManager
+import android.app.PendingIntent
 import android.content.Intent
+import android.content.pm.ServiceInfo
+import android.os.Build
+import android.util.Log
+import androidx.core.app.NotificationCompat
+import androidx.core.app.ServiceCompat
 import androidx.media3.common.AudioAttributes
 import androidx.media3.common.C
 import androidx.media3.exoplayer.ExoPlayer
 import androidx.media3.session.MediaSession
 import androidx.media3.session.MediaSessionService
+import com.parachord.android.R
 import com.parachord.android.playback.handlers.SpotifyPlaybackHandler
 import dagger.hilt.android.AndroidEntryPoint
 import javax.inject.Inject
@@ -17,10 +27,11 @@ import javax.inject.Inject
  * Also manages the Spotify App Remote connection lifecycle — connecting when
  * the service starts and disconnecting on destroy.
  *
- * During external playback (Spotify Connect, Apple Music), ExoPlayer is prepared
- * with track metadata but not actually playing. This keeps the MediaSession active
- * and the foreground notification visible, preventing Android from killing the
- * process when the screen is off.
+ * During external playback (Spotify Connect, Apple Music), ExoPlayer isn't
+ * actively playing so MediaSessionService won't automatically keep the
+ * foreground notification. We handle this by explicitly calling
+ * [startForeground] with a persistent notification when external playback
+ * is active, preventing Android from killing the process when the screen is off.
  */
 @AndroidEntryPoint
 class PlaybackService : MediaSessionService() {
@@ -29,9 +40,24 @@ class PlaybackService : MediaSessionService() {
 
     private var mediaSession: MediaSession? = null
     private var player: ExoPlayer? = null
+    private var isExternalForeground = false
+
+    companion object {
+        private const val TAG = "PlaybackService"
+        private const val EXTERNAL_NOTIFICATION_ID = 9999
+        private const val CHANNEL_ID = "parachord_external_playback"
+
+        /** Intent actions sent by PlaybackController to manage foreground state. */
+        const val ACTION_EXTERNAL_PLAYBACK_START = "com.parachord.android.EXTERNAL_PLAYBACK_START"
+        const val ACTION_EXTERNAL_PLAYBACK_STOP = "com.parachord.android.EXTERNAL_PLAYBACK_STOP"
+        const val EXTRA_TRACK_TITLE = "track_title"
+        const val EXTRA_TRACK_ARTIST = "track_artist"
+    }
 
     override fun onCreate() {
         super.onCreate()
+
+        createNotificationChannel()
 
         val audioAttributes = AudioAttributes.Builder()
             .setUsage(C.USAGE_MEDIA)
@@ -48,6 +74,20 @@ class PlaybackService : MediaSessionService() {
             .build()
     }
 
+    override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
+        when (intent?.action) {
+            ACTION_EXTERNAL_PLAYBACK_START -> {
+                val title = intent.getStringExtra(EXTRA_TRACK_TITLE) ?: "Playing"
+                val artist = intent.getStringExtra(EXTRA_TRACK_ARTIST) ?: ""
+                promoteToForeground(title, artist)
+            }
+            ACTION_EXTERNAL_PLAYBACK_STOP -> {
+                demoteFromForeground()
+            }
+        }
+        return super.onStartCommand(intent, flags, startId)
+    }
+
     override fun onGetSession(controllerInfo: MediaSession.ControllerInfo): MediaSession? =
         mediaSession
 
@@ -58,9 +98,8 @@ class PlaybackService : MediaSessionService() {
      */
     override fun onTaskRemoved(rootIntent: Intent?) {
         val p = player
-        if (p != null && (p.playWhenReady || p.mediaItemCount > 0)) {
-            // Player has content (either playing via ExoPlayer or holding
-            // metadata for external playback) — keep the service alive
+        if (isExternalForeground || (p != null && p.playWhenReady)) {
+            // External playback active or ExoPlayer playing — keep alive
             return
         }
         stopSelf()
@@ -68,6 +107,7 @@ class PlaybackService : MediaSessionService() {
 
     override fun onDestroy() {
         spotifyHandler.disconnect()
+        isExternalForeground = false
         mediaSession?.run {
             player.release()
             release()
@@ -75,5 +115,76 @@ class PlaybackService : MediaSessionService() {
         mediaSession = null
         player = null
         super.onDestroy()
+    }
+
+    /**
+     * Explicitly start this service in the foreground during external playback.
+     * MediaSessionService only auto-promotes when ExoPlayer is actively playing,
+     * which doesn't happen for Spotify/Apple Music external handlers.
+     */
+    private fun promoteToForeground(title: String, artist: String) {
+        if (isExternalForeground) {
+            // Just update the notification text
+            val nm = getSystemService(NotificationManager::class.java)
+            nm?.notify(EXTERNAL_NOTIFICATION_ID, buildNotification(title, artist))
+            return
+        }
+
+        Log.d(TAG, "Promoting to foreground for external playback: $title - $artist")
+        val notification = buildNotification(title, artist)
+        try {
+            ServiceCompat.startForeground(
+                this,
+                EXTERNAL_NOTIFICATION_ID,
+                notification,
+                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q)
+                    ServiceInfo.FOREGROUND_SERVICE_TYPE_MEDIA_PLAYBACK
+                else 0,
+            )
+            isExternalForeground = true
+        } catch (e: Exception) {
+            Log.e(TAG, "Failed to start foreground", e)
+        }
+    }
+
+    private fun demoteFromForeground() {
+        if (!isExternalForeground) return
+        Log.d(TAG, "Demoting from external playback foreground")
+        isExternalForeground = false
+        ServiceCompat.stopForeground(this, ServiceCompat.STOP_FOREGROUND_REMOVE)
+    }
+
+    private fun buildNotification(title: String, artist: String): Notification {
+        val launchIntent = packageManager.getLaunchIntentForPackage(packageName)
+        val pendingIntent = if (launchIntent != null) {
+            PendingIntent.getActivity(
+                this, 0, launchIntent,
+                PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE,
+            )
+        } else null
+
+        return NotificationCompat.Builder(this, CHANNEL_ID)
+            .setContentTitle(title)
+            .setContentText(artist)
+            .setSmallIcon(R.drawable.ic_notification)
+            .setOngoing(true)
+            .setSilent(true)
+            .setContentIntent(pendingIntent)
+            .setCategory(NotificationCompat.CATEGORY_TRANSPORT)
+            .setVisibility(NotificationCompat.VISIBILITY_PUBLIC)
+            .build()
+    }
+
+    private fun createNotificationChannel() {
+        val channel = NotificationChannel(
+            CHANNEL_ID,
+            "Now Playing",
+            NotificationManager.IMPORTANCE_LOW,
+        ).apply {
+            description = "Shows current track during external playback"
+            setShowBadge(false)
+        }
+        val nm = getSystemService(NotificationManager::class.java)
+        nm?.createNotificationChannel(channel)
     }
 }
