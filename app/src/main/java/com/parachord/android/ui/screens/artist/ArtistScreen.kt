@@ -1,5 +1,6 @@
 package com.parachord.android.ui.screens.artist
 
+import com.parachord.android.resolver.trackKey
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement

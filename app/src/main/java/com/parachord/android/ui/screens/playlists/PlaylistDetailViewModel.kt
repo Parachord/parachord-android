@@ -10,6 +10,8 @@ import com.parachord.android.data.db.entity.TrackEntity
 import com.parachord.android.data.repository.LibraryRepository
 import com.parachord.android.data.store.SettingsStore
 import com.parachord.android.playback.PlaybackController
+import com.parachord.android.resolver.PlaylistTrackInfo
+import com.parachord.android.resolver.TrackResolverCache
 import dagger.hilt.android.lifecycle.HiltViewModel
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
@@ -26,6 +28,7 @@ class PlaylistDetailViewModel @Inject constructor(
     private val playbackController: PlaybackController,
     private val playbackStateHolder: com.parachord.android.playback.PlaybackStateHolder,
     private val settingsStore: SettingsStore,
+    private val trackResolverCache: TrackResolverCache,
 ) : ViewModel() {
 
     /** User-configured resolver priority order, used to sort resolver icons on track rows. */
@@ -45,6 +48,30 @@ class PlaylistDetailViewModel @Inject constructor(
     val tracks: StateFlow<List<PlaylistTrackEntity>> =
         libraryRepository.getPlaylistTracks(playlistId)
             .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
+
+    /** Resolver badge names for UI display — shared across all screens via TrackResolverCache. */
+    val trackResolvers: StateFlow<Map<String, List<String>>> = trackResolverCache.trackResolvers
+
+    init {
+        // Run full resolver pipeline against playlist tracks in background (concurrent, deduplicated)
+        viewModelScope.launch {
+            tracks.collect { trackList ->
+                if (trackList.isNotEmpty()) {
+                    trackResolverCache.resolvePlaylistTracksInBackground(
+                        trackList.map { pt ->
+                            PlaylistTrackInfo(
+                                title = pt.trackTitle,
+                                artist = pt.trackArtist,
+                                spotifyId = pt.trackSpotifyId,
+                                appleMusicId = pt.trackAppleMusicId,
+                                soundcloudId = pt.trackSoundcloudId,
+                            )
+                        }
+                    )
+                }
+            }
+        }
+    }
 
     /** Play all tracks starting from the given index. */
     fun playAll(startIndex: Int = 0) {

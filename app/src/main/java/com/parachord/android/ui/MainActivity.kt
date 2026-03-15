@@ -60,6 +60,7 @@ import androidx.navigation.NavGraph.Companion.findStartDestination
 import androidx.navigation.compose.currentBackStackEntryAsState
 import androidx.navigation.compose.rememberNavController
 import com.parachord.android.auth.OAuthManager
+import com.parachord.android.data.store.SettingsStore
 import com.parachord.android.playback.handlers.MusicKitWebBridge
 import com.parachord.android.ui.components.ActionOverlay
 import com.parachord.android.ui.components.CreatePlaylistDialog
@@ -85,6 +86,9 @@ class MainActivity : ComponentActivity() {
     @Inject
     lateinit var musicKitBridge: MusicKitWebBridge
 
+    @Inject
+    lateinit var settingsStore: SettingsStore
+
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         enableEdgeToEdge()
@@ -97,6 +101,16 @@ class MainActivity : ComponentActivity() {
     override fun onResume() {
         super.onResume()
         musicKitBridge.setActivity(this)
+        // Auto-configure MusicKit on launch if the user has previously set up Apple Music.
+        // configure() restores the saved Music User Token, so no login popup is needed.
+        if (!musicKitBridge.configured.value) {
+            CoroutineScope(Dispatchers.IO).launch {
+                val devToken = settingsStore.getAppleMusicDeveloperToken()
+                if (!devToken.isNullOrBlank()) {
+                    musicKitBridge.configure()
+                }
+            }
+        }
     }
 
     override fun onPause() {

@@ -20,6 +20,8 @@ import com.parachord.android.playback.handlers.AppleMusicPlaybackHandler
 import com.parachord.android.playback.handlers.PlaybackAction
 import com.parachord.android.resolver.ResolverManager
 import com.parachord.android.resolver.ResolverScoring
+import com.parachord.android.resolver.TrackResolverCache
+import com.parachord.android.resolver.trackKey
 import com.parachord.android.widget.MiniPlayerWidgetUpdater
 import dagger.hilt.android.qualifiers.ApplicationContext
 import kotlinx.coroutines.CoroutineScope
@@ -56,6 +58,7 @@ class PlaybackController @Inject constructor(
     private val lastFmApi: LastFmApi,
     private val resolverManager: ResolverManager,
     private val resolverScoring: ResolverScoring,
+    private val trackResolverCache: TrackResolverCache,
     private val widgetUpdater: MiniPlayerWidgetUpdater,
 ) {
     companion object {
@@ -324,12 +327,18 @@ class PlaybackController @Inject constructor(
     }
 
     private suspend fun playTrackInternal(track: TrackEntity) {
-        val action = router.route(track)
+        // Re-select the best resolver from cached sources before routing.
+        // Stored tracks may have a stale `resolver` field from when they were first
+        // added (e.g. "spotify"), but the user may now prioritize a different resolver
+        // (e.g. "applemusic"). The TrackResolverCache has live resolution results
+        // sorted by the user's current priority order, so we pick the best one.
+        val routedTrack = reselectBestSource(track)
+        val action = router.route(routedTrack)
         val snapshot = queueManager.snapshot.value
 
         if (action == null) {
-            Log.w(TAG, "No playback handler for: ${track.title}")
-            playViaExoPlayer(track)
+            Log.w(TAG, "No playback handler for: ${routedTrack.title}")
+            playViaExoPlayer(routedTrack)
             return
         }
 
@@ -347,7 +356,7 @@ class PlaybackController @Inject constructor(
 
                 stateHolder.update {
                     copy(
-                        currentTrack = track,
+                        currentTrack = routedTrack,
                         isPlaying = true,
                         position = 0L,
                         upNext = snapshot.upNext,
@@ -369,17 +378,17 @@ class PlaybackController @Inject constructor(
                 // this if playback actually fails.
                 stateHolder.update {
                     copy(
-                        currentTrack = track,
+                        currentTrack = routedTrack,
                         isPlaying = true,
                         position = 0L,
-                        duration = track.duration ?: 0L,
+                        duration = routedTrack.duration ?: 0L,
                         upNext = snapshot.upNext,
                         playbackContext = snapshot.playbackContext,
                         shuffleEnabled = snapshot.shuffleEnabled,
                     )
                 }
 
-                action.handler.play(track)
+                action.handler.play(routedTrack)
 
                 // Start the appropriate state polling based on the handler type
                 when (action.handler) {
@@ -392,7 +401,7 @@ class PlaybackController @Inject constructor(
         }
 
         // If the track has no artwork, try to fetch it in the background
-        enrichArtworkIfMissing(track)
+        enrichArtworkIfMissing(routedTrack)
 
         // Check spinoff availability for the new track (unless in spinoff mode)
         if (!stateHolder.state.value.spinoffMode) {
@@ -797,6 +806,42 @@ class PlaybackController @Inject constructor(
      * metadata providers in the background. Updates both the DB and the
      * live PlaybackState so the UI refreshes without a restart.
      */
+    /**
+     * Re-select the best resolver for a track using cached resolution results.
+     *
+     * When a track is stored in the DB or queue, its `resolver` field reflects
+     * whichever resolver was "best" at the time it was added. But the user may
+     * have since changed their resolver priority order, or background resolution
+     * may have discovered additional sources (e.g. Apple Music for a track that
+     * was originally stored as Spotify-only).
+     *
+     * This checks the shared [TrackResolverCache] for live-resolved sources and
+     * uses [ResolverScoring.selectBest] to pick the current best, then returns
+     * a copy of the track with the updated routing fields. If no cached sources
+     * exist, the original track is returned unchanged.
+     */
+    private suspend fun reselectBestSource(track: TrackEntity): TrackEntity {
+        val key = trackKey(track.title, track.artist)
+        val cachedSources = trackResolverCache.trackSources.value[key]
+        if (cachedSources.isNullOrEmpty()) return track
+
+        val best = resolverScoring.selectBest(cachedSources) ?: return track
+
+        // Only update if the best resolver actually changed
+        if (best.resolver == track.resolver) return track
+
+        Log.d(TAG, "Re-routed '${track.title}' from ${track.resolver} → ${best.resolver} (user priority)")
+        return track.copy(
+            resolver = best.resolver,
+            sourceType = best.sourceType,
+            sourceUrl = best.url,
+            spotifyUri = best.spotifyUri ?: track.spotifyUri,
+            spotifyId = best.spotifyId ?: track.spotifyId,
+            soundcloudId = best.soundcloudId ?: track.soundcloudId,
+            appleMusicId = best.appleMusicId ?: track.appleMusicId,
+        )
+    }
+
     private fun enrichArtworkIfMissing(track: TrackEntity) {
         if (!track.artworkUrl.isNullOrBlank()) return
         scope.launch(Dispatchers.IO) {

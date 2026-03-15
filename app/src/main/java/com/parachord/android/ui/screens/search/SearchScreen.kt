@@ -135,7 +135,8 @@ fun SearchScreen(
                             title = track.title,
                             artist = track.artist,
                             artworkUrl = track.artworkUrl,
-                            resolvers = track.availableResolvers(resolverOrder),
+                            resolvers = trackResolvers["${track.title.lowercase().trim()}|${track.artist.lowercase().trim()}"]?.ifEmpty { null }
+                                ?: track.availableResolvers(resolverOrder),
                             duration = track.duration,
                             onClick = {
                                 viewModel.saveHistoryEntry(

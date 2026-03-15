@@ -161,6 +161,20 @@ class LibraryRepository @Inject constructor(
         ))
     }
 
+    /**
+     * Backfill resolver IDs on a stored track from resolution results.
+     * Only fills in IDs that are currently null/blank — never overwrites.
+     */
+    suspend fun backfillTrackResolverIds(
+        trackId: String,
+        spotifyId: String?,
+        spotifyUri: String?,
+        appleMusicId: String?,
+        soundcloudId: String?,
+    ) {
+        trackDao.backfillResolverIds(trackId, spotifyId, spotifyUri, appleMusicId, soundcloudId)
+    }
+
     /** Convert a PlaylistTrackEntity to a TrackEntity for playback. */
     fun playlistTrackToTrackEntity(pt: PlaylistTrackEntity): TrackEntity =
         TrackEntity(

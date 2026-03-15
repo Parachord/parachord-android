@@ -9,6 +9,7 @@ import com.parachord.android.data.store.SettingsStore
 import com.parachord.android.playback.PlaybackController
 import com.parachord.android.playback.PlaybackState
 import com.parachord.android.playback.PlaybackStateHolder
+import com.parachord.android.resolver.TrackResolverCache
 import dagger.hilt.android.lifecycle.HiltViewModel
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
@@ -22,6 +23,7 @@ class NowPlayingViewModel @Inject constructor(
     private val playbackController: PlaybackController,
     private val libraryRepository: LibraryRepository,
     private val settingsStore: SettingsStore,
+    private val trackResolverCache: TrackResolverCache,
 ) : ViewModel() {
 
     val playbackState: StateFlow<PlaybackState> = playbackStateHolder.state
@@ -33,6 +35,24 @@ class NowPlayingViewModel @Inject constructor(
     val playlists: StateFlow<List<PlaylistEntity>> =
         libraryRepository.getAllPlaylists()
             .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), emptyList())
+
+    /** Resolver badge names for UI display — shared across all screens via TrackResolverCache. */
+    val trackResolvers: StateFlow<Map<String, List<String>>> = trackResolverCache.trackResolvers
+
+    init {
+        // Resolve queue tracks in background as they change (concurrent, deduplicated)
+        viewModelScope.launch {
+            playbackState.collect { state ->
+                val allTracks = buildList {
+                    state.currentTrack?.let { add(it) }
+                    addAll(state.upNext)
+                }
+                if (allTracks.isNotEmpty()) {
+                    trackResolverCache.resolveInBackground(allTracks, backfillDb = false)
+                }
+            }
+        }
+    }
 
     fun togglePlayPause() {
         playbackController.togglePlayPause()

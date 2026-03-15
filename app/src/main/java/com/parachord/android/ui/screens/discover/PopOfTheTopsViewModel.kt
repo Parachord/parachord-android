@@ -13,13 +13,12 @@ import com.parachord.android.playback.PlaybackController
 import com.parachord.android.resolver.ResolvedSource
 import com.parachord.android.resolver.ResolverManager
 import com.parachord.android.resolver.ResolverScoring
+import com.parachord.android.resolver.TrackResolverCache
+import com.parachord.android.resolver.trackKey
 import dagger.hilt.android.lifecycle.HiltViewModel
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.flow.MutableStateFlow
-import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
-import kotlinx.coroutines.flow.map
-import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
 import javax.inject.Inject
 
@@ -29,6 +28,7 @@ class PopOfTheTopsViewModel @Inject constructor(
     private val resolverManager: ResolverManager,
     private val resolverScoring: ResolverScoring,
     private val playbackController: PlaybackController,
+    private val trackResolverCache: TrackResolverCache,
 ) : ViewModel() {
 
     companion object {
@@ -59,10 +59,8 @@ class PopOfTheTopsViewModel @Inject constructor(
     /** Pre-resolved sources keyed by "title|artist" */
     private val _trackSources = MutableStateFlow<Map<String, List<ResolvedSource>>>(emptyMap())
 
-    /** Resolver badge names for UI display, derived from cached sources */
-    val trackResolvers: StateFlow<Map<String, List<String>>> = _trackSources
-        .map { sources -> sources.mapValues { (_, v) -> v.map { it.resolver }.distinct() } }
-        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), emptyMap())
+    /** Resolver badge names for UI display from shared cache */
+    val trackResolvers: StateFlow<Map<String, List<String>>> = trackResolverCache.trackResolvers
 
     private var resolveJob: Job? = null
 
@@ -127,7 +125,7 @@ class PopOfTheTopsViewModel @Inject constructor(
     }
 
     private suspend fun resolveChartSong(song: ChartSong): TrackEntity? {
-        val key = "${song.title.lowercase().trim()}|${song.artist.lowercase().trim()}"
+        val key = trackKey(song.title, song.artist)
         val sources = _trackSources.value[key]
             ?: resolverManager.resolveWithHints(
                 query = "${song.artist} - ${song.title}",
@@ -153,8 +151,15 @@ class PopOfTheTopsViewModel @Inject constructor(
         resolveJob?.cancel()
         resolveJob = viewModelScope.launch {
             for (song in songs) {
-                val key = "${song.title.lowercase().trim()}|${song.artist.lowercase().trim()}"
+                val key = trackKey(song.title, song.artist)
                 if (_trackSources.value.containsKey(key)) continue
+                // Check shared cache first (cross-context dedup)
+                val cached = trackResolverCache.getSources(song.title, song.artist)
+                if (cached != null) {
+                    _trackSources.value = _trackSources.value + (key to cached)
+                    trackResolverCache.putSources(song.title, song.artist, cached)
+                    continue
+                }
                 try {
                     val sources = resolverManager.resolveWithHints(
                         query = "${song.artist} - ${song.title}",
@@ -162,6 +167,7 @@ class PopOfTheTopsViewModel @Inject constructor(
                     )
                     if (sources.isNotEmpty()) {
                         _trackSources.value = _trackSources.value + (key to sources)
+                        trackResolverCache.putSources(song.title, song.artist, sources)
                     }
                 } catch (_: Exception) { /* skip */ }
             }

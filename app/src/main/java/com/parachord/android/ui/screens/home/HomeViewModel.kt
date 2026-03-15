@@ -20,6 +20,7 @@ import com.parachord.android.data.scanner.ScanProgress
 import com.parachord.android.data.store.SettingsStore
 import com.parachord.android.playback.PlaybackController
 import com.parachord.android.playback.PlaybackStateHolder
+import com.parachord.android.resolver.TrackResolverCache
 import dagger.hilt.android.lifecycle.HiltViewModel
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
@@ -59,11 +60,15 @@ class HomeViewModel @Inject constructor(
     private val chartsRepository: ChartsRepository,
     private val aiRecommendationService: AiRecommendationService,
     private val settingsStore: SettingsStore,
+    private val trackResolverCache: TrackResolverCache,
 ) : ViewModel() {
 
     /** User-configured resolver priority order, used to sort resolver icons on track rows. */
     val resolverOrder: StateFlow<List<String>> = settingsStore.getResolverOrderFlow()
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), emptyList())
+
+    /** Resolver badge names for UI display — shared across all screens via TrackResolverCache. */
+    val trackResolvers: StateFlow<Map<String, List<String>>> = trackResolverCache.trackResolvers
 
     val recentTracks: StateFlow<List<TrackEntity>> = repository.getAllTracks()
         .map { tracks -> tracks.sortedByDescending { it.addedAt }.take(20) }
@@ -139,6 +144,12 @@ class HomeViewModel @Inject constructor(
     init {
         loadDiscoverPreviews()
         checkAiPlugins()
+        // Run full resolver pipeline against stored tracks in background (concurrent, deduplicated)
+        viewModelScope.launch {
+            recentTracks.collect { tracks ->
+                if (tracks.isNotEmpty()) trackResolverCache.resolveInBackground(tracks)
+            }
+        }
     }
 
     private fun checkAiPlugins() {

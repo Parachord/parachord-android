@@ -58,6 +58,8 @@ fun QueueSheet(
     modifier: Modifier = Modifier,
     /** User-configured resolver priority order for sorting resolver icons. */
     resolverOrder: List<String> = emptyList(),
+    /** Resolver names from the full resolver pipeline, keyed by "title|artist". */
+    trackResolvers: Map<String, List<String>> = emptyMap(),
     /** True when queue is "paused" (spinoff or listen-along) — dims tracks to show they'll resume later. */
     queueSuspended: Boolean = false,
     /** Navigate to the source context (album, playlist, artist page). */
@@ -153,6 +155,7 @@ fun QueueSheet(
                         index = index,
                         suspended = queueSuspended,
                         resolverOrder = resolverOrder,
+                        trackResolvers = trackResolvers,
                         onTap = { onPlayFromQueue(index) },
                         onRemove = { onRemoveFromQueue(index) },
                     )
@@ -168,6 +171,7 @@ private fun QueueTrackRow(
     index: Int,
     suspended: Boolean,
     resolverOrder: List<String> = emptyList(),
+    trackResolvers: Map<String, List<String>> = emptyMap(),
     onTap: () -> Unit,
     onRemove: () -> Unit,
 ) {
@@ -248,7 +252,8 @@ private fun QueueTrackRow(
             }
 
             // Resolver badges
-            val resolvers = track.availableResolvers(resolverOrder)
+            val resolvers = trackResolvers["${track.title.lowercase().trim()}|${track.artist.lowercase().trim()}"]?.ifEmpty { null }
+                ?: track.availableResolvers(resolverOrder)
             if (resolvers.isNotEmpty()) {
                 Spacer(modifier = Modifier.width(8.dp))
                 ResolverIconRow(

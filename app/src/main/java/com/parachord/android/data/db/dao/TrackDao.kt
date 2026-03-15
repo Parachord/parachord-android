@@ -73,4 +73,24 @@ interface TrackDao {
     /** Delete all synced tracks (spotify-prefixed IDs). */
     @Query("DELETE FROM tracks WHERE id LIKE 'spotify-%'")
     suspend fun deleteSyncedTracks(): Int
+
+    /**
+     * Update resolver IDs on an existing track without touching other fields.
+     * Only fills in IDs that are currently null/blank — never overwrites existing data.
+     */
+    @Query("""
+        UPDATE tracks SET
+            spotifyId = CASE WHEN (spotifyId IS NULL OR spotifyId = '') THEN :spotifyId ELSE spotifyId END,
+            spotifyUri = CASE WHEN (spotifyUri IS NULL OR spotifyUri = '') THEN :spotifyUri ELSE spotifyUri END,
+            appleMusicId = CASE WHEN (appleMusicId IS NULL OR appleMusicId = '') THEN :appleMusicId ELSE appleMusicId END,
+            soundcloudId = CASE WHEN (soundcloudId IS NULL OR soundcloudId = '') THEN :soundcloudId ELSE soundcloudId END
+        WHERE id = :trackId
+    """)
+    suspend fun backfillResolverIds(
+        trackId: String,
+        spotifyId: String?,
+        spotifyUri: String?,
+        appleMusicId: String?,
+        soundcloudId: String?,
+    )
 }

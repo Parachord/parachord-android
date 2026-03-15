@@ -15,6 +15,8 @@ import com.parachord.android.data.store.SettingsStore
 import com.parachord.android.playback.PlaybackController
 import com.parachord.android.resolver.ResolvedSource
 import com.parachord.android.resolver.ResolverManager
+import com.parachord.android.resolver.TrackResolverCache
+import com.parachord.android.resolver.trackKey
 import dagger.hilt.android.lifecycle.HiltViewModel
 import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.FlowPreview
@@ -25,7 +27,6 @@ import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.debounce
 import kotlinx.coroutines.flow.flatMapLatest
 import kotlinx.coroutines.flow.flowOf
-import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
 import javax.inject.Inject
@@ -39,6 +40,7 @@ class SearchViewModel @Inject constructor(
     private val searchHistoryDao: SearchHistoryDao,
     private val resolverManager: ResolverManager,
     private val settingsStore: SettingsStore,
+    private val trackResolverCache: TrackResolverCache,
 ) : ViewModel() {
 
     /** User-configured resolver priority order, used to sort resolver icons on track rows. */
@@ -79,10 +81,8 @@ class SearchViewModel @Inject constructor(
     /** Cached resolved sources for remote tracks, keyed by "title|artist" */
     private val _trackSources = MutableStateFlow<Map<String, List<ResolvedSource>>>(emptyMap())
 
-    /** Resolver badge names for UI display, derived from cached sources */
-    val trackResolvers: StateFlow<Map<String, List<String>>> = _trackSources
-        .map { sources -> sources.mapValues { (_, v) -> v.map { it.resolver }.distinct() } }
-        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), emptyMap())
+    /** Resolver badge names for UI display from shared cache */
+    val trackResolvers: StateFlow<Map<String, List<String>>> = trackResolverCache.trackResolvers
 
     // Search history
     val searchHistory: StateFlow<List<SearchHistoryEntity>> = searchHistoryDao.getRecent()
@@ -155,8 +155,15 @@ class SearchViewModel @Inject constructor(
     private fun resolveTracksInBackground(tracks: List<TrackSearchResult>) {
         viewModelScope.launch {
             for (track in tracks) {
-                val key = "${track.title.lowercase().trim()}|${track.artist.lowercase().trim()}"
+                val key = trackKey(track.title, track.artist)
                 if (_trackSources.value.containsKey(key)) continue
+                // Check shared cache first (cross-context dedup)
+                val cached = trackResolverCache.getSources(track.title, track.artist)
+                if (cached != null) {
+                    _trackSources.value = _trackSources.value + (key to cached)
+                    trackResolverCache.putSources(track.title, track.artist, cached)
+                    continue
+                }
                 try {
                     val sources = resolverManager.resolveWithHints(
                         query = "${track.title} ${track.artist}",
@@ -164,6 +171,7 @@ class SearchViewModel @Inject constructor(
                     )
                     if (sources.isNotEmpty()) {
                         _trackSources.value = _trackSources.value + (key to sources)
+                        trackResolverCache.putSources(track.title, track.artist, sources)
                     }
                 } catch (_: Exception) { /* skip */ }
             }

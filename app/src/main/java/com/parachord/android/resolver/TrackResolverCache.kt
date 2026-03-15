@@ -1,0 +1,218 @@
+package com.parachord.android.resolver
+
+import android.util.Log
+import com.parachord.android.data.db.entity.TrackEntity
+import com.parachord.android.data.repository.LibraryRepository
+import com.parachord.android.data.store.SettingsStore
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.Job
+import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.SharingStarted
+import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.combine
+import kotlinx.coroutines.flow.stateIn
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.sync.Semaphore
+import kotlinx.coroutines.sync.withPermit
+import javax.inject.Inject
+import javax.inject.Singleton
+
+/**
+ * Centralized, session-wide cache for track resolver results.
+ *
+ * Mirrors the desktop's ResolutionScheduler approach:
+ * - Cross-context deduplication (one track resolved once, all screens benefit)
+ * - Concurrent resolution (4 workers, matching desktop)
+ * - Priority-based ordering (callers submit with context priority)
+ * - Resolved IDs are backfilled into the database for persistence
+ *
+ * ViewModels observe [trackResolvers] for UI display and call [resolveInBackground]
+ * to submit tracks for resolution.
+ */
+@Singleton
+class TrackResolverCache @Inject constructor(
+    private val resolverManager: ResolverManager,
+    private val libraryRepository: LibraryRepository,
+    private val settingsStore: SettingsStore,
+) {
+    companion object {
+        private const val TAG = "TrackResolverCache"
+        /** Max concurrent resolutions — matches desktop's 4 workers. */
+        private const val MAX_CONCURRENCY = 4
+    }
+
+    private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
+    private val semaphore = Semaphore(MAX_CONCURRENCY)
+
+    /** All cached resolved sources, keyed by "title|artist" */
+    private val _trackSources = MutableStateFlow<Map<String, List<ResolvedSource>>>(emptyMap())
+    val trackSources: StateFlow<Map<String, List<ResolvedSource>>> = _trackSources.asStateFlow()
+
+    /**
+     * Resolver badge names for UI display, sorted by user-configured priority order.
+     * This ensures the highest-priority resolver (the one that will actually play)
+     * appears first in the icon row, matching user expectations.
+     */
+    val trackResolvers: StateFlow<Map<String, List<String>>> =
+        combine(
+            _trackSources,
+            settingsStore.getResolverOrderFlow(),
+        ) { sources, resolverOrder ->
+            sources.mapValues { (_, v) ->
+                val resolvers = v.map { it.resolver }.distinct()
+                if (resolverOrder.isEmpty()) resolvers
+                else resolvers.sortedBy { r ->
+                    val idx = resolverOrder.indexOf(r)
+                    if (idx == -1) resolverOrder.size else idx
+                }
+            }
+        }.stateIn(scope, SharingStarted.Eagerly, emptyMap())
+
+    /** Track keys currently being resolved (prevents duplicate in-flight requests). */
+    private val inFlight = mutableSetOf<String>()
+
+    /**
+     * Submit tracks for background resolution with concurrent workers.
+     *
+     * Matches the desktop's context-priority pattern:
+     * - Queue tracks (priority 1) should be submitted separately
+     * - Page tracks (priority 4) are the normal case
+     * - Already-resolved tracks are skipped (cross-context dedup)
+     *
+     * @param tracks TrackEntities to resolve
+     * @param backfillDb If true, persist newly-discovered resolver IDs back to the DB
+     */
+    fun resolveInBackground(
+        tracks: List<TrackEntity>,
+        backfillDb: Boolean = true,
+    ): Job = scope.launch {
+        for (track in tracks) {
+            val key = trackKey(track.title, track.artist)
+            // Skip if already resolved (cross-context dedup)
+            if (_trackSources.value.containsKey(key)) continue
+            // Skip if already in-flight from another context
+            val shouldResolve = synchronized(inFlight) { inFlight.add(key) }
+            if (!shouldResolve) continue
+
+            // Launch concurrent resolution (bounded by semaphore)
+            launch {
+                try {
+                    semaphore.withPermit {
+                        val sources = resolverManager.resolveWithHints(
+                            query = "${track.title} ${track.artist}",
+                            spotifyId = track.spotifyId,
+                            appleMusicId = track.appleMusicId,
+                            soundcloudId = track.soundcloudId,
+                        )
+                        if (sources.isNotEmpty()) {
+                            _trackSources.value = _trackSources.value + (key to sources)
+                            if (backfillDb) {
+                                backfillResolverIds(track, sources)
+                            }
+                        }
+                    }
+                } catch (e: Exception) {
+                    Log.w(TAG, "Failed to resolve '${track.title}': ${e.message}")
+                } finally {
+                    synchronized(inFlight) { inFlight.remove(key) }
+                }
+            }
+        }
+    }
+
+    /**
+     * Submit playlist tracks (PlaylistTrackEntity doesn't extend TrackEntity,
+     * so we accept the raw fields).
+     */
+    fun resolvePlaylistTracksInBackground(
+        tracks: List<PlaylistTrackInfo>,
+    ): Job = scope.launch {
+        for (track in tracks) {
+            val key = trackKey(track.title, track.artist)
+            if (_trackSources.value.containsKey(key)) continue
+            val shouldResolve = synchronized(inFlight) { inFlight.add(key) }
+            if (!shouldResolve) continue
+
+            launch {
+                try {
+                    semaphore.withPermit {
+                        val sources = resolverManager.resolveWithHints(
+                            query = "${track.title} ${track.artist}",
+                            spotifyId = track.spotifyId,
+                            appleMusicId = track.appleMusicId,
+                            soundcloudId = track.soundcloudId,
+                        )
+                        if (sources.isNotEmpty()) {
+                            _trackSources.value = _trackSources.value + (key to sources)
+                        }
+                    }
+                } catch (e: Exception) {
+                    Log.w(TAG, "Failed to resolve '${track.title}': ${e.message}")
+                } finally {
+                    synchronized(inFlight) { inFlight.remove(key) }
+                }
+            }
+        }
+    }
+
+    /** Store pre-resolved sources into the shared cache (e.g. from ViewModel-local resolution). */
+    fun putSources(title: String, artist: String, sources: List<ResolvedSource>) {
+        if (sources.isEmpty()) return
+        val key = trackKey(title, artist)
+        _trackSources.value = _trackSources.value + (key to sources)
+    }
+
+    /** Get cached resolvers for a track, or null if not yet resolved. */
+    fun getResolvers(title: String, artist: String): List<String>? {
+        val key = trackKey(title, artist)
+        return trackResolvers.value[key]?.ifEmpty { null }
+    }
+
+    /** Get cached sources for a track, or null if not yet resolved. */
+    fun getSources(title: String, artist: String): List<ResolvedSource>? {
+        val key = trackKey(title, artist)
+        return _trackSources.value[key]?.ifEmpty { null }
+    }
+
+    /** Persist any newly-discovered resolver IDs back to the database. */
+    private suspend fun backfillResolverIds(track: TrackEntity, sources: List<ResolvedSource>) {
+        val spotifyId = sources.firstOrNull { it.resolver == "spotify" }?.spotifyId
+        val spotifyUri = sources.firstOrNull { it.resolver == "spotify" }?.spotifyUri
+        val appleMusicId = sources.firstOrNull { it.resolver == "applemusic" }?.appleMusicId
+        val soundcloudId = sources.firstOrNull { it.resolver == "soundcloud" }?.soundcloudId
+        // Only call DB if there's something new to fill in
+        if ((spotifyId != null && track.spotifyId.isNullOrBlank()) ||
+            (spotifyUri != null && track.spotifyUri.isNullOrBlank()) ||
+            (appleMusicId != null && track.appleMusicId.isNullOrBlank()) ||
+            (soundcloudId != null && track.soundcloudId.isNullOrBlank())
+        ) {
+            try {
+                libraryRepository.backfillTrackResolverIds(
+                    trackId = track.id,
+                    spotifyId = spotifyId,
+                    spotifyUri = spotifyUri,
+                    appleMusicId = appleMusicId,
+                    soundcloudId = soundcloudId,
+                )
+            } catch (e: Exception) {
+                Log.w(TAG, "Failed to backfill resolver IDs for '${track.title}': ${e.message}")
+            }
+        }
+    }
+}
+
+/** Lightweight data holder for playlist track resolution (avoids coupling to entity). */
+data class PlaylistTrackInfo(
+    val title: String,
+    val artist: String,
+    val spotifyId: String? = null,
+    val appleMusicId: String? = null,
+    val soundcloudId: String? = null,
+)
+
+/** Canonical key format for track resolver lookups. */
+fun trackKey(title: String, artist: String): String =
+    "${title.lowercase().trim()}|${artist.lowercase().trim()}"

@@ -15,6 +15,7 @@ import com.parachord.android.playback.PlaybackContext
 import com.parachord.android.playback.PlaybackController
 import com.parachord.android.resolver.ResolverManager
 import com.parachord.android.resolver.ResolverScoring
+import com.parachord.android.resolver.TrackResolverCache
 import dagger.hilt.android.lifecycle.HiltViewModel
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
@@ -34,11 +35,19 @@ class LibraryViewModel @Inject constructor(
     private val resolverManager: ResolverManager,
     private val resolverScoring: ResolverScoring,
     private val settingsStore: SettingsStore,
+    private val trackResolverCache: TrackResolverCache,
 ) : ViewModel() {
+
+    companion object {
+        private const val TAG = "LibraryViewModel"
+    }
 
     // Track which items have been enriched this session to avoid re-triggering
     private val enrichedArtists = mutableSetOf<String>()
     private val enrichedAlbums = mutableSetOf<String>()
+
+    /** Resolver badge names for UI display — shared across all screens via TrackResolverCache. */
+    val trackResolvers: StateFlow<Map<String, List<String>>> = trackResolverCache.trackResolvers
 
     val tracks: StateFlow<List<TrackEntity>> = repository.getAllTracks()
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), emptyList())
@@ -88,6 +97,12 @@ class LibraryViewModel @Inject constructor(
             }
             settingsStore.getSortFriends()?.let { name ->
                 runCatching { FriendSort.valueOf(name) }.getOrNull()?.let { _friendSort.value = it }
+            }
+        }
+        // Run full resolver pipeline against stored tracks in background (concurrent, deduplicated)
+        viewModelScope.launch {
+            tracks.collect { trackList ->
+                if (trackList.isNotEmpty()) trackResolverCache.resolveInBackground(trackList)
             }
         }
     }

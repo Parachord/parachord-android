@@ -13,6 +13,8 @@ import com.parachord.android.playback.PlaybackController
 import com.parachord.android.resolver.ResolvedSource
 import com.parachord.android.resolver.ResolverManager
 import com.parachord.android.resolver.ResolverScoring
+import com.parachord.android.resolver.TrackResolverCache
+import com.parachord.android.resolver.trackKey
 import dagger.hilt.android.lifecycle.HiltViewModel
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
@@ -32,6 +34,7 @@ class AlbumViewModel @Inject constructor(
     private val playbackController: PlaybackController,
     private val libraryRepository: com.parachord.android.data.repository.LibraryRepository,
     private val playbackStateHolder: com.parachord.android.playback.PlaybackStateHolder,
+    private val trackResolverCache: TrackResolverCache,
 ) : ViewModel() {
 
     companion object {
@@ -59,10 +62,11 @@ class AlbumViewModel @Inject constructor(
     /** Cached resolved sources for tracks, keyed by "title|artist" */
     private val _trackSources = MutableStateFlow<Map<String, List<ResolvedSource>>>(emptyMap())
 
-    /** Resolver badge names for UI display, derived from cached sources */
-    val trackResolvers: StateFlow<Map<String, List<String>>> = _trackSources
-        .map { sources -> sources.mapValues { (_, v) -> v.map { it.resolver }.distinct() } }
-        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), emptyMap())
+    /**
+     * Resolver badge names for UI display — sorted by user priority.
+     * Uses shared cache (already sorted) merged with local album-specific results.
+     */
+    val trackResolvers: StateFlow<Map<String, List<String>>> = trackResolverCache.trackResolvers
 
     init {
         if (albumTitle.isNotBlank()) {
@@ -97,8 +101,14 @@ class AlbumViewModel @Inject constructor(
     private fun resolveTracksInBackground(tracks: List<TrackSearchResult>) {
         viewModelScope.launch {
             for (track in tracks) {
-                val key = "${track.title.lowercase().trim()}|${track.artist.lowercase().trim()}"
+                val key = trackKey(track.title, track.artist)
                 if (_trackSources.value.containsKey(key)) continue
+                // Check shared cache first (cross-context dedup)
+                val cached = trackResolverCache.getSources(track.title, track.artist)
+                if (cached != null) {
+                    _trackSources.value = _trackSources.value + (key to cached)
+                    continue
+                }
                 try {
                     val sources = resolverManager.resolveWithHints(
                         query = "${track.title} ${track.artist}",
@@ -106,6 +116,8 @@ class AlbumViewModel @Inject constructor(
                     )
                     if (sources.isNotEmpty()) {
                         _trackSources.value = _trackSources.value + (key to sources)
+                        // Feed into shared cache for cross-context display + priority sorting
+                        trackResolverCache.putSources(track.title, track.artist, sources)
                     }
                 } catch (_: Exception) { /* skip */ }
             }
