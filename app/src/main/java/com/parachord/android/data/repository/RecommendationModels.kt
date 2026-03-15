@@ -1,9 +1,12 @@
 package com.parachord.android.data.repository
 
+import kotlinx.serialization.Serializable
+
 /**
  * Domain models for the Recommendations page.
  */
 
+@Serializable
 data class RecommendedArtist(
     val name: String,
     val imageUrl: String? = null,
@@ -11,6 +14,7 @@ data class RecommendedArtist(
     val source: String = "", // "lastfm", "listenbrainz"
 )
 
+@Serializable
 data class RecommendedTrack(
     val title: String,
     val artist: String,

@@ -1,18 +1,24 @@
 package com.parachord.android.data.repository
 
+import android.content.Context
 import android.util.Log
 import com.parachord.android.data.api.ListenBrainzApi
 import com.parachord.android.data.metadata.MetadataService
 import com.parachord.android.data.store.SettingsStore
+import dagger.hilt.android.qualifiers.ApplicationContext
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.async
 import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.flow
 import kotlinx.coroutines.withContext
+import kotlinx.serialization.Serializable
+import kotlinx.serialization.encodeToString
+import kotlinx.serialization.json.Json
 import okhttp3.OkHttpClient
 import okhttp3.Request
 import org.json.JSONObject
+import java.io.File
 import javax.inject.Inject
 import javax.inject.Singleton
 
@@ -29,6 +35,7 @@ import javax.inject.Singleton
  */
 @Singleton
 class RecommendationsRepository @Inject constructor(
+    @ApplicationContext private val context: Context,
     private val listenBrainzApi: ListenBrainzApi,
     private val settingsStore: SettingsStore,
     private val metadataService: MetadataService,
@@ -36,21 +43,61 @@ class RecommendationsRepository @Inject constructor(
 ) {
     companion object {
         private const val TAG = "RecommendationsRepo"
+        private const val CACHE_FILE = "recommendations_cache.json"
     }
+
+    private val diskJson = Json { ignoreUnknownKeys = true; encodeDefaults = true }
 
     /** In-memory cache for stale-while-revalidate. */
     private var cachedTracks: List<RecommendedTrack>? = null
     private var cachedArtists: List<RecommendedArtist>? = null
+    private var diskCacheLoaded = false
 
     /** Synchronous access to cached data (for ViewModel initial state). */
-    val cachedTracksList: List<RecommendedTrack>? get() = cachedTracks
-    val cachedArtistsList: List<RecommendedArtist>? get() = cachedArtists
+    val cachedTracksList: List<RecommendedTrack>?
+        get() {
+            if (!diskCacheLoaded) loadDiskCache()
+            return cachedTracks
+        }
+    val cachedArtistsList: List<RecommendedArtist>?
+        get() {
+            if (!diskCacheLoaded) loadDiskCache()
+            return cachedArtists
+        }
+
+    private fun loadDiskCache() {
+        diskCacheLoaded = true
+        try {
+            val file = File(context.filesDir, CACHE_FILE)
+            if (!file.exists()) return
+            val wrapper = diskJson.decodeFromString<RecommendationsDiskCache>(file.readText())
+            cachedTracks = wrapper.tracks
+            cachedArtists = wrapper.artists
+            Log.d(TAG, "Loaded ${wrapper.tracks.size} tracks, ${wrapper.artists.size} artists from disk cache")
+        } catch (e: Exception) {
+            Log.w(TAG, "Failed to load disk cache", e)
+        }
+    }
+
+    private fun saveDiskCache() {
+        try {
+            val wrapper = RecommendationsDiskCache(
+                tracks = cachedTracks ?: emptyList(),
+                artists = cachedArtists ?: emptyList(),
+            )
+            val file = File(context.filesDir, CACHE_FILE)
+            file.writeText(diskJson.encodeToString(wrapper))
+        } catch (e: Exception) {
+            Log.w(TAG, "Failed to save disk cache", e)
+        }
+    }
 
     /**
      * Get recommended tracks from Last.fm and ListenBrainz.
      * Mirrors desktop's parallel fetch + merge approach.
      */
     fun getRecommendedTracks(): Flow<Resource<List<RecommendedTrack>>> = flow {
+        if (!diskCacheLoaded) loadDiskCache()
         // Show stale cache immediately while refreshing
         if (cachedTracks != null) {
             emit(Resource.Success(cachedTracks!!))
@@ -96,6 +143,7 @@ class RecommendationsRepository @Inject constructor(
 
             Log.d(TAG, "Merged recommendations → ${deduped.size} unique tracks")
             cachedTracks = deduped
+            saveDiskCache()
             emit(Resource.Success(deduped))
         } catch (e: Exception) {
             Log.e(TAG, "Failed to load recommendations", e)
@@ -110,6 +158,7 @@ class RecommendationsRepository @Inject constructor(
      * updates state after each, so artists appear with images progressively.
      */
     fun getRecommendedArtists(): Flow<Resource<List<RecommendedArtist>>> = flow {
+        if (!diskCacheLoaded) loadDiskCache()
         // Show stale cache immediately while refreshing
         if (cachedArtists != null) {
             emit(Resource.Success(cachedArtists!!))
@@ -157,6 +206,7 @@ class RecommendationsRepository @Inject constructor(
 
             // Emit immediately without images so UI shows artist names right away
             cachedArtists = artists
+            saveDiskCache()
             emit(Resource.Success(artists))
 
             // Progressively resolve artist images (matching desktop's sequential approach).
@@ -180,6 +230,8 @@ class RecommendationsRepository @Inject constructor(
                     }
                 } catch (_: Exception) { /* skip */ }
             }
+            // Save final enriched data to disk
+            saveDiskCache()
         } catch (e: Exception) {
             Log.e(TAG, "Failed to load recommended artists", e)
             emit(Resource.Error("Failed to load recommendations"))
@@ -283,3 +335,10 @@ class RecommendationsRepository @Inject constructor(
     }
 
 }
+
+/** Disk cache wrapper for JSON serialization. */
+@Serializable
+private data class RecommendationsDiskCache(
+    val tracks: List<RecommendedTrack>,
+    val artists: List<RecommendedArtist>,
+)

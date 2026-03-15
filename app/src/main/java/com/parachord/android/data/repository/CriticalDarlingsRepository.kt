@@ -1,17 +1,23 @@
 package com.parachord.android.data.repository
 
+import android.content.Context
 import android.util.Log
 import com.parachord.android.data.api.MusicBrainzApi
 import com.parachord.android.data.metadata.MusicBrainzProvider
+import dagger.hilt.android.qualifiers.ApplicationContext
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.flow
 import kotlinx.coroutines.withContext
+import kotlinx.serialization.Serializable
+import kotlinx.serialization.encodeToString
+import kotlinx.serialization.json.Json
 import okhttp3.OkHttpClient
 import okhttp3.Request
 import org.xmlpull.v1.XmlPullParser
 import org.xmlpull.v1.XmlPullParserFactory
+import java.io.File
 import java.io.StringReader
 import java.text.SimpleDateFormat
 import java.util.Date
@@ -32,27 +38,61 @@ import javax.inject.Singleton
  */
 @Singleton
 class CriticalDarlingsRepository @Inject constructor(
+    @ApplicationContext private val context: Context,
     private val okHttpClient: OkHttpClient,
     private val musicBrainzApi: MusicBrainzApi,
 ) {
     companion object {
         private const val TAG = "CriticalDarlingsRepo"
         private const val RSS_URL = "https://www.rssground.com/p/uncoveries"
+        private const val CACHE_FILE = "critical_darlings_cache.json"
     }
+
+    private val diskJson = Json { ignoreUnknownKeys = true; encodeDefaults = true }
 
     /** In-memory cache. */
     private var cachedAlbums: List<CriticsPickAlbum>? = null
     private var lastFetchedAt: Long = 0L
     private val STALE_THRESHOLD = 4 * 60 * 60 * 1000L // 4 hours (matching desktop)
+    private var diskCacheLoaded = false
 
     /** Synchronous access to cached albums (for ViewModel initial state). */
-    val cached: List<CriticsPickAlbum>? get() = cachedAlbums
+    val cached: List<CriticsPickAlbum>?
+        get() {
+            if (!diskCacheLoaded) loadDiskCache()
+            return cachedAlbums
+        }
+
+    private fun loadDiskCache() {
+        diskCacheLoaded = true
+        try {
+            val file = File(context.filesDir, CACHE_FILE)
+            if (!file.exists()) return
+            val wrapper = diskJson.decodeFromString<CriticalDarlingsDiskCache>(file.readText())
+            cachedAlbums = wrapper.albums
+            lastFetchedAt = wrapper.fetchedAt
+            Log.d(TAG, "Loaded ${wrapper.albums.size} cached critics' picks from disk")
+        } catch (e: Exception) {
+            Log.w(TAG, "Failed to load disk cache", e)
+        }
+    }
+
+    private fun saveDiskCache(albums: List<CriticsPickAlbum>, fetchedAt: Long) {
+        try {
+            val wrapper = CriticalDarlingsDiskCache(albums = albums, fetchedAt = fetchedAt)
+            val file = File(context.filesDir, CACHE_FILE)
+            file.writeText(diskJson.encodeToString(wrapper))
+        } catch (e: Exception) {
+            Log.w(TAG, "Failed to save disk cache", e)
+        }
+    }
 
     /**
      * Get critics' picks albums, with progressive album art loading.
      * Emits an initial list (without art), then re-emits as each album's art is resolved.
      */
     fun getCriticsPicks(forceRefresh: Boolean = false): Flow<Resource<List<CriticsPickAlbum>>> = flow {
+        if (!diskCacheLoaded) loadDiskCache()
         try {
             val now = System.currentTimeMillis()
             val isStale = now - lastFetchedAt > STALE_THRESHOLD
@@ -80,6 +120,7 @@ class CriticalDarlingsRepository @Inject constructor(
             // Emit immediately without art
             cachedAlbums = albums
             lastFetchedAt = now
+            saveDiskCache(albums, now)
             emit(Resource.Success(albums))
 
             // Progressively fetch album art (matching desktop's fetchCriticsPicksAlbumArt)
@@ -99,6 +140,8 @@ class CriticalDarlingsRepository @Inject constructor(
                     delay(200)
                 } catch (_: Exception) { /* skip art for this album */ }
             }
+            // Save final enriched data to disk
+            cachedAlbums?.let { saveDiskCache(it, lastFetchedAt) }
         } catch (e: Exception) {
             Log.e(TAG, "Failed to load critics' picks", e)
             emit(Resource.Error("Failed to load critics' picks"))
@@ -278,6 +321,47 @@ class CriticalDarlingsRepository @Inject constructor(
             Log.w(TAG, "Failed to fetch art for '$albumTitle' by '$artistName'", e)
             null
         }
+    }
+}
+
+/** Disk cache wrapper for JSON serialization. */
+@Serializable
+private data class CriticalDarlingsDiskCache(
+    val albums: List<@Serializable(with = CriticsPickAlbumSerializer::class) CriticsPickAlbum>,
+    val fetchedAt: Long,
+)
+
+/** Custom serializer to handle java.util.Date in CriticsPickAlbum. */
+private object CriticsPickAlbumSerializer : kotlinx.serialization.KSerializer<CriticsPickAlbum> {
+    @Serializable
+    private data class Surrogate(
+        val id: String,
+        val title: String,
+        val artist: String,
+        val link: String? = null,
+        val description: String = "",
+        val spotifyUrl: String? = null,
+        val pubDateMs: Long? = null,
+        val albumArt: String? = null,
+    )
+
+    override val descriptor = Surrogate.serializer().descriptor
+    override fun serialize(encoder: kotlinx.serialization.encoding.Encoder, value: CriticsPickAlbum) {
+        Surrogate.serializer().serialize(encoder, Surrogate(
+            id = value.id, title = value.title, artist = value.artist,
+            link = value.link, description = value.description,
+            spotifyUrl = value.spotifyUrl, pubDateMs = value.pubDate?.time,
+            albumArt = value.albumArt,
+        ))
+    }
+    override fun deserialize(decoder: kotlinx.serialization.encoding.Decoder): CriticsPickAlbum {
+        val s = Surrogate.serializer().deserialize(decoder)
+        return CriticsPickAlbum(
+            id = s.id, title = s.title, artist = s.artist,
+            link = s.link, description = s.description,
+            spotifyUrl = s.spotifyUrl, pubDate = s.pubDateMs?.let { Date(it) },
+            albumArt = s.albumArt,
+        )
     }
 }
 

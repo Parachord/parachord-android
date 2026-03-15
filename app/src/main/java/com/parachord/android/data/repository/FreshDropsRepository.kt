@@ -1,5 +1,6 @@
 package com.parachord.android.data.repository
 
+import android.content.Context
 import android.util.Log
 import com.parachord.android.BuildConfig
 import com.parachord.android.data.api.LastFmApi
@@ -8,11 +9,16 @@ import com.parachord.android.data.api.MusicBrainzApi
 import com.parachord.android.data.db.dao.TrackDao
 import com.parachord.android.data.metadata.MusicBrainzProvider
 import com.parachord.android.data.store.SettingsStore
+import dagger.hilt.android.qualifiers.ApplicationContext
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.flow
 import kotlinx.coroutines.withContext
+import kotlinx.serialization.Serializable
+import kotlinx.serialization.encodeToString
+import kotlinx.serialization.json.Json
+import java.io.File
 import java.time.LocalDate
 import java.time.format.DateTimeFormatter
 import javax.inject.Inject
@@ -30,6 +36,7 @@ import javax.inject.Singleton
  */
 @Singleton
 class FreshDropsRepository @Inject constructor(
+    @ApplicationContext private val context: Context,
     private val musicBrainzApi: MusicBrainzApi,
     private val lastFmApi: LastFmApi,
     private val listenBrainzApi: ListenBrainzApi,
@@ -40,18 +47,52 @@ class FreshDropsRepository @Inject constructor(
         private const val TAG = "FreshDropsRepo"
         private const val MAX_ARTISTS_TO_CHECK = 50
         private const val STALE_THRESHOLD = 6 * 60 * 60 * 1000L // 6 hours
+        private const val CACHE_FILE = "fresh_drops_cache.json"
     }
 
-    /** In-memory cache. */
+    private val diskJson = Json { ignoreUnknownKeys = true; encodeDefaults = true }
+
+    /** In-memory cache, initialized from disk on first access. */
     private var cachedReleases: List<FreshDrop>? = null
     private var lastFetchedAt: Long = 0L
+    private var diskCacheLoaded = false
 
     /** Synchronous access to cached releases (for ViewModel initial state). */
-    val cached: List<FreshDrop>? get() = cachedReleases
+    val cached: List<FreshDrop>?
+        get() {
+            if (!diskCacheLoaded) loadDiskCache()
+            return cachedReleases
+        }
     val isCacheStale: Boolean get() = System.currentTimeMillis() - lastFetchedAt > STALE_THRESHOLD
 
     /** MBID cache to avoid repeated artist lookups. */
     private val mbidCache = mutableMapOf<String, String>()
+
+    /** Load cache from disk on first access. */
+    private fun loadDiskCache() {
+        diskCacheLoaded = true
+        try {
+            val file = File(context.filesDir, CACHE_FILE)
+            if (!file.exists()) return
+            val wrapper = diskJson.decodeFromString<FreshDropsDiskCache>(file.readText())
+            cachedReleases = wrapper.releases
+            lastFetchedAt = wrapper.fetchedAt
+            Log.d(TAG, "Loaded ${wrapper.releases.size} cached fresh drops from disk (age: ${(System.currentTimeMillis() - wrapper.fetchedAt) / 1000}s)")
+        } catch (e: Exception) {
+            Log.w(TAG, "Failed to load disk cache", e)
+        }
+    }
+
+    /** Persist cache to disk. */
+    private fun saveDiskCache(releases: List<FreshDrop>, fetchedAt: Long) {
+        try {
+            val wrapper = FreshDropsDiskCache(releases = releases, fetchedAt = fetchedAt)
+            val file = File(context.filesDir, CACHE_FILE)
+            file.writeText(diskJson.encodeToString(wrapper))
+        } catch (e: Exception) {
+            Log.w(TAG, "Failed to save disk cache", e)
+        }
+    }
 
     /**
      * Get fresh drops with progressive loading.
@@ -64,6 +105,9 @@ class FreshDropsRepository @Inject constructor(
      * - Cache results in memory for the session
      */
     fun getFreshDrops(forceRefresh: Boolean = false): Flow<Resource<List<FreshDrop>>> = flow {
+        // Ensure disk cache is loaded before checking staleness
+        if (!diskCacheLoaded) loadDiskCache()
+
         val now = System.currentTimeMillis()
         val isStale = now - lastFetchedAt > STALE_THRESHOLD
 
@@ -119,6 +163,7 @@ class FreshDropsRepository @Inject constructor(
                         // Save partial results so cache survives if collector is cancelled
                         cachedReleases = progressMerged
                         lastFetchedAt = System.currentTimeMillis()
+                        saveDiskCache(progressMerged, lastFetchedAt)
                         emit(Resource.Success(progressMerged))
                     }
 
@@ -136,6 +181,7 @@ class FreshDropsRepository @Inject constructor(
 
             cachedReleases = finalReleases
             lastFetchedAt = System.currentTimeMillis()
+            saveDiskCache(finalReleases, lastFetchedAt)
             emit(Resource.Success(finalReleases))
         } catch (e: Exception) {
             Log.e(TAG, "Failed to load fresh drops", e)
@@ -291,9 +337,17 @@ private data class ArtistSource(
     val source: String, // "library", "history"
 )
 
+/** Disk cache wrapper for JSON serialization. */
+@Serializable
+private data class FreshDropsDiskCache(
+    val releases: List<FreshDrop>,
+    val fetchedAt: Long,
+)
+
 /**
  * A new release (fresh drop).
  */
+@Serializable
 data class FreshDrop(
     val mbid: String? = null,
     val title: String,
