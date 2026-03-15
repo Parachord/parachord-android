@@ -376,9 +376,11 @@ class MusicKitWebBridge @Inject constructor(
         Log.d(TAG, "Pre-authorize configure() result: $configured")
         musicKitReady.await()
         val result = evaluate("authorize()") ?: return false
+        Log.d(TAG, "authorize() JS result: $result")
         return try {
             val parsed = json.decodeFromString<AuthorizeResponse>(cleanJsString(result))
             val authorized = parsed.authorized
+            Log.d(TAG, "authorize() authorized=$authorized")
             if (authorized) _authorized.value = true
             authorized
         } catch (e: Exception) {

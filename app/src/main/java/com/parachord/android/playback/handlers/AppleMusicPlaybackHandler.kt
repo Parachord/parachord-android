@@ -26,6 +26,9 @@ class AppleMusicPlaybackHandler @Inject constructor(
 
     override suspend fun createMediaItem(track: TrackEntity) = null // External playback
 
+    /** Whether the user has completed a full authorize flow this session. */
+    private var hasAuthorizedThisSession = false
+
     override suspend fun play(track: TrackEntity) {
         val songId = track.appleMusicId ?: return
         // Ensure configured + authorized
@@ -35,19 +38,26 @@ class AppleMusicPlaybackHandler @Inject constructor(
                 return
             }
         }
-        if (!musicKitBridge.authorized.value) {
-            // Try to authorize (shows Apple ID login dialog if Activity is available)
+        // Always do a full authorize on first play of the session.
+        // MusicKit may auto-restore auth from cookies during configure() but
+        // the cached token may lack Apple Music subscription entitlements,
+        // resulting in 30-second preview playback instead of full tracks.
+        if (!hasAuthorizedThisSession || !musicKitBridge.authorized.value) {
+            Log.d(TAG, "Authorizing (firstSession=${!hasAuthorizedThisSession}, authorized=${musicKitBridge.authorized.value})")
             if (!musicKitBridge.authorize()) {
                 Log.w(TAG, "MusicKit authorization required — prompting user")
                 musicKitBridge.emitSignInRequired()
                 return
             }
+            hasAuthorizedThisSession = true
         }
         val success = musicKitBridge.play(songId)
         if (!success) {
             // Playback failed — may be an expired user token, try re-authorizing
             Log.w(TAG, "MusicKit playback failed, attempting re-authorization")
+            hasAuthorizedThisSession = false
             if (musicKitBridge.authorize()) {
+                hasAuthorizedThisSession = true
                 musicKitBridge.play(songId)
             } else {
                 musicKitBridge.emitSignInRequired()

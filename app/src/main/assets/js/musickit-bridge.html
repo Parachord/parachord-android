@@ -46,8 +46,17 @@
     async function authorize() {
         try {
             if (!music) return JSON.stringify({ success: false, error: 'Not configured' });
+            // Clear any stale cached token first — forces a fresh sign-in
+            // so the new token includes Apple Music subscription entitlements.
+            // Without this, a cached token from a previous session may lack
+            // subscription scope and MusicKit plays 30-second previews only.
+            try { await music.unauthorize(); } catch (_) {}
             const token = await music.authorize();
-            return JSON.stringify({ success: true, authorized: !!token });
+            return JSON.stringify({
+                success: true,
+                authorized: !!token,
+                hasSubscription: music.isAuthorized,
+            });
         } catch (e) {
             return JSON.stringify({ success: false, authorized: false, error: e.message || String(e) });
         }
