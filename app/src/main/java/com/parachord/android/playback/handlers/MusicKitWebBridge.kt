@@ -477,6 +477,50 @@ class MusicKitWebBridge @Inject constructor(
         }
     }
 
+    // ── Playlist Fetch ─────────────────────────────────────────────
+
+    /**
+     * Result from fetching an Apple Music playlist.
+     */
+    data class AppleMusicPlaylistResult(
+        val name: String,
+        val tracks: List<AppleMusicSearchResult>,
+    )
+
+    /**
+     * Fetch an Apple Music playlist's tracks by catalog playlist ID.
+     * Returns null if MusicKit is not configured or the playlist can't be found.
+     */
+    suspend fun getPlaylist(playlistId: String): AppleMusicPlaylistResult? {
+        musicKitReady.await()
+        val storefront = settingsStore.getAppleMusicStorefront() ?: "us"
+        val escaped = playlistId.replace("'", "\\'")
+        val result = evaluate("getPlaylist('$escaped', '$storefront')") ?: return null
+        return try {
+            val response = json.decodeFromString<GetPlaylistResponse>(cleanJsString(result))
+            if (!response.success || response.tracks.isNullOrEmpty()) return null
+            AppleMusicPlaylistResult(
+                name = response.name ?: "Playlist",
+                tracks = response.tracks.map { t ->
+                    AppleMusicSearchResult(
+                        id = t.id,
+                        title = t.title,
+                        artist = t.artist,
+                        album = t.album,
+                        duration = t.duration,
+                        artworkUrl = t.artworkUrl,
+                        isrc = null,
+                        previewUrl = null,
+                        appleMusicUrl = null,
+                    )
+                },
+            )
+        } catch (e: Exception) {
+            Log.w(TAG, "Failed to parse getPlaylist response: ${e.message}")
+            null
+        }
+    }
+
     // ── Playback Control ──────────────────────────────────────────
 
     /** Play a song by Apple Music catalog ID. Returns true on success. */
@@ -702,6 +746,24 @@ class MusicKitWebBridge @Inject constructor(
         val isrc: String? = null,
         val previewUrl: String? = null,
         val appleMusicUrl: String? = null,
+    )
+
+    @Serializable
+    private data class GetPlaylistResponse(
+        val success: Boolean,
+        val name: String? = null,
+        val tracks: List<GetPlaylistTrack>? = null,
+        val error: String? = null,
+    )
+
+    @Serializable
+    private data class GetPlaylistTrack(
+        val id: String,
+        val title: String,
+        val artist: String,
+        val album: String? = null,
+        val duration: Long? = null,
+        val artworkUrl: String? = null,
     )
 
     @Serializable

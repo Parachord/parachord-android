@@ -18,6 +18,7 @@ import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
 import java.util.UUID
 import com.parachord.android.data.store.SettingsStore
+import com.parachord.android.playlist.PlaylistImportManager
 import com.parachord.android.playback.PlaybackContext
 import com.parachord.android.playback.PlaybackController
 import com.parachord.android.playback.handlers.MusicKitWebBridge
@@ -45,6 +46,7 @@ class MainViewModel @Inject constructor(
     private val resolverScoring: ResolverScoring,
     private val musicKitBridge: MusicKitWebBridge,
     settingsStore: SettingsStore,
+    private val playlistImportManager: PlaylistImportManager,
 ) : ViewModel() {
 
     companion object {
@@ -133,6 +135,50 @@ class MainViewModel @Inject constructor(
             )
             libraryRepository.addPlaylist(playlist)
         }
+    }
+
+    // ── Playlist Import ───────────────────────────────────────────
+
+    private val _importLoading = MutableStateFlow(false)
+    val importLoading: StateFlow<Boolean> = _importLoading
+
+    private val _importError = MutableStateFlow<String?>(null)
+    val importError: StateFlow<String?> = _importError
+
+    fun importPlaylistFromUrl(url: String, onSuccess: (String) -> Unit) {
+        viewModelScope.launch {
+            _importLoading.value = true
+            _importError.value = null
+            try {
+                val result = playlistImportManager.importFromUrl(url)
+                _importLoading.value = false
+                onSuccess(result.playlistId)
+                _toastEvents.emit("Imported '${result.playlistName}' (${result.trackCount} tracks)")
+            } catch (e: Exception) {
+                _importLoading.value = false
+                _importError.value = e.message ?: "Import failed"
+            }
+        }
+    }
+
+    fun importPlaylistFromFile(content: String, filename: String?, onSuccess: (String) -> Unit) {
+        viewModelScope.launch {
+            _importLoading.value = true
+            _importError.value = null
+            try {
+                val result = playlistImportManager.importFromXspfContent(content, filename)
+                _importLoading.value = false
+                onSuccess(result.playlistId)
+                _toastEvents.emit("Imported '${result.playlistName}' (${result.trackCount} tracks)")
+            } catch (e: Exception) {
+                _importLoading.value = false
+                _importError.value = e.message ?: "Import failed"
+            }
+        }
+    }
+
+    fun clearImportError() {
+        _importError.value = null
     }
 
     // ── Listen Along (mirrors desktop's queue + toast logic) ─────

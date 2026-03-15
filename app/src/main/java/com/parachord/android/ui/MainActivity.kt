@@ -65,6 +65,7 @@ import com.parachord.android.data.store.SettingsStore
 import com.parachord.android.playback.handlers.MusicKitWebBridge
 import com.parachord.android.ui.components.ActionOverlay
 import com.parachord.android.ui.components.CreatePlaylistDialog
+import com.parachord.android.ui.components.ImportPlaylistDialog
 import com.parachord.android.ui.components.DrawerContent
 import com.parachord.android.ui.components.MiniPlayer
 import com.parachord.android.ui.navigation.BottomNavItem
@@ -229,6 +230,7 @@ private fun ParachordAppContent(mainViewModel: MainViewModel) {
 
     var showActionOverlay by rememberSaveable { mutableStateOf(false) }
     var showCreatePlaylistDialog by remember { mutableStateOf(false) }
+    var showImportPlaylistDialog by remember { mutableStateOf(false) }
 
     if (showCreatePlaylistDialog) {
         CreatePlaylistDialog(
@@ -241,6 +243,40 @@ private fun ParachordAppContent(mainViewModel: MainViewModel) {
                     launchSingleTop = true
                 }
             },
+        )
+    }
+
+    if (showImportPlaylistDialog) {
+        val importLoading by mainViewModel.importLoading.collectAsStateWithLifecycle()
+        val importError by mainViewModel.importError.collectAsStateWithLifecycle()
+
+        ImportPlaylistDialog(
+            onDismiss = {
+                showImportPlaylistDialog = false
+                mainViewModel.clearImportError()
+            },
+            onImportUrl = { url ->
+                mainViewModel.importPlaylistFromUrl(url) { playlistId ->
+                    showImportPlaylistDialog = false
+                    navController.navigate(Routes.playlistDetail(playlistId)) {
+                        launchSingleTop = true
+                    }
+                }
+            },
+            onImportFile = { uri ->
+                val content = context.contentResolver.openInputStream(uri)?.bufferedReader()?.readText()
+                if (content != null) {
+                    val filename = uri.lastPathSegment
+                    mainViewModel.importPlaylistFromFile(content, filename) { playlistId ->
+                        showImportPlaylistDialog = false
+                        navController.navigate(Routes.playlistDetail(playlistId)) {
+                            launchSingleTop = true
+                        }
+                    }
+                }
+            },
+            isLoading = importLoading,
+            errorMessage = importError,
         )
     }
 
@@ -481,7 +517,10 @@ private fun ParachordAppContent(mainViewModel: MainViewModel) {
                 showActionOverlay = false
                 showCreatePlaylistDialog = true
             },
-            onImportPlaylist = { showActionOverlay = false },
+            onImportPlaylist = {
+                showActionOverlay = false
+                showImportPlaylistDialog = true
+            },
             onAddFriend = {
                 showActionOverlay = false
                 navController.navigate(Routes.FRIENDS) {

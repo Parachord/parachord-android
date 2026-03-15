@@ -7,6 +7,7 @@ import androidx.lifecycle.viewModelScope
 import com.parachord.android.data.db.entity.TrackEntity
 import com.parachord.android.playback.PlaybackController
 import com.parachord.android.playback.QueueManager
+import com.parachord.android.playlist.PlaylistImportManager
 import com.parachord.android.resolver.ResolverManager
 import dagger.hilt.android.lifecycle.HiltViewModel
 import kotlinx.coroutines.flow.MutableSharedFlow
@@ -46,6 +47,7 @@ class DeepLinkViewModel @Inject constructor(
     private val playbackController: PlaybackController,
     private val queueManager: QueueManager,
     private val resolverManager: ResolverManager,
+    private val playlistImportManager: PlaylistImportManager,
 ) : ViewModel() {
 
     private val _navEvents = MutableSharedFlow<DeepLinkNavEvent>()
@@ -175,7 +177,13 @@ class DeepLinkViewModel @Inject constructor(
                 // ── Import ────────────────────────────────────────────────
 
                 is DeepLinkAction.ImportPlaylist -> {
-                    _navEvents.emit(DeepLinkNavEvent.Toast("Playlist import not yet supported"))
+                    try {
+                        val result = playlistImportManager.importFromUrl(action.url)
+                        _navEvents.emit(DeepLinkNavEvent.Playlist(result.playlistId))
+                        _navEvents.emit(DeepLinkNavEvent.Toast("Imported '${result.playlistName}' (${result.trackCount} tracks)"))
+                    } catch (e: Exception) {
+                        _navEvents.emit(DeepLinkNavEvent.Toast("Import failed: ${e.message}"))
+                    }
                 }
 
                 // ── External URL lookups ──────────────────────────────────
@@ -187,7 +195,14 @@ class DeepLinkViewModel @Inject constructor(
                 is DeepLinkAction.AppleMusicSong -> resolveAndPlayAppleMusicSong(action.songId)
                 is DeepLinkAction.AppleMusicAlbum -> resolveAndNavigateAppleMusicAlbum(action.albumId)
                 is DeepLinkAction.AppleMusicPlaylist -> {
-                    _navEvents.emit(DeepLinkNavEvent.Toast("Apple Music playlist import coming soon"))
+                    try {
+                        val url = "https://music.apple.com/us/playlist/imported/${action.playlistId}"
+                        val result = playlistImportManager.importFromUrl(url)
+                        _navEvents.emit(DeepLinkNavEvent.Playlist(result.playlistId))
+                        _navEvents.emit(DeepLinkNavEvent.Toast("Imported '${result.playlistName}' (${result.trackCount} tracks)"))
+                    } catch (e: Exception) {
+                        _navEvents.emit(DeepLinkNavEvent.Toast("Could not import Apple Music playlist: ${e.message}"))
+                    }
                 }
 
                 is DeepLinkAction.Unknown -> Log.w(TAG, "Unknown deep link: ${action.uri}")
@@ -216,12 +231,13 @@ class DeepLinkViewModel @Inject constructor(
     }
 
     private suspend fun resolveAndNavigateSpotifyPlaylist(playlistId: String) {
-        val result = externalLinkResolver.resolveSpotifyPlaylist(playlistId)
-        if (result != null) {
-            // TODO: Import as Parachord playlist and navigate
-            _navEvents.emit(DeepLinkNavEvent.Toast("Opened playlist: ${result.name}"))
-        } else {
-            _navEvents.emit(DeepLinkNavEvent.Toast("Could not load Spotify playlist"))
+        try {
+            val url = "https://open.spotify.com/playlist/$playlistId"
+            val result = playlistImportManager.importFromUrl(url)
+            _navEvents.emit(DeepLinkNavEvent.Playlist(result.playlistId))
+            _navEvents.emit(DeepLinkNavEvent.Toast("Imported '${result.playlistName}' (${result.trackCount} tracks)"))
+        } catch (e: Exception) {
+            _navEvents.emit(DeepLinkNavEvent.Toast("Could not import Spotify playlist: ${e.message}"))
         }
     }
 

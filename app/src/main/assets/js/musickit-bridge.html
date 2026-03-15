@@ -121,6 +121,44 @@
     }
 
     /**
+     * Get playlist tracks by Apple Music playlist ID.
+     * Returns JSON: { success: bool, name: string, tracks: [...], error?: string }
+     */
+    async function getPlaylist(playlistId, storefront) {
+        try {
+            if (!music) return JSON.stringify({ success: false, error: 'Not configured' });
+            var sf = storefront || 'us';
+            var response = await music.api.music(
+                '/v1/catalog/' + sf + '/playlists/' + playlistId,
+                { include: 'tracks' }
+            );
+            var playlist = response.data.data[0];
+            if (!playlist) return JSON.stringify({ success: false, error: 'Playlist not found' });
+            var name = playlist.attributes.name || 'Untitled Playlist';
+            var trackData = (playlist.relationships && playlist.relationships.tracks &&
+                             playlist.relationships.tracks.data) || [];
+            var tracks = trackData.map(function(song) {
+                var artwork = song.attributes.artwork;
+                var artworkUrl = null;
+                if (artwork && artwork.url) {
+                    artworkUrl = artwork.url.replace('{w}', '600').replace('{h}', '600');
+                }
+                return {
+                    id: song.id,
+                    title: song.attributes.name,
+                    artist: song.attributes.artistName,
+                    album: song.attributes.albumName || null,
+                    duration: song.attributes.durationInMillis || null,
+                    artworkUrl: artworkUrl,
+                };
+            });
+            return JSON.stringify({ success: true, name: name, tracks: tracks });
+        } catch (e) {
+            return JSON.stringify({ success: false, error: e.message || String(e) });
+        }
+    }
+
+    /**
      * Play a song by Apple Music catalog ID.
      * Returns JSON: { success: bool, error?: string }
      */
