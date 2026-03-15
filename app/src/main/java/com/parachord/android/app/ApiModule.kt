@@ -1,5 +1,6 @@
 package com.parachord.android.app
 
+import com.parachord.android.data.api.AppleMusicApi
 import com.parachord.android.data.api.LastFmApi
 import com.parachord.android.data.api.MusicBrainzApi
 import com.parachord.android.data.api.SpotifyApi
@@ -73,6 +74,21 @@ object ApiModule {
     @Singleton
     fun provideSpotifyApi(@Named("spotify") retrofit: Retrofit): SpotifyApi =
         retrofit.create(SpotifyApi::class.java)
+
+    @Provides
+    @Singleton
+    @Named("itunes")
+    fun provideItunesRetrofit(json: Json, client: OkHttpClient): Retrofit =
+        Retrofit.Builder()
+            .baseUrl("https://itunes.apple.com/")
+            .client(client)
+            .addConverterFactory(json.asConverterFactory("application/json".toMediaType()))
+            .build()
+
+    @Provides
+    @Singleton
+    fun provideAppleMusicApi(@Named("itunes") retrofit: Retrofit): AppleMusicApi =
+        retrofit.create(AppleMusicApi::class.java)
 
     private fun userAgentInterceptor(userAgent: String) = Interceptor { chain ->
         chain.proceed(

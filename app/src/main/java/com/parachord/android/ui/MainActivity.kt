@@ -59,6 +59,8 @@ import androidx.navigation.NavGraph.Companion.findStartDestination
 import androidx.navigation.compose.currentBackStackEntryAsState
 import androidx.navigation.compose.rememberNavController
 import com.parachord.android.auth.OAuthManager
+import com.parachord.android.deeplink.DeepLinkNavEvent
+import com.parachord.android.deeplink.DeepLinkViewModel
 import com.parachord.android.data.store.SettingsStore
 import com.parachord.android.playback.handlers.MusicKitWebBridge
 import com.parachord.android.ui.components.ActionOverlay
@@ -91,7 +93,7 @@ class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         enableEdgeToEdge()
-        handleOAuthIntent(intent)
+        handleDeepLink(intent)
         setContent {
             ParachordApp()
         }
@@ -119,16 +121,21 @@ class MainActivity : ComponentActivity() {
 
     override fun onNewIntent(intent: Intent) {
         super.onNewIntent(intent)
-        handleOAuthIntent(intent)
+        handleDeepLink(intent)
     }
 
-    private fun handleOAuthIntent(intent: Intent?) {
+    private fun handleDeepLink(intent: Intent?) {
         val uri = intent?.data ?: return
+        // Auth callbacks go directly to OAuthManager (fast path)
         if (uri.scheme == "parachord" && uri.host == "auth") {
             CoroutineScope(Dispatchers.IO).launch {
                 oAuthManager.handleRedirect(uri)
             }
+            return
         }
+        // All other URIs go through DeepLinkViewModel
+        val vm = androidx.lifecycle.ViewModelProvider(this)[com.parachord.android.deeplink.DeepLinkViewModel::class.java]
+        vm.handleUri(uri)
     }
 }
 
@@ -178,6 +185,45 @@ private fun ParachordAppContent(mainViewModel: MainViewModel) {
     LaunchedEffect(Unit) {
         mainViewModel.navigateToSettings.collect {
             navController.navigate(Routes.SETTINGS) { launchSingleTop = true }
+        }
+    }
+
+    // Handle deep link navigation events
+    val deepLinkViewModel: DeepLinkViewModel = hiltViewModel()
+    LaunchedEffect(Unit) {
+        deepLinkViewModel.navEvents.collect { event ->
+            when (event) {
+                is DeepLinkNavEvent.Artist ->
+                    navController.navigate(Routes.artist(event.name)) { launchSingleTop = true }
+                is DeepLinkNavEvent.Album ->
+                    navController.navigate(Routes.album(event.title, event.artist)) { launchSingleTop = true }
+                is DeepLinkNavEvent.Playlist ->
+                    navController.navigate(Routes.playlistDetail(event.id)) { launchSingleTop = true }
+                is DeepLinkNavEvent.Home ->
+                    navController.navigate(Routes.HOME) { launchSingleTop = true }
+                is DeepLinkNavEvent.Library ->
+                    navController.navigate(Routes.collection(event.tab)) { launchSingleTop = true }
+                is DeepLinkNavEvent.History ->
+                    navController.navigate(Routes.HISTORY) { launchSingleTop = true }
+                is DeepLinkNavEvent.Friend ->
+                    navController.navigate(Routes.friendDetail(event.id)) { launchSingleTop = true }
+                is DeepLinkNavEvent.Recommendations ->
+                    navController.navigate(Routes.RECOMMENDATIONS) { launchSingleTop = true }
+                is DeepLinkNavEvent.Charts ->
+                    navController.navigate(Routes.POP_OF_THE_TOPS) { launchSingleTop = true }
+                is DeepLinkNavEvent.CriticalDarlings ->
+                    navController.navigate(Routes.CRITICAL_DARLINGS) { launchSingleTop = true }
+                is DeepLinkNavEvent.Playlists ->
+                    navController.navigate(Routes.PLAYLISTS) { launchSingleTop = true }
+                is DeepLinkNavEvent.Settings ->
+                    navController.navigate(Routes.SETTINGS) { launchSingleTop = true }
+                is DeepLinkNavEvent.Search ->
+                    navController.navigate(Routes.SEARCH) { launchSingleTop = true }
+                is DeepLinkNavEvent.Chat ->
+                    navController.navigate(Routes.CHAT) { launchSingleTop = true }
+                is DeepLinkNavEvent.Toast ->
+                    Toast.makeText(context, event.message, Toast.LENGTH_SHORT).show()
+            }
         }
     }
 

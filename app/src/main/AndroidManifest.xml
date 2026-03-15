@@ -38,6 +38,41 @@
                     android:scheme="parachord"
                     android:host="auth" />
             </intent-filter>
+
+            <!-- Deep link for all Parachord protocol URLs -->
+            <intent-filter>
+                <action android:name="android.intent.action.VIEW" />
+                <category android:name="android.intent.category.DEFAULT" />
+                <category android:name="android.intent.category.BROWSABLE" />
+                <data android:scheme="parachord" />
+            </intent-filter>
+
+            <!-- Spotify web URLs -->
+            <intent-filter>
+                <action android:name="android.intent.action.VIEW" />
+                <category android:name="android.intent.category.DEFAULT" />
+                <category android:name="android.intent.category.BROWSABLE" />
+                <data android:scheme="https" android:host="open.spotify.com" android:pathPrefix="/track" />
+                <data android:scheme="https" android:host="open.spotify.com" android:pathPrefix="/album" />
+                <data android:scheme="https" android:host="open.spotify.com" android:pathPrefix="/playlist" />
+                <data android:scheme="https" android:host="open.spotify.com" android:pathPrefix="/artist" />
+            </intent-filter>
+
+            <!-- Spotify URIs (spotify:track:xxx) -->
+            <intent-filter>
+                <action android:name="android.intent.action.VIEW" />
+                <category android:name="android.intent.category.DEFAULT" />
+                <category android:name="android.intent.category.BROWSABLE" />
+                <data android:scheme="spotify" />
+            </intent-filter>
+
+            <!-- Apple Music URLs -->
+            <intent-filter>
+                <action android:name="android.intent.action.VIEW" />
+                <category android:name="android.intent.category.DEFAULT" />
+                <category android:name="android.intent.category.BROWSABLE" />
+                <data android:scheme="https" android:host="music.apple.com" android:pathPrefix="/" />
+            </intent-filter>
         </activity>
 
         <service
