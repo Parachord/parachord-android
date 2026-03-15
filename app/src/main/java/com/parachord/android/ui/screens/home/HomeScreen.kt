@@ -149,6 +149,7 @@ fun HomeScreen(
     val aiRecommendations by viewModel.aiRecommendations.collectAsStateWithLifecycle()
     val aiLoading by viewModel.aiLoading.collectAsStateWithLifecycle()
     val playlists by viewModel.playlists.collectAsStateWithLifecycle()
+    val resolverOrder by viewModel.resolverOrder.collectAsStateWithLifecycle()
     val contextMenuState = rememberTrackContextMenuState()
 
     // Track context menu host (for Recent Loves long-press)
@@ -389,7 +390,7 @@ fun HomeScreen(
                             title = track.title,
                             artist = track.artist,
                             artworkUrl = track.artworkUrl,
-                            resolver = track.resolver,
+                            resolvers = track.availableResolvers(resolverOrder),
                             duration = track.duration,
                             onClick = {
                                 viewModel.playTrack(track)

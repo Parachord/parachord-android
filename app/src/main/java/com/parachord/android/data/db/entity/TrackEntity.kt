@@ -25,4 +25,25 @@ data class TrackEntity(
     val spotifyId: String? = null,
     /** Apple Music catalog song ID (e.g. "1440935467"). */
     val appleMusicId: String? = null,
-)
+) {
+    /**
+     * Derive all available resolvers from stored IDs.
+     * Returns resolver names for which this track has a usable ID,
+     * sorted by the provided resolver order (user-configured priority).
+     */
+    fun availableResolvers(resolverOrder: List<String> = emptyList()): List<String> {
+        val available = buildList {
+            if (!spotifyId.isNullOrBlank() || !spotifyUri.isNullOrBlank()) add("spotify")
+            if (!appleMusicId.isNullOrBlank()) add("applemusic")
+            if (!soundcloudId.isNullOrBlank()) add("soundcloud")
+            // Include the stored resolver even if we don't have a specific ID field for it
+            // (e.g. youtube, bandcamp, localfiles)
+            if (resolver != null && !contains(resolver)) add(resolver)
+        }
+        if (resolverOrder.isEmpty()) return available
+        return available.sortedBy { r ->
+            val idx = resolverOrder.indexOf(r)
+            if (idx == -1) resolverOrder.size else idx
+        }
+    }
+}

@@ -67,6 +67,7 @@ class SettingsStore @Inject constructor(
         val SORT_PLAYLISTS = stringPreferencesKey("sort_playlists")
         val APPLE_MUSIC_DEVELOPER_TOKEN = stringPreferencesKey("apple_music_developer_token")
         val APPLE_MUSIC_STOREFRONT = stringPreferencesKey("apple_music_storefront")
+        val APPLE_MUSIC_USER_TOKEN = stringPreferencesKey("apple_music_user_token")
 
         /** Default canonical order matching the desktop app. */
         private const val DEFAULT_RESOLVER_ORDER = "spotify,applemusic,bandcamp,soundcloud,localfiles,youtube"
@@ -374,6 +375,18 @@ class SettingsStore @Inject constructor(
 
     suspend fun setAppleMusicStorefront(storefront: String) {
         dataStore.edit { it[APPLE_MUSIC_STOREFRONT] = storefront }
+    }
+
+    /** Persisted Apple Music user token (MUT) — allows skipping re-auth on relaunch. */
+    suspend fun getAppleMusicUserToken(): String? =
+        dataStore.data.first()[APPLE_MUSIC_USER_TOKEN]?.ifBlank { null }
+
+    suspend fun setAppleMusicUserToken(token: String) {
+        dataStore.edit { it[APPLE_MUSIC_USER_TOKEN] = token }
+    }
+
+    suspend fun clearAppleMusicUserToken() {
+        dataStore.edit { it.remove(APPLE_MUSIC_USER_TOKEN) }
     }
 
     // --- Metadata provider enable/disable ---

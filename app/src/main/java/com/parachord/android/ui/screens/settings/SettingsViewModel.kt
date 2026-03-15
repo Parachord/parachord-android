@@ -154,7 +154,7 @@ class SettingsViewModel @Inject constructor(
     fun disconnectAppleMusic() {
         viewModelScope.launch {
             settingsStore.clearAppleMusicDeveloperToken()
-            musicKitBridge.teardown()
+            musicKitBridge.disconnect()
         }
     }
 

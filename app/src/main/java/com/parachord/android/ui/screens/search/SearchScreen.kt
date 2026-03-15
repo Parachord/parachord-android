@@ -72,6 +72,7 @@ fun SearchScreen(
     val isSearchingRemote by viewModel.isSearchingRemote.collectAsStateWithLifecycle()
     val searchHistory by viewModel.searchHistory.collectAsStateWithLifecycle()
     val trackResolvers by viewModel.trackResolvers.collectAsState()
+    val resolverOrder by viewModel.resolverOrder.collectAsStateWithLifecycle()
 
     Column(modifier = modifier.fillMaxSize()) {
         TopAppBar(
@@ -134,7 +135,7 @@ fun SearchScreen(
                             title = track.title,
                             artist = track.artist,
                             artworkUrl = track.artworkUrl,
-                            resolver = track.resolver,
+                            resolvers = track.availableResolvers(resolverOrder),
                             duration = track.duration,
                             onClick = {
                                 viewModel.saveHistoryEntry(

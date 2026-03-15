@@ -37,7 +37,7 @@ import androidx.compose.ui.unit.dp
 import com.parachord.android.data.db.entity.TrackEntity
 import com.parachord.android.playback.PlaybackContext
 import com.parachord.android.ui.components.AlbumArtCard
-import com.parachord.android.ui.components.ResolverIconSquare
+import com.parachord.android.ui.components.ResolverIconRow
 import com.parachord.android.ui.theme.PlayerSurface
 import com.parachord.android.ui.theme.PlayerTextPrimary
 import com.parachord.android.ui.theme.PlayerTextSecondary
@@ -56,6 +56,8 @@ fun QueueSheet(
     onRemoveFromQueue: (Int) -> Unit,
     onClearQueue: () -> Unit,
     modifier: Modifier = Modifier,
+    /** User-configured resolver priority order for sorting resolver icons. */
+    resolverOrder: List<String> = emptyList(),
     /** True when queue is "paused" (spinoff or listen-along) — dims tracks to show they'll resume later. */
     queueSuspended: Boolean = false,
     /** Navigate to the source context (album, playlist, artist page). */
@@ -150,6 +152,7 @@ fun QueueSheet(
                         track = track,
                         index = index,
                         suspended = queueSuspended,
+                        resolverOrder = resolverOrder,
                         onTap = { onPlayFromQueue(index) },
                         onRemove = { onRemoveFromQueue(index) },
                     )
@@ -164,6 +167,7 @@ private fun QueueTrackRow(
     track: TrackEntity,
     index: Int,
     suspended: Boolean,
+    resolverOrder: List<String> = emptyList(),
     onTap: () -> Unit,
     onRemove: () -> Unit,
 ) {
@@ -243,11 +247,12 @@ private fun QueueTrackRow(
                 )
             }
 
-            // Resolver badge
-            if (track.resolver != null) {
+            // Resolver badges
+            val resolvers = track.availableResolvers(resolverOrder)
+            if (resolvers.isNotEmpty()) {
                 Spacer(modifier = Modifier.width(8.dp))
-                ResolverIconSquare(
-                    resolver = track.resolver!!,
+                ResolverIconRow(
+                    resolvers = resolvers,
                     size = 20.dp,
                     modifier = Modifier.graphicsLayer { alpha = dimAlpha },
                 )

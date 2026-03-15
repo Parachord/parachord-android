@@ -41,4 +41,22 @@ data class PlaylistTrackEntity(
     val trackSpotifyId: String? = null,
     val trackAppleMusicId: String? = null,
     val addedAt: Long = System.currentTimeMillis(),
-)
+) {
+    /**
+     * Derive all available resolvers from stored IDs.
+     * Mirrors [TrackEntity.availableResolvers] for playlist tracks.
+     */
+    fun availableResolvers(resolverOrder: List<String> = emptyList()): List<String> {
+        val available = buildList {
+            if (!trackSpotifyId.isNullOrBlank() || !trackSpotifyUri.isNullOrBlank()) add("spotify")
+            if (!trackAppleMusicId.isNullOrBlank()) add("applemusic")
+            if (!trackSoundcloudId.isNullOrBlank()) add("soundcloud")
+            if (trackResolver != null && !contains(trackResolver)) add(trackResolver)
+        }
+        if (resolverOrder.isEmpty()) return available
+        return available.sortedBy { r ->
+            val idx = resolverOrder.indexOf(r)
+            if (idx < 0) Int.MAX_VALUE else idx
+        }
+    }
+}

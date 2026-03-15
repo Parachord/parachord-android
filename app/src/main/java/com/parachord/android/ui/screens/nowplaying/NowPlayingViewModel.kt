@@ -5,6 +5,7 @@ import androidx.lifecycle.viewModelScope
 import com.parachord.android.data.db.entity.PlaylistEntity
 import com.parachord.android.data.db.entity.TrackEntity
 import com.parachord.android.data.repository.LibraryRepository
+import com.parachord.android.data.store.SettingsStore
 import com.parachord.android.playback.PlaybackController
 import com.parachord.android.playback.PlaybackState
 import com.parachord.android.playback.PlaybackStateHolder
@@ -20,9 +21,14 @@ class NowPlayingViewModel @Inject constructor(
     private val playbackStateHolder: PlaybackStateHolder,
     private val playbackController: PlaybackController,
     private val libraryRepository: LibraryRepository,
+    private val settingsStore: SettingsStore,
 ) : ViewModel() {
 
     val playbackState: StateFlow<PlaybackState> = playbackStateHolder.state
+
+    /** User-configured resolver priority order, used to sort resolver icons on track rows. */
+    val resolverOrder: StateFlow<List<String>> = settingsStore.getResolverOrderFlow()
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), emptyList())
 
     val playlists: StateFlow<List<PlaylistEntity>> =
         libraryRepository.getAllPlaylists()

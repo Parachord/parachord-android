@@ -80,6 +80,7 @@ fun NowPlayingScreen(
     viewModel: NowPlayingViewModel = hiltViewModel(),
 ) {
     val playbackState by viewModel.playbackState.collectAsStateWithLifecycle()
+    val resolverOrder by viewModel.resolverOrder.collectAsStateWithLifecycle()
     val track = playbackState.currentTrack
     val upNext = playbackState.upNext
     val scope = rememberCoroutineScope()
@@ -139,6 +140,7 @@ fun NowPlayingScreen(
                 onMoveInQueue = { from, to -> viewModel.moveInQueue(from, to) },
                 onRemoveFromQueue = { viewModel.removeFromQueue(it) },
                 onClearQueue = { viewModel.clearQueue() },
+                resolverOrder = resolverOrder,
                 queueSuspended = playbackState.spinoffMode ||
                     playbackState.playbackContext?.type == "listen-along",
                 onNavigateToContext = { ctx ->

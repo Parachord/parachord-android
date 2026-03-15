@@ -124,6 +124,7 @@ fun CollectionScreen(
     var showSyncSheet by remember { mutableStateOf(false) }
     val contextMenuState = rememberTrackContextMenuState()
     val allPlaylists by viewModel.playlists.collectAsStateWithLifecycle()
+    val resolverOrder by viewModel.resolverOrder.collectAsStateWithLifecycle()
 
     if (showSyncSheet) {
         SyncSetupSheet(onDismiss = { showSyncSheet = false })
@@ -397,7 +398,7 @@ fun CollectionScreen(
                                         title = track.title,
                                         artist = track.artist,
                                         artworkUrl = track.artworkUrl,
-                                        resolver = track.resolver,
+                                        resolvers = track.availableResolvers(resolverOrder),
                                         duration = track.duration,
                                         onClick = { viewModel.playTrack(track) },
                                         onLongClick = {

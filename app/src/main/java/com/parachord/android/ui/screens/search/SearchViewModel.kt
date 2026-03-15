@@ -11,6 +11,7 @@ import com.parachord.android.data.metadata.MetadataService
 import com.parachord.android.data.metadata.TrackSearchResult
 import com.parachord.android.data.metadata.AlbumSearchResult
 import com.parachord.android.data.repository.LibraryRepository
+import com.parachord.android.data.store.SettingsStore
 import com.parachord.android.playback.PlaybackController
 import com.parachord.android.resolver.ResolvedSource
 import com.parachord.android.resolver.ResolverManager
@@ -37,7 +38,12 @@ class SearchViewModel @Inject constructor(
     private val playbackController: PlaybackController,
     private val searchHistoryDao: SearchHistoryDao,
     private val resolverManager: ResolverManager,
+    private val settingsStore: SettingsStore,
 ) : ViewModel() {
+
+    /** User-configured resolver priority order, used to sort resolver icons on track rows. */
+    val resolverOrder: StateFlow<List<String>> = settingsStore.getResolverOrderFlow()
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), emptyList())
 
     private val _query = MutableStateFlow("")
     val query: StateFlow<String> = _query.asStateFlow()

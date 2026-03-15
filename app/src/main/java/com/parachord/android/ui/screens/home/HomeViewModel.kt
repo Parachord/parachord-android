@@ -17,6 +17,7 @@ import com.parachord.android.data.repository.RecommendationsRepository
 import com.parachord.android.data.repository.Resource
 import com.parachord.android.data.scanner.MediaScanner
 import com.parachord.android.data.scanner.ScanProgress
+import com.parachord.android.data.store.SettingsStore
 import com.parachord.android.playback.PlaybackController
 import com.parachord.android.playback.PlaybackStateHolder
 import dagger.hilt.android.lifecycle.HiltViewModel
@@ -57,7 +58,12 @@ class HomeViewModel @Inject constructor(
     private val freshDropsRepository: FreshDropsRepository,
     private val chartsRepository: ChartsRepository,
     private val aiRecommendationService: AiRecommendationService,
+    private val settingsStore: SettingsStore,
 ) : ViewModel() {
+
+    /** User-configured resolver priority order, used to sort resolver icons on track rows. */
+    val resolverOrder: StateFlow<List<String>> = settingsStore.getResolverOrderFlow()
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), emptyList())
 
     val recentTracks: StateFlow<List<TrackEntity>> = repository.getAllTracks()
         .map { tracks -> tracks.sortedByDescending { it.addedAt }.take(20) }

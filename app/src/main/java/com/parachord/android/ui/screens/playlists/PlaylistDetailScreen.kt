@@ -79,6 +79,7 @@ fun PlaylistDetailScreen(
     val tracks by viewModel.tracks.collectAsStateWithLifecycle()
     val allPlaylists by viewModel.allPlaylists.collectAsStateWithLifecycle()
     val nowPlayingTitle by viewModel.nowPlayingTitle.collectAsStateWithLifecycle()
+    val resolverOrder by viewModel.resolverOrder.collectAsStateWithLifecycle()
     val contextMenuState = rememberTrackContextMenuState()
     var showPlaylistMenu by remember { mutableStateOf(false) }
     var showDeleteConfirm by remember { mutableStateOf(false) }
@@ -205,7 +206,7 @@ fun PlaylistDetailScreen(
                     title = track.trackTitle,
                     artist = track.trackArtist,
                     artworkUrl = track.trackArtworkUrl,
-                    resolver = track.trackResolver,
+                    resolvers = track.availableResolvers(resolverOrder),
                     duration = track.trackDuration,
                     trackNumber = index + 1,
                     isPlaying = nowPlayingTitle == track.trackTitle,

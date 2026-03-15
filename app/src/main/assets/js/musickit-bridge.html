@@ -2,7 +2,7 @@
 <html>
 <head>
     <meta charset="utf-8">
-    <title>MusicKit Bridge</title>
+    <title>Parachord</title>
 </head>
 <body>
 <script src="https://js-cdn.music.apple.com/musickit/v3/musickit.js"></script>
@@ -23,42 +23,61 @@
 
     /**
      * Configure MusicKit with a developer token.
-     * Returns JSON: { success: bool, error?: string }
+     * Optionally accepts a saved music user token (MUT) to restore auth
+     * without showing the login popup.
+     * Returns JSON: { success: bool, authorized: bool, error?: string }
      */
-    async function configure(developerToken, appName) {
+    async function configure(developerToken, appName, savedMusicUserToken) {
         try {
-            await MusicKit.configure({
+            var config = {
                 developerToken: developerToken,
                 app: { name: appName || 'Parachord', build: '1.0.0' },
-            });
+            };
+            if (savedMusicUserToken) {
+                config.musicUserToken = savedMusicUserToken;
+            }
+            await MusicKit.configure(config);
             music = MusicKit.getInstance();
             _attachListeners();
-            return JSON.stringify({ success: true });
+            return JSON.stringify({
+                success: true,
+                authorized: music.isAuthorized,
+            });
         } catch (e) {
-            return JSON.stringify({ success: false, error: e.message || String(e) });
+            return JSON.stringify({ success: false, authorized: false, error: e.message || String(e) });
         }
     }
 
     /**
      * Prompt Apple ID sign-in.
-     * Returns JSON: { success: bool, authorized: bool, error?: string }
+     * Returns the music user token (MUT) on success so Kotlin can persist it.
+     * Returns JSON: { success: bool, authorized: bool, musicUserToken?: string, error?: string }
      */
     async function authorize() {
         try {
             if (!music) return JSON.stringify({ success: false, error: 'Not configured' });
-            // Clear any stale cached token first — forces a fresh sign-in
-            // so the new token includes Apple Music subscription entitlements.
-            // Without this, a cached token from a previous session may lack
-            // subscription scope and MusicKit plays 30-second previews only.
-            try { await music.unauthorize(); } catch (_) {}
-            const token = await music.authorize();
+            var token = await music.authorize();
             return JSON.stringify({
                 success: true,
                 authorized: !!token,
-                hasSubscription: music.isAuthorized,
+                musicUserToken: token || null,
             });
         } catch (e) {
             return JSON.stringify({ success: false, authorized: false, error: e.message || String(e) });
+        }
+    }
+
+    /**
+     * Sign out — clears the music user token from MusicKit.
+     * Call this when the user explicitly disconnects Apple Music.
+     */
+    async function unauthorize() {
+        try {
+            if (!music) return JSON.stringify({ success: true });
+            await music.unauthorize();
+            return JSON.stringify({ success: true });
+        } catch (e) {
+            return JSON.stringify({ success: false, error: e.message || String(e) });
         }
     }
 

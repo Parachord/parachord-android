@@ -8,6 +8,7 @@ import com.parachord.android.data.db.entity.PlaylistEntity
 import com.parachord.android.data.db.entity.PlaylistTrackEntity
 import com.parachord.android.data.db.entity.TrackEntity
 import com.parachord.android.data.repository.LibraryRepository
+import com.parachord.android.data.store.SettingsStore
 import com.parachord.android.playback.PlaybackController
 import dagger.hilt.android.lifecycle.HiltViewModel
 import kotlinx.coroutines.flow.SharingStarted
@@ -24,7 +25,12 @@ class PlaylistDetailViewModel @Inject constructor(
     private val libraryRepository: LibraryRepository,
     private val playbackController: PlaybackController,
     private val playbackStateHolder: com.parachord.android.playback.PlaybackStateHolder,
+    private val settingsStore: SettingsStore,
 ) : ViewModel() {
+
+    /** User-configured resolver priority order, used to sort resolver icons on track rows. */
+    val resolverOrder: StateFlow<List<String>> = settingsStore.getResolverOrderFlow()
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), emptyList())
 
     private val playlistId: String = savedStateHandle["playlistId"] ?: ""
 

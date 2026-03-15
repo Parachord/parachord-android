@@ -40,7 +40,12 @@ class ResolverManager @Inject constructor(
     companion object {
         private const val TAG = "ResolverManager"
         private const val SC_API_BASE = "https://api.soundcloud.com"
+        /** Only check token freshness once per 5 minutes to avoid unnecessary API calls. */
+        private const val TOKEN_CHECK_INTERVAL_MS = 5 * 60 * 1000L
     }
+
+    /** Timestamp of last proactive token freshness check (epochMs). */
+    @Volatile private var lastTokenCheck = 0L
 
     private val _resolvers = MutableStateFlow(
         listOf(
@@ -52,11 +57,44 @@ class ResolverManager @Inject constructor(
     val resolvers: StateFlow<List<ResolverInfo>> = _resolvers.asStateFlow()
 
     /**
+     * Proactively ensure the Spotify access token is fresh.
+     * Debounced to once per 5 minutes to avoid unnecessary API calls.
+     *
+     * Makes a lightweight "me" API call; if it 401s, refreshes the token once.
+     * This way, by the time individual resolveSpotify() calls run, the token is valid.
+     */
+    suspend fun ensureTokensFresh() {
+        val now = System.currentTimeMillis()
+        if (now - lastTokenCheck < TOKEN_CHECK_INTERVAL_MS) return
+        lastTokenCheck = now
+
+        val token = settingsStore.getSpotifyAccessToken()
+        if (!token.isNullOrBlank()) {
+            try {
+                spotifyApi.getCurrentUser("Bearer $token")
+            } catch (e: HttpException) {
+                if (e.code() == 401) {
+                    Log.d(TAG, "Spotify token stale, proactively refreshing")
+                    if (oAuthManager.refreshSpotifyToken()) {
+                        Log.d(TAG, "Spotify token proactively refreshed")
+                    } else {
+                        Log.w(TAG, "Spotify proactive token refresh failed — re-auth may be needed")
+                    }
+                }
+            } catch (_: Exception) {
+                // Network error etc — resolve() will handle individual failures
+            }
+        }
+    }
+
+    /**
      * Resolve a track query through all enabled and configured resolvers in parallel.
      * Only resolvers that are active (per user settings) and have valid credentials
      * will be included in the pipeline.
      */
     suspend fun resolve(query: String): List<ResolvedSource> = coroutineScope {
+        // Proactively refresh stale tokens before resolving
+        ensureTokensFresh()
         val activeResolvers = settingsStore.getActiveResolvers()
 
         // Build resolver tasks for enabled resolvers only.

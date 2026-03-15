@@ -52,6 +52,10 @@ class LibraryViewModel @Inject constructor(
     val playlists: StateFlow<List<PlaylistEntity>> = repository.getAllPlaylists()
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), emptyList())
 
+    /** User-configured resolver priority order, used to sort resolver icons on track rows. */
+    val resolverOrder: StateFlow<List<String>> = settingsStore.getResolverOrderFlow()
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), emptyList())
+
     // --- Sort state per tab ---
 
     private val _artistSort = MutableStateFlow(ArtistSort.ALPHA_ASC)

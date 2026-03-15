@@ -27,30 +27,23 @@ class AppleMusicPlaybackHandler @Inject constructor(
 
     override suspend fun createMediaItem(track: TrackEntity) = null // External playback
 
-    /** Whether the user has completed a full authorize flow this session. */
-    private var hasAuthorizedThisSession = false
-
     override suspend fun play(track: TrackEntity) {
         val songId = track.appleMusicId ?: return
-        // Ensure configured + authorized
+        // Ensure configured — configure() also restores saved MUT if available
         if (!musicKitBridge.configured.value) {
             if (!musicKitBridge.configure()) {
                 Log.w(TAG, "MusicKit configuration failed")
                 return
             }
         }
-        // Always do a full authorize on first play of the session.
-        // MusicKit may auto-restore auth from cookies during configure() but
-        // the cached token may lack Apple Music subscription entitlements,
-        // resulting in 30-second preview playback instead of full tracks.
-        if (!hasAuthorizedThisSession || !musicKitBridge.authorized.value) {
-            Log.d(TAG, "Authorizing (firstSession=${!hasAuthorizedThisSession}, authorized=${musicKitBridge.authorized.value})")
+        // If not authorized after configure (no saved MUT or it expired), prompt login
+        if (!musicKitBridge.authorized.value) {
+            Log.d(TAG, "Not authorized, prompting sign-in")
             if (!musicKitBridge.authorize()) {
                 Log.w(TAG, "MusicKit authorization required — prompting user")
                 musicKitBridge.emitSignInRequired()
                 return
             }
-            hasAuthorizedThisSession = true
         }
         var success = musicKitBridge.play(songId)
         if (!success) {
@@ -68,9 +61,7 @@ class AppleMusicPlaybackHandler @Inject constructor(
             if (!success) {
                 // Retries exhausted — likely an expired user token, re-authorize
                 Log.w(TAG, "MusicKit playback still failing, attempting re-authorization")
-                hasAuthorizedThisSession = false
                 if (musicKitBridge.authorize()) {
-                    hasAuthorizedThisSession = true
                     musicKitBridge.play(songId)
                 } else {
                     musicKitBridge.emitSignInRequired()

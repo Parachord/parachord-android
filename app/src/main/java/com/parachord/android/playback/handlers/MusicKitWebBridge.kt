@@ -309,12 +309,28 @@ class MusicKitWebBridge @Inject constructor(
         authDialog = null
         webView?.destroy()
         webView = null
+        pageLoaded = CompletableDeferred()
+        musicKitReady = CompletableDeferred()
         _ready.value = false
         _configured.value = false
         _authorized.value = false
         _isPlaying.value = false
         _position.value = 0L
         _duration.value = 0L
+    }
+
+    /**
+     * Full disconnect — clears saved tokens and signs out of Apple Music.
+     * Use this when the user explicitly disconnects in Settings.
+     */
+    suspend fun disconnect() {
+        // Clear saved music user token
+        settingsStore.clearAppleMusicUserToken()
+        // Tell MusicKit to unauthorize if the WebView is alive
+        if (webView != null && _configured.value) {
+            try { evaluate("unauthorize()") } catch (_: Exception) {}
+        }
+        teardown()
     }
 
     // ── Configuration & Auth ──────────────────────────────────────
@@ -362,14 +378,23 @@ class MusicKitWebBridge @Inject constructor(
             return false
         }
         val escaped = token.replace("'", "\\'")
-        val result = evaluate("configure('$escaped', '$APP_NAME')")
+        // Pass saved music user token to restore auth without popup
+        val savedMut = settingsStore.getAppleMusicUserToken()
+        val mutArg = if (savedMut != null) "'${savedMut.replace("'", "\\'")}'" else "null"
+        val result = evaluate("configure('$escaped', '$APP_NAME', $mutArg)")
         Log.d(TAG, "configure() JS result: $result")
         if (result == null) return false
         return try {
-            val parsed = json.decodeFromString<GenericResponse>(cleanJsString(result))
+            val parsed = json.decodeFromString<ConfigureResponse>(cleanJsString(result))
             val success = parsed.success
             if (!success) Log.w(TAG, "configure() failed: ${parsed.error}")
-            if (success) _configured.value = true
+            if (success) {
+                _configured.value = true
+                if (parsed.authorized) {
+                    Log.d(TAG, "Restored auth from saved music user token")
+                    _authorized.value = true
+                }
+            }
             success
         } catch (e: Exception) {
             Log.e(TAG, "Failed to parse configure response: $result", e)
@@ -386,37 +411,25 @@ class MusicKitWebBridge @Inject constructor(
      * Call [setActivity] before this so the auth popup can be shown.
      */
     suspend fun authorize(): Boolean {
-        // First, try silent auth on the existing WebView — cookies from a
-        // previous session may still be valid, avoiding a login popup.
-        if (webView != null && _configured.value) {
-            Log.d(TAG, "Attempting silent authorize on existing WebView")
-            val silentResult = evaluate("authorize()")
-            if (silentResult != null) {
-                try {
-                    val parsed = json.decodeFromString<AuthorizeResponse>(cleanJsString(silentResult))
-                    if (parsed.authorized) {
-                        Log.d(TAG, "Silent authorize succeeded (cookies valid)")
-                        _authorized.value = true
-                        return true
-                    }
-                } catch (e: Exception) {
-                    Log.w(TAG, "Silent authorize parse failed: $silentResult", e)
-                }
-            }
-            Log.d(TAG, "Silent authorize failed, falling back to full re-auth")
-        }
-
-        // Silent auth failed or no WebView — tear down and reinitialize to
-        // ensure clean state for auth popup. MusicKit JS internally tracks
-        // popup state and may refuse to open a second window.open() after
-        // the first popup is dismissed/destroyed.
         if (activityRef?.get() == null) {
             Log.w(TAG, "No activity set — authorize() popup will not be visible")
         }
-        teardown()
-        initialize()
-        val configured = configure()
-        Log.d(TAG, "Pre-authorize configure() result: $configured")
+
+        // Ensure WebView is initialized and configured
+        if (webView == null || !_configured.value) {
+            // Tear down stale state if the WebView exists but isn't configured
+            if (webView != null) teardown()
+            initialize()
+            val configured = configure()
+            Log.d(TAG, "Pre-authorize configure() result: $configured")
+            if (!configured) return false
+            // configure() may have restored auth from saved MUT
+            if (_authorized.value) {
+                Log.d(TAG, "Already authorized after configure (saved MUT valid)")
+                return true
+            }
+        }
+
         musicKitReady.await()
         val result = evaluate("authorize()") ?: return false
         Log.d(TAG, "authorize() JS result: $result")
@@ -424,7 +437,14 @@ class MusicKitWebBridge @Inject constructor(
             val parsed = json.decodeFromString<AuthorizeResponse>(cleanJsString(result))
             val authorized = parsed.authorized
             Log.d(TAG, "authorize() authorized=$authorized")
-            if (authorized) _authorized.value = true
+            if (authorized) {
+                _authorized.value = true
+                // Persist the music user token for future sessions
+                parsed.musicUserToken?.let { mut ->
+                    Log.d(TAG, "Saving music user token (${mut.length} chars)")
+                    settingsStore.setAppleMusicUserToken(mut)
+                }
+            }
             authorized
         } catch (e: Exception) {
             Log.e(TAG, "Failed to parse authorize response: $result", e)
@@ -650,9 +670,17 @@ class MusicKitWebBridge @Inject constructor(
     )
 
     @Serializable
+    private data class ConfigureResponse(
+        val success: Boolean = false,
+        val authorized: Boolean = false,
+        val error: String? = null,
+    )
+
+    @Serializable
     private data class AuthorizeResponse(
         val success: Boolean = false,
         val authorized: Boolean = false,
+        val musicUserToken: String? = null,
         val error: String? = null,
     )
 

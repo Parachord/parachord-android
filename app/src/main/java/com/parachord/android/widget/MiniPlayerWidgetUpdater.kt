@@ -53,6 +53,7 @@ class MiniPlayerWidgetUpdater @Inject constructor(
 
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
     private var observeJob: Job? = null
+    private var artworkFetchJob: Job? = null
 
     /** Simple in-memory cache for decoded artwork bitmaps keyed by URL. */
     private val artworkCache = LruCache<String, Bitmap>(5)
@@ -98,14 +99,23 @@ class MiniPlayerWidgetUpdater @Inject constructor(
                 lastIsPlaying = isPlaying
                 lastProgress = progress
 
-                // Fetch artwork if URL changed
+                // Fetch artwork in a separate job so collectLatest doesn't
+                // cancel the network request when the next position update arrives.
                 val artworkUrl = track?.artworkUrl
                 if (artworkUrl != lastArtworkUrl) {
                     lastArtworkUrl = artworkUrl
-                    lastArtworkBitmap = if (artworkUrl != null) {
-                        fetchArtwork(artworkUrl)
+                    artworkFetchJob?.cancel()
+                    if (artworkUrl != null) {
+                        artworkFetchJob = scope.launch {
+                            val bitmap = fetchArtwork(artworkUrl)
+                            // Only apply if this is still the current artwork URL
+                            if (lastArtworkUrl == artworkUrl) {
+                                lastArtworkBitmap = bitmap
+                                pushUpdate()
+                            }
+                        }
                     } else {
-                        null
+                        lastArtworkBitmap = null
                     }
                 }
 
