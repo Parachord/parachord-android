@@ -11,8 +11,11 @@ import com.parachord.android.playlist.PlaylistImportManager
 import com.parachord.android.resolver.ResolverManager
 import dagger.hilt.android.lifecycle.HiltViewModel
 import kotlinx.coroutines.flow.MutableSharedFlow
+import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharedFlow
+import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asSharedFlow
+import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.launch
 import javax.inject.Inject
 
@@ -40,6 +43,16 @@ sealed class DeepLinkNavEvent {
     data class Toast(val message: String) : DeepLinkNavEvent()
 }
 
+/**
+ * A pending confirmation for a deep link action that needs user approval.
+ * Matches the desktop's "An external link wants to..." dialog pattern.
+ */
+data class DeepLinkConfirmation(
+    val title: String,
+    val message: String,
+    val action: DeepLinkAction,
+)
+
 @HiltViewModel
 class DeepLinkViewModel @Inject constructor(
     private val deepLinkHandler: DeepLinkHandler,
@@ -53,12 +66,73 @@ class DeepLinkViewModel @Inject constructor(
     private val _navEvents = MutableSharedFlow<DeepLinkNavEvent>()
     val navEvents: SharedFlow<DeepLinkNavEvent> = _navEvents.asSharedFlow()
 
+    private val _pendingConfirmation = MutableStateFlow<DeepLinkConfirmation?>(null)
+    val pendingConfirmation: StateFlow<DeepLinkConfirmation?> = _pendingConfirmation.asStateFlow()
+
     fun handleUri(uri: Uri) {
         val action = deepLinkHandler.parse(uri)
-        handleAction(action)
+        // Actions that need user approval before executing
+        val confirmation = buildConfirmation(action)
+        if (confirmation != null) {
+            _pendingConfirmation.value = confirmation
+        } else {
+            executeAction(action)
+        }
     }
 
-    private fun handleAction(action: DeepLinkAction) {
+    /** User confirmed the pending action. */
+    fun confirmPendingAction() {
+        val pending = _pendingConfirmation.value ?: return
+        _pendingConfirmation.value = null
+        executeAction(pending.action)
+    }
+
+    /** User dismissed the confirmation dialog. */
+    fun dismissPendingAction() {
+        _pendingConfirmation.value = null
+    }
+
+    /**
+     * Build a confirmation prompt for actions that need user approval.
+     * Returns null for actions that can execute immediately (navigation, control, etc.).
+     * Matches the desktop's "An external link wants to..." pattern.
+     */
+    private fun buildConfirmation(action: DeepLinkAction): DeepLinkConfirmation? {
+        return when (action) {
+            is DeepLinkAction.NavigateChat -> {
+                if (action.prompt != null) {
+                    DeepLinkConfirmation(
+                        title = "Send to Chat",
+                        message = "An external link wants to send this message to chat:\n\n\"${action.prompt.take(500)}\"",
+                        action = action,
+                    )
+                } else null // No prompt → just navigate, no confirmation needed
+            }
+            is DeepLinkAction.QueueAdd -> DeepLinkConfirmation(
+                title = "Add to Queue",
+                message = "An external link wants to add a track to your queue:\n\n${action.artist} – ${action.title}",
+                action = action,
+            )
+            is DeepLinkAction.QueueClear -> DeepLinkConfirmation(
+                title = "Clear Queue",
+                message = "An external link wants to clear your queue.",
+                action = action,
+            )
+            is DeepLinkAction.ImportPlaylist -> DeepLinkConfirmation(
+                title = "Import Playlist",
+                message = "An external link wants to import a playlist from:\n\n${action.url}",
+                action = action,
+            )
+            is DeepLinkAction.Play -> DeepLinkConfirmation(
+                title = "Play Track",
+                message = "An external link wants to play:\n\n${action.artist} – ${action.title}",
+                action = action,
+            )
+            else -> null
+        }
+    }
+
+    private fun executeAction(action: DeepLinkAction) {
         viewModelScope.launch {
             when (action) {
                 is DeepLinkAction.OAuthCallback -> { /* handled by OAuthManager in MainActivity */ }
@@ -133,8 +207,8 @@ class DeepLinkViewModel @Inject constructor(
                 }
 
                 is DeepLinkAction.Volume -> {
-                    // Volume control not yet implemented in PlaybackController
-                    _navEvents.emit(DeepLinkNavEvent.Toast("Volume set to ${action.level}%"))
+                    // Volume control not available on Android (media volume is system-level)
+                    Log.d(TAG, "Volume deep link ignored on Android (level=${action.level})")
                 }
 
                 // ── Navigation ────────────────────────────────────────────

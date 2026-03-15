@@ -1,6 +1,7 @@
 package com.parachord.android.ui
 
 import android.content.Intent
+import android.net.Uri
 import android.os.Bundle
 import android.widget.Toast
 import androidx.activity.ComponentActivity
@@ -59,12 +60,14 @@ import androidx.navigation.NavGraph.Companion.findStartDestination
 import androidx.navigation.compose.currentBackStackEntryAsState
 import androidx.navigation.compose.rememberNavController
 import com.parachord.android.auth.OAuthManager
+import com.parachord.android.deeplink.DeepLinkConfirmation
 import com.parachord.android.deeplink.DeepLinkNavEvent
 import com.parachord.android.deeplink.DeepLinkViewModel
 import com.parachord.android.data.store.SettingsStore
 import com.parachord.android.playback.handlers.MusicKitWebBridge
 import com.parachord.android.ui.components.ActionOverlay
 import com.parachord.android.ui.components.CreatePlaylistDialog
+import com.parachord.android.ui.components.DeepLinkConfirmationDialog
 import com.parachord.android.ui.components.ImportPlaylistDialog
 import com.parachord.android.ui.components.DrawerContent
 import com.parachord.android.ui.components.MiniPlayer
@@ -76,6 +79,7 @@ import com.parachord.android.ui.theme.ParachordTheme
 import dagger.hilt.android.AndroidEntryPoint
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.launch
 import javax.inject.Inject
 
@@ -90,6 +94,9 @@ class MainActivity : ComponentActivity() {
 
     @Inject
     lateinit var settingsStore: SettingsStore
+
+    /** Pending deep link URI stored for the composable to process. */
+    internal val pendingDeepLink = MutableStateFlow<Uri?>(null)
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -134,9 +141,8 @@ class MainActivity : ComponentActivity() {
             }
             return
         }
-        // All other URIs go through DeepLinkViewModel
-        val vm = androidx.lifecycle.ViewModelProvider(this)[com.parachord.android.deeplink.DeepLinkViewModel::class.java]
-        vm.handleUri(uri)
+        // Store for the composable-scoped ViewModel to process
+        pendingDeepLink.value = uri
     }
 }
 
@@ -191,6 +197,29 @@ private fun ParachordAppContent(mainViewModel: MainViewModel) {
 
     // Handle deep link navigation events
     val deepLinkViewModel: DeepLinkViewModel = hiltViewModel()
+
+    // Process pending deep links from the Activity (intent handling).
+    // The Activity stores the URI; the composable-scoped ViewModel processes it.
+    val activity = context as? MainActivity
+    LaunchedEffect(Unit) {
+        activity?.pendingDeepLink?.collect { uri ->
+            if (uri != null) {
+                deepLinkViewModel.handleUri(uri)
+                activity.pendingDeepLink.value = null
+            }
+        }
+    }
+
+    // Show confirmation dialog for deep link actions that need user approval
+    val pendingConfirmation by deepLinkViewModel.pendingConfirmation.collectAsStateWithLifecycle()
+    pendingConfirmation?.let { confirmation ->
+        DeepLinkConfirmationDialog(
+            confirmation = confirmation,
+            onConfirm = { deepLinkViewModel.confirmPendingAction() },
+            onDismiss = { deepLinkViewModel.dismissPendingAction() },
+        )
+    }
+
     LaunchedEffect(Unit) {
         deepLinkViewModel.navEvents.collect { event ->
             when (event) {
