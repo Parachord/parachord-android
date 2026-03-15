@@ -81,6 +81,7 @@ fun NowPlayingScreen(
 ) {
     val playbackState by viewModel.playbackState.collectAsStateWithLifecycle()
     val resolverOrder by viewModel.resolverOrder.collectAsStateWithLifecycle()
+    val trackResolvers by viewModel.trackResolvers.collectAsStateWithLifecycle()
     val track = playbackState.currentTrack
     val upNext = playbackState.upNext
     val scope = rememberCoroutineScope()
@@ -141,6 +142,7 @@ fun NowPlayingScreen(
                 onRemoveFromQueue = { viewModel.removeFromQueue(it) },
                 onClearQueue = { viewModel.clearQueue() },
                 resolverOrder = resolverOrder,
+                trackResolvers = trackResolvers,
                 queueSuspended = playbackState.spinoffMode ||
                     playbackState.playbackContext?.type == "listen-along",
                 onNavigateToContext = { ctx ->
@@ -470,10 +472,10 @@ fun NowPlayingScreen(
                                 contentAlignment = Alignment.Center,
                             ) {
                                 Text(
-                                    text = "${upNext.size}",
+                                    text = if (upNext.size > 99) "99+" else "${upNext.size}",
                                     color = Color.White,
-                                    fontSize = 9.sp,
-                                    lineHeight = 9.sp,
+                                    fontSize = if (upNext.size > 99) 7.sp else 9.sp,
+                                    lineHeight = if (upNext.size > 99) 7.sp else 9.sp,
                                 )
                             }
                         }
