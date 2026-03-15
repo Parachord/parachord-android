@@ -20,7 +20,9 @@ data class SerializableTrack(
     val sourceUrl: String? = null,
     val resolver: String? = null,
     val spotifyUri: String? = null,
+    val spotifyId: String? = null,
     val soundcloudId: String? = null,
+    val appleMusicId: String? = null,
 )
 
 /**
@@ -48,7 +50,9 @@ fun TrackEntity.toSerializable() = SerializableTrack(
     sourceUrl = sourceUrl,
     resolver = resolver,
     spotifyUri = spotifyUri,
+    spotifyId = spotifyId,
     soundcloudId = soundcloudId,
+    appleMusicId = appleMusicId,
 )
 
 fun SerializableTrack.toTrackEntity() = TrackEntity(
@@ -63,5 +67,7 @@ fun SerializableTrack.toTrackEntity() = TrackEntity(
     sourceUrl = sourceUrl,
     resolver = resolver,
     spotifyUri = spotifyUri,
+    spotifyId = spotifyId,
     soundcloudId = soundcloudId,
+    appleMusicId = appleMusicId,
 )

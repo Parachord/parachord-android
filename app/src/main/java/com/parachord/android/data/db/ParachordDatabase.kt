@@ -37,7 +37,7 @@ import com.parachord.android.data.db.entity.TrackEntity
         SyncSourceEntity::class,
         ArtistEntity::class,
     ],
-    version = 10,
+    version = 11,
     exportSchema = false,
 )
 abstract class ParachordDatabase : RoomDatabase() {
@@ -219,13 +219,25 @@ abstract class ParachordDatabase : RoomDatabase() {
             }
         }
 
+        /**
+         * Migration from v10 → v11: add trackSpotifyId and trackAppleMusicId columns
+         * to playlist_tracks table so playlist tracks preserve resolver IDs for
+         * proper playback routing (Apple Music, Spotify, etc.).
+         */
+        private val MIGRATION_10_11 = object : Migration(10, 11) {
+            override fun migrate(db: SupportSQLiteDatabase) {
+                db.execSQL("ALTER TABLE `playlist_tracks` ADD COLUMN `trackSpotifyId` TEXT")
+                db.execSQL("ALTER TABLE `playlist_tracks` ADD COLUMN `trackAppleMusicId` TEXT")
+            }
+        }
+
         fun create(context: Context): ParachordDatabase =
             Room.databaseBuilder(
                 context,
                 ParachordDatabase::class.java,
                 "parachord.db"
             )
-                .addMigrations(MIGRATION_4_5, MIGRATION_5_6, MIGRATION_6_7, MIGRATION_7_8, MIGRATION_8_9, MIGRATION_9_10)
+                .addMigrations(MIGRATION_4_5, MIGRATION_5_6, MIGRATION_6_7, MIGRATION_7_8, MIGRATION_8_9, MIGRATION_9_10, MIGRATION_10_11)
                 // Only fall back to destructive for very old versions (pre-v4)
                 // that we can't reasonably migrate from
                 .fallbackToDestructiveMigrationFrom(1, 2, 3)

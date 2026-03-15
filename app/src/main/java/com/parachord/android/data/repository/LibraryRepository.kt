@@ -106,6 +106,8 @@ class LibraryRepository @Inject constructor(
                 trackResolver = track.resolver,
                 trackSpotifyUri = track.spotifyUri,
                 trackSoundcloudId = track.soundcloudId,
+                trackSpotifyId = track.spotifyId,
+                trackAppleMusicId = track.appleMusicId,
             )
         }
         playlistTrackDao.insertAll(playlistTracks)
@@ -130,6 +132,8 @@ class LibraryRepository @Inject constructor(
                 trackResolver = track.resolver,
                 trackSpotifyUri = track.spotifyUri,
                 trackSoundcloudId = track.soundcloudId,
+                trackSpotifyId = track.spotifyId,
+                trackAppleMusicId = track.appleMusicId,
             )
         }
         playlistTrackDao.insertAll(playlistTracks)
@@ -169,6 +173,8 @@ class LibraryRepository @Inject constructor(
             sourceUrl = pt.trackSourceUrl,
             resolver = pt.trackResolver,
             spotifyUri = pt.trackSpotifyUri,
+            spotifyId = pt.trackSpotifyId,
             soundcloudId = pt.trackSoundcloudId,
+            appleMusicId = pt.trackAppleMusicId,
         )
 }

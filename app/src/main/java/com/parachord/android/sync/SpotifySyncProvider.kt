@@ -332,6 +332,7 @@ class SpotifySyncProvider @Inject constructor(
                     trackArtworkUrl = track.album?.images?.bestImageUrl(),
                     trackResolver = "spotify",
                     trackSpotifyUri = track.id?.let { "spotify:track:$it" },
+                    trackSpotifyId = track.id,
                     addedAt = parseIsoTimestamp(item.addedAt),
                 ))
             }

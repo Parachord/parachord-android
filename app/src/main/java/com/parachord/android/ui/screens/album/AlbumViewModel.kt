@@ -198,7 +198,9 @@ class AlbumViewModel @Inject constructor(
             sourceUrl = best?.url,
             resolver = best?.resolver,
             spotifyUri = best?.spotifyUri,
+            spotifyId = best?.spotifyId,
             soundcloudId = best?.soundcloudId,
+            appleMusicId = best?.appleMusicId,
         )
     }
 

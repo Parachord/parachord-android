@@ -38,5 +38,7 @@ data class PlaylistTrackEntity(
     val trackResolver: String? = null,
     val trackSpotifyUri: String? = null,
     val trackSoundcloudId: String? = null,
+    val trackSpotifyId: String? = null,
+    val trackAppleMusicId: String? = null,
     val addedAt: Long = System.currentTimeMillis(),
 )
