@@ -1,5 +1,7 @@
 package com.parachord.android.ui
 
+import android.content.Context
+import android.os.PowerManager
 import android.util.Log
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
@@ -22,6 +24,7 @@ import com.parachord.android.playback.handlers.MusicKitWebBridge
 import com.parachord.android.playback.PlaybackState
 import com.parachord.android.playback.PlaybackStateHolder
 import dagger.hilt.android.lifecycle.HiltViewModel
+import dagger.hilt.android.qualifiers.ApplicationContext
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
@@ -33,6 +36,7 @@ import javax.inject.Inject
 
 @HiltViewModel
 class MainViewModel @Inject constructor(
+    @ApplicationContext private val context: Context,
     private val playbackStateHolder: PlaybackStateHolder,
     private val playbackController: PlaybackController,
     private val libraryRepository: LibraryRepository,
@@ -137,6 +141,13 @@ class MainViewModel @Inject constructor(
     private val _listenAlongFriend = MutableStateFlow<FriendEntity?>(null)
     val listenAlongFriend: StateFlow<FriendEntity?> = _listenAlongFriend
 
+    /** WakeLock to keep listen-along polling active when the screen is off. */
+    private val listenAlongWakeLock: PowerManager.WakeLock by lazy {
+        (context.getSystemService(Context.POWER_SERVICE) as PowerManager)
+            .newWakeLock(PowerManager.PARTIAL_WAKE_LOCK, "Parachord::ListenAlong")
+            .apply { setReferenceCounted(false) }
+    }
+
     /** Toast events for the Activity to observe and show. */
     private val _toastEvents = kotlinx.coroutines.flow.MutableSharedFlow<String>()
     val toastEvents = _toastEvents
@@ -178,6 +189,12 @@ class MainViewModel @Inject constructor(
         lastListenAlongTrackKey = null
         pendingListenAlongTrack = null
         deferredStopFriendName = null
+
+        // Keep CPU awake so polling continues with the screen off
+        if (!listenAlongWakeLock.isHeld) {
+            listenAlongWakeLock.acquire(2 * 60 * 60 * 1000L) // 2h safety timeout
+            Log.d(TAG, "Acquired WakeLock for listen-along polling")
+        }
 
         listenAlongJob = viewModelScope.launch {
             // Toast: "Listening along with [FriendName]"
@@ -229,6 +246,10 @@ class MainViewModel @Inject constructor(
         pendingListenAlongTrack = null
         deferredStopFriendName = null
         isListenAlongPlayback = false
+        if (listenAlongWakeLock.isHeld) {
+            listenAlongWakeLock.release()
+            Log.d(TAG, "Released WakeLock for listen-along polling")
+        }
         if (!silent && friendName != null) {
             viewModelScope.launch {
                 _toastEvents.emit("Stopped listening along with $friendName")

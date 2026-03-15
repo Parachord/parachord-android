@@ -2,6 +2,7 @@ package com.parachord.android.playback
 
 import android.content.ComponentName
 import android.content.Context
+import android.os.PowerManager
 import android.util.Log
 import android.widget.Toast
 import androidx.media3.common.MediaItem
@@ -69,6 +70,17 @@ class PlaybackController @Inject constructor(
 
     /** Whether playback is currently managed externally (e.g. Spotify Connect). */
     private var isExternalPlayback = false
+
+    /**
+     * Partial WakeLock held during external playback (Spotify/Apple Music) to keep
+     * the CPU active for state polling and auto-advance detection when the screen is off.
+     * ExoPlayer manages its own WakeLock internally.
+     */
+    private val wakeLock: PowerManager.WakeLock by lazy {
+        (context.getSystemService(Context.POWER_SERVICE) as PowerManager)
+            .newWakeLock(PowerManager.PARTIAL_WAKE_LOCK, "Parachord::ExternalPlayback")
+            .apply { setReferenceCounted(false) }
+    }
 
     /** Listener called when a track naturally completes (auto-advance, not user skip). */
     var onTrackEndedListener: (() -> Unit)? = null
@@ -492,6 +504,7 @@ class PlaybackController @Inject constructor(
     /** Poll Spotify Web API for position/state when playing externally. */
     private fun startSpotifyStatePolling() {
         spotifyStateJob?.cancel()
+        acquireExternalPlaybackWakeLock()
         spotifyStateJob = scope.launch {
             val spotify = router.getSpotifyHandler()
             // Small initial delay to let the track start
@@ -523,11 +536,13 @@ class PlaybackController @Inject constructor(
 
     private fun stopSpotifyStatePolling() {
         spotifyStateJob?.cancel()
+        releaseExternalPlaybackWakeLock()
     }
 
     /** Poll Apple Music (MusicKit JS) for position/state when playing externally. */
     private fun startAppleMusicStatePolling() {
         appleMusicPollingJob?.cancel()
+        acquireExternalPlaybackWakeLock()
         val handler = router.getAppleMusicHandler()
 
         // Register track-ended callback from MusicKit JS
@@ -570,8 +585,24 @@ class PlaybackController @Inject constructor(
 
     private fun stopAppleMusicStatePolling() {
         appleMusicPollingJob?.cancel()
+        releaseExternalPlaybackWakeLock()
         // Clear the callback to avoid stale references
         router.getAppleMusicHandler().musicKitBridge.onTrackEnded = null
+    }
+
+    private fun acquireExternalPlaybackWakeLock() {
+        if (!wakeLock.isHeld) {
+            // 1-hour timeout as a safety net — released explicitly when polling stops
+            wakeLock.acquire(60 * 60 * 1000L)
+            Log.d(TAG, "Acquired WakeLock for external playback polling")
+        }
+    }
+
+    private fun releaseExternalPlaybackWakeLock() {
+        if (wakeLock.isHeld) {
+            wakeLock.release()
+            Log.d(TAG, "Released WakeLock for external playback polling")
+        }
     }
 
     // ── Spinoff public API ────────────────────────────────────────────────
