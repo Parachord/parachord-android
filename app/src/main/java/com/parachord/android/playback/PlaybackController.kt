@@ -284,7 +284,14 @@ class PlaybackController @Inject constructor(
     fun togglePlayPause() {
         if (isExternalPlayback) {
             scope.launch {
-                val handler = router.activeExternalHandler ?: return@launch
+                val handler = router.activeExternalHandler
+                if (handler == null) {
+                    // No active handler — external playback stalled. Re-play the current track.
+                    val track = stateHolder.state.value.currentTrack ?: return@launch
+                    Log.d(TAG, "togglePlayPause: no active handler, re-playing '${track.title}'")
+                    playTrackInternal(track)
+                    return@launch
+                }
                 val isCurrentlyPlaying = when (handler) {
                     is AppleMusicPlaybackHandler -> handler.isPlaying()
                     else -> router.getSpotifyHandler().isPlaying()
@@ -295,6 +302,18 @@ class PlaybackController @Inject constructor(
                 } else {
                     handler.resume()
                     stateHolder.update { copy(isPlaying = true) }
+                    // If resume didn't actually start playback (stale session),
+                    // re-play the track from scratch after a brief check.
+                    delay(1500)
+                    val stillNotPlaying = when (handler) {
+                        is AppleMusicPlaybackHandler -> !handler.isPlaying()
+                        else -> !router.getSpotifyHandler().isPlaying()
+                    }
+                    if (stillNotPlaying) {
+                        val track = stateHolder.state.value.currentTrack ?: return@launch
+                        Log.d(TAG, "togglePlayPause: resume failed, re-playing '${track.title}'")
+                        playTrackInternal(track)
+                    }
                 }
             }
             return
@@ -371,7 +390,27 @@ class PlaybackController @Inject constructor(
                 stopPositionUpdates()
                 stopSpotifyStatePolling()
                 stopAppleMusicStatePolling()
-                controller?.stop()
+
+                // Don't stop ExoPlayer entirely — set track metadata so the
+                // MediaSession stays active and the foreground notification persists.
+                // Without this, Android kills the process when the screen is off
+                // because there's no foreground service keeping it alive.
+                controller?.let { ctrl ->
+                    ctrl.stop()
+                    val metadataItem = MediaItem.Builder()
+                        .setMediaId(routedTrack.id)
+                        .setMediaMetadata(
+                            MediaMetadata.Builder()
+                                .setTitle(routedTrack.title)
+                                .setArtist(routedTrack.artist)
+                                .setAlbumTitle(routedTrack.album)
+                                .build()
+                        )
+                        .build()
+                    ctrl.setMediaItems(listOf(metadataItem))
+                    ctrl.prepare()
+                    // Don't call ctrl.play() — external handler manages actual playback
+                }
 
                 // Set UI state optimistically — show the track as playing immediately
                 // so the user gets instant feedback. The state polling will correct
@@ -517,7 +556,9 @@ class PlaybackController @Inject constructor(
     private fun startSpotifyStatePolling() {
         spotifyStateJob?.cancel()
         acquireExternalPlaybackWakeLock()
-        spotifyStateJob = scope.launch {
+        // Run on Dispatchers.Default so Doze mode doesn't throttle the polling
+        // loop — Dispatchers.Main gets deferred when the screen is off.
+        spotifyStateJob = scope.launch(Dispatchers.Default) {
             val spotify = router.getSpotifyHandler()
             // Small initial delay to let the track start
             delay(1000)
@@ -537,7 +578,9 @@ class PlaybackController @Inject constructor(
                 // Auto-advance: detect when our track is done via multiple signals
                 // (natural end, Spotify autoplay to different track, or item cleared)
                 if (spotify.isOurTrackDone()) {
-                    skipNextInternal(userInitiated = false)
+                    withContext(Dispatchers.Main) {
+                        skipNextInternal(userInitiated = false)
+                    }
                     break
                 }
 
@@ -567,18 +610,22 @@ class PlaybackController @Inject constructor(
         handler.musicKitBridge.onTrackEnded = {
             if (trackEndHandled.compareAndSet(false, true)) {
                 Log.d(TAG, "Apple Music track ended (JS callback)")
-                scope.launch { skipNextInternal(userInitiated = false) }
+                scope.launch(Dispatchers.Main) { skipNextInternal(userInitiated = false) }
             }
         }
 
-        appleMusicPollingJob = scope.launch {
+        // Run on Dispatchers.Default so Doze mode doesn't throttle the polling
+        // loop — Dispatchers.Main gets deferred when the screen is off.
+        appleMusicPollingJob = scope.launch(Dispatchers.Default) {
             // Small initial delay to let the track start
             delay(1000)
             while (isActive && isExternalPlayback) {
                 // Actively poll JS for fresh position/duration — the
                 // playbackStateDidChange event only fires on state transitions,
                 // not continuously during playback.
-                handler.musicKitBridge.pollPlaybackState()
+                withContext(Dispatchers.Main) {
+                    handler.musicKitBridge.pollPlaybackState()
+                }
 
                 val position = handler.getPosition()
                 val duration = handler.getDuration()
@@ -595,7 +642,9 @@ class PlaybackController @Inject constructor(
                 // Safety-net track completion detection
                 if (handler.isOurTrackDone() && trackEndHandled.compareAndSet(false, true)) {
                     Log.d(TAG, "Apple Music track done (safety net)")
-                    skipNextInternal(userInitiated = false)
+                    withContext(Dispatchers.Main) {
+                        skipNextInternal(userInitiated = false)
+                    }
                     break
                 }
 
