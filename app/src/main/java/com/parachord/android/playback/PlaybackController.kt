@@ -749,18 +749,17 @@ class PlaybackController @Inject constructor(
                     return@launch
                 }
 
-                Log.d(TAG, "Spinoff: resolved ${resolvedTracks.size} tracks, starting playback")
+                Log.d(TAG, "Spinoff: resolved ${resolvedTracks.size} tracks, ready for playback")
 
                 // 3. Save previous playback context (queue is NOT modified — desktop behavior)
                 preSpinoffContext = queueManager.playbackContext
                 spinoffSourceTrack = track
 
-                // 4. Populate spinoff pool (separate from queue)
+                // 4. Populate spinoff pool (separate from queue).
+                //    Don't interrupt the current song — let it finish, then
+                //    skipNextInternal() will pull from the pool automatically.
                 spinoffPool.clear()
                 spinoffPool.addAll(resolvedTracks)
-
-                // Pop first track to play immediately
-                val firstTrack = spinoffPool.removeAt(0)
 
                 // Set playback context to spinoff (queue contents untouched)
                 queueManager.setContext(PlaybackContext(type = "spinoff", name = "Spinoff from ${track.title}"))
@@ -776,9 +775,6 @@ class PlaybackController @Inject constructor(
                 withContext(Dispatchers.Main) {
                     Toast.makeText(context, "Spinning off of ${track.title} - ${track.artist}", Toast.LENGTH_SHORT).show()
                 }
-
-                // 5. Start playing the first spinoff track
-                playTrackInternal(firstTrack)
             } catch (e: Exception) {
                 Log.e(TAG, "Spinoff: failed to start", e)
                 withContext(Dispatchers.Main) {
