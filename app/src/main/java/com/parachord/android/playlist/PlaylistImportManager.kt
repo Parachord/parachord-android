@@ -1,6 +1,7 @@
 package com.parachord.android.playlist
 
 import android.util.Log
+import com.parachord.android.auth.OAuthManager
 import com.parachord.android.data.api.SpotifyApi
 import com.parachord.android.data.api.bestImageUrl
 import com.parachord.android.data.db.entity.PlaylistEntity
@@ -12,6 +13,7 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import okhttp3.OkHttpClient
 import okhttp3.Request
+import retrofit2.HttpException
 import java.util.UUID
 import javax.inject.Inject
 import javax.inject.Singleton
@@ -31,6 +33,7 @@ class PlaylistImportManager @Inject constructor(
     private val libraryRepository: LibraryRepository,
     private val settingsStore: SettingsStore,
     private val httpClient: OkHttpClient,
+    private val oAuthManager: OAuthManager,
 ) {
     suspend fun importFromUrl(url: String): ImportResult = withContext(Dispatchers.IO) {
         Log.d(TAG, "Importing playlist from URL: $url")
@@ -60,22 +63,35 @@ class PlaylistImportManager @Inject constructor(
     private fun isAppleMusicPlaylistUrl(url: String): Boolean =
         url.contains("music.apple.com") && url.contains("/playlist/")
 
+    /**
+     * Execute a Spotify API call with automatic token refresh on 401.
+     * Mirrors SpotifyProvider.withAuth() and ResolverManager.resolveSpotify().
+     */
+    private suspend fun <T> withSpotifyAuth(block: suspend (auth: String) -> T): T {
+        val token = settingsStore.getSpotifyAccessToken()
+            ?: throw IllegalStateException("Spotify not connected. Connect Spotify in Settings to import playlists.")
+        return try {
+            block("Bearer $token")
+        } catch (e: HttpException) {
+            if (e.code() == 401 && oAuthManager.refreshSpotifyToken()) {
+                val newToken = settingsStore.getSpotifyAccessToken()
+                    ?: throw IllegalStateException("Spotify session expired. Reconnect Spotify in Settings.")
+                block("Bearer $newToken")
+            } else {
+                when (e.code()) {
+                    401 -> throw IllegalStateException("Spotify session expired. Reconnect Spotify in Settings.")
+                    404 -> throw IllegalArgumentException("Playlist not found. It may be private or deleted.")
+                    else -> throw IllegalStateException("Spotify error: HTTP ${e.code()}")
+                }
+            }
+        }
+    }
+
     private suspend fun importSpotifyPlaylist(url: String): ImportResult {
         val playlistId = extractSpotifyPlaylistId(url)
             ?: throw IllegalArgumentException("Could not extract Spotify playlist ID from URL")
-        val token = settingsStore.getSpotifyAccessToken()
-            ?: throw IllegalStateException("Spotify not connected. Connect Spotify in Settings to import playlists.")
-        val auth = "Bearer $token"
 
-        val playlist = try {
-            spotifyApi.getPlaylist(auth, playlistId)
-        } catch (e: retrofit2.HttpException) {
-            when (e.code()) {
-                401 -> throw IllegalStateException("Spotify session expired. Reconnect Spotify in Settings.")
-                404 -> throw IllegalArgumentException("Playlist not found. It may be private or deleted.")
-                else -> throw IllegalStateException("Spotify error: HTTP ${e.code()}")
-            }
-        }
+        val playlist = withSpotifyAuth { auth -> spotifyApi.getPlaylist(auth, playlistId) }
         val playlistName = playlist.name ?: "Spotify Playlist"
         val artworkUrl = playlist.images?.firstOrNull()?.url
 
@@ -83,7 +99,9 @@ class PlaylistImportManager @Inject constructor(
         var offset = 0
         var hasMore = true
         while (hasMore) {
-            val page = spotifyApi.getPlaylistTracks(auth, playlistId, limit = 100, offset = offset)
+            val page = withSpotifyAuth { auth ->
+                spotifyApi.getPlaylistTracks(auth, playlistId, limit = 100, offset = offset)
+            }
             page.items.forEach { item ->
                 val track = item.track ?: return@forEach
                 allTracks.add(
