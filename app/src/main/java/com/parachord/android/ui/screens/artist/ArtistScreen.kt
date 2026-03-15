@@ -99,6 +99,7 @@ fun ArtistScreen(
     val albums by viewModel.albums.collectAsStateWithLifecycle()
     val isLoading by viewModel.isLoading.collectAsStateWithLifecycle()
     val trackResolvers by viewModel.trackResolvers.collectAsStateWithLifecycle()
+    val trackResolverConfidences by viewModel.trackResolverConfidences.collectAsStateWithLifecycle()
     val isSaved by viewModel.isSaved.collectAsStateWithLifecycle()
     val playlists by viewModel.playlists.collectAsStateWithLifecycle()
     val contextMenuState = rememberTrackContextMenuState()
@@ -268,6 +269,7 @@ fun ArtistScreen(
                             onNavigateToAlbum = onNavigateToAlbum,
                             onPlayTrack = viewModel::playTrack,
                             trackResolvers = trackResolvers,
+                            trackResolverConfidences = trackResolverConfidences,
                             onTrackLongClick = { track ->
                                 val entity = viewModel.trackSearchResultToEntity(track)
                                 contextMenuState.show(
@@ -331,6 +333,7 @@ private fun DiscographyTab(
     onNavigateToAlbum: (albumTitle: String, artistName: String) -> Unit,
     onPlayTrack: (TrackSearchResult) -> Unit = {},
     trackResolvers: Map<String, List<String>> = emptyMap(),
+    trackResolverConfidences: Map<String, Map<String, Float>> = emptyMap(),
     onTrackLongClick: (TrackSearchResult) -> Unit = {},
 ) {
     var selectedFilter by remember { mutableStateOf("all") }
@@ -468,6 +471,7 @@ private fun DiscographyTab(
                     artist = track.album ?: "",
                     artworkUrl = track.artworkUrl,
                     resolvers = trackResolvers[trackKey(track.title, track.artist)]?.ifEmpty { null },
+                    resolverConfidences = trackResolverConfidences[trackKey(track.title, track.artist)],
                     onClick = { onPlayTrack(track) },
                     onLongClick = { onTrackLongClick(track) },
                 )

@@ -61,6 +61,7 @@ class PopOfTheTopsViewModel @Inject constructor(
 
     /** Resolver badge names for UI display from shared cache */
     val trackResolvers: StateFlow<Map<String, List<String>>> = trackResolverCache.trackResolvers
+    val trackResolverConfidences: StateFlow<Map<String, Map<String, Float>>> = trackResolverCache.trackResolverConfidences
 
     private var resolveJob: Job? = null
 
@@ -130,6 +131,8 @@ class PopOfTheTopsViewModel @Inject constructor(
             ?: resolverManager.resolveWithHints(
                 query = "${song.artist} - ${song.title}",
                 spotifyId = song.spotifyId,
+                targetTitle = song.title,
+                targetArtist = song.artist,
             )
         val best = resolverScoring.selectBest(sources) ?: return null
         return TrackEntity(
@@ -164,6 +167,8 @@ class PopOfTheTopsViewModel @Inject constructor(
                     val sources = resolverManager.resolveWithHints(
                         query = "${song.artist} - ${song.title}",
                         spotifyId = song.spotifyId,
+                        targetTitle = song.title,
+                        targetArtist = song.artist,
                     )
                     if (sources.isNotEmpty()) {
                         _trackSources.value = _trackSources.value + (key to sources)

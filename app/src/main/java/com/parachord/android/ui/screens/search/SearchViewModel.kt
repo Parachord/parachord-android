@@ -83,6 +83,7 @@ class SearchViewModel @Inject constructor(
 
     /** Resolver badge names for UI display from shared cache */
     val trackResolvers: StateFlow<Map<String, List<String>>> = trackResolverCache.trackResolvers
+    val trackResolverConfidences: StateFlow<Map<String, Map<String, Float>>> = trackResolverCache.trackResolverConfidences
 
     // Search history
     val searchHistory: StateFlow<List<SearchHistoryEntity>> = searchHistoryDao.getRecent()
@@ -168,6 +169,8 @@ class SearchViewModel @Inject constructor(
                     val sources = resolverManager.resolveWithHints(
                         query = "${track.title} ${track.artist}",
                         spotifyId = track.spotifyId,
+                        targetTitle = track.title,
+                        targetArtist = track.artist,
                     )
                     if (sources.isNotEmpty()) {
                         _trackSources.value = _trackSources.value + (key to sources)

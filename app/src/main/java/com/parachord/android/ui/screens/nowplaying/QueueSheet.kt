@@ -60,6 +60,8 @@ fun QueueSheet(
     resolverOrder: List<String> = emptyList(),
     /** Resolver names from the full resolver pipeline, keyed by "title|artist". */
     trackResolvers: Map<String, List<String>> = emptyMap(),
+    /** Resolver confidence scores keyed by "title|artist", then by resolver name. */
+    trackResolverConfidences: Map<String, Map<String, Float>> = emptyMap(),
     /** True when queue is "paused" (spinoff or listen-along) — dims tracks to show they'll resume later. */
     queueSuspended: Boolean = false,
     /** Navigate to the source context (album, playlist, artist page). */
@@ -156,6 +158,7 @@ fun QueueSheet(
                         suspended = queueSuspended,
                         resolverOrder = resolverOrder,
                         trackResolvers = trackResolvers,
+                        trackResolverConfidences = trackResolverConfidences,
                         onTap = { onPlayFromQueue(index) },
                         onRemove = { onRemoveFromQueue(index) },
                     )
@@ -172,6 +175,7 @@ private fun QueueTrackRow(
     suspended: Boolean,
     resolverOrder: List<String> = emptyList(),
     trackResolvers: Map<String, List<String>> = emptyMap(),
+    trackResolverConfidences: Map<String, Map<String, Float>> = emptyMap(),
     onTap: () -> Unit,
     onRemove: () -> Unit,
 ) {
@@ -259,6 +263,7 @@ private fun QueueTrackRow(
                 ResolverIconRow(
                     resolvers = resolvers,
                     size = 20.dp,
+                    confidences = trackResolverConfidences["${track.title.lowercase().trim()}|${track.artist.lowercase().trim()}"],
                     modifier = Modifier.graphicsLayer { alpha = dimAlpha },
                 )
             }

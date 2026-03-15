@@ -264,6 +264,8 @@ class DjToolExecutor @Inject constructor(
         val sources = resolverManager.resolveWithHints(
             query = query,
             spotifyId = spotifyId,
+            targetTitle = title,
+            targetArtist = artist,
         )
         val best = resolverScoring.selectBest(sources)
 

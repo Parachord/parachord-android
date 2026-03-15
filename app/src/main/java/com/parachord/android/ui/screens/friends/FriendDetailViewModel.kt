@@ -66,6 +66,7 @@ class FriendDetailViewModel @Inject constructor(
 
     /** Resolver badge names for UI display from shared cache */
     val trackResolvers: StateFlow<Map<String, List<String>>> = trackResolverCache.trackResolvers
+    val trackResolverConfidences: StateFlow<Map<String, Map<String, Float>>> = trackResolverCache.trackResolverConfidences
 
     init {
         loadFriend()
@@ -188,7 +189,7 @@ class FriendDetailViewModel @Inject constructor(
     ): TrackEntity? {
         val key = trackKey(title, artist)
         val sources = _trackSources.value[key]
-            ?: resolverManager.resolveWithHints(query = "$artist - $title")
+            ?: resolverManager.resolveWithHints(query = "$artist - $title", targetTitle = title, targetArtist = artist)
         val best = resolverScoring.selectBest(sources) ?: return null
 
         return TrackEntity(
@@ -221,6 +222,8 @@ class FriendDetailViewModel @Inject constructor(
                 try {
                     val sources = resolverManager.resolveWithHints(
                         query = "${track.title} ${track.artist}",
+                        targetTitle = track.title,
+                        targetArtist = track.artist,
                     )
                     if (sources.isNotEmpty()) {
                         _trackSources.value = _trackSources.value + (key to sources)
@@ -246,6 +249,8 @@ class FriendDetailViewModel @Inject constructor(
                 try {
                     val sources = resolverManager.resolveWithHints(
                         query = "${track.title} ${track.artist}",
+                        targetTitle = track.title,
+                        targetArtist = track.artist,
                     )
                     if (sources.isNotEmpty()) {
                         _trackSources.value = _trackSources.value + (key to sources)

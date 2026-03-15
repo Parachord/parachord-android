@@ -69,6 +69,7 @@ class HomeViewModel @Inject constructor(
 
     /** Resolver badge names for UI display — shared across all screens via TrackResolverCache. */
     val trackResolvers: StateFlow<Map<String, List<String>>> = trackResolverCache.trackResolvers
+    val trackResolverConfidences: StateFlow<Map<String, Map<String, Float>>> = trackResolverCache.trackResolverConfidences
 
     val recentTracks: StateFlow<List<TrackEntity>> = repository.getAllTracks()
         .map { tracks -> tracks.sortedByDescending { it.addedAt }.take(20) }

@@ -73,6 +73,7 @@ class HistoryViewModel @Inject constructor(
 
     /** Resolver badge names for UI display from shared cache */
     val trackResolvers: StateFlow<Map<String, List<String>>> = trackResolverCache.trackResolvers
+    val trackResolverConfidences: StateFlow<Map<String, Map<String, Float>>> = trackResolverCache.trackResolverConfidences
 
     /** Filtered and sorted recent tracks. */
     val filteredRecentTracks: StateFlow<Resource<List<RecentTrack>>> = combine(
@@ -230,7 +231,7 @@ class HistoryViewModel @Inject constructor(
     ): TrackEntity? {
         val key = trackKey(title, artist)
         val sources = _trackSources.value[key]
-            ?: resolverManager.resolveWithHints(query = "$artist - $title")
+            ?: resolverManager.resolveWithHints(query = "$artist - $title", targetTitle = title, targetArtist = artist)
         val best = resolverScoring.selectBest(sources) ?: return null
 
         return TrackEntity(
@@ -263,6 +264,8 @@ class HistoryViewModel @Inject constructor(
                 try {
                     val sources = resolverManager.resolveWithHints(
                         query = "${track.title} ${track.artist}",
+                        targetTitle = track.title,
+                        targetArtist = track.artist,
                     )
                     if (sources.isNotEmpty()) {
                         _trackSources.value = _trackSources.value + (key to sources)
@@ -305,6 +308,8 @@ class HistoryViewModel @Inject constructor(
                 try {
                     val sources = resolverManager.resolveWithHints(
                         query = "${track.title} ${track.artist}",
+                        targetTitle = track.title,
+                        targetArtist = track.artist,
                     )
                     if (sources.isNotEmpty()) {
                         _trackSources.value = _trackSources.value + (key to sources)

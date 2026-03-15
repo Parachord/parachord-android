@@ -91,6 +91,7 @@ fun PopOfTheTopsScreen(
     val songsSource by viewModel.songsSource.collectAsState()
     val searchQuery by viewModel.searchQuery.collectAsState()
     val trackResolvers by viewModel.trackResolvers.collectAsState()
+    val trackResolverConfidences by viewModel.trackResolverConfidences.collectAsState()
 
     Column(modifier = modifier.fillMaxSize()) {
         TopAppBar(
@@ -135,6 +136,7 @@ fun PopOfTheTopsScreen(
                     songsSource = songsSource,
                     searchQuery = searchQuery,
                     trackResolvers = trackResolvers,
+                    trackResolverConfidences = trackResolverConfidences,
                     onCountryChange = viewModel::setCountry,
                     onSourceChange = viewModel::setSongsSource,
                     onSearchQueryChange = viewModel::setSearchQuery,
@@ -500,6 +502,7 @@ private fun SongsTab(
     songsSource: String,
     searchQuery: String,
     trackResolvers: Map<String, List<String>>,
+    trackResolverConfidences: Map<String, Map<String, Float>> = emptyMap(),
     onCountryChange: (String) -> Unit,
     onSourceChange: (String) -> Unit,
     onSearchQueryChange: (String) -> Unit,
@@ -542,6 +545,7 @@ private fun SongsTab(
                         artworkUrl = song.artworkUrl,
                         trackNumber = song.rank,
                         resolvers = trackResolvers[key]?.ifEmpty { null },
+                        resolverConfidences = trackResolverConfidences[key],
                         onClick = { onSongClick(song, songs) },
                     )
                 }

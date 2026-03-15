@@ -87,6 +87,7 @@ fun NowPlayingScreen(
     val playbackState by viewModel.playbackState.collectAsStateWithLifecycle()
     val resolverOrder by viewModel.resolverOrder.collectAsStateWithLifecycle()
     val trackResolvers by viewModel.trackResolvers.collectAsStateWithLifecycle()
+    val trackResolverConfidences by viewModel.trackResolverConfidences.collectAsStateWithLifecycle()
     val track = playbackState.currentTrack
     val upNext = playbackState.upNext
     val scope = rememberCoroutineScope()
@@ -148,6 +149,7 @@ fun NowPlayingScreen(
                 onClearQueue = { viewModel.clearQueue() },
                 resolverOrder = resolverOrder,
                 trackResolvers = trackResolvers,
+                trackResolverConfidences = trackResolverConfidences,
                 queueSuspended = playbackState.spinoffMode ||
                     playbackState.playbackContext?.type == "listen-along",
                 onNavigateToContext = { ctx ->

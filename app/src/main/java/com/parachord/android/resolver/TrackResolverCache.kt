@@ -13,7 +13,9 @@ import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.combine
+import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.stateIn
+import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.sync.Semaphore
 import kotlinx.coroutines.sync.withPermit
@@ -71,6 +73,17 @@ class TrackResolverCache @Inject constructor(
             }
         }.stateIn(scope, SharingStarted.Eagerly, emptyMap())
 
+    /**
+     * Confidence scores for UI display, keyed by "title|artist" → resolver → confidence.
+     * Matches the desktop's approach: confidence <= 0.8 → dimmed (opacity 0.6).
+     */
+    val trackResolverConfidences: StateFlow<Map<String, Map<String, Float>>> =
+        _trackSources.map { sources ->
+            sources.mapValues { (_, v) ->
+                v.associate { it.resolver to (it.confidence?.toFloat() ?: 1f) }
+            }
+        }.stateIn(scope, SharingStarted.Eagerly, emptyMap())
+
     /** Track keys currently being resolved (prevents duplicate in-flight requests). */
     private val inFlight = mutableSetOf<String>()
 
@@ -106,9 +119,11 @@ class TrackResolverCache @Inject constructor(
                             spotifyId = track.spotifyId,
                             appleMusicId = track.appleMusicId,
                             soundcloudId = track.soundcloudId,
+                            targetTitle = track.title,
+                            targetArtist = track.artist,
                         )
                         if (sources.isNotEmpty()) {
-                            _trackSources.value = _trackSources.value + (key to sources)
+                            _trackSources.update { it + (key to sources) }
                             if (backfillDb) {
                                 backfillResolverIds(track, sources)
                             }
@@ -144,9 +159,11 @@ class TrackResolverCache @Inject constructor(
                             spotifyId = track.spotifyId,
                             appleMusicId = track.appleMusicId,
                             soundcloudId = track.soundcloudId,
+                            targetTitle = track.title,
+                            targetArtist = track.artist,
                         )
                         if (sources.isNotEmpty()) {
-                            _trackSources.value = _trackSources.value + (key to sources)
+                            _trackSources.update { it + (key to sources) }
                         }
                     }
                 } catch (e: Exception) {
@@ -162,7 +179,7 @@ class TrackResolverCache @Inject constructor(
     fun putSources(title: String, artist: String, sources: List<ResolvedSource>) {
         if (sources.isEmpty()) return
         val key = trackKey(title, artist)
-        _trackSources.value = _trackSources.value + (key to sources)
+        _trackSources.update { it + (key to sources) }
     }
 
     /** Get cached resolvers for a track, or null if not yet resolved. */

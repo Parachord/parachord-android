@@ -80,6 +80,7 @@ fun AlbumScreen(
     val isLoading by viewModel.isLoading.collectAsStateWithLifecycle()
     val isResolving by viewModel.isResolving.collectAsStateWithLifecycle()
     val trackResolvers by viewModel.trackResolvers.collectAsStateWithLifecycle()
+    val trackResolverConfidences by viewModel.trackResolverConfidences.collectAsStateWithLifecycle()
     val playlists by viewModel.playlists.collectAsStateWithLifecycle()
     val nowPlayingTitle by viewModel.nowPlayingTitle.collectAsStateWithLifecycle()
     val contextMenuState = rememberTrackContextMenuState()
@@ -242,6 +243,7 @@ fun AlbumScreen(
                             trackNumber = index + 1,
                             isPlaying = nowPlayingTitle == track.title,
                             resolvers = trackResolvers["${track.title.lowercase().trim()}|${track.artist.lowercase().trim()}"]?.ifEmpty { null },
+                            resolverConfidences = trackResolverConfidences["${track.title.lowercase().trim()}|${track.artist.lowercase().trim()}"],
                             onClick = { viewModel.playTrack(index) },
                             onLongClick = {
                                 val entity = viewModel.resolvedTrackEntity(index)

@@ -36,6 +36,7 @@ fun TrackRow(
     artworkUrl: String? = null,
     resolver: String? = null,
     resolvers: List<String>? = null,
+    resolverConfidences: Map<String, Float>? = null,
     duration: Long? = null,
     trackNumber: Int? = null,
     isPlaying: Boolean = false,
@@ -119,7 +120,11 @@ fun TrackRow(
         // Resolver icon squares (colored squares with white logos)
         if (allResolvers.isNotEmpty()) {
             Spacer(modifier = Modifier.width(8.dp))
-            ResolverIconRow(resolvers = allResolvers, size = 20.dp)
+            ResolverIconRow(
+                resolvers = allResolvers,
+                size = 20.dp,
+                confidences = resolverConfidences,
+            )
         }
     }
 }

@@ -68,6 +68,7 @@ class ArtistViewModel @Inject constructor(
 
     /** Resolver badge names for UI display from shared cache */
     val trackResolvers: StateFlow<Map<String, List<String>>> = trackResolverCache.trackResolvers
+    val trackResolverConfidences: StateFlow<Map<String, Map<String, Float>>> = trackResolverCache.trackResolverConfidences
 
     init {
         if (artistName.isNotBlank()) {
@@ -195,6 +196,8 @@ class ArtistViewModel @Inject constructor(
                     ?: resolverManager.resolveWithHints(
                         query = "${track.artist} - ${track.title}",
                         spotifyId = track.spotifyId,
+                        targetTitle = track.title,
+                        targetArtist = track.artist,
                     )
                 val best = resolverScoring.selectBest(sources)
                 if (best == null) {
@@ -289,6 +292,8 @@ class ArtistViewModel @Inject constructor(
                     val sources = resolverManager.resolveWithHints(
                         query = "${track.title} ${track.artist}",
                         spotifyId = track.spotifyId,
+                        targetTitle = track.title,
+                        targetArtist = track.artist,
                     )
                     if (sources.isNotEmpty()) {
                         _trackSources.value = _trackSources.value + (key to sources)

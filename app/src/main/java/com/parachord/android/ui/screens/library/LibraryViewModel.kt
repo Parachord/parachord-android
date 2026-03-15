@@ -48,6 +48,7 @@ class LibraryViewModel @Inject constructor(
 
     /** Resolver badge names for UI display — shared across all screens via TrackResolverCache. */
     val trackResolvers: StateFlow<Map<String, List<String>>> = trackResolverCache.trackResolvers
+    val trackResolverConfidences: StateFlow<Map<String, Map<String, Float>>> = trackResolverCache.trackResolverConfidences
 
     val tracks: StateFlow<List<TrackEntity>> = repository.getAllTracks()
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), emptyList())
@@ -282,6 +283,8 @@ class LibraryViewModel @Inject constructor(
                     val sources = resolverManager.resolveWithHints(
                         query = "${track.artist} - ${track.title}",
                         spotifyId = track.spotifyId,
+                        targetTitle = track.title,
+                        targetArtist = track.artist,
                     )
                     val best = resolverScoring.selectBest(sources) ?: return@mapNotNull null
                     TrackEntity(
@@ -324,6 +327,8 @@ class LibraryViewModel @Inject constructor(
                     val sources = resolverManager.resolveWithHints(
                         query = "${track.artist} - ${track.title}",
                         spotifyId = track.spotifyId,
+                        targetTitle = track.title,
+                        targetArtist = track.artist,
                     )
                     Log.d("LibraryVM", "Queue top songs: resolved '${track.title}' → ${sources.size} sources")
                     val best = resolverScoring.selectBest(sources) ?: return@mapNotNull null

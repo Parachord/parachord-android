@@ -12,6 +12,7 @@ import androidx.compose.material3.Icon
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.SolidColor
@@ -303,15 +304,19 @@ private fun parseNumbers(s: String): List<Float> {
  *
  * @param showBackground If true (default), shows the colored square background.
  *   If false, renders just the white icon (useful for overlaying on a colored tile).
+ * @param confidence Match confidence (0.0–1.0). Matches with confidence ≤ 0.8 are
+ *   dimmed to 60% opacity, matching the desktop's behavior.
  */
 @Composable
 fun ResolverIconSquare(
     resolver: String,
     size: Dp = 20.dp,
     showBackground: Boolean = true,
+    confidence: Float = 1f,
     modifier: Modifier = Modifier,
 ) {
     val bgColor = ResolverIconColors.forResolver(resolver)
+    val iconAlpha = if (confidence > 0.8f) 1f else 0.6f
 
     // SoundCloud uses a PNG drawable instead of an SVG path
     if (resolver.lowercase() == "soundcloud") {
@@ -320,6 +325,7 @@ fun ResolverIconSquare(
                 modifier = modifier
                     .size(size)
                     .clip(RoundedCornerShape(4.dp))
+                    .alpha(iconAlpha)
                     .background(bgColor),
                 contentAlignment = Alignment.Center,
             ) {
@@ -333,7 +339,7 @@ fun ResolverIconSquare(
             Image(
                 painter = painterResource(R.drawable.soundcloud_icon_white),
                 contentDescription = "SoundCloud",
-                modifier = modifier.size(size),
+                modifier = modifier.size(size).alpha(iconAlpha),
             )
         }
         return
@@ -347,6 +353,7 @@ fun ResolverIconSquare(
             modifier = modifier
                 .size(size)
                 .clip(RoundedCornerShape(4.dp))
+                .alpha(iconAlpha)
                 .background(bgColor ?: return),
             contentAlignment = Alignment.Center,
         ) {
@@ -362,7 +369,7 @@ fun ResolverIconSquare(
         Icon(
             imageVector = iconVector,
             contentDescription = resolver,
-            modifier = modifier.size(size),
+            modifier = modifier.size(size).alpha(iconAlpha),
             tint = Color.White,
         )
     }
@@ -371,11 +378,15 @@ fun ResolverIconSquare(
 /**
  * Row of resolver icon squares for a track.
  * Shows all available resolvers as small colored squares.
+ *
+ * @param confidences Optional map of resolver → confidence (0.0–1.0).
+ *   Resolvers with confidence ≤ 0.8 are dimmed to match the desktop.
  */
 @Composable
 fun ResolverIconRow(
     resolvers: List<String>,
     size: Dp = 20.dp,
+    confidences: Map<String, Float>? = null,
     modifier: Modifier = Modifier,
 ) {
     if (resolvers.isEmpty()) return
@@ -393,7 +404,11 @@ fun ResolverIconRow(
     ) {
         sorted.forEachIndexed { index, resolver ->
             if (index > 0) Spacer(modifier = Modifier.width(3.dp))
-            ResolverIconSquare(resolver = resolver, size = size)
+            ResolverIconSquare(
+                resolver = resolver,
+                size = size,
+                confidence = confidences?.get(resolver) ?: 1f,
+            )
         }
     }
 }

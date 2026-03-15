@@ -72,6 +72,7 @@ fun SearchScreen(
     val isSearchingRemote by viewModel.isSearchingRemote.collectAsStateWithLifecycle()
     val searchHistory by viewModel.searchHistory.collectAsStateWithLifecycle()
     val trackResolvers by viewModel.trackResolvers.collectAsState()
+    val trackResolverConfidences by viewModel.trackResolverConfidences.collectAsStateWithLifecycle()
     val resolverOrder by viewModel.resolverOrder.collectAsStateWithLifecycle()
 
     Column(modifier = modifier.fillMaxSize()) {
@@ -137,6 +138,7 @@ fun SearchScreen(
                             artworkUrl = track.artworkUrl,
                             resolvers = trackResolvers["${track.title.lowercase().trim()}|${track.artist.lowercase().trim()}"]?.ifEmpty { null }
                                 ?: track.availableResolvers(resolverOrder),
+                            resolverConfidences = trackResolverConfidences["${track.title.lowercase().trim()}|${track.artist.lowercase().trim()}"],
                             duration = track.duration,
                             onClick = {
                                 viewModel.saveHistoryEntry(
@@ -223,6 +225,7 @@ fun SearchScreen(
                             artist = track.artist,
                             artworkUrl = track.artworkUrl,
                             resolvers = trackResolvers["${track.title.lowercase().trim()}|${track.artist.lowercase().trim()}"]?.ifEmpty { null },
+                            resolverConfidences = trackResolverConfidences["${track.title.lowercase().trim()}|${track.artist.lowercase().trim()}"],
                             onClick = {
                                 viewModel.saveHistoryEntry(
                                     resultType = "track",

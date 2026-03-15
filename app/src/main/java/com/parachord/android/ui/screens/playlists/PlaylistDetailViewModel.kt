@@ -51,6 +51,7 @@ class PlaylistDetailViewModel @Inject constructor(
 
     /** Resolver badge names for UI display — shared across all screens via TrackResolverCache. */
     val trackResolvers: StateFlow<Map<String, List<String>>> = trackResolverCache.trackResolvers
+    val trackResolverConfidences: StateFlow<Map<String, Map<String, Float>>> = trackResolverCache.trackResolverConfidences
 
     init {
         // Run full resolver pipeline against playlist tracks in background (concurrent, deduplicated)

@@ -347,7 +347,7 @@ class MainViewModel @Inject constructor(
         lastListenAlongTrackKey = trackKey
 
         try {
-            val sources = resolverManager.resolveWithHints(query = "$trackArtist - $trackName")
+            val sources = resolverManager.resolveWithHints(query = "$trackArtist - $trackName", targetTitle = trackName, targetArtist = trackArtist)
             val best = resolverScoring.selectBest(sources) ?: return
 
             val track = TrackEntity(

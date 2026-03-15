@@ -91,6 +91,7 @@ fun FriendDetailScreen(
     val topAlbums by viewModel.topAlbums.collectAsState()
     val topArtists by viewModel.topArtists.collectAsState()
     val trackResolvers by viewModel.trackResolvers.collectAsState()
+    val trackResolverConfidences by viewModel.trackResolverConfidences.collectAsState()
 
     val currentFriend = friend
 
@@ -174,6 +175,7 @@ fun FriendDetailScreen(
                     recentTracks = recentTracks,
                     onPlayTrack = viewModel::playRecentTrack,
                     trackResolvers = trackResolvers,
+                    trackResolverConfidences = trackResolverConfidences,
                 )
                 1 -> FriendTopSongsTab(
                     tracks = topTracks,
@@ -181,6 +183,7 @@ fun FriendDetailScreen(
                     onPeriodChanged = viewModel::setPeriod,
                     onPlayTrack = viewModel::playTopTrack,
                     trackResolvers = trackResolvers,
+                    trackResolverConfidences = trackResolverConfidences,
                 )
                 2 -> FriendTopAlbumsTab(
                     albums = topAlbums,
@@ -233,6 +236,7 @@ private fun FriendRecentTab(
     recentTracks: Resource<List<RecentTrack>>,
     onPlayTrack: (Int) -> Unit,
     trackResolvers: Map<String, List<String>> = emptyMap(),
+    trackResolverConfidences: Map<String, Map<String, Float>> = emptyMap(),
 ) {
     when (recentTracks) {
         is Resource.Loading -> {
@@ -250,6 +254,7 @@ private fun FriendRecentTab(
                         RecentTrackRow(
                             track = recentTracks.data[index],
                             resolvers = trackResolvers["${recentTracks.data[index].title.lowercase().trim()}|${recentTracks.data[index].artist.lowercase().trim()}"]?.ifEmpty { null },
+                            resolverConfidences = trackResolverConfidences["${recentTracks.data[index].title.lowercase().trim()}|${recentTracks.data[index].artist.lowercase().trim()}"],
                             onClick = { onPlayTrack(index) },
                         )
                     }
@@ -260,7 +265,7 @@ private fun FriendRecentTab(
 }
 
 @Composable
-private fun RecentTrackRow(track: RecentTrack, resolvers: List<String>? = null, onClick: () -> Unit = {}) {
+private fun RecentTrackRow(track: RecentTrack, resolvers: List<String>? = null, resolverConfidences: Map<String, Float>? = null, onClick: () -> Unit = {}) {
     Row(
         modifier = Modifier
             .fillMaxWidth()
@@ -305,7 +310,7 @@ private fun RecentTrackRow(track: RecentTrack, resolvers: List<String>? = null, 
         // Resolver badges (to the right of the time)
         if (!resolvers.isNullOrEmpty()) {
             Spacer(modifier = Modifier.width(6.dp))
-            ResolverIconRow(resolvers = resolvers, size = 20.dp)
+            ResolverIconRow(resolvers = resolvers, size = 20.dp, confidences = resolverConfidences)
         }
     }
 }
@@ -319,6 +324,7 @@ private fun FriendTopSongsTab(
     onPeriodChanged: (String) -> Unit,
     onPlayTrack: (Int) -> Unit,
     trackResolvers: Map<String, List<String>> = emptyMap(),
+    trackResolverConfidences: Map<String, Map<String, Float>> = emptyMap(),
 ) {
     Column(modifier = Modifier.fillMaxSize()) {
         PeriodFilter(selectedPeriod = selectedPeriod, onPeriodChanged = onPeriodChanged)
@@ -342,6 +348,7 @@ private fun FriendTopSongsTab(
                                 artworkUrl = track.artworkUrl,
                                 trackNumber = track.rank,
                                 resolvers = trackResolvers["${track.title.lowercase().trim()}|${track.artist.lowercase().trim()}"]?.ifEmpty { null },
+                                resolverConfidences = trackResolverConfidences["${track.title.lowercase().trim()}|${track.artist.lowercase().trim()}"],
                                 onClick = { onPlayTrack(index) },
                             )
                         }

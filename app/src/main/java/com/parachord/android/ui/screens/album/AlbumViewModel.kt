@@ -67,6 +67,7 @@ class AlbumViewModel @Inject constructor(
      * Uses shared cache (already sorted) merged with local album-specific results.
      */
     val trackResolvers: StateFlow<Map<String, List<String>>> = trackResolverCache.trackResolvers
+    val trackResolverConfidences: StateFlow<Map<String, Map<String, Float>>> = trackResolverCache.trackResolverConfidences
 
     init {
         if (albumTitle.isNotBlank()) {
@@ -113,6 +114,8 @@ class AlbumViewModel @Inject constructor(
                     val sources = resolverManager.resolveWithHints(
                         query = "${track.title} ${track.artist}",
                         spotifyId = track.spotifyId,
+                        targetTitle = track.title,
+                        targetArtist = track.artist,
                     )
                     if (sources.isNotEmpty()) {
                         _trackSources.value = _trackSources.value + (key to sources)
@@ -142,6 +145,8 @@ class AlbumViewModel @Inject constructor(
                     ?: resolverManager.resolveWithHints(
                         query = query,
                         spotifyId = track.spotifyId,
+                        targetTitle = track.title,
+                        targetArtist = track.artist,
                     )
                 Log.d(TAG, "Resolved ${sources.size} sources: ${sources.map { "${it.resolver}(${it.confidence})" }}")
 
@@ -164,7 +169,7 @@ class AlbumViewModel @Inject constructor(
                         val q = "${t.artist} - ${t.title}"
                         val k = "${t.title.lowercase().trim()}|${t.artist.lowercase().trim()}"
                         val s = _trackSources.value[k]
-                            ?: resolverManager.resolveWithHints(query = q, spotifyId = t.spotifyId)
+                            ?: resolverManager.resolveWithHints(query = q, spotifyId = t.spotifyId, targetTitle = t.title, targetArtist = t.artist)
                         val b = resolverScoring.selectBest(s) ?: return@mapNotNull null
                         t.toTrackEntity(detail, b)
                     }
@@ -286,6 +291,8 @@ class AlbumViewModel @Inject constructor(
                 ?: resolverManager.resolveWithHints(
                     query = query,
                     spotifyId = track.spotifyId,
+                    targetTitle = track.title,
+                    targetArtist = track.artist,
                 )
             val best = resolverScoring.selectBest(sources) ?: return@mapNotNull null
             track.toTrackEntity(detail, best)

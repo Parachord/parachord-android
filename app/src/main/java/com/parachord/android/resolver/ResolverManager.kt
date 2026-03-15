@@ -91,8 +91,15 @@ class ResolverManager @Inject constructor(
      * Resolve a track query through all enabled and configured resolvers in parallel.
      * Only resolvers that are active (per user settings) and have valid credentials
      * will be included in the pipeline.
+     *
+     * @param targetTitle Original track title for confidence scoring
+     * @param targetArtist Original track artist for confidence scoring
      */
-    suspend fun resolve(query: String): List<ResolvedSource> = coroutineScope {
+    suspend fun resolve(
+        query: String,
+        targetTitle: String? = null,
+        targetArtist: String? = null,
+    ): List<ResolvedSource> = coroutineScope {
         // Proactively refresh stale tokens before resolving
         ensureTokensFresh()
         val activeResolvers = settingsStore.getActiveResolvers()
@@ -111,8 +118,24 @@ class ResolverManager @Inject constructor(
             }
         }
 
-        val results = tasks.mapNotNull { it.await() }
-        Log.d(TAG, "Resolved '$query' → ${results.size} sources: ${results.map { it.resolver }}")
+        var results = tasks.mapNotNull { it.await() }
+
+        // Apply confidence scoring if target title/artist are available
+        if (targetTitle != null && targetArtist != null) {
+            results = results.map { source ->
+                if (source.matchedTitle != null || source.matchedArtist != null) {
+                    val scored = scoreConfidence(
+                        targetTitle, targetArtist,
+                        source.matchedTitle, source.matchedArtist,
+                    )
+                    source.copy(confidence = scored)
+                } else {
+                    source
+                }
+            }
+        }
+
+        Log.d(TAG, "Resolved '$query' → ${results.size} sources: ${results.map { "${it.resolver}(${String.format("%.0f%%", (it.confidence ?: 0.0) * 100)})" }}")
         results
     }
 
@@ -120,12 +143,17 @@ class ResolverManager @Inject constructor(
      * Resolve using pre-existing IDs (from metadata providers).
      * Verifies that ID-based sources are actually playable before trusting them.
      * Falls back to search-based resolution for all enabled resolvers.
+     *
+     * @param targetTitle Original track title for confidence scoring
+     * @param targetArtist Original track artist for confidence scoring
      */
     suspend fun resolveWithHints(
         query: String,
         spotifyId: String? = null,
         soundcloudId: String? = null,
         appleMusicId: String? = null,
+        targetTitle: String? = null,
+        targetArtist: String? = null,
     ): List<ResolvedSource> = coroutineScope {
         val results = mutableListOf<ResolvedSource>()
 
@@ -167,7 +195,9 @@ class ResolverManager @Inject constructor(
         }
 
         // Also run the regular resolve pipeline for other sources
-        val others = resolve(query).filter { it.resolver !in results.map { r -> r.resolver } }
+        // (with target title/artist for confidence scoring)
+        val others = resolve(query, targetTitle, targetArtist)
+            .filter { it.resolver !in results.map { r -> r.resolver } }
         results.addAll(others)
 
         results
@@ -217,7 +247,10 @@ class ResolverManager @Inject constructor(
             resolver = "spotify",
             spotifyUri = "spotify:track:${track.id}",
             spotifyId = track.id,
-            confidence = 0.9,
+            confidence = 0.9, // Default — overridden by scoreConfidence() in resolve()
+            matchedTitle = track.name,
+            matchedArtist = track.artistName,
+            matchedDurationMs = track.durationMs,
         )
     }
 
@@ -266,7 +299,9 @@ class ResolverManager @Inject constructor(
                         sourceType = "applemusic",
                         resolver = "applemusic",
                         appleMusicId = best.id,
-                        confidence = 0.9,
+                        confidence = 0.9, // Default — overridden by scoreConfidence() in resolve()
+                        matchedTitle = best.title,
+                        matchedArtist = best.artist,
                     )
                 }
             } catch (e: Exception) {
@@ -306,7 +341,10 @@ class ResolverManager @Inject constructor(
                     sourceType = "applemusic",
                     resolver = "applemusic",
                     appleMusicId = best.trackId.toString(),
-                    confidence = 0.85,
+                    confidence = 0.85, // Default — overridden by scoreConfidence() in resolve()
+                    matchedTitle = best.trackName,
+                    matchedArtist = best.artistName,
+                    matchedDurationMs = best.trackTimeMillis,
                 )
             } catch (e: Exception) {
                 Log.w(TAG, "iTunes search failed for '$query': ${e.message}")
@@ -399,7 +437,10 @@ class ResolverManager @Inject constructor(
                 resolver = "soundcloud",
                 soundcloudId = best.id.toString(),
                 soundcloudUrl = best.permalinkUrl,
-                confidence = 0.9, // Desktop default for SoundCloud matches
+                confidence = 0.9, // Default — overridden by scoreConfidence() in resolve()
+                matchedTitle = best.title,
+                matchedArtist = best.user?.username,
+                matchedDurationMs = best.duration,
             )
         }
 }
@@ -472,4 +513,62 @@ data class ResolvedSource(
     val confidence: Double? = null,
     /** Whether the resolver explicitly couldn't match this track. */
     val noMatch: Boolean = false,
+    /** The title returned by the resolver's search result (for confidence scoring). */
+    val matchedTitle: String? = null,
+    /** The artist returned by the resolver's search result (for confidence scoring). */
+    val matchedArtist: String? = null,
+    /** Duration in ms from the resolver's result (for confidence scoring). */
+    val matchedDurationMs: Long? = null,
 )
+
+// ── Confidence Scoring ──────────────────────────────────────────────
+
+/**
+ * Normalize a string for comparison: lowercase, strip everything except
+ * alphanumeric characters. Matches the desktop's normalizeStr().
+ */
+fun normalizeStr(s: String?): String =
+    s?.lowercase()?.replace(Regex("[^a-z0-9]"), "") ?: ""
+
+/**
+ * Check if two normalized strings match via containment (either direction).
+ * Matches the desktop's validateResolvedTrack() logic.
+ */
+private fun stringsMatch(a: String, b: String): Boolean {
+    if (a.isEmpty() || b.isEmpty()) return false
+    return a.contains(b) || b.contains(a)
+}
+
+/**
+ * Calculate match confidence by comparing the resolver's result against the
+ * target track. Matches the desktop's calculateConfidence():
+ *
+ * - Title + artist match → 0.95
+ * - Title match only     → 0.85
+ * - Artist match only    → 0.70
+ * - No match             → 0.50
+ *
+ * Direct ID matches (spotifyId, appleMusicId, soundcloudId) bypass this and
+ * keep their 0.95 confidence since the ID is authoritative.
+ */
+fun scoreConfidence(
+    targetTitle: String,
+    targetArtist: String,
+    matchedTitle: String?,
+    matchedArtist: String?,
+): Double {
+    val normTarget = normalizeStr(targetTitle)
+    val normArtist = normalizeStr(targetArtist)
+    val normMatchTitle = normalizeStr(matchedTitle)
+    val normMatchArtist = normalizeStr(matchedArtist)
+
+    val titleMatch = stringsMatch(normTarget, normMatchTitle)
+    val artistMatch = stringsMatch(normArtist, normMatchArtist)
+
+    return when {
+        titleMatch && artistMatch -> 0.95
+        titleMatch -> 0.85
+        artistMatch -> 0.70
+        else -> 0.50
+    }
+}
