@@ -64,6 +64,8 @@ fun ParachordNavHost(
     onOpenDrawer: () -> Unit,
     onOpenChat: () -> Unit = {},
     onListenAlong: (com.parachord.android.data.db.entity.FriendEntity) -> Unit = {},
+    listenAlongFriend: com.parachord.android.data.db.entity.FriendEntity? = null,
+    onStopListenAlong: () -> Unit = {},
     modifier: Modifier = Modifier,
 ) {
     NavHost(
@@ -198,6 +200,8 @@ fun ParachordNavHost(
                 onNavigateToAlbum = { albumTitle, artistName ->
                     navController.navigate(Routes.album(albumTitle, artistName))
                 },
+                listenAlongFriend = listenAlongFriend,
+                onStopListenAlong = onStopListenAlong,
             )
         }
         composable(Routes.SETTINGS) {

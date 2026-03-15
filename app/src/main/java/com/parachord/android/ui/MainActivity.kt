@@ -165,6 +165,7 @@ private fun ParachordAppContent(mainViewModel: MainViewModel) {
     val currentTrack = playbackState.currentTrack
     val isCurrentTrackFavorited by mainViewModel.isCurrentTrackFavorited.collectAsStateWithLifecycle()
     val friends by mainViewModel.friends.collectAsStateWithLifecycle()
+    val listenAlongFriend by mainViewModel.listenAlongFriend.collectAsStateWithLifecycle()
 
     // Observe toast events from ViewModel (listen-along notifications, etc.)
     val context = LocalContext.current
@@ -406,6 +407,8 @@ private fun ParachordAppContent(mainViewModel: MainViewModel) {
                         onListenAlong = { friend ->
                             mainViewModel.startListenAlong(friend)
                         },
+                        listenAlongFriend = listenAlongFriend,
+                        onStopListenAlong = { mainViewModel.stopListenAlong() },
                     )
                 }
             }

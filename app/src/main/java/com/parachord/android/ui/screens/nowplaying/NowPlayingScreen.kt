@@ -54,6 +54,9 @@ import androidx.compose.ui.unit.em
 import androidx.compose.ui.unit.sp
 import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import androidx.compose.material.icons.filled.Close
+import androidx.compose.material.icons.filled.Headphones
+import com.parachord.android.data.db.entity.FriendEntity
 import com.parachord.android.ui.components.AlbumArtCardFill
 import com.parachord.android.ui.components.ResolverIconSquare
 import com.parachord.android.ui.components.TrackContextInfo
@@ -76,6 +79,8 @@ fun NowPlayingScreen(
     onBack: () -> Unit,
     onNavigateToArtist: (artistName: String) -> Unit = {},
     onNavigateToAlbum: (albumTitle: String, artistName: String) -> Unit = { _, _ -> },
+    listenAlongFriend: FriendEntity? = null,
+    onStopListenAlong: () -> Unit = {},
     modifier: Modifier = Modifier,
     viewModel: NowPlayingViewModel = hiltViewModel(),
 ) {
@@ -187,16 +192,49 @@ fun NowPlayingScreen(
                 horizontalAlignment = Alignment.CenterHorizontally,
             ) {
                 // Always-dark top app bar — tap anywhere to collapse
+                // When listening along, shows friend info + stop button instead of "NOW PLAYING"
                 TopAppBar(
                     title = {
-                        Text(
-                            text = "NOW PLAYING",
-                            style = MaterialTheme.typography.titleLarge.copy(
-                                fontWeight = FontWeight.Light,
-                                letterSpacing = 0.2.em,
-                            ),
-                            color = PlayerTextSecondary,
-                        )
+                        if (listenAlongFriend != null) {
+                            Row(
+                                verticalAlignment = Alignment.CenterVertically,
+                            ) {
+                                Icon(
+                                    imageVector = Icons.Default.Headphones,
+                                    contentDescription = null,
+                                    tint = PurpleDark,
+                                    modifier = Modifier.size(18.dp),
+                                )
+                                Column(
+                                    modifier = Modifier.padding(start = 8.dp),
+                                ) {
+                                    Text(
+                                        text = "Listening along with",
+                                        color = PurpleDark.copy(alpha = 0.8f),
+                                        fontSize = 11.sp,
+                                        lineHeight = 14.sp,
+                                    )
+                                    Text(
+                                        text = listenAlongFriend.displayName,
+                                        color = Color(0xFFEDE9FE), // purple-100
+                                        fontSize = 14.sp,
+                                        lineHeight = 18.sp,
+                                        fontWeight = FontWeight.Medium,
+                                        maxLines = 1,
+                                        overflow = TextOverflow.Ellipsis,
+                                    )
+                                }
+                            }
+                        } else {
+                            Text(
+                                text = "NOW PLAYING",
+                                style = MaterialTheme.typography.titleLarge.copy(
+                                    fontWeight = FontWeight.Light,
+                                    letterSpacing = 0.2.em,
+                                ),
+                                color = PlayerTextSecondary,
+                            )
+                        }
                     },
                     navigationIcon = {
                         IconButton(onClick = onBack) {
@@ -208,6 +246,18 @@ fun NowPlayingScreen(
                             )
                         }
                     },
+                    actions = {
+                        if (listenAlongFriend != null) {
+                            IconButton(onClick = onStopListenAlong) {
+                                Icon(
+                                    imageVector = Icons.Default.Close,
+                                    contentDescription = "Stop listening along",
+                                    tint = PurpleDark.copy(alpha = 0.7f),
+                                    modifier = Modifier.size(20.dp),
+                                )
+                            }
+                        }
+                    },
                     colors = TopAppBarDefaults.topAppBarColors(
                         containerColor = Color.Transparent,
                     ),
@@ -217,7 +267,7 @@ fun NowPlayingScreen(
 
                 Spacer(modifier = Modifier.height(16.dp))
 
-                // Large album artwork with shadow — tap to open album page
+                // Large album artwork — tap to open album page
                 AlbumArtCardFill(
                     artworkUrl = track?.artworkUrl,
                     modifier = Modifier
