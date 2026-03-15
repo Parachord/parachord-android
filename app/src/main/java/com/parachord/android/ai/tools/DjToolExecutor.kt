@@ -8,6 +8,8 @@ import com.parachord.android.data.repository.LibraryRepository
 import com.parachord.android.data.store.SettingsStore
 import com.parachord.android.playback.PlaybackController
 import com.parachord.android.playback.PlaybackStateHolder
+import com.parachord.android.resolver.ResolverManager
+import com.parachord.android.resolver.ResolverScoring
 import java.util.UUID
 import javax.inject.Inject
 import javax.inject.Singleton
@@ -24,6 +26,8 @@ class DjToolExecutor @Inject constructor(
     private val metadataService: MetadataService,
     private val libraryRepository: LibraryRepository,
     private val settingsStore: SettingsStore,
+    private val resolverManager: ResolverManager,
+    private val resolverScoring: ResolverScoring,
 ) {
 
     /**
@@ -250,9 +254,20 @@ class DjToolExecutor @Inject constructor(
         return mapOf("success" to true, "blocked" to entry)
     }
 
-    /** Convert a search result to a TrackEntity for playback. */
-    private fun TrackSearchResult.toTrackEntity(): TrackEntity {
-        val trackId = spotifyId ?: UUID.randomUUID().toString()
+    /**
+     * Convert a search result to a TrackEntity for playback.
+     * Routes through the resolver pipeline to get proper source URLs and IDs
+     * instead of using preview URLs (which are only 30-second samples).
+     */
+    private suspend fun TrackSearchResult.toTrackEntity(): TrackEntity {
+        val query = "$artist - $title"
+        val sources = resolverManager.resolveWithHints(
+            query = query,
+            spotifyId = spotifyId,
+        )
+        val best = resolverScoring.selectBest(sources)
+
+        val trackId = best?.spotifyId ?: spotifyId ?: UUID.randomUUID().toString()
         return TrackEntity(
             id = trackId,
             title = title,
@@ -260,10 +275,13 @@ class DjToolExecutor @Inject constructor(
             album = album,
             duration = duration,
             artworkUrl = artworkUrl,
-            sourceUrl = previewUrl,
-            resolver = provider.ifBlank { null },
-            spotifyUri = spotifyId?.let { "spotify:track:$it" },
-            appleMusicId = null, // Set by resolver pipeline when Apple Music source is selected
+            sourceType = best?.sourceType,
+            sourceUrl = best?.url ?: previewUrl,
+            resolver = best?.resolver ?: provider.ifBlank { null },
+            spotifyUri = best?.spotifyUri ?: spotifyId?.let { "spotify:track:$it" },
+            spotifyId = best?.spotifyId ?: spotifyId,
+            soundcloudId = best?.soundcloudId,
+            appleMusicId = best?.appleMusicId,
         )
     }
 }
