@@ -204,6 +204,7 @@ class FriendDetailViewModel @Inject constructor(
             resolver = best.resolver,
             spotifyUri = best.spotifyUri,
             soundcloudId = best.soundcloudId,
+            appleMusicId = best.appleMusicId,
         )
     }
 

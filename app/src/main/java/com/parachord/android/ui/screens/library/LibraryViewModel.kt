@@ -277,6 +277,7 @@ class LibraryViewModel @Inject constructor(
                         resolver = best.resolver,
                         spotifyUri = best.spotifyUri,
                         soundcloudId = best.soundcloudId,
+                        appleMusicId = best.appleMusicId,
                     )
                 }
                 if (entities.isNotEmpty()) {
@@ -319,6 +320,7 @@ class LibraryViewModel @Inject constructor(
                         resolver = best.resolver,
                         spotifyUri = best.spotifyUri,
                         soundcloudId = best.soundcloudId,
+                        appleMusicId = best.appleMusicId,
                     )
                 }
                 Log.d("LibraryVM", "Queue top songs: resolved ${entities.size}/${topTracks.size} tracks")

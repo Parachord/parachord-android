@@ -294,6 +294,7 @@ class MainViewModel @Inject constructor(
                 resolver = best.resolver,
                 spotifyUri = best.spotifyUri,
                 soundcloudId = best.soundcloudId,
+                appleMusicId = best.appleMusicId,
             )
 
             val state = playbackState.value

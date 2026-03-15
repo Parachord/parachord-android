@@ -212,6 +212,7 @@ class ArtistViewModel @Inject constructor(
                     resolver = best.resolver,
                     spotifyUri = best.spotifyUri,
                     soundcloudId = best.soundcloudId,
+                    appleMusicId = best.appleMusicId,
                 )
                 playbackController.playTrack(entity)
             } catch (e: Exception) {

@@ -625,6 +625,8 @@ class PlaybackController @Inject constructor(
                                 resolver = best.resolver,
                                 spotifyUri = best.spotifyUri,
                                 spotifyId = best.spotifyId,
+                                soundcloudId = best.soundcloudId,
+                                appleMusicId = best.appleMusicId,
                             )
                         )
                     } catch (e: Exception) {
