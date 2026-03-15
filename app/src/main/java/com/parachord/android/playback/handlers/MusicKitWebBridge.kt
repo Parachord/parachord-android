@@ -535,6 +535,13 @@ class MusicKitWebBridge @Inject constructor(
                 // JS bridge already sends values in milliseconds
                 _position.value = state.position.toLong()
                 _duration.value = state.duration.toLong()
+                // Detect ended state as a safety net — the JS side also fires
+                // onTrackEnded for this, but duplicates are harmless and this
+                // ensures we catch it even if the JS callback is missed.
+                if (state.state == "ended" || state.state == "completed") {
+                    Log.d(TAG, "Playback state is '${state.state}', firing onTrackEnded")
+                    onTrackEnded?.invoke()
+                }
             } catch (e: Exception) {
                 Log.e(TAG, "Failed to parse playback state: $jsonStr", e)
             }
