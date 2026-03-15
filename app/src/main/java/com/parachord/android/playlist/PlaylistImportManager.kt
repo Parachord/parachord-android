@@ -54,7 +54,8 @@ class PlaylistImportManager @Inject constructor(
         }
 
     private fun isSpotifyPlaylistUrl(url: String): Boolean =
-        url.contains("open.spotify.com/playlist/") || url.startsWith("spotify:playlist:")
+        url.contains("open.spotify.com/") && url.contains("/playlist/") ||
+            url.startsWith("spotify:playlist:")
 
     private fun isAppleMusicPlaylistUrl(url: String): Boolean =
         url.contains("music.apple.com") && url.contains("/playlist/")
@@ -66,7 +67,15 @@ class PlaylistImportManager @Inject constructor(
             ?: throw IllegalStateException("Spotify not connected. Connect Spotify in Settings to import playlists.")
         val auth = "Bearer $token"
 
-        val playlist = spotifyApi.getPlaylist(auth, playlistId)
+        val playlist = try {
+            spotifyApi.getPlaylist(auth, playlistId)
+        } catch (e: retrofit2.HttpException) {
+            when (e.code()) {
+                401 -> throw IllegalStateException("Spotify session expired. Reconnect Spotify in Settings.")
+                404 -> throw IllegalArgumentException("Playlist not found. It may be private or deleted.")
+                else -> throw IllegalStateException("Spotify error: HTTP ${e.code()}")
+            }
+        }
         val playlistName = playlist.name ?: "Spotify Playlist"
         val artworkUrl = playlist.images?.firstOrNull()?.url
 
