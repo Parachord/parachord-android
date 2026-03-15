@@ -436,42 +436,45 @@ fun NowPlayingScreen(
                     verticalAlignment = Alignment.CenterVertically,
                 ) {
                     // Queue button with badge
-                    IconButton(
-                        onClick = {
-                            scope.launch {
-                                if (sheetState.currentValue == SheetValue.Expanded) {
-                                    sheetState.partialExpand()
-                                } else {
-                                    sheetState.expand()
-                                }
-                            }
-                        },
-                        colors = IconButtonDefaults.iconButtonColors(
-                            contentColor = if (upNext.isNotEmpty()) ActiveControlColor else PlayerTextSecondary,
-                        ),
+                    Box(
+                        modifier = Modifier.size(48.dp),
+                        contentAlignment = Alignment.Center,
                     ) {
-                        Box {
+                        IconButton(
+                            onClick = {
+                                scope.launch {
+                                    if (sheetState.currentValue == SheetValue.Expanded) {
+                                        sheetState.partialExpand()
+                                    } else {
+                                        sheetState.expand()
+                                    }
+                                }
+                            },
+                            colors = IconButtonDefaults.iconButtonColors(
+                                contentColor = if (upNext.isNotEmpty()) ActiveControlColor else PlayerTextSecondary,
+                            ),
+                        ) {
                             Icon(
                                 imageVector = ParachordIcons.Queue,
                                 contentDescription = "Queue",
                                 modifier = Modifier.size(22.dp),
                             )
-                            if (upNext.isNotEmpty()) {
-                                Box(
-                                    modifier = Modifier
-                                        .align(Alignment.TopEnd)
-                                        .offset(x = 6.dp, y = (-6).dp)
-                                        .size(14.dp)
-                                        .background(PurpleDark, CircleShape),
-                                    contentAlignment = Alignment.Center,
-                                ) {
-                                    Text(
-                                        text = "${upNext.size}",
-                                        color = Color.White,
-                                        fontSize = 8.sp,
-                                        lineHeight = 8.sp,
-                                    )
-                                }
+                        }
+                        if (upNext.isNotEmpty()) {
+                            Box(
+                                modifier = Modifier
+                                    .align(Alignment.TopEnd)
+                                    .offset(x = (-2).dp, y = 4.dp)
+                                    .size(16.dp)
+                                    .background(PurpleDark, CircleShape),
+                                contentAlignment = Alignment.Center,
+                            ) {
+                                Text(
+                                    text = "${upNext.size}",
+                                    color = Color.White,
+                                    fontSize = 9.sp,
+                                    lineHeight = 9.sp,
+                                )
                             }
                         }
                     }
