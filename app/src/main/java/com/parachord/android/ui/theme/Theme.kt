@@ -97,6 +97,9 @@ private val DarkExtendedColors = ParachordExtendedColors(
 
 val LocalParachordColors = staticCompositionLocalOf { LightExtendedColors }
 
+/** User-configured resolver priority order, provided at the app root. */
+val LocalResolverOrder = staticCompositionLocalOf { emptyList<String>() }
+
 // ── Theme Accessor ───────────────────────────────────────────────────
 
 object ParachordTheme {

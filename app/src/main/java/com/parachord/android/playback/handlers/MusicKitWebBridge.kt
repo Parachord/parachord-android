@@ -1,22 +1,38 @@
 package com.parachord.android.playback.handlers
 
 import android.annotation.SuppressLint
+import android.app.Activity
+import android.app.AlertDialog
 import android.content.Context
+import android.os.Message
 import android.util.Log
+import android.view.ViewGroup
+import android.webkit.CookieManager
 import android.webkit.JavascriptInterface
+import android.webkit.WebChromeClient
+import android.webkit.WebResourceRequest
+import android.webkit.WebResourceResponse
 import android.webkit.WebView
 import android.webkit.WebViewClient
+import androidx.webkit.WebViewAssetLoader
 import com.parachord.android.data.store.SettingsStore
 import dagger.hilt.android.qualifiers.ApplicationContext
 import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.SharedFlow
 import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.asSharedFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.withContext
-import kotlinx.serialization.SerialName
 import kotlinx.serialization.Serializable
 import kotlinx.serialization.json.Json
+import java.lang.ref.WeakReference
+import android.util.Base64
+import android.view.WindowManager
+import java.util.concurrent.ConcurrentHashMap
+import java.util.concurrent.atomic.AtomicInteger
 import javax.inject.Inject
 import javax.inject.Singleton
 
@@ -39,12 +55,22 @@ class MusicKitWebBridge @Inject constructor(
 ) {
     companion object {
         private const val TAG = "MusicKitWebBridge"
-        private const val BRIDGE_URL = "file:///android_asset/js/musickit-bridge.html"
+        /** Served via WebViewAssetLoader so the bridge has an https:// origin,
+         *  which is required for cross-origin postMessage with Apple's auth page. */
+        private const val BRIDGE_URL = "https://appassets.androidplatform.net/assets/js/musickit-bridge.html"
         private const val APP_NAME = "Parachord"
     }
 
     private var webView: WebView? = null
     private var pageLoaded = CompletableDeferred<Unit>()
+    /** Completes when MusicKit JS library has loaded and is callable. */
+    private var musicKitReady = CompletableDeferred<Unit>()
+
+    /** Weak reference to the current Activity for showing auth dialogs. */
+    private var activityRef: WeakReference<Activity>? = null
+
+    /** Dialog showing the Apple ID login popup during authorization. */
+    private var authDialog: AlertDialog? = null
 
     private val _ready = MutableStateFlow(false)
     val ready: StateFlow<Boolean> = _ready.asStateFlow()
@@ -67,7 +93,24 @@ class MusicKitWebBridge @Inject constructor(
     /** Callback invoked when the current track finishes playing (for auto-advance). */
     var onTrackEnded: (() -> Unit)? = null
 
+    /** Emitted when playback requires Apple ID sign-in. UI should prompt the user. */
+    private val _signInRequired = MutableSharedFlow<Unit>(extraBufferCapacity = 1)
+    val signInRequired: SharedFlow<Unit> = _signInRequired.asSharedFlow()
+
     // ── Lifecycle ─────────────────────────────────────────────────
+
+    /**
+     * Set the current Activity reference for showing auth popups.
+     * Call from Activity.onResume() and clear in onPause().
+     */
+    fun setActivity(activity: Activity?) {
+        activityRef = activity?.let { WeakReference(it) }
+    }
+
+    /** Emit a sign-in required event for the UI to observe. */
+    fun emitSignInRequired() {
+        _signInRequired.tryEmit(Unit)
+    }
 
     /** Create the hidden WebView and load the MusicKit bridge HTML. */
     @SuppressLint("SetJavaScriptEnabled")
@@ -75,17 +118,161 @@ class MusicKitWebBridge @Inject constructor(
         if (webView != null) return@withContext
 
         pageLoaded = CompletableDeferred()
+        musicKitReady = CompletableDeferred()
+
+        // Serve assets from https:// origin so Apple's auth page can postMessage back
+        val assetLoader = WebViewAssetLoader.Builder()
+            .addPathHandler("/assets/", WebViewAssetLoader.AssetsPathHandler(context))
+            .build()
 
         val wv = WebView(context).apply {
             settings.javaScriptEnabled = true
             settings.domStorageEnabled = true
             settings.mediaPlaybackRequiresUserGesture = false
+            settings.javaScriptCanOpenWindowsAutomatically = true
+            settings.setSupportMultipleWindows(true)
+            CookieManager.getInstance().setAcceptThirdPartyCookies(this, true)
             addJavascriptInterface(MusicKitJsInterface(), "MusicKitBridge")
             webViewClient = object : WebViewClient() {
+                override fun shouldInterceptRequest(
+                    view: WebView?,
+                    request: WebResourceRequest?,
+                ): WebResourceResponse? {
+                    return request?.url?.let { assetLoader.shouldInterceptRequest(it) }
+                        ?: super.shouldInterceptRequest(view, request)
+                }
+
                 override fun onPageFinished(view: WebView?, url: String?) {
                     super.onPageFinished(view, url)
                     Log.d(TAG, "Bridge page loaded: $url")
                     pageLoaded.complete(Unit)
+                }
+            }
+            // Handle MusicKit authorize() popup — show Apple ID login in a Dialog
+            webChromeClient = object : WebChromeClient() {
+                @SuppressLint("SetJavaScriptEnabled")
+                override fun onCreateWindow(
+                    view: WebView?,
+                    isDialog: Boolean,
+                    isUserGesture: Boolean,
+                    resultMsg: Message?,
+                ): Boolean {
+                    val activity = activityRef?.get()
+                    if (activity == null || activity.isFinishing) {
+                        Log.w(TAG, "No activity available for auth popup")
+                        return false
+                    }
+                    val transport = resultMsg?.obj as? WebView.WebViewTransport ?: return false
+
+                    Log.d(TAG, "Opening Apple ID auth popup in dialog")
+
+                    // Dismiss any previous auth dialog before opening a new one
+                    authDialog?.dismiss()
+                    authDialog = null
+
+                    // Reference to bridge WebView for relaying postMessage
+                    val bridgeWv = webView
+
+                    val authWebView = WebView(activity).apply {
+                        settings.javaScriptEnabled = true
+                        settings.domStorageEnabled = true
+                        CookieManager.getInstance().setAcceptThirdPartyCookies(this, true)
+                        setBackgroundColor(android.graphics.Color.WHITE)
+                        layoutParams = ViewGroup.LayoutParams(
+                            ViewGroup.LayoutParams.MATCH_PARENT,
+                            ViewGroup.LayoutParams.MATCH_PARENT,
+                        )
+                        isFocusable = true
+                        isFocusableInTouchMode = true
+
+                        // JS interface to relay window.opener.postMessage from
+                        // auth popup back to the bridge WebView. Android WebView
+                        // doesn't support window.opener between separate WebViews.
+                        addJavascriptInterface(object {
+                            @JavascriptInterface
+                            fun relay(data: String, origin: String) {
+                                Log.d(TAG, "Relaying postMessage to bridge: origin=$origin")
+                                bridgeWv?.post {
+                                    val escaped = data
+                                        .replace("\\", "\\\\")
+                                        .replace("'", "\\'")
+                                        .replace("\n", "\\n")
+                                    bridgeWv.evaluateJavascript(
+                                        "window.postMessage(JSON.parse('$escaped'), '$origin')",
+                                        null,
+                                    )
+                                }
+                            }
+                        }, "AuthRelay")
+
+                        webViewClient = object : WebViewClient() {
+                            override fun onPageFinished(v: WebView?, url: String?) {
+                                super.onPageFinished(v, url)
+                                Log.d(TAG, "Auth WebView page: $url")
+                                // Patch window.opener to relay postMessage to bridge
+                                v?.evaluateJavascript("""
+                                    (function() {
+                                        if (!window.opener) { window.opener = {}; }
+                                        var origPM = window.opener.postMessage;
+                                        window.opener.postMessage = function(data, origin) {
+                                            AuthRelay.relay(
+                                                typeof data === 'string' ? data : JSON.stringify(data),
+                                                origin || '*'
+                                            );
+                                            if (origPM) origPM.call(window.opener, data, origin);
+                                        };
+                                    })()
+                                """.trimIndent(), null)
+                            }
+                        }
+                        // Handle window.close() from Apple's auth page after Allow
+                        webChromeClient = object : WebChromeClient() {
+                            override fun onCloseWindow(window: WebView?) {
+                                Log.d(TAG, "Auth popup window.close()")
+                                authDialog?.dismiss()
+                                authDialog = null
+                            }
+                        }
+                    }
+
+                    transport.webView = authWebView
+                    resultMsg.sendToTarget()
+
+                    val dialog = AlertDialog.Builder(activity, android.R.style.Theme_DeviceDefault_Light_NoActionBar)
+                        .setView(authWebView)
+                        .setOnDismissListener {
+                            Log.d(TAG, "Auth dialog dismissed")
+                            authWebView.destroy()
+                            authDialog = null
+                        }
+                        .create()
+                    authDialog = dialog
+                    dialog.show()
+                    dialog.window?.apply {
+                        // Fill entire screen
+                        setLayout(
+                            ViewGroup.LayoutParams.MATCH_PARENT,
+                            ViewGroup.LayoutParams.MATCH_PARENT,
+                        )
+                        // White background to match Apple's auth page
+                        setBackgroundDrawableResource(android.R.color.white)
+                        // Allow soft keyboard for Apple ID input fields
+                        setSoftInputMode(
+                            WindowManager.LayoutParams.SOFT_INPUT_STATE_VISIBLE or
+                                WindowManager.LayoutParams.SOFT_INPUT_ADJUST_RESIZE,
+                        )
+                        clearFlags(WindowManager.LayoutParams.FLAG_ALT_FOCUSABLE_IM)
+                        clearFlags(WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE)
+                    }
+                    authWebView.requestFocus()
+
+                    return true
+                }
+
+                override fun onCloseWindow(window: WebView?) {
+                    Log.d(TAG, "Auth popup closed by MusicKit")
+                    authDialog?.dismiss()
+                    authDialog = null
                 }
             }
         }
@@ -96,6 +283,8 @@ class MusicKitWebBridge @Inject constructor(
 
     /** Destroy the WebView and release resources. */
     fun teardown() {
+        authDialog?.dismiss()
+        authDialog = null
         webView?.destroy()
         webView = null
         _ready.value = false
@@ -109,21 +298,55 @@ class MusicKitWebBridge @Inject constructor(
     // ── Configuration & Auth ──────────────────────────────────────
 
     /**
+     * Check if a JWT developer token has expired.
+     * Returns true if expired or unparseable.
+     */
+    private fun isTokenExpired(token: String): Boolean {
+        return try {
+            val parts = token.split(".")
+            if (parts.size != 3) return true
+            val payload = String(Base64.decode(parts[1], Base64.URL_SAFE or Base64.NO_PADDING))
+            val expMatch = Regex("\"exp\"\\s*:\\s*(\\d+)").find(payload)
+            val exp = expMatch?.groupValues?.get(1)?.toLongOrNull() ?: return true
+            val nowSec = System.currentTimeMillis() / 1000
+            (nowSec >= exp).also { expired ->
+                if (expired) Log.w(TAG, "Developer token expired (exp=$exp, now=$nowSec)")
+            }
+        } catch (e: Exception) {
+            Log.w(TAG, "Failed to check token expiration: ${e.message}")
+            false // Assume valid if we can't parse — let MusicKit reject it
+        }
+    }
+
+    /**
      * Configure MusicKit with the developer token from settings.
+     * Automatically initializes the WebView if needed.
      * Returns true if configuration succeeded.
      */
     suspend fun configure(): Boolean {
+        if (webView == null) initialize()
         pageLoaded.await()
+        Log.d(TAG, "Page loaded, waiting for MusicKit JS library...")
+        musicKitReady.await()
+        Log.d(TAG, "MusicKit JS ready, configuring...")
         val token = settingsStore.getAppleMusicDeveloperToken()
         if (token.isNullOrBlank()) {
             Log.w(TAG, "No Apple Music developer token configured")
             return false
         }
+        if (isTokenExpired(token)) {
+            Log.w(TAG, "Apple Music developer token has expired — needs regeneration")
+            _signInRequired.tryEmit(Unit)
+            return false
+        }
         val escaped = token.replace("'", "\\'")
-        val result = evaluate("configure('$escaped', '$APP_NAME')") ?: return false
+        val result = evaluate("configure('$escaped', '$APP_NAME')")
+        Log.d(TAG, "configure() JS result: $result")
+        if (result == null) return false
         return try {
             val parsed = json.decodeFromString<GenericResponse>(cleanJsString(result))
             val success = parsed.success
+            if (!success) Log.w(TAG, "configure() failed: ${parsed.error}")
             if (success) _configured.value = true
             success
         } catch (e: Exception) {
@@ -134,10 +357,24 @@ class MusicKitWebBridge @Inject constructor(
 
     /**
      * Prompt Apple ID sign-in via MusicKit's authorize flow.
+     * This opens a popup (handled by onCreateWindow as a visible Dialog)
+     * where the user signs in with their Apple ID.
      * Returns true if the user authorized successfully.
+     *
+     * Call [setActivity] before this so the auth popup can be shown.
      */
     suspend fun authorize(): Boolean {
-        pageLoaded.await()
+        if (activityRef?.get() == null) {
+            Log.w(TAG, "No activity set — authorize() popup will not be visible")
+        }
+        // Tear down and reinitialize to ensure clean state for auth popup.
+        // MusicKit JS internally tracks popup state and may refuse to open
+        // a second window.open() after the first popup is dismissed/destroyed.
+        teardown()
+        initialize()
+        val configured = configure()
+        Log.d(TAG, "Pre-authorize configure() result: $configured")
+        musicKitReady.await()
         val result = evaluate("authorize()") ?: return false
         return try {
             val parsed = json.decodeFromString<AuthorizeResponse>(cleanJsString(result))
@@ -157,7 +394,7 @@ class MusicKitWebBridge @Inject constructor(
      * Returns a list of search results, or empty on failure.
      */
     suspend fun search(query: String, limit: Int = 10): List<AppleMusicSearchResult> {
-        pageLoaded.await()
+        musicKitReady.await()
         val storefront = settingsStore.getAppleMusicStorefront() ?: "us"
         val escaped = query.replace("'", "\\'")
         val result = evaluate("search('$escaped', $limit, '$storefront')") ?: return emptyList()
@@ -179,7 +416,7 @@ class MusicKitWebBridge @Inject constructor(
 
     /** Play a song by Apple Music catalog ID. Returns true on success. */
     suspend fun play(songId: String): Boolean {
-        pageLoaded.await()
+        musicKitReady.await()
         val escaped = songId.replace("'", "\\'")
         val result = evaluate("play('$escaped')") ?: return false
         return parseSuccessResponse(result)
@@ -187,25 +424,25 @@ class MusicKitWebBridge @Inject constructor(
 
     /** Pause playback. */
     suspend fun pause() {
-        pageLoaded.await()
+        musicKitReady.await()
         evaluate("pause()")
     }
 
     /** Resume playback. */
     suspend fun resume() {
-        pageLoaded.await()
+        musicKitReady.await()
         evaluate("resume()")
     }
 
     /** Stop playback. */
     suspend fun stop() {
-        pageLoaded.await()
+        musicKitReady.await()
         evaluate("stop()")
     }
 
     /** Seek to position in milliseconds. */
     suspend fun seekTo(positionMs: Long) {
-        pageLoaded.await()
+        musicKitReady.await()
         evaluate("seekTo($positionMs)")
     }
 
@@ -218,6 +455,12 @@ class MusicKitWebBridge @Inject constructor(
     // ── JS Interface (JS -> Kotlin callbacks) ─────────────────────
 
     inner class MusicKitJsInterface {
+
+        @JavascriptInterface
+        fun onBridgeReady(status: String) {
+            Log.d(TAG, "MusicKit JS library loaded: $status")
+            musicKitReady.complete(Unit)
+        }
 
         @JavascriptInterface
         fun onPlaybackStateChange(jsonStr: String) {
@@ -255,23 +498,50 @@ class MusicKitWebBridge @Inject constructor(
             Log.d(TAG, "Track ended: $jsonStr")
             onTrackEnded?.invoke()
         }
+
+        @JavascriptInterface
+        fun onEvalResult(callId: String, result: String) {
+            evalCallbacks.remove(callId)?.complete(result)
+        }
     }
 
     // ── Private Helpers ───────────────────────────────────────────
 
+    private val evalCallbacks = ConcurrentHashMap<String, CompletableDeferred<String?>>()
+    private val evalCounter = AtomicInteger(0)
+
     /**
-     * Evaluate a JS expression in the WebView.
-     * Wraps the script in an async IIFE so top-level await works.
-     * Must be called on the Main thread (handled by withContext).
+     * Evaluate a JS expression in the WebView and await its result.
+     *
+     * Uses a callback via the JS interface to get the resolved value of async
+     * functions. Android's evaluateJavascript does NOT await Promises — it returns
+     * the Promise object itself ({}) — so we route the resolved value through
+     * [MusicKitJsInterface.onEvalResult] instead.
      */
     private suspend fun evaluate(script: String): String? = withContext(Dispatchers.Main) {
         val wv = webView ?: run {
             Log.e(TAG, "WebView not initialized")
             return@withContext null
         }
+        val callId = "eval_${evalCounter.incrementAndGet()}"
         val deferred = CompletableDeferred<String?>()
-        val wrapped = "(async function() { return $script; })()"
-        wv.evaluateJavascript(wrapped) { result -> deferred.complete(result) }
+        evalCallbacks[callId] = deferred
+        val wrapped = """
+            (function() {
+                try {
+                    var p = $script;
+                    if (p && typeof p.then === 'function') {
+                        p.then(function(r) { MusicKitBridge.onEvalResult('$callId', r || ''); })
+                         .catch(function(e) { MusicKitBridge.onEvalResult('$callId', JSON.stringify({success:false,error:e.message||String(e)})); });
+                    } else {
+                        MusicKitBridge.onEvalResult('$callId', p || '');
+                    }
+                } catch(e) {
+                    MusicKitBridge.onEvalResult('$callId', JSON.stringify({success:false,error:e.message||String(e)}));
+                }
+            })()
+        """.trimIndent()
+        wv.evaluateJavascript(wrapped) { /* ignore direct result */ }
         deferred.await()
     }
 

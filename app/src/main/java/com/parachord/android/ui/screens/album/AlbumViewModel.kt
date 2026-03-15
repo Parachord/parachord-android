@@ -293,4 +293,5 @@ private fun TrackSearchResult.toTrackEntity(
     resolver = source.resolver,
     spotifyUri = source.spotifyUri,
     soundcloudId = source.soundcloudId,
+    appleMusicId = source.appleMusicId,
 )

@@ -9,6 +9,18 @@
 <script>
     let music = null;
 
+    // Signal to Kotlin that MusicKit JS has loaded and is ready
+    function _checkReady() {
+        if (typeof MusicKit !== 'undefined') {
+            if (window.MusicKitBridge) {
+                MusicKitBridge.onBridgeReady('ready');
+            }
+        } else {
+            setTimeout(_checkReady, 100);
+        }
+    }
+    _checkReady();
+
     /**
      * Configure MusicKit with a developer token.
      * Returns JSON: { success: bool, error?: string }

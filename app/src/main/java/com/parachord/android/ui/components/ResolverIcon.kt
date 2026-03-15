@@ -21,6 +21,7 @@ import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import com.parachord.android.R
+import com.parachord.android.ui.theme.LocalResolverOrder
 
 /**
  * Resolver icon colors matching the desktop's resolverIconColors.
@@ -378,11 +379,19 @@ fun ResolverIconRow(
     modifier: Modifier = Modifier,
 ) {
     if (resolvers.isEmpty()) return
+    val resolverOrder = LocalResolverOrder.current
+    val sorted = if (resolverOrder.isNotEmpty()) {
+        resolvers.sortedBy { r ->
+            resolverOrder.indexOf(r).let { if (it == -1) resolverOrder.size else it }
+        }
+    } else {
+        resolvers
+    }
     Row(
         modifier = modifier,
         verticalAlignment = Alignment.CenterVertically,
     ) {
-        resolvers.forEachIndexed { index, resolver ->
+        sorted.forEachIndexed { index, resolver ->
             if (index > 0) Spacer(modifier = Modifier.width(3.dp))
             ResolverIconSquare(resolver = resolver, size = size)
         }

@@ -18,6 +18,7 @@ import java.util.UUID
 import com.parachord.android.data.store.SettingsStore
 import com.parachord.android.playback.PlaybackContext
 import com.parachord.android.playback.PlaybackController
+import com.parachord.android.playback.handlers.MusicKitWebBridge
 import com.parachord.android.playback.PlaybackState
 import com.parachord.android.playback.PlaybackStateHolder
 import dagger.hilt.android.lifecycle.HiltViewModel
@@ -38,6 +39,7 @@ class MainViewModel @Inject constructor(
     private val friendsRepository: FriendsRepository,
     private val resolverManager: ResolverManager,
     private val resolverScoring: ResolverScoring,
+    private val musicKitBridge: MusicKitWebBridge,
     settingsStore: SettingsStore,
 ) : ViewModel() {
 
@@ -66,6 +68,9 @@ class MainViewModel @Inject constructor(
 
     val themeMode: StateFlow<String> = settingsStore.themeMode
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), "system")
+
+    val resolverOrder: StateFlow<List<String>> = settingsStore.getResolverOrderFlow()
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), emptyList())
 
     /** Pinned friends for the sidebar drawer (on-air auto-pins + manual pins). */
     val friends: StateFlow<List<FriendEntity>> = friendsRepository.getPinnedFriends()
@@ -135,6 +140,20 @@ class MainViewModel @Inject constructor(
     /** Toast events for the Activity to observe and show. */
     private val _toastEvents = kotlinx.coroutines.flow.MutableSharedFlow<String>()
     val toastEvents = _toastEvents
+
+    /** Navigation events for the Activity (e.g., open Settings for Apple Music sign-in). */
+    private val _navigateToSettings = kotlinx.coroutines.flow.MutableSharedFlow<Unit>()
+    val navigateToSettings = _navigateToSettings
+
+    init {
+        // Observe Apple Music sign-in required events
+        viewModelScope.launch {
+            musicKitBridge.signInRequired.collect {
+                _toastEvents.emit("Sign in to Apple Music to play this track")
+                _navigateToSettings.emit(Unit)
+            }
+        }
+    }
 
     /** Track key of last played track to avoid replaying the same one. */
     private var lastListenAlongTrackKey: String? = null

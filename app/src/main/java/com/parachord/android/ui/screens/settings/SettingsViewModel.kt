@@ -137,12 +137,25 @@ class SettingsViewModel @Inject constructor(
         viewModelScope.launch { settingsStore.setAppleMusicStorefront(storefront) }
     }
 
-    fun authorizeAppleMusic() {
-        viewModelScope.launch { musicKitBridge.authorize() }
+    private val _appleMusicConnecting = MutableStateFlow(false)
+    val appleMusicConnecting: StateFlow<Boolean> = _appleMusicConnecting
+
+    fun connectAppleMusic() {
+        viewModelScope.launch {
+            _appleMusicConnecting.value = true
+            try {
+                musicKitBridge.authorize()
+            } finally {
+                _appleMusicConnecting.value = false
+            }
+        }
     }
 
     fun disconnectAppleMusic() {
-        viewModelScope.launch { settingsStore.clearAppleMusicDeveloperToken() }
+        viewModelScope.launch {
+            settingsStore.clearAppleMusicDeveloperToken()
+            musicKitBridge.teardown()
+        }
     }
 
     // --- SoundCloud ---

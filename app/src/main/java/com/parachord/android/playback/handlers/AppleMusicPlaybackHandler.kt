@@ -36,12 +36,23 @@ class AppleMusicPlaybackHandler @Inject constructor(
             }
         }
         if (!musicKitBridge.authorized.value) {
+            // Try to authorize (shows Apple ID login dialog if Activity is available)
             if (!musicKitBridge.authorize()) {
-                Log.w(TAG, "MusicKit authorization failed")
+                Log.w(TAG, "MusicKit authorization required — prompting user")
+                musicKitBridge.emitSignInRequired()
                 return
             }
         }
-        musicKitBridge.play(songId)
+        val success = musicKitBridge.play(songId)
+        if (!success) {
+            // Playback failed — may be an expired user token, try re-authorizing
+            Log.w(TAG, "MusicKit playback failed, attempting re-authorization")
+            if (musicKitBridge.authorize()) {
+                musicKitBridge.play(songId)
+            } else {
+                musicKitBridge.emitSignInRequired()
+            }
+        }
     }
 
     override suspend fun pause() { musicKitBridge.pause() }

@@ -12,6 +12,7 @@ import androidx.compose.foundation.gestures.Orientation
 import androidx.compose.foundation.gestures.draggable
 import androidx.compose.foundation.gestures.rememberDraggableState
 import androidx.compose.foundation.isSystemInDarkTheme
+import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -59,6 +60,7 @@ import androidx.navigation.NavGraph.Companion.findStartDestination
 import androidx.navigation.compose.currentBackStackEntryAsState
 import androidx.navigation.compose.rememberNavController
 import com.parachord.android.auth.OAuthManager
+import com.parachord.android.playback.handlers.MusicKitWebBridge
 import com.parachord.android.ui.components.ActionOverlay
 import com.parachord.android.ui.components.CreatePlaylistDialog
 import com.parachord.android.ui.components.DrawerContent
@@ -66,6 +68,7 @@ import com.parachord.android.ui.components.MiniPlayer
 import com.parachord.android.ui.navigation.BottomNavItem
 import com.parachord.android.ui.navigation.ParachordNavHost
 import com.parachord.android.ui.navigation.Routes
+import com.parachord.android.ui.theme.LocalResolverOrder
 import com.parachord.android.ui.theme.ParachordTheme
 import dagger.hilt.android.AndroidEntryPoint
 import kotlinx.coroutines.CoroutineScope
@@ -79,6 +82,9 @@ class MainActivity : ComponentActivity() {
     @Inject
     lateinit var oAuthManager: OAuthManager
 
+    @Inject
+    lateinit var musicKitBridge: MusicKitWebBridge
+
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         enableEdgeToEdge()
@@ -86,6 +92,16 @@ class MainActivity : ComponentActivity() {
         setContent {
             ParachordApp()
         }
+    }
+
+    override fun onResume() {
+        super.onResume()
+        musicKitBridge.setActivity(this)
+    }
+
+    override fun onPause() {
+        super.onPause()
+        musicKitBridge.setActivity(null)
     }
 
     override fun onNewIntent(intent: Intent) {
@@ -113,8 +129,12 @@ fun ParachordApp() {
         else -> isSystemInDarkTheme()
     }
 
+    val resolverOrder by mainViewModel.resolverOrder.collectAsStateWithLifecycle()
+
     ParachordTheme(darkTheme = darkTheme) {
-        ParachordAppContent(mainViewModel)
+        CompositionLocalProvider(LocalResolverOrder provides resolverOrder) {
+            ParachordAppContent(mainViewModel)
+        }
     }
 }
 
@@ -137,6 +157,13 @@ private fun ParachordAppContent(mainViewModel: MainViewModel) {
     LaunchedEffect(Unit) {
         mainViewModel.toastEvents.collect { message ->
             Toast.makeText(context, message, Toast.LENGTH_SHORT).show()
+        }
+    }
+
+    // Navigate to Settings when Apple Music sign-in is required
+    LaunchedEffect(Unit) {
+        mainViewModel.navigateToSettings.collect {
+            navController.navigate(Routes.SETTINGS) { launchSingleTop = true }
         }
     }
 

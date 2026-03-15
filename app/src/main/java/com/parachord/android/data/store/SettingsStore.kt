@@ -6,6 +6,7 @@ import androidx.datastore.preferences.core.booleanPreferencesKey
 import androidx.datastore.preferences.core.edit
 import androidx.datastore.preferences.core.stringPreferencesKey
 import androidx.datastore.preferences.core.stringSetPreferencesKey
+import com.parachord.android.BuildConfig
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.map
@@ -348,10 +349,14 @@ class SettingsStore @Inject constructor(
     // --- Apple Music ---
 
     fun getAppleMusicDeveloperTokenFlow(): Flow<String?> =
-        dataStore.data.map { it[APPLE_MUSIC_DEVELOPER_TOKEN]?.ifBlank { null } }
+        dataStore.data.map {
+            it[APPLE_MUSIC_DEVELOPER_TOKEN]?.ifBlank { null }
+                ?: BuildConfig.APPLE_MUSIC_DEVELOPER_TOKEN.ifBlank { null }
+        }
 
     suspend fun getAppleMusicDeveloperToken(): String? =
         dataStore.data.first()[APPLE_MUSIC_DEVELOPER_TOKEN]?.ifBlank { null }
+            ?: BuildConfig.APPLE_MUSIC_DEVELOPER_TOKEN.ifBlank { null }
 
     suspend fun setAppleMusicDeveloperToken(token: String) {
         dataStore.edit { it[APPLE_MUSIC_DEVELOPER_TOKEN] = token }

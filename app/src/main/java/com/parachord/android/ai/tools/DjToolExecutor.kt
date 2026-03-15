@@ -263,6 +263,7 @@ class DjToolExecutor @Inject constructor(
             sourceUrl = previewUrl,
             resolver = provider.ifBlank { null },
             spotifyUri = spotifyId?.let { "spotify:track:$it" },
+            appleMusicId = null, // Set by resolver pipeline when Apple Music source is selected
         )
     }
 }

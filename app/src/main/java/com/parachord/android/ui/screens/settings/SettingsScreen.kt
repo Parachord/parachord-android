@@ -1,6 +1,7 @@
 package com.parachord.android.ui.screens.settings
 
 import androidx.compose.animation.core.animateDpAsState
+import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
@@ -96,6 +97,7 @@ import com.parachord.android.ui.components.SectionHeader
 import com.parachord.android.ui.components.SwipeableTabLayout
 import com.parachord.android.ui.screens.sync.SyncSetupSheet
 import com.parachord.android.ui.screens.sync.SyncViewModel
+import com.parachord.android.ui.theme.ParachordTheme
 import com.parachord.android.ui.theme.Success
 import kotlin.math.roundToInt
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -248,6 +250,7 @@ fun SettingsScreen(
     val appleMusicDeveloperToken by viewModel.appleMusicDeveloperToken.collectAsStateWithLifecycle()
     val appleMusicConfigured by viewModel.appleMusicConfigured.collectAsStateWithLifecycle()
     val appleMusicAuthorized by viewModel.appleMusicAuthorized.collectAsStateWithLifecycle()
+    val appleMusicConnecting by viewModel.appleMusicConnecting.collectAsStateWithLifecycle()
     val persistQueue by viewModel.persistQueue.collectAsStateWithLifecycle()
     val libreFmAuthError by viewModel.libreFmAuthError.collectAsStateWithLifecycle()
     val listenBrainzAuthError by viewModel.listenBrainzAuthError.collectAsStateWithLifecycle()
@@ -299,9 +302,10 @@ fun SettingsScreen(
                     appleMusicHasToken = appleMusicDeveloperToken != null,
                     appleMusicConfigured = appleMusicConfigured,
                     appleMusicAuthorized = appleMusicAuthorized,
+                    appleMusicConnecting = appleMusicConnecting,
                     onAppleMusicSaveToken = { viewModel.setAppleMusicDeveloperToken(it) },
                     onAppleMusicSaveStorefront = { viewModel.setAppleMusicStorefront(it) },
-                    onAppleMusicAuthorize = { viewModel.authorizeAppleMusic() },
+                    onAppleMusicAuthorize = { viewModel.connectAppleMusic() },
                     onAppleMusicDisconnect = { viewModel.disconnectAppleMusic() },
                     onListenBrainzTokenSubmit = { viewModel.setListenBrainzToken(it) },
                     onListenBrainzDisconnect = { viewModel.disconnectListenBrainz() },
@@ -362,6 +366,7 @@ private fun PlugInsTab(
     appleMusicHasToken: Boolean = false,
     appleMusicConfigured: Boolean = false,
     appleMusicAuthorized: Boolean = false,
+    appleMusicConnecting: Boolean = false,
     onAppleMusicSaveToken: (String) -> Unit = {},
     onAppleMusicSaveStorefront: (String) -> Unit = {},
     onAppleMusicAuthorize: () -> Unit = {},
@@ -572,6 +577,7 @@ private fun PlugInsTab(
             appleMusicHasToken = appleMusicHasToken,
             appleMusicConfigured = appleMusicConfigured,
             appleMusicAuthorized = appleMusicAuthorized,
+            appleMusicConnecting = appleMusicConnecting,
             onAppleMusicSaveToken = onAppleMusicSaveToken,
             onAppleMusicSaveStorefront = onAppleMusicSaveStorefront,
             onAppleMusicAuthorize = onAppleMusicAuthorize,
@@ -794,6 +800,7 @@ private fun PluginConfigSheet(
     appleMusicHasToken: Boolean = false,
     appleMusicConfigured: Boolean = false,
     appleMusicAuthorized: Boolean = false,
+    appleMusicConnecting: Boolean = false,
     onAppleMusicSaveToken: (String) -> Unit = {},
     onAppleMusicSaveStorefront: (String) -> Unit = {},
     onAppleMusicAuthorize: () -> Unit = {},
@@ -814,19 +821,7 @@ private fun PluginConfigSheet(
     ModalBottomSheet(
         onDismissRequest = onDismiss,
         sheetState = sheetState,
-        containerColor = ModalBg,
-        scrimColor = ModalScrim,
-        dragHandle = {
-            Box(
-                modifier = Modifier
-                    .padding(vertical = 10.dp)
-                    .size(width = 32.dp, height = 4.dp)
-                    .background(
-                        color = Color.White.copy(alpha = 0.2f),
-                        shape = RoundedCornerShape(2.dp),
-                    ),
-            )
-        },
+        containerColor = MaterialTheme.colorScheme.surface,
     ) {
         Column(
             modifier = Modifier
@@ -931,9 +926,10 @@ private fun PluginConfigSheet(
                     hasToken = appleMusicHasToken,
                     configured = appleMusicConfigured,
                     authorized = appleMusicAuthorized,
+                    connecting = appleMusicConnecting,
                     onSaveToken = onAppleMusicSaveToken,
                     onSaveStorefront = onAppleMusicSaveStorefront,
-                    onAuthorize = onAppleMusicAuthorize,
+                    onConnect = onAppleMusicAuthorize,
                     onDisconnect = onAppleMusicDisconnect,
                 )
                 "local-files" -> LocalFilesConfig()
@@ -1214,11 +1210,14 @@ private fun AppleMusicConfig(
     hasToken: Boolean,
     configured: Boolean,
     authorized: Boolean,
+    connecting: Boolean = false,
     onSaveToken: (String) -> Unit,
     onSaveStorefront: (String) -> Unit,
-    onAuthorize: () -> Unit,
+    onConnect: () -> Unit,
     onDisconnect: () -> Unit,
 ) {
+    val hasBuiltInToken = BuildConfig.APPLE_MUSIC_DEVELOPER_TOKEN.isNotBlank()
+
     Spacer(modifier = Modifier.height(16.dp))
     HorizontalDivider()
     Spacer(modifier = Modifier.height(16.dp))
@@ -1241,7 +1240,7 @@ private fun AppleMusicConfig(
             )
             Spacer(modifier = Modifier.width(8.dp))
             Text(
-                text = "Connected",
+                text = "Apple Music connected",
                 style = MaterialTheme.typography.bodySmall,
                 color = Success,
             )
@@ -1250,20 +1249,34 @@ private fun AppleMusicConfig(
         TextButton(onClick = onDisconnect) {
             Text("Disconnect", color = MaterialTheme.colorScheme.error)
         }
-    } else if (hasToken && configured && !authorized) {
+    } else if (hasToken) {
         Text(
-            text = "MusicKit configured. Sign in with your Apple ID to authorize.",
+            text = "Sign in with your Apple ID to stream from Apple Music.",
             style = MaterialTheme.typography.bodySmall,
             color = MaterialTheme.colorScheme.onSurfaceVariant,
         )
         Spacer(modifier = Modifier.height(12.dp))
-        TextButton(onClick = onAuthorize) {
-            Text("Sign In", color = MaterialTheme.colorScheme.primary)
+        if (connecting) {
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                CircularProgressIndicator(
+                    modifier = Modifier.size(16.dp),
+                    strokeWidth = 2.dp,
+                )
+                Spacer(modifier = Modifier.width(8.dp))
+                Text(
+                    text = "Connecting…",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+            }
+        } else {
+            TextButton(onClick = onConnect) {
+                Text("Connect Apple Music", color = MaterialTheme.colorScheme.primary)
+            }
         }
     } else {
         Text(
-            text = if (!hasToken) "Enter developer token to enable"
-            else "Configuring MusicKit…",
+            text = "Add your MusicKit developer token below, then connect.",
             style = MaterialTheme.typography.bodySmall,
             color = MaterialTheme.colorScheme.onSurfaceVariant,
         )
@@ -1271,97 +1284,127 @@ private fun AppleMusicConfig(
 
     Spacer(modifier = Modifier.height(16.dp))
     HorizontalDivider()
-    Spacer(modifier = Modifier.height(16.dp))
-
-    // Developer Token
-    Text(
-        text = "Developer Token",
-        style = MaterialTheme.typography.bodyMedium,
-        fontWeight = FontWeight.Medium,
-    )
-    Spacer(modifier = Modifier.height(8.dp))
-
-    var tokenInput by remember { mutableStateOf("") }
-
-    OutlinedTextField(
-        value = tokenInput,
-        onValueChange = { tokenInput = it },
-        label = { Text("Developer Token") },
-        placeholder = { Text("Enter your MusicKit developer token") },
-        singleLine = true,
-        visualTransformation = PasswordVisualTransformation(),
-        modifier = Modifier.fillMaxWidth(),
-    )
     Spacer(modifier = Modifier.height(12.dp))
 
-    TextButton(
-        onClick = {
-            if (tokenInput.isNotBlank()) {
-                onSaveToken(tokenInput.trim())
-                tokenInput = ""
-            }
-        },
-        enabled = tokenInput.isNotBlank(),
-    ) {
-        Text("Save Token", color = MaterialTheme.colorScheme.primary)
+    // Advanced — Developer Token & Storefront
+    var advancedOpen by remember { mutableStateOf(!hasToken && !hasBuiltInToken) }
+    TextButton(onClick = { advancedOpen = !advancedOpen }) {
+        Text(
+            text = if (advancedOpen) "▾ Advanced" else "▸ Advanced",
+            style = MaterialTheme.typography.bodyMedium,
+            fontWeight = FontWeight.Medium,
+            color = MaterialTheme.colorScheme.onSurface,
+        )
     }
 
-    if (hasToken) {
-        Spacer(modifier = Modifier.height(4.dp))
-        Row(verticalAlignment = Alignment.CenterVertically) {
-            Icon(
-                imageVector = Icons.Filled.Check,
-                contentDescription = null,
-                tint = Success,
-                modifier = Modifier.size(14.dp),
-            )
-            Spacer(modifier = Modifier.width(6.dp))
+    if (advancedOpen) {
+        if (hasBuiltInToken && !hasToken) {
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Icon(
+                    imageVector = Icons.Filled.Check,
+                    contentDescription = null,
+                    tint = Success,
+                    modifier = Modifier.size(14.dp),
+                )
+                Spacer(modifier = Modifier.width(6.dp))
+                Text(
+                    text = "Using built-in developer token",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = Success,
+                )
+            }
+            Spacer(modifier = Modifier.height(8.dp))
             Text(
-                text = "Developer token saved",
+                text = "You can override by entering a custom token below.",
                 style = MaterialTheme.typography.bodySmall,
-                color = Success,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+        } else {
+            Text(
+                text = "A MusicKit developer token is required to access the Apple Music catalog.",
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
         }
-    }
+        Spacer(modifier = Modifier.height(12.dp))
 
-    Spacer(modifier = Modifier.height(16.dp))
-    HorizontalDivider()
-    Spacer(modifier = Modifier.height(16.dp))
+        var tokenInput by remember { mutableStateOf("") }
 
-    // Storefront
-    Text(
-        text = "Storefront",
-        style = MaterialTheme.typography.bodyMedium,
-        fontWeight = FontWeight.Medium,
-    )
-    Spacer(modifier = Modifier.height(8.dp))
+        OutlinedTextField(
+            value = tokenInput,
+            onValueChange = { tokenInput = it },
+            label = { Text("Developer Token") },
+            placeholder = { Text("eyJhbGciOiJFUzI1NiIs…") },
+            singleLine = true,
+            visualTransformation = PasswordVisualTransformation(),
+            modifier = Modifier.fillMaxWidth(),
+        )
+        Spacer(modifier = Modifier.height(12.dp))
 
-    var storefrontInput by remember { mutableStateOf("") }
+        TextButton(
+            onClick = {
+                if (tokenInput.isNotBlank()) {
+                    onSaveToken(tokenInput.trim())
+                    tokenInput = ""
+                }
+            },
+            enabled = tokenInput.isNotBlank(),
+        ) {
+            Text(
+                "Save Token",
+                color = if (tokenInput.isNotBlank()) MaterialTheme.colorScheme.primary
+                else MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+        }
 
-    OutlinedTextField(
-        value = storefrontInput,
-        onValueChange = { storefrontInput = it },
-        label = { Text("Storefront") },
-        placeholder = { Text("us") },
-        singleLine = true,
-        modifier = Modifier.fillMaxWidth(),
-    )
-    Spacer(modifier = Modifier.height(8.dp))
-    Text(
-        text = "Country code for the Apple Music catalog (default: us)",
-        style = MaterialTheme.typography.bodySmall,
-        color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.6f),
-    )
-    Spacer(modifier = Modifier.height(12.dp))
+        if (hasToken) {
+            Spacer(modifier = Modifier.height(4.dp))
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Icon(
+                    imageVector = Icons.Filled.Check,
+                    contentDescription = null,
+                    tint = Success,
+                    modifier = Modifier.size(14.dp),
+                )
+                Spacer(modifier = Modifier.width(6.dp))
+                Text(
+                    text = "Custom developer token saved",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = Success,
+                )
+            }
+        }
 
-    TextButton(
-        onClick = {
-            val value = storefrontInput.trim().ifBlank { "us" }
-            onSaveStorefront(value)
-            storefrontInput = ""
-        },
-    ) {
-        Text("Save Storefront", color = MaterialTheme.colorScheme.primary)
+        Spacer(modifier = Modifier.height(16.dp))
+
+        // Storefront
+        var storefrontInput by remember { mutableStateOf("") }
+
+        OutlinedTextField(
+            value = storefrontInput,
+            onValueChange = { storefrontInput = it },
+            label = { Text("Storefront") },
+            placeholder = { Text("us") },
+            singleLine = true,
+            modifier = Modifier.fillMaxWidth(),
+        )
+        Spacer(modifier = Modifier.height(4.dp))
+        Text(
+            text = "Country code for the Apple Music catalog (default: us)",
+            style = MaterialTheme.typography.bodySmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.6f),
+        )
+        Spacer(modifier = Modifier.height(12.dp))
+
+        TextButton(
+            onClick = {
+                val value = storefrontInput.trim().ifBlank { "us" }
+                onSaveStorefront(value)
+                storefrontInput = ""
+            },
+        ) {
+            Text("Save Storefront", color = MaterialTheme.colorScheme.primary)
+        }
     }
 }
 
