@@ -37,7 +37,7 @@ import javax.inject.Singleton
 class MiniPlayerWidgetUpdater @Inject constructor(
     @ApplicationContext private val context: Context,
     private val stateHolder: PlaybackStateHolder,
-    private val playbackController: PlaybackController,
+    private val playbackControllerLazy: dagger.Lazy<PlaybackController>,
 ) {
     companion object {
         private const val TAG = "WidgetUpdater"
@@ -61,9 +61,9 @@ class MiniPlayerWidgetUpdater @Inject constructor(
     private val mediaActionReceiver = object : BroadcastReceiver() {
         override fun onReceive(ctx: Context, intent: Intent) {
             when (intent.getStringExtra("action")) {
-                "play_pause" -> playbackController.togglePlayPause()
-                "skip_next" -> playbackController.skipNext()
-                "skip_previous" -> playbackController.skipPrevious()
+                "play_pause" -> playbackControllerLazy.get().togglePlayPause()
+                "skip_next" -> playbackControllerLazy.get().skipNext()
+                "skip_previous" -> playbackControllerLazy.get().skipPrevious()
             }
         }
     }
