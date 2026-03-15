@@ -138,6 +138,15 @@ private val builtInPlugins = listOf(
         description = "Search and stream tracks from SoundCloud",
     ),
     PluginInfo(
+        id = "applemusic",
+        name = "Apple Music",
+        resolverId = "applemusic",
+        bgColor = Color(0xFFFC3C44),
+        category = PluginCategory.RESOLVER,
+        capabilities = listOf("Resolve", "Search", "Stream"),
+        description = "Search and stream from Apple Music via MusicKit",
+    ),
+    PluginInfo(
         id = "local-files",
         name = "Local Files",
         resolverId = "localfiles",
@@ -236,6 +245,9 @@ fun SettingsScreen(
     val libreFmConnected by viewModel.libreFmConnected.collectAsStateWithLifecycle()
     val soundCloudConnected by viewModel.soundCloudConnected.collectAsStateWithLifecycle()
     val soundCloudCredentialsSaved by viewModel.soundCloudCredentialsSaved.collectAsStateWithLifecycle()
+    val appleMusicDeveloperToken by viewModel.appleMusicDeveloperToken.collectAsStateWithLifecycle()
+    val appleMusicConfigured by viewModel.appleMusicConfigured.collectAsStateWithLifecycle()
+    val appleMusicAuthorized by viewModel.appleMusicAuthorized.collectAsStateWithLifecycle()
     val persistQueue by viewModel.persistQueue.collectAsStateWithLifecycle()
     val libreFmAuthError by viewModel.libreFmAuthError.collectAsStateWithLifecycle()
     val listenBrainzAuthError by viewModel.listenBrainzAuthError.collectAsStateWithLifecycle()
@@ -284,6 +296,13 @@ fun SettingsScreen(
                     onSoundCloudConnect = { viewModel.connectSoundCloud() },
                     onSoundCloudDisconnect = { viewModel.disconnectSoundCloud() },
                     onSoundCloudClearCredentials = { viewModel.clearSoundCloudCredentials() },
+                    appleMusicHasToken = appleMusicDeveloperToken != null,
+                    appleMusicConfigured = appleMusicConfigured,
+                    appleMusicAuthorized = appleMusicAuthorized,
+                    onAppleMusicSaveToken = { viewModel.setAppleMusicDeveloperToken(it) },
+                    onAppleMusicSaveStorefront = { viewModel.setAppleMusicStorefront(it) },
+                    onAppleMusicAuthorize = { viewModel.authorizeAppleMusic() },
+                    onAppleMusicDisconnect = { viewModel.disconnectAppleMusic() },
                     onListenBrainzTokenSubmit = { viewModel.setListenBrainzToken(it) },
                     onListenBrainzDisconnect = { viewModel.disconnectListenBrainz() },
                     listenBrainzAuthError = listenBrainzAuthError,
@@ -340,6 +359,13 @@ private fun PlugInsTab(
     onSoundCloudConnect: () -> Unit = {},
     onSoundCloudDisconnect: () -> Unit = {},
     onSoundCloudClearCredentials: () -> Unit = {},
+    appleMusicHasToken: Boolean = false,
+    appleMusicConfigured: Boolean = false,
+    appleMusicAuthorized: Boolean = false,
+    onAppleMusicSaveToken: (String) -> Unit = {},
+    onAppleMusicSaveStorefront: (String) -> Unit = {},
+    onAppleMusicAuthorize: () -> Unit = {},
+    onAppleMusicDisconnect: () -> Unit = {},
     onListenBrainzTokenSubmit: (String) -> Unit,
     onListenBrainzDisconnect: () -> Unit,
     listenBrainzAuthError: String?,
@@ -373,6 +399,7 @@ private fun PlugInsTab(
         return when (id) {
             "spotify" -> spotifyConnected
             "soundcloud" -> soundCloudConnected
+            "applemusic" -> appleMusicConfigured && appleMusicAuthorized
             "lastfm" -> lastFmConnected
             "listenbrainz" -> listenBrainzConnected
             "librefm" -> libreFmConnected
@@ -529,6 +556,7 @@ private fun PlugInsTab(
                 when (plugin.id) {
                     "spotify" -> onSpotifyToggle()
                     "soundcloud" -> if (soundCloudConnected) onSoundCloudDisconnect() else onSoundCloudConnect()
+                    "applemusic" -> if (appleMusicConfigured && appleMusicAuthorized) onAppleMusicDisconnect() else onAppleMusicAuthorize()
                     "lastfm" -> onLastFmToggle()
                     "discogs" -> onMetaProviderToggle("discogs", !isConnected("discogs"))
                     "wikipedia" -> onMetaProviderToggle("wikipedia", !isConnected("wikipedia"))
@@ -541,6 +569,13 @@ private fun PlugInsTab(
             onSoundCloudConnect = onSoundCloudConnect,
             onSoundCloudDisconnect = onSoundCloudDisconnect,
             onSoundCloudClearCredentials = onSoundCloudClearCredentials,
+            appleMusicHasToken = appleMusicHasToken,
+            appleMusicConfigured = appleMusicConfigured,
+            appleMusicAuthorized = appleMusicAuthorized,
+            onAppleMusicSaveToken = onAppleMusicSaveToken,
+            onAppleMusicSaveStorefront = onAppleMusicSaveStorefront,
+            onAppleMusicAuthorize = onAppleMusicAuthorize,
+            onAppleMusicDisconnect = onAppleMusicDisconnect,
             onListenBrainzTokenSubmit = onListenBrainzTokenSubmit,
             onListenBrainzDisconnect = onListenBrainzDisconnect,
             listenBrainzAuthError = listenBrainzAuthError,
@@ -756,6 +791,13 @@ private fun PluginConfigSheet(
     onSoundCloudConnect: () -> Unit = {},
     onSoundCloudDisconnect: () -> Unit = {},
     onSoundCloudClearCredentials: () -> Unit = {},
+    appleMusicHasToken: Boolean = false,
+    appleMusicConfigured: Boolean = false,
+    appleMusicAuthorized: Boolean = false,
+    onAppleMusicSaveToken: (String) -> Unit = {},
+    onAppleMusicSaveStorefront: (String) -> Unit = {},
+    onAppleMusicAuthorize: () -> Unit = {},
+    onAppleMusicDisconnect: () -> Unit = {},
     onListenBrainzTokenSubmit: (String) -> Unit = {},
     onListenBrainzDisconnect: () -> Unit = {},
     listenBrainzAuthError: String? = null,
@@ -884,6 +926,15 @@ private fun PluginConfigSheet(
                     onConnect = onSoundCloudConnect,
                     onDisconnect = onSoundCloudDisconnect,
                     onClearCredentials = onSoundCloudClearCredentials,
+                )
+                "applemusic" -> AppleMusicConfig(
+                    hasToken = appleMusicHasToken,
+                    configured = appleMusicConfigured,
+                    authorized = appleMusicAuthorized,
+                    onSaveToken = onAppleMusicSaveToken,
+                    onSaveStorefront = onAppleMusicSaveStorefront,
+                    onAuthorize = onAppleMusicAuthorize,
+                    onDisconnect = onAppleMusicDisconnect,
                 )
                 "local-files" -> LocalFilesConfig()
                 "lastfm" -> LastFmConfig(isConnected, onToggleConnection, scrobbling, onScrobblingChanged)
@@ -1153,6 +1204,164 @@ private fun SoundCloudConfig(
                 )
             }
         }
+    }
+}
+
+// ── Apple Music Config ─────────────────────────────────────────────
+
+@Composable
+private fun AppleMusicConfig(
+    hasToken: Boolean,
+    configured: Boolean,
+    authorized: Boolean,
+    onSaveToken: (String) -> Unit,
+    onSaveStorefront: (String) -> Unit,
+    onAuthorize: () -> Unit,
+    onDisconnect: () -> Unit,
+) {
+    Spacer(modifier = Modifier.height(16.dp))
+    HorizontalDivider()
+    Spacer(modifier = Modifier.height(16.dp))
+
+    // Connection status
+    Text(
+        text = "Connection",
+        style = MaterialTheme.typography.bodyMedium,
+        fontWeight = FontWeight.Medium,
+    )
+    Spacer(modifier = Modifier.height(8.dp))
+
+    if (configured && authorized) {
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            Icon(
+                imageVector = Icons.Filled.Check,
+                contentDescription = null,
+                tint = Success,
+                modifier = Modifier.size(16.dp),
+            )
+            Spacer(modifier = Modifier.width(8.dp))
+            Text(
+                text = "Connected",
+                style = MaterialTheme.typography.bodySmall,
+                color = Success,
+            )
+        }
+        Spacer(modifier = Modifier.height(12.dp))
+        TextButton(onClick = onDisconnect) {
+            Text("Disconnect", color = MaterialTheme.colorScheme.error)
+        }
+    } else if (hasToken && configured && !authorized) {
+        Text(
+            text = "MusicKit configured. Sign in with your Apple ID to authorize.",
+            style = MaterialTheme.typography.bodySmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+        )
+        Spacer(modifier = Modifier.height(12.dp))
+        TextButton(onClick = onAuthorize) {
+            Text("Sign In", color = MaterialTheme.colorScheme.primary)
+        }
+    } else {
+        Text(
+            text = if (!hasToken) "Enter developer token to enable"
+            else "Configuring MusicKit…",
+            style = MaterialTheme.typography.bodySmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+        )
+    }
+
+    Spacer(modifier = Modifier.height(16.dp))
+    HorizontalDivider()
+    Spacer(modifier = Modifier.height(16.dp))
+
+    // Developer Token
+    Text(
+        text = "Developer Token",
+        style = MaterialTheme.typography.bodyMedium,
+        fontWeight = FontWeight.Medium,
+    )
+    Spacer(modifier = Modifier.height(8.dp))
+
+    var tokenInput by remember { mutableStateOf("") }
+
+    OutlinedTextField(
+        value = tokenInput,
+        onValueChange = { tokenInput = it },
+        label = { Text("Developer Token") },
+        placeholder = { Text("Enter your MusicKit developer token") },
+        singleLine = true,
+        visualTransformation = PasswordVisualTransformation(),
+        modifier = Modifier.fillMaxWidth(),
+    )
+    Spacer(modifier = Modifier.height(12.dp))
+
+    TextButton(
+        onClick = {
+            if (tokenInput.isNotBlank()) {
+                onSaveToken(tokenInput.trim())
+                tokenInput = ""
+            }
+        },
+        enabled = tokenInput.isNotBlank(),
+    ) {
+        Text("Save Token", color = MaterialTheme.colorScheme.primary)
+    }
+
+    if (hasToken) {
+        Spacer(modifier = Modifier.height(4.dp))
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            Icon(
+                imageVector = Icons.Filled.Check,
+                contentDescription = null,
+                tint = Success,
+                modifier = Modifier.size(14.dp),
+            )
+            Spacer(modifier = Modifier.width(6.dp))
+            Text(
+                text = "Developer token saved",
+                style = MaterialTheme.typography.bodySmall,
+                color = Success,
+            )
+        }
+    }
+
+    Spacer(modifier = Modifier.height(16.dp))
+    HorizontalDivider()
+    Spacer(modifier = Modifier.height(16.dp))
+
+    // Storefront
+    Text(
+        text = "Storefront",
+        style = MaterialTheme.typography.bodyMedium,
+        fontWeight = FontWeight.Medium,
+    )
+    Spacer(modifier = Modifier.height(8.dp))
+
+    var storefrontInput by remember { mutableStateOf("") }
+
+    OutlinedTextField(
+        value = storefrontInput,
+        onValueChange = { storefrontInput = it },
+        label = { Text("Storefront") },
+        placeholder = { Text("us") },
+        singleLine = true,
+        modifier = Modifier.fillMaxWidth(),
+    )
+    Spacer(modifier = Modifier.height(8.dp))
+    Text(
+        text = "Country code for the Apple Music catalog (default: us)",
+        style = MaterialTheme.typography.bodySmall,
+        color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.6f),
+    )
+    Spacer(modifier = Modifier.height(12.dp))
+
+    TextButton(
+        onClick = {
+            val value = storefrontInput.trim().ifBlank { "us" }
+            onSaveStorefront(value)
+            storefrontInput = ""
+        },
+    ) {
+        Text("Save Storefront", color = MaterialTheme.colorScheme.primary)
     }
 }
 

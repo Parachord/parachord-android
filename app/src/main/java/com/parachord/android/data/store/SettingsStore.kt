@@ -347,12 +347,22 @@ class SettingsStore @Inject constructor(
 
     // --- Apple Music ---
 
+    fun getAppleMusicDeveloperTokenFlow(): Flow<String?> =
+        dataStore.data.map { it[APPLE_MUSIC_DEVELOPER_TOKEN]?.ifBlank { null } }
+
     suspend fun getAppleMusicDeveloperToken(): String? =
         dataStore.data.first()[APPLE_MUSIC_DEVELOPER_TOKEN]?.ifBlank { null }
 
     suspend fun setAppleMusicDeveloperToken(token: String) {
         dataStore.edit { it[APPLE_MUSIC_DEVELOPER_TOKEN] = token }
     }
+
+    suspend fun clearAppleMusicDeveloperToken() {
+        dataStore.edit { it.remove(APPLE_MUSIC_DEVELOPER_TOKEN) }
+    }
+
+    fun getAppleMusicStorefrontFlow(): Flow<String?> =
+        dataStore.data.map { it[APPLE_MUSIC_STOREFRONT]?.ifBlank { null } }
 
     suspend fun getAppleMusicStorefront(): String? =
         dataStore.data.first()[APPLE_MUSIC_STOREFRONT]?.ifBlank { null }

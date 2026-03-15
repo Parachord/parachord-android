@@ -7,6 +7,7 @@ import com.parachord.android.auth.OAuthManager
 import com.parachord.android.data.api.ListenBrainzApi
 import com.parachord.android.data.store.SettingsStore
 import com.parachord.android.playback.QueuePersistence
+import com.parachord.android.playback.handlers.MusicKitWebBridge
 import com.parachord.android.playback.scrobbler.LibreFmScrobbler
 import dagger.hilt.android.lifecycle.HiltViewModel
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -24,6 +25,7 @@ class SettingsViewModel @Inject constructor(
     private val queuePersistence: QueuePersistence,
     private val libreFmScrobbler: LibreFmScrobbler,
     private val listenBrainzApi: ListenBrainzApi,
+    private val musicKitBridge: MusicKitWebBridge,
 ) : ViewModel() {
 
     val themeMode: StateFlow<String> = settingsStore.themeMode
@@ -110,6 +112,37 @@ class SettingsViewModel @Inject constructor(
 
     fun disconnectLastFm() {
         viewModelScope.launch { settingsStore.clearLastFmSession() }
+    }
+
+    // --- Apple Music ---
+
+    val appleMusicDeveloperToken: StateFlow<String?> = settingsStore.getAppleMusicDeveloperTokenFlow()
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), null)
+
+    val appleMusicStorefront: StateFlow<String?> = settingsStore.getAppleMusicStorefrontFlow()
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), null)
+
+    val appleMusicConfigured: StateFlow<Boolean> = musicKitBridge.configured
+
+    val appleMusicAuthorized: StateFlow<Boolean> = musicKitBridge.authorized
+
+    fun setAppleMusicDeveloperToken(token: String) {
+        viewModelScope.launch {
+            settingsStore.setAppleMusicDeveloperToken(token)
+            musicKitBridge.configure()
+        }
+    }
+
+    fun setAppleMusicStorefront(storefront: String) {
+        viewModelScope.launch { settingsStore.setAppleMusicStorefront(storefront) }
+    }
+
+    fun authorizeAppleMusic() {
+        viewModelScope.launch { musicKitBridge.authorize() }
+    }
+
+    fun disconnectAppleMusic() {
+        viewModelScope.launch { settingsStore.clearAppleMusicDeveloperToken() }
     }
 
     // --- SoundCloud ---
