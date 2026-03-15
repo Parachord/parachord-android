@@ -8,9 +8,7 @@ import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
-import androidx.compose.foundation.gestures.Orientation
-import androidx.compose.foundation.gestures.draggable
-import androidx.compose.foundation.gestures.rememberDraggableState
+import androidx.compose.foundation.gestures.detectHorizontalDragGestures
 import androidx.compose.foundation.isSystemInDarkTheme
 import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.foundation.layout.Arrangement
@@ -24,6 +22,7 @@ import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.material3.DrawerValue
 import androidx.compose.material3.Icon
@@ -35,7 +34,6 @@ import androidx.compose.material3.rememberDrawerState
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
-import androidx.compose.runtime.mutableFloatStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
@@ -49,6 +47,7 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.input.nestedscroll.NestedScrollConnection
 import androidx.compose.ui.input.nestedscroll.NestedScrollSource
 import androidx.compose.ui.input.nestedscroll.nestedScroll
+import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.unit.Velocity
@@ -213,13 +212,13 @@ private fun ParachordAppContent(mainViewModel: MainViewModel) {
         }
     }
 
-    // NestedScrollConnection: catches HorizontalPager boundary overscroll on tab screens
+    // NestedScrollConnection: catches HorizontalPager boundary overscroll on tab screens.
+    // Left overscroll (swipe right) → open drawer; right overscroll (swipe left) → open chat.
     val overscrollConnection = remember(onOpenDrawer, onOpenChat) {
         object : NestedScrollConnection {
             private var accumulatedX = 0f
 
             override fun onPreScroll(available: Offset, source: NestedScrollSource): Offset {
-                // Reset accumulator at start of new gesture direction
                 if (available.x != 0f && (available.x > 0f) != (accumulatedX > 0f)) {
                     accumulatedX = 0f
                 }
@@ -250,17 +249,14 @@ private fun ParachordAppContent(mainViewModel: MainViewModel) {
         }
     }
 
-    // Draggable state for non-tab screens (dispatches horizontal nested scroll)
+    // Right-edge swipe threshold for opening chat
     val density = LocalDensity.current
-    val swipeThresholdPx = with(density) { 80.dp.toPx() }
-    var dragAccumulator by remember { mutableFloatStateOf(0f) }
-    val draggableState = rememberDraggableState { delta ->
-        dragAccumulator += delta
-    }
+    val edgeSwipeThresholdPx = with(density) { 60.dp.toPx() }
 
     Box(modifier = Modifier.fillMaxSize()) {
         ModalNavigationDrawer(
             drawerState = drawerState,
+            gesturesEnabled = showBottomBar, // Disable drawer swipe on full-screen routes
             drawerContent = {
                 ModalDrawerSheet {
                     DrawerContent(
@@ -388,17 +384,7 @@ private fun ParachordAppContent(mainViewModel: MainViewModel) {
                 Box(
                     modifier = Modifier
                         .padding(innerPadding)
-                        .nestedScroll(overscrollConnection)
-                        .draggable(
-                            state = draggableState,
-                            orientation = Orientation.Horizontal,
-                            onDragStarted = { dragAccumulator = 0f },
-                            onDragStopped = {
-                                if (dragAccumulator > swipeThresholdPx) onOpenDrawer()
-                                else if (dragAccumulator < -swipeThresholdPx) onOpenChat()
-                                dragAccumulator = 0f
-                            },
-                        ),
+                        .nestedScroll(overscrollConnection),
                 ) {
                     ParachordNavHost(
                         navController = navController,
@@ -410,6 +396,33 @@ private fun ParachordAppContent(mainViewModel: MainViewModel) {
                         listenAlongFriend = listenAlongFriend,
                         onStopListenAlong = { mainViewModel.stopListenAlong() },
                     )
+
+                    // Right-edge swipe zone — swipe left from the right edge to open chat.
+                    // The ModalNavigationDrawer handles left-edge swipe for the sidebar.
+                    if (showBottomBar) {
+                        Box(
+                            modifier = Modifier
+                                .align(Alignment.CenterEnd)
+                                .width(24.dp)
+                                .fillMaxHeight()
+                                .pointerInput(onOpenChat) {
+                                    var accumulated = 0f
+                                    detectHorizontalDragGestures(
+                                        onDragStart = { accumulated = 0f },
+                                        onDragEnd = {
+                                            if (accumulated < -edgeSwipeThresholdPx) {
+                                                onOpenChat()
+                                            }
+                                            accumulated = 0f
+                                        },
+                                        onDragCancel = { accumulated = 0f },
+                                        onHorizontalDrag = { _, dragAmount ->
+                                            accumulated += dragAmount
+                                        },
+                                    )
+                                },
+                        )
+                    }
                 }
             }
         }
