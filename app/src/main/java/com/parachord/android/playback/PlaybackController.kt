@@ -140,6 +140,7 @@ class PlaybackController @Inject constructor(
         positionUpdateJob?.cancel()
         spotifyStateJob?.cancel()
         appleMusicPollingJob?.cancel()
+        if (isExternalPlayback) sendExternalPlaybackStop()
         controllerFuture?.let { MediaController.releaseFuture(it) }
         controllerFuture = null
         controller = null
@@ -215,6 +216,7 @@ class PlaybackController @Inject constructor(
             Log.d(TAG, "skipNext: queue empty, stopping playback")
             if (isExternalPlayback) {
                 scope.launch { router.stopExternalPlayback() }
+                sendExternalPlaybackStop()
                 isExternalPlayback = false
             }
             stateHolder.update { copy(isPlaying = false) }
@@ -364,6 +366,7 @@ class PlaybackController @Inject constructor(
 
         when (action) {
             is PlaybackAction.ExoPlayerItem -> {
+                if (isExternalPlayback) sendExternalPlaybackStop()
                 isExternalPlayback = false
                 stopSpotifyStatePolling()
                 stopAppleMusicStatePolling()
@@ -430,6 +433,9 @@ class PlaybackController @Inject constructor(
 
                 action.handler.play(routedTrack)
 
+                // Promote the service to foreground so Android doesn't kill it
+                sendExternalPlaybackStart(routedTrack)
+
                 // Start the appropriate state polling based on the handler type
                 when (action.handler) {
                     is AppleMusicPlaybackHandler ->
@@ -452,6 +458,7 @@ class PlaybackController @Inject constructor(
     /** Fallback: play directly via ExoPlayer when no handler matches. */
     private fun playViaExoPlayer(track: TrackEntity) {
         val ctrl = controller ?: return
+        if (isExternalPlayback) sendExternalPlaybackStop()
         isExternalPlayback = false
         stopSpotifyStatePolling()
         stopAppleMusicStatePolling()

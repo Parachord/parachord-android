@@ -13,6 +13,7 @@ import androidx.core.app.ServiceCompat
 import androidx.media3.common.AudioAttributes
 import androidx.media3.common.C
 import androidx.media3.exoplayer.ExoPlayer
+import androidx.media3.session.DefaultMediaNotificationProvider
 import androidx.media3.session.MediaSession
 import androidx.media3.session.MediaSessionService
 import com.parachord.android.R
@@ -58,6 +59,17 @@ class PlaybackService : MediaSessionService() {
         super.onCreate()
 
         createNotificationChannel()
+
+        // Use the Parachord logo for the media notification instead of
+        // Media3's default ExoPlayer icon.
+        setMediaNotificationProvider(
+            DefaultMediaNotificationProvider.Builder(this)
+                .setNotificationId(1337)
+                .setChannelId(CHANNEL_ID)
+                .setChannelName(R.string.app_name)
+                .build()
+                .apply { setSmallIcon(R.drawable.ic_notification) }
+        )
 
         val audioAttributes = AudioAttributes.Builder()
             .setUsage(C.USAGE_MEDIA)
