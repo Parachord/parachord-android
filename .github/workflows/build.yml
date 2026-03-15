@@ -1,0 +1,45 @@
+name: Build APK
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up JDK 17
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: 17
+
+      - name: Setup Gradle
+        uses: gradle/actions/setup-gradle@v4
+
+      - name: Create local.properties
+        run: |
+          cat <<EOF > local.properties
+          LASTFM_API_KEY=${{ secrets.LASTFM_API_KEY }}
+          LASTFM_SHARED_SECRET=${{ secrets.LASTFM_SHARED_SECRET }}
+          SPOTIFY_CLIENT_ID=${{ secrets.SPOTIFY_CLIENT_ID }}
+          SOUNDCLOUD_CLIENT_ID=${{ secrets.SOUNDCLOUD_CLIENT_ID }}
+          SOUNDCLOUD_CLIENT_SECRET=${{ secrets.SOUNDCLOUD_CLIENT_SECRET }}
+          APPLE_MUSIC_DEVELOPER_TOKEN=${{ secrets.APPLE_MUSIC_DEVELOPER_TOKEN }}
+          EOF
+
+      - name: Build debug APK
+        run: ./gradlew assembleDebug
+
+      - name: Upload APK artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: parachord-debug
+          path: app/build/outputs/apk/debug/*.apk
+          retention-days: 14
