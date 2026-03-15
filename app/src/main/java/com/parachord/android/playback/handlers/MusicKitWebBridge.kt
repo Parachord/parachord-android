@@ -452,6 +452,25 @@ class MusicKitWebBridge @Inject constructor(
     fun getDuration(): Long = _duration.value
     fun getIsPlaying(): Boolean = _isPlaying.value
 
+    /**
+     * Actively poll playback state from JS.
+     * The playbackStateDidChange event only fires on state transitions
+     * (play→pause, loading→playing), NOT continuously during playback.
+     * This method evaluates getPlaybackState() in JS to get fresh
+     * position/duration values for the progress bar.
+     */
+    suspend fun pollPlaybackState() {
+        val result = evaluate("getPlaybackState()") ?: return
+        try {
+            val state = json.decodeFromString<MusicKitPlaybackState>(cleanJsString(result))
+            _isPlaying.value = state.isPlaying
+            _position.value = state.position.toLong()
+            _duration.value = state.duration.toLong()
+        } catch (e: Exception) {
+            Log.w(TAG, "Failed to parse polled playback state: $result", e)
+        }
+    }
+
     // ── JS Interface (JS -> Kotlin callbacks) ─────────────────────
 
     inner class MusicKitJsInterface {

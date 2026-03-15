@@ -539,6 +539,11 @@ class PlaybackController @Inject constructor(
             // Small initial delay to let the track start
             delay(1000)
             while (isActive && isExternalPlayback) {
+                // Actively poll JS for fresh position/duration — the
+                // playbackStateDidChange event only fires on state transitions,
+                // not continuously during playback.
+                handler.musicKitBridge.pollPlaybackState()
+
                 val position = handler.getPosition()
                 val duration = handler.getDuration()
                 val playing = handler.isPlaying()
