@@ -545,9 +545,18 @@ class PlaybackController @Inject constructor(
         acquireExternalPlaybackWakeLock()
         val handler = router.getAppleMusicHandler()
 
+        // Guard against multiple end-of-track signals arriving from different
+        // detection paths (JS playbackStateDidChange, JS mediaItemDidEndPlaying,
+        // or the polling safety net). Without this, concurrent signals would
+        // call skipNextInternal() multiple times, skipping tracks in the queue.
+        val trackEndHandled = java.util.concurrent.atomic.AtomicBoolean(false)
+
         // Register track-ended callback from MusicKit JS
         handler.musicKitBridge.onTrackEnded = {
-            scope.launch { skipNextInternal(userInitiated = false) }
+            if (trackEndHandled.compareAndSet(false, true)) {
+                Log.d(TAG, "Apple Music track ended (JS callback)")
+                scope.launch { skipNextInternal(userInitiated = false) }
+            }
         }
 
         appleMusicPollingJob = scope.launch {
@@ -572,7 +581,7 @@ class PlaybackController @Inject constructor(
                 }
 
                 // Safety-net track completion detection
-                if (handler.isOurTrackDone()) {
+                if (handler.isOurTrackDone() && trackEndHandled.compareAndSet(false, true)) {
                     Log.d(TAG, "Apple Music track done (safety net)")
                     skipNextInternal(userInitiated = false)
                     break

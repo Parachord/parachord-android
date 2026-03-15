@@ -237,6 +237,16 @@
             if (window.MusicKitBridge) {
                 MusicKitBridge.onPlaybackStateChange(json);
             }
+            // Detect track completion — MusicKit JS v3 transitions to
+            // "ended" (or "completed") state when a track finishes.
+            // The "mediaItemDidEndPlaying" event is iOS-only and does not
+            // exist in MusicKit JS, so this is the reliable path.
+            if (state === MusicKit.PlaybackStates.ended ||
+                state === MusicKit.PlaybackStates.completed) {
+                if (window.MusicKitBridge) {
+                    MusicKitBridge.onTrackEnded(JSON.stringify({ ended: true }));
+                }
+            }
         });
 
         music.addEventListener('authorizationStatusDidChange', function(event) {
