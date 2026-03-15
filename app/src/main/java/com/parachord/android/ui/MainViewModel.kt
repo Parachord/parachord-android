@@ -24,6 +24,7 @@ import com.parachord.android.playback.PlaybackController
 import com.parachord.android.playback.handlers.MusicKitWebBridge
 import com.parachord.android.playback.PlaybackState
 import com.parachord.android.playback.PlaybackStateHolder
+import com.parachord.android.playback.effectiveTrack
 import dagger.hilt.android.lifecycle.HiltViewModel
 import dagger.hilt.android.qualifiers.ApplicationContext
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -59,10 +60,11 @@ class MainViewModel @Inject constructor(
 
     val playbackState: StateFlow<PlaybackState> = playbackStateHolder.state
 
-    /** Whether the currently playing track is in the user's collection. */
+    /** Whether the currently playing track is in the user's collection.
+     *  Uses [effectiveTrack] so it reflects the actual streaming metadata. */
     @OptIn(kotlinx.coroutines.ExperimentalCoroutinesApi::class)
     val isCurrentTrackFavorited: StateFlow<Boolean> = playbackStateHolder.state
-        .map { it.currentTrack }
+        .map { it.effectiveTrack }
         .flatMapLatest { track ->
             if (track != null) {
                 libraryRepository.isTrackInCollection(track.title, track.artist)
@@ -114,9 +116,10 @@ class MainViewModel @Inject constructor(
         playbackController.skipNext()
     }
 
-    /** Toggle the current track's collection status (heart/favorite). */
+    /** Toggle the current track's collection status (heart/favorite).
+     *  Uses [effectiveTrack] so it saves/removes the actual streaming track. */
     fun toggleCurrentTrackFavorite() {
-        val track = playbackState.value.currentTrack ?: return
+        val track = playbackState.value.effectiveTrack ?: return
         viewModelScope.launch {
             if (isCurrentTrackFavorited.value) {
                 libraryRepository.deleteTrackWithSync(track)

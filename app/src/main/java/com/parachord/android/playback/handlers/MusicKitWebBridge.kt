@@ -95,6 +95,16 @@ class MusicKitWebBridge @Inject constructor(
     /** Callback invoked when the current track finishes playing (for auto-advance). */
     var onTrackEnded: (() -> Unit)? = null
 
+    // Actual track metadata from MusicKit JS (what's REALLY playing)
+    /** Title of the track MusicKit reports as currently playing. */
+    var actualTitle: String? = null; private set
+    /** Artist of the track MusicKit reports as currently playing. */
+    var actualArtist: String? = null; private set
+    /** Album name of the track MusicKit reports as currently playing. */
+    var actualAlbum: String? = null; private set
+    /** Album artwork URL of the track MusicKit reports as currently playing. */
+    var actualArtworkUrl: String? = null; private set
+
     /** Emitted when playback requires Apple ID sign-in. UI should prompt the user. */
     private val _signInRequired = MutableSharedFlow<Unit>(extraBufferCapacity = 1)
     val signInRequired: SharedFlow<Unit> = _signInRequired.asSharedFlow()
@@ -526,6 +536,11 @@ class MusicKitWebBridge @Inject constructor(
     /** Play a song by Apple Music catalog ID. Returns true on success. */
     suspend fun play(songId: String): Boolean {
         musicKitReady.await()
+        // Clear actual metadata until MusicKit reports what's really playing
+        actualTitle = null
+        actualArtist = null
+        actualAlbum = null
+        actualArtworkUrl = null
         val escaped = songId.replace("'", "\\'")
         val result = evaluate("play('$escaped')") ?: return false
         return parseSuccessResponse(result)
@@ -626,6 +641,15 @@ class MusicKitWebBridge @Inject constructor(
         @JavascriptInterface
         fun onNowPlayingChange(jsonStr: String) {
             Log.d(TAG, "Now playing change: $jsonStr")
+            try {
+                val data = json.decodeFromString<MusicKitNowPlayingInfo>(jsonStr)
+                actualTitle = data.title
+                actualArtist = data.artist
+                actualAlbum = data.album
+                actualArtworkUrl = data.artworkUrl
+            } catch (e: Exception) {
+                Log.w(TAG, "Failed to parse now playing change: ${e.message}")
+            }
         }
 
         @JavascriptInterface
@@ -778,5 +802,15 @@ class MusicKitWebBridge @Inject constructor(
     data class MusicKitAuthState(
         val configured: Boolean = false,
         val authorized: Boolean = false,
+    )
+
+    @Serializable
+    private data class MusicKitNowPlayingInfo(
+        val id: String? = null,
+        val title: String? = null,
+        val artist: String? = null,
+        val album: String? = null,
+        val duration: Long? = null,
+        val artworkUrl: String? = null,
     )
 }

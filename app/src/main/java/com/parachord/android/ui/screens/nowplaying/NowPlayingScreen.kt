@@ -57,6 +57,7 @@ import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.Headphones
 import com.parachord.android.data.db.entity.FriendEntity
+import com.parachord.android.playback.effectiveTrack
 import com.parachord.android.ui.components.AlbumArtCardFill
 import com.parachord.android.ui.components.ResolverIconSquare
 import com.parachord.android.ui.components.TrackContextInfo
@@ -269,9 +270,13 @@ fun NowPlayingScreen(
 
                 Spacer(modifier = Modifier.height(16.dp))
 
+                // Use streaming source artwork when available (higher quality, confirms actual track)
+                val streamingMeta = playbackState.streamingMetadata
+                val displayArtworkUrl = streamingMeta?.artworkUrl ?: track?.artworkUrl
+
                 // Large album artwork — tap to open album page
                 AlbumArtCardFill(
-                    artworkUrl = track?.artworkUrl,
+                    artworkUrl = displayArtworkUrl,
                     modifier = Modifier
                         .fillMaxWidth(0.85f)
                         .padding(horizontal = 8.dp)
@@ -289,13 +294,17 @@ fun NowPlayingScreen(
 
                 Spacer(modifier = Modifier.height(32.dp))
 
-                // Track info
+                // Display actual streaming metadata when available, fall back to queued track
+                val displayTitle = streamingMeta?.title ?: track?.title ?: "No track playing"
+                val displayArtist = streamingMeta?.artist ?: track?.artist ?: ""
+                val displayAlbum = streamingMeta?.album ?: track?.album
+
                 Column(
                     modifier = Modifier.padding(horizontal = 32.dp),
                     horizontalAlignment = Alignment.CenterHorizontally,
                 ) {
                     Text(
-                        text = track?.title ?: "No track playing",
+                        text = displayTitle,
                         style = MaterialTheme.typography.titleLarge,
                         fontWeight = FontWeight.SemiBold,
                         color = PlayerTextPrimary,
@@ -305,29 +314,29 @@ fun NowPlayingScreen(
                     )
                     Spacer(modifier = Modifier.height(4.dp))
                     Text(
-                        text = track?.artist ?: "",
+                        text = displayArtist,
                         style = MaterialTheme.typography.bodyLarge,
                         color = PlayerTextSecondary,
                         textAlign = TextAlign.Center,
                         maxLines = 1,
                         overflow = TextOverflow.Ellipsis,
-                        modifier = if (track?.artist != null) {
-                            Modifier.clickable { onNavigateToArtist(track.artist) }
+                        modifier = if (displayArtist.isNotBlank()) {
+                            Modifier.clickable { onNavigateToArtist(displayArtist) }
                         } else Modifier,
                     )
 
                     // Album name (tappable to navigate)
-                    if (!track?.album.isNullOrBlank() && track?.artist?.isNotBlank() == true) {
+                    if (!displayAlbum.isNullOrBlank() && displayArtist.isNotBlank()) {
                         Spacer(modifier = Modifier.height(2.dp))
                         Text(
-                            text = track!!.album,
+                            text = displayAlbum,
                             style = MaterialTheme.typography.bodySmall,
                             color = PlayerTextSecondary.copy(alpha = 0.7f),
                             textAlign = TextAlign.Center,
                             maxLines = 1,
                             overflow = TextOverflow.Ellipsis,
                             modifier = Modifier.clickable {
-                                onNavigateToAlbum(track.album, track.artist)
+                                onNavigateToAlbum(displayAlbum, displayArtist)
                             },
                         )
                     }
@@ -451,18 +460,21 @@ fun NowPlayingScreen(
                     Spacer(modifier = Modifier.weight(1f))
 
                     // Context menu (•••) button — opens track actions
+                    // Uses effectiveTrack so actions (add to playlist, collection, etc.)
+                    // reflect the actual streaming track metadata
                     IconButton(
                         onClick = {
-                            if (track != null) {
+                            val effective = playbackState.effectiveTrack
+                            if (effective != null) {
                                 contextMenuState.show(
                                     TrackContextInfo(
-                                        title = track.title,
-                                        artist = track.artist,
-                                        album = track.album,
-                                        artworkUrl = track.artworkUrl,
-                                        duration = track.duration,
+                                        title = effective.title,
+                                        artist = effective.artist,
+                                        album = effective.album,
+                                        artworkUrl = effective.artworkUrl,
+                                        duration = effective.duration,
                                     ),
-                                    track,
+                                    effective,
                                 )
                             }
                         },

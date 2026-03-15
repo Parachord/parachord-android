@@ -385,6 +385,7 @@ class PlaybackController @Inject constructor(
                         upNext = snapshot.upNext,
                         playbackContext = snapshot.playbackContext,
                         shuffleEnabled = snapshot.shuffleEnabled,
+                        streamingMetadata = null, // ExoPlayer = no external source mismatch
                     )
                 }
             }
@@ -428,6 +429,7 @@ class PlaybackController @Inject constructor(
                         upNext = snapshot.upNext,
                         playbackContext = snapshot.playbackContext,
                         shuffleEnabled = snapshot.shuffleEnabled,
+                        streamingMetadata = null, // Reset until polling confirms actual metadata
                     )
                 }
 
@@ -478,6 +480,7 @@ class PlaybackController @Inject constructor(
                 upNext = snapshot.upNext,
                 playbackContext = snapshot.playbackContext,
                 shuffleEnabled = snapshot.shuffleEnabled,
+                streamingMetadata = null, // ExoPlayer = no external source mismatch
             )
         }
         enrichArtworkIfMissing(track)
@@ -575,11 +578,21 @@ class PlaybackController @Inject constructor(
                 val position = spotify.getPosition()
                 val duration = spotify.getDuration()
 
+                // Build streaming metadata from what Spotify reports is actually playing
+                val streamingMeta = buildStreamingMetadata(
+                    queuedTrack = stateHolder.state.value.currentTrack,
+                    actualTitle = spotify.actualTitle,
+                    actualArtist = spotify.actualArtist,
+                    actualAlbum = spotify.actualAlbum,
+                    actualArtworkUrl = spotify.actualArtworkUrl,
+                )
+
                 stateHolder.update {
                     copy(
                         isPlaying = playing,
                         position = position,
                         duration = duration,
+                        streamingMetadata = streamingMeta,
                     )
                 }
 
@@ -639,11 +652,21 @@ class PlaybackController @Inject constructor(
                 val duration = handler.getDuration()
                 val playing = handler.isPlaying()
 
+                // Build streaming metadata from what MusicKit reports is actually playing
+                val streamingMeta = buildStreamingMetadata(
+                    queuedTrack = stateHolder.state.value.currentTrack,
+                    actualTitle = handler.musicKitBridge.actualTitle,
+                    actualArtist = handler.musicKitBridge.actualArtist,
+                    actualAlbum = handler.musicKitBridge.actualAlbum,
+                    actualArtworkUrl = handler.musicKitBridge.actualArtworkUrl,
+                )
+
                 stateHolder.update {
                     copy(
                         isPlaying = playing,
                         position = position,
                         duration = duration,
+                        streamingMetadata = streamingMeta,
                     )
                 }
 
@@ -916,6 +939,30 @@ class PlaybackController @Inject constructor(
             spotifyId = best.spotifyId ?: track.spotifyId,
             soundcloudId = best.soundcloudId ?: track.soundcloudId,
             appleMusicId = best.appleMusicId ?: track.appleMusicId,
+        )
+    }
+
+    /**
+     * Build [StreamingMetadata] from what the streaming source reports is actually playing.
+     * The Now Playing screen uses this to display actual track info (title, artist, album,
+     * artwork) directly from the source — so the user always sees what's really streaming.
+     *
+     * Returns null only when actual metadata isn't available yet (polling hasn't started).
+     */
+    private fun buildStreamingMetadata(
+        queuedTrack: TrackEntity?,
+        actualTitle: String?,
+        actualArtist: String?,
+        actualAlbum: String?,
+        actualArtworkUrl: String?,
+    ): StreamingMetadata? {
+        if (queuedTrack == null || actualTitle == null) return null
+
+        return StreamingMetadata(
+            title = actualTitle,
+            artist = actualArtist,
+            album = actualAlbum,
+            artworkUrl = actualArtworkUrl,
         )
     }
 

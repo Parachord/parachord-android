@@ -15,6 +15,46 @@ data class PlaybackState(
     val spinoffMode: Boolean = false,
     val spinoffLoading: Boolean = false,
     val spinoffAvailable: Boolean? = null, // null=unchecked, true/false=checked
+    /**
+     * Actual metadata from the streaming source (Spotify / Apple Music).
+     * When non-null, the streaming service reported different track info than
+     * what we queued — indicates a low-confidence match or mismatched track.
+     * Null when playback is via ExoPlayer (local/SoundCloud) since metadata
+     * always matches, or when the streaming source confirms the queued track.
+     */
+    val streamingMetadata: StreamingMetadata? = null,
 )
+
+/**
+ * Actual metadata reported by the streaming source (Spotify Connect / Apple Music MusicKit).
+ * Used to verify that the track playing is what we expected. When it differs from
+ * [PlaybackState.currentTrack], the UI shows the actual streaming info.
+ */
+data class StreamingMetadata(
+    val title: String? = null,
+    val artist: String? = null,
+    val album: String? = null,
+    val artworkUrl: String? = null,
+)
+
+/**
+ * The "effective" track that represents what's actually playing.
+ * Overlays streaming metadata (from Spotify/Apple Music) onto the queued [TrackEntity],
+ * so actions like favorite, add-to-playlist, and scrobble reflect the real track.
+ *
+ * Returns null if no track is playing. If no streaming metadata is available
+ * (ExoPlayer playback), returns [currentTrack] unchanged.
+ */
+val PlaybackState.effectiveTrack: TrackEntity?
+    get() {
+        val track = currentTrack ?: return null
+        val meta = streamingMetadata ?: return track
+        return track.copy(
+            title = meta.title ?: track.title,
+            artist = meta.artist ?: track.artist,
+            album = meta.album ?: track.album,
+            artworkUrl = meta.artworkUrl ?: track.artworkUrl,
+        )
+    }
 
 enum class RepeatMode { OFF, ALL, ONE }

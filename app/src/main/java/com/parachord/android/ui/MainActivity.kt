@@ -410,10 +410,11 @@ private fun ParachordAppContent(mainViewModel: MainViewModel) {
                                 val progress = if (playbackState.duration > 0) {
                                     playbackState.position.toFloat() / playbackState.duration.toFloat()
                                 } else 0f
+                                val streamMeta = playbackState.streamingMetadata
                                 MiniPlayer(
-                                    trackTitle = currentTrack.title,
-                                    artistName = currentTrack.artist,
-                                    artworkUrl = currentTrack.artworkUrl,
+                                    trackTitle = streamMeta?.title ?: currentTrack.title,
+                                    artistName = streamMeta?.artist ?: currentTrack.artist,
+                                    artworkUrl = streamMeta?.artworkUrl ?: currentTrack.artworkUrl,
                                     isPlaying = playbackState.isPlaying,
                                     isFavorited = isCurrentTrackFavorited,
                                     progress = progress,

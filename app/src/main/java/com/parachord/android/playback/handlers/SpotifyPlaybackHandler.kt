@@ -55,6 +55,16 @@ class SpotifyPlaybackHandler @Inject constructor(
     private var cachedDuration = 0L
     private var _isConnected = false
 
+    // Actual track metadata from the Spotify API (what's REALLY playing)
+    /** Title of the track Spotify reports as currently playing. */
+    var actualTitle: String? = null; private set
+    /** Artist of the track Spotify reports as currently playing. */
+    var actualArtist: String? = null; private set
+    /** Album name of the track Spotify reports as currently playing. */
+    var actualAlbum: String? = null; private set
+    /** Album artwork URL of the track Spotify reports as currently playing. */
+    var actualArtworkUrl: String? = null; private set
+
     /** The Spotify track ID we expect to be playing (from the URI we sent to play). */
     private var expectedTrackId: String? = null
     /** The track ID currently reported by the Spotify API. */
@@ -105,6 +115,11 @@ class SpotifyPlaybackHandler @Inject constructor(
             currentItemId = expectedTrackId
             playStartedAt = System.currentTimeMillis()
             pausedByUs = false
+            // Clear actual metadata until polling confirms what's really playing
+            actualTitle = null
+            actualArtist = null
+            actualAlbum = null
+            actualArtworkUrl = null
             lastProgressMs = 0L
             lastPercentComplete = 0f
             consecutivePollFailures = 0
@@ -384,6 +399,17 @@ class SpotifyPlaybackHandler @Inject constructor(
                             // Preserve duration when item becomes null (track just ended)
                             if (state.item?.durationMs != null) {
                                 cachedDuration = state.item.durationMs
+                            }
+
+                            // Capture actual track metadata from Spotify
+                            state.item?.let { item ->
+                                actualTitle = item.name
+                                actualArtist = item.artistName
+                                actualAlbum = item.album?.name
+                                actualArtworkUrl = item.album?.images
+                                    ?.filter { it.url != null }
+                                    ?.sortedByDescending { it.width ?: 0 }
+                                    ?.firstOrNull()?.url
                             }
                         }
                     } else {
