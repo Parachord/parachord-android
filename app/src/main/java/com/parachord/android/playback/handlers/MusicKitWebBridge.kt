@@ -6,12 +6,14 @@ import android.app.AlertDialog
 import android.content.Context
 import android.os.Message
 import android.util.Log
+import android.view.View
 import android.view.ViewGroup
 import android.webkit.CookieManager
 import android.webkit.JavascriptInterface
 import android.webkit.WebChromeClient
 import android.webkit.WebResourceRequest
 import android.webkit.WebResourceResponse
+import android.webkit.PermissionRequest
 import android.webkit.WebView
 import android.webkit.WebViewClient
 import androidx.webkit.WebViewAssetLoader
@@ -131,6 +133,8 @@ class MusicKitWebBridge @Inject constructor(
             settings.mediaPlaybackRequiresUserGesture = false
             settings.javaScriptCanOpenWindowsAutomatically = true
             settings.setSupportMultipleWindows(true)
+            // Hardware acceleration is required for Widevine DRM decryption
+            setLayerType(View.LAYER_TYPE_HARDWARE, null)
             CookieManager.getInstance().setAcceptThirdPartyCookies(this, true)
             addJavascriptInterface(MusicKitJsInterface(), "MusicKitBridge")
             webViewClient = object : WebViewClient() {
@@ -150,6 +154,24 @@ class MusicKitWebBridge @Inject constructor(
             }
             // Handle MusicKit authorize() popup — show Apple ID login in a Dialog
             webChromeClient = object : WebChromeClient() {
+                /**
+                 * Grant protected media ID permission so MusicKit JS can use
+                 * Widevine DRM via EME (Encrypted Media Extensions).
+                 * Without this, EME silently fails and MusicKit falls back
+                 * to 30-second preview playback.
+                 */
+                override fun onPermissionRequest(request: PermissionRequest?) {
+                    request?.let {
+                        Log.d(TAG, "Permission request: ${it.resources.joinToString()}")
+                        if (PermissionRequest.RESOURCE_PROTECTED_MEDIA_ID in it.resources) {
+                            Log.d(TAG, "Granting RESOURCE_PROTECTED_MEDIA_ID for DRM")
+                            it.grant(it.resources)
+                            return
+                        }
+                    }
+                    super.onPermissionRequest(request)
+                }
+
                 @SuppressLint("SetJavaScriptEnabled")
                 override fun onCreateWindow(
                     view: WebView?,
@@ -364,12 +386,33 @@ class MusicKitWebBridge @Inject constructor(
      * Call [setActivity] before this so the auth popup can be shown.
      */
     suspend fun authorize(): Boolean {
+        // First, try silent auth on the existing WebView — cookies from a
+        // previous session may still be valid, avoiding a login popup.
+        if (webView != null && _configured.value) {
+            Log.d(TAG, "Attempting silent authorize on existing WebView")
+            val silentResult = evaluate("authorize()")
+            if (silentResult != null) {
+                try {
+                    val parsed = json.decodeFromString<AuthorizeResponse>(cleanJsString(silentResult))
+                    if (parsed.authorized) {
+                        Log.d(TAG, "Silent authorize succeeded (cookies valid)")
+                        _authorized.value = true
+                        return true
+                    }
+                } catch (e: Exception) {
+                    Log.w(TAG, "Silent authorize parse failed: $silentResult", e)
+                }
+            }
+            Log.d(TAG, "Silent authorize failed, falling back to full re-auth")
+        }
+
+        // Silent auth failed or no WebView — tear down and reinitialize to
+        // ensure clean state for auth popup. MusicKit JS internally tracks
+        // popup state and may refuse to open a second window.open() after
+        // the first popup is dismissed/destroyed.
         if (activityRef?.get() == null) {
             Log.w(TAG, "No activity set — authorize() popup will not be visible")
         }
-        // Tear down and reinitialize to ensure clean state for auth popup.
-        // MusicKit JS internally tracks popup state and may refuse to open
-        // a second window.open() after the first popup is dismissed/destroyed.
         teardown()
         initialize()
         val configured = configure()

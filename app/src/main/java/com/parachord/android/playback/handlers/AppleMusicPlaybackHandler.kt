@@ -2,6 +2,7 @@ package com.parachord.android.playback.handlers
 
 import android.util.Log
 import com.parachord.android.data.db.entity.TrackEntity
+import kotlinx.coroutines.delay
 import javax.inject.Inject
 import javax.inject.Singleton
 
@@ -51,16 +52,29 @@ class AppleMusicPlaybackHandler @Inject constructor(
             }
             hasAuthorizedThisSession = true
         }
-        val success = musicKitBridge.play(songId)
+        var success = musicKitBridge.play(songId)
         if (!success) {
-            // Playback failed — may be an expired user token, try re-authorizing
-            Log.w(TAG, "MusicKit playback failed, attempting re-authorization")
-            hasAuthorizedThisSession = false
-            if (musicKitBridge.authorize()) {
-                hasAuthorizedThisSession = true
-                musicKitBridge.play(songId)
-            } else {
-                musicKitBridge.emitSignInRequired()
+            // Widevine DRM license negotiation can take a moment after auth.
+            // Retry a few times with a short delay before falling back to re-auth.
+            Log.w(TAG, "MusicKit playback failed, retrying after delay (DRM handshake may be in progress)")
+            for (attempt in 1..3) {
+                delay(1000L * attempt)
+                success = musicKitBridge.play(songId)
+                if (success) {
+                    Log.d(TAG, "Play succeeded on retry attempt $attempt")
+                    break
+                }
+            }
+            if (!success) {
+                // Retries exhausted — likely an expired user token, re-authorize
+                Log.w(TAG, "MusicKit playback still failing, attempting re-authorization")
+                hasAuthorizedThisSession = false
+                if (musicKitBridge.authorize()) {
+                    hasAuthorizedThisSession = true
+                    musicKitBridge.play(songId)
+                } else {
+                    musicKitBridge.emitSignInRequired()
+                }
             }
         }
     }
