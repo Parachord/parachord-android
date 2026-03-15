@@ -20,6 +20,7 @@ import com.parachord.android.playback.handlers.AppleMusicPlaybackHandler
 import com.parachord.android.playback.handlers.PlaybackAction
 import com.parachord.android.resolver.ResolverManager
 import com.parachord.android.resolver.ResolverScoring
+import com.parachord.android.widget.MiniPlayerWidgetUpdater
 import dagger.hilt.android.qualifiers.ApplicationContext
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -55,6 +56,7 @@ class PlaybackController @Inject constructor(
     private val lastFmApi: LastFmApi,
     private val resolverManager: ResolverManager,
     private val resolverScoring: ResolverScoring,
+    private val widgetUpdater: MiniPlayerWidgetUpdater,
 ) {
     companion object {
         private const val TAG = "PlaybackController"
@@ -125,6 +127,7 @@ class PlaybackController @Inject constructor(
                 }
                 queuePersistence.startObserving()
                 scrobbleManager.startObserving()
+                widgetUpdater.startObserving()
             }
         }, MoreExecutors.directExecutor())
     }

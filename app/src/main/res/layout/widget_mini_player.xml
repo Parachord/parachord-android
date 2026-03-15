@@ -1,0 +1,110 @@
+<?xml version="1.0" encoding="utf-8"?>
+<RelativeLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    android:id="@+id/widget_root"
+    android:layout_width="match_parent"
+    android:layout_height="match_parent"
+    android:background="@drawable/widget_background"
+    android:padding="12dp">
+
+    <!-- Album art -->
+    <ImageView
+        android:id="@+id/widget_artwork"
+        android:layout_width="48dp"
+        android:layout_height="48dp"
+        android:layout_alignParentStart="true"
+        android:layout_centerVertical="true"
+        android:background="@drawable/widget_art_placeholder"
+        android:clipToOutline="true"
+        android:contentDescription="Album artwork"
+        android:scaleType="centerCrop" />
+
+    <!-- Skip previous button -->
+    <ImageButton
+        android:id="@+id/widget_skip_previous"
+        android:layout_width="40dp"
+        android:layout_height="40dp"
+        android:layout_alignParentEnd="true"
+        android:layout_centerVertical="true"
+        android:layout_marginEnd="88dp"
+        android:background="@drawable/widget_button_ripple"
+        android:contentDescription="Previous"
+        android:scaleType="center"
+        android:src="@drawable/ic_widget_skip_previous" />
+
+    <!-- Play/pause button (center-right) -->
+    <ImageButton
+        android:id="@+id/widget_play_pause"
+        android:layout_width="44dp"
+        android:layout_height="44dp"
+        android:layout_alignParentEnd="true"
+        android:layout_centerVertical="true"
+        android:layout_marginEnd="40dp"
+        android:background="@drawable/widget_button_ripple"
+        android:contentDescription="Play"
+        android:scaleType="center"
+        android:src="@drawable/ic_widget_play" />
+
+    <!-- Skip next button -->
+    <ImageButton
+        android:id="@+id/widget_skip_next"
+        android:layout_width="40dp"
+        android:layout_height="40dp"
+        android:layout_alignParentEnd="true"
+        android:layout_centerVertical="true"
+        android:background="@drawable/widget_button_ripple"
+        android:contentDescription="Next"
+        android:scaleType="center"
+        android:src="@drawable/ic_widget_skip_next" />
+
+    <!-- Track info (between art and buttons) -->
+    <LinearLayout
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:layout_centerVertical="true"
+        android:layout_marginStart="12dp"
+        android:layout_marginEnd="8dp"
+        android:layout_toStartOf="@id/widget_skip_previous"
+        android:layout_toEndOf="@id/widget_artwork"
+        android:orientation="vertical">
+
+        <!-- Track title -->
+        <TextView
+            android:id="@+id/widget_title"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:ellipsize="end"
+            android:maxLines="1"
+            android:text="Not playing"
+            android:textColor="#F3F4F6"
+            android:textSize="14sp"
+            android:textStyle="bold" />
+
+        <!-- Artist name -->
+        <TextView
+            android:id="@+id/widget_artist"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="1dp"
+            android:ellipsize="end"
+            android:maxLines="1"
+            android:text=""
+            android:textColor="#9CA3AF"
+            android:textSize="12sp" />
+
+    </LinearLayout>
+
+    <!-- Progress bar at bottom -->
+    <ProgressBar
+        android:id="@+id/widget_progress"
+        style="@android:style/Widget.ProgressBar.Horizontal"
+        android:layout_width="match_parent"
+        android:layout_height="3dp"
+        android:layout_alignParentBottom="true"
+        android:layout_marginStart="-12dp"
+        android:layout_marginEnd="-12dp"
+        android:layout_marginBottom="-10dp"
+        android:max="1000"
+        android:progress="0"
+        android:progressDrawable="@drawable/widget_progress_track" />
+
+</RelativeLayout>
