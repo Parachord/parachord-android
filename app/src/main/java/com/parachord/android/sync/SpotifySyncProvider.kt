@@ -83,6 +83,12 @@ class SpotifySyncProvider @Inject constructor(
                         if (!oAuthManager.refreshSpotifyToken()) throw e
                         retries++
                     }
+                    403 -> {
+                        // Permission denied — likely stale scopes from an older auth.
+                        // Re-authenticating with updated scopes should fix this.
+                        Log.w(TAG, "403 Forbidden — reconnect Spotify to grant updated permissions")
+                        throw e
+                    }
                     429 -> {
                         val retryAfter = e.response()?.headers()?.get("Retry-After")?.toLongOrNull() ?: 1
                         if (retries >= MAX_RETRIES) throw e

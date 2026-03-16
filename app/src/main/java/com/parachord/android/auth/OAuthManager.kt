@@ -118,11 +118,13 @@ class OAuthManager @Inject constructor(
             .appendQueryParameter("scope", listOf(
                 "user-read-playback-state",
                 "user-modify-playback-state",
+                "user-read-private",
                 "user-library-read",
                 "user-library-modify",
                 "user-follow-read",
                 "user-follow-modify",
                 "playlist-read-private",
+                "playlist-read-collaborative",
                 "playlist-modify-public",
                 "playlist-modify-private",
             ).joinToString(" "))
