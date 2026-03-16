@@ -298,9 +298,13 @@
             // "ended" (or "completed") state when a track finishes.
             // The "mediaItemDidEndPlaying" event is iOS-only and does not
             // exist in MusicKit JS, so this is the reliable path.
+            // Guard: on spotty networks MusicKit can fire "ended" when
+            // buffering fails mid-song. Only signal track end if we're
+            // within 15 seconds of the duration (or duration is unknown).
             if (state === MusicKit.PlaybackStates.ended ||
                 state === MusicKit.PlaybackStates.completed) {
-                if (window.MusicKitBridge) {
+                var nearEnd = (durationMs <= 0) || (durationMs - positionMs < 15000);
+                if (nearEnd && window.MusicKitBridge) {
                     MusicKitBridge.onTrackEnded(JSON.stringify({ ended: true }));
                 }
             }

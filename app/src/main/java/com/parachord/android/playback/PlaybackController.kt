@@ -654,11 +654,27 @@ class PlaybackController @Inject constructor(
         // call skipNextInternal() multiple times, skipping tracks in the queue.
         val trackEndHandled = java.util.concurrent.atomic.AtomicBoolean(false)
 
-        // Register track-ended callback from MusicKit JS
+        // Register track-ended callback from MusicKit JS.
+        // On spotty networks MusicKit can fire "ended" when it fails to buffer
+        // mid-song. Guard against premature advancement by cross-checking the
+        // reported position against the known track duration — only accept the
+        // signal if we're genuinely near the end (within 15 seconds) or if we
+        // have no duration data to compare against.
         handler.musicKitBridge.onTrackEnded = {
-            if (trackEndHandled.compareAndSet(false, true)) {
-                Log.d(TAG, "Apple Music track ended (JS callback)")
+            val position = handler.getPosition()
+            val duration = handler.getDuration()
+            val knownDuration = stateHolder.state.value.currentTrack?.duration
+            val effectiveDuration = when {
+                knownDuration != null && knownDuration > 0 -> knownDuration
+                duration > 0 -> duration
+                else -> null
+            }
+            val nearEnd = effectiveDuration == null || effectiveDuration - position < 15_000
+            if (nearEnd && trackEndHandled.compareAndSet(false, true)) {
+                Log.d(TAG, "Apple Music track ended (JS callback, pos=$position dur=$effectiveDuration)")
                 scope.launch(Dispatchers.Main) { skipNextInternal(userInitiated = false) }
+            } else if (!nearEnd) {
+                Log.w(TAG, "Ignoring spurious track-ended signal (pos=$position dur=$effectiveDuration) — likely network stall")
             }
         }
 
