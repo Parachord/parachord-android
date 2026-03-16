@@ -39,12 +39,13 @@ fun SyncSetupSheet(
     viewModel: SyncViewModel = hiltViewModel(),
 ) {
     val currentStep by viewModel.currentStep.collectAsStateWithLifecycle()
-    val sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
+    val sheetState = rememberModalBottomSheetState(
+        skipPartiallyExpanded = true,
+        confirmValueChange = { it != SheetValue.Hidden || currentStep != SyncViewModel.SetupStep.SYNCING },
+    )
 
     ModalBottomSheet(
-        onDismissRequest = {
-            if (currentStep != SyncViewModel.SetupStep.SYNCING) onDismiss()
-        },
+        onDismissRequest = onDismiss,
         sheetState = sheetState,
         containerColor = MaterialTheme.colorScheme.surface,
         dragHandle = {
