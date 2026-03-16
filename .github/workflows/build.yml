@@ -35,12 +35,12 @@ jobs:
           APPLE_MUSIC_DEVELOPER_TOKEN=${{ secrets.APPLE_MUSIC_DEVELOPER_TOKEN }}
           EOF
 
-      - name: Build distributable APK
-        run: ./gradlew assembleDist
+      - name: Build release APK
+        run: ./gradlew assembleRelease
 
       - name: Upload APK artifact
         uses: actions/upload-artifact@v4
         with:
-          name: parachord-dist
-          path: app/build/outputs/apk/dist/*.apk
+          name: parachord-release
+          path: app/build/outputs/apk/release/*.apk
           retention-days: 14
