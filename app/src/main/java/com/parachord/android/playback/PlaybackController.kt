@@ -139,6 +139,9 @@ class PlaybackController @Inject constructor(
                 queuePersistence.startObserving()
                 scrobbleManager.startObserving()
                 widgetUpdater.startObserving()
+                // Eagerly warm the MusicKit WebView + JS bridge so the first
+                // Apple Music play doesn't pay the ~500ms initialization cost.
+                router.getAppleMusicHandler().warmUp()
             }
         }, MoreExecutors.directExecutor())
     }
@@ -478,6 +481,14 @@ class PlaybackController @Inject constructor(
         // If the track has no artwork, try to fetch it in the background
         enrichArtworkIfMissing(routedTrack)
 
+        // Pre-resolve the next few queue tracks so their resolver IDs
+        // (spotifyId, appleMusicId, etc.) are ready before we need them.
+        // This eliminates resolver latency from track transitions.
+        val upcoming = snapshot.upNext.take(3)
+        if (upcoming.isNotEmpty()) {
+            trackResolverCache.resolveInBackground(upcoming)
+        }
+
         // Check spinoff availability for the new track (unless in spinoff mode)
         if (!stateHolder.state.value.spinoffMode) {
             checkSpinoffAvailability()
@@ -693,6 +704,9 @@ class PlaybackController @Inject constructor(
             var stallCount = 0
             var lastRecoveryAttempt = 0L
             val maxRecoveryBackoffMs = 16_000L
+            // Prefetch: preload the next track's catalog data once we're
+            // within 30 seconds of the end of the current track.
+            var nextTrackPreloaded = false
 
             while (isActive && isExternalPlayback) {
                 // Actively poll JS for fresh position/duration — the
@@ -758,6 +772,21 @@ class PlaybackController @Inject constructor(
                     }
                     stallCount = 0
                     lastRecoveryAttempt = 0L
+                }
+
+                // ── Next-track prefetch ──────────────────────────────────
+                // When within 30s of the end, preload the next Apple Music
+                // track's catalog data so setQueue() is near-instant.
+                if (!nextTrackPreloaded && duration > 0 && duration - position in 1..30_000) {
+                    val nextTrack = queueManager.snapshot.value.upNext.firstOrNull()
+                    val nextAmId = nextTrack?.let { reselectBestSource(it) }?.appleMusicId
+                    if (nextAmId != null) {
+                        nextTrackPreloaded = true
+                        Log.d(TAG, "Preloading next Apple Music track: $nextAmId")
+                        withContext(Dispatchers.Main) {
+                            handler.musicKitBridge.preload(nextAmId)
+                        }
+                    }
                 }
 
                 // Safety-net track completion detection

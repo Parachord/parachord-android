@@ -159,6 +159,24 @@
     }
 
     /**
+     * Preload a song by Apple Music catalog ID.
+     * Fetches the catalog metadata so that a subsequent play(songId)
+     * can skip the catalog lookup and start near-instantly.
+     * Returns JSON: { success: bool, error?: string }
+     */
+    async function preload(songId) {
+        try {
+            if (!music) return JSON.stringify({ success: false, error: 'Not configured' });
+            var sf = music.storefrontId || 'us';
+            await music.api.music('/v1/catalog/' + sf + '/songs/' + songId);
+            return JSON.stringify({ success: true });
+        } catch (e) {
+            // Non-fatal — worst case we fall back to normal cold-start play()
+            return JSON.stringify({ success: false, error: e.message || String(e) });
+        }
+    }
+
+    /**
      * Play a song by Apple Music catalog ID.
      * Returns JSON: { success: bool, error?: string }
      */

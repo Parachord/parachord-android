@@ -538,6 +538,16 @@ class MusicKitWebBridge @Inject constructor(
 
     // ── Playback Control ──────────────────────────────────────────
 
+    /**
+     * Preload a song's catalog data so a subsequent [play] starts faster.
+     * Non-blocking and best-effort — failures are silently ignored.
+     */
+    suspend fun preload(songId: String) {
+        if (!musicKitReady.isCompleted) return
+        val escaped = songId.replace("'", "\\'")
+        evaluate("preload('$escaped')")
+    }
+
     /** Play a song by Apple Music catalog ID. Returns true on success. */
     suspend fun play(songId: String): Boolean {
         musicKitReady.await()

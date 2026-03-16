@@ -22,6 +22,21 @@ class AppleMusicPlaybackHandler @Inject constructor(
         private const val TAG = "AppleMusicHandler"
     }
 
+    /**
+     * Eagerly initialize and configure the MusicKit bridge so the first
+     * [play] call doesn't pay the WebView + JS library + token setup cost.
+     * Best-effort — failures are silent since play() will retry anyway.
+     */
+    suspend fun warmUp() {
+        try {
+            if (!musicKitBridge.configured.value) {
+                musicKitBridge.configure()
+            }
+        } catch (e: Exception) {
+            Log.w(TAG, "MusicKit warm-up failed (non-fatal)", e)
+        }
+    }
+
     override fun canHandle(track: TrackEntity): Boolean =
         track.resolver == "applemusic" && track.appleMusicId != null
 
