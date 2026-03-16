@@ -56,6 +56,16 @@ android {
             applicationIdSuffix = ".debug"
             isDebuggable = true
         }
+        // Sideload-safe build for CI distribution. Same as debug but NOT
+        // marked debuggable — Android 14+ (targetSdk 34+) blocks installing
+        // debuggable APKs via the package installer with a generic
+        // "something went wrong" error. This variant uses the debug signing
+        // key so no release keystore is needed.
+        create("dist") {
+            initWith(getByName("debug"))
+            isDebuggable = false
+            matchingFallbacks += "debug"
+        }
     }
 
     compileOptions {
