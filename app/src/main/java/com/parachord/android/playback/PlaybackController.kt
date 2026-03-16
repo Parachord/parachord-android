@@ -73,9 +73,16 @@ class PlaybackController @Inject constructor(
     private var positionUpdateJob: Job? = null
     private var spotifyStateJob: Job? = null
     private var appleMusicPollingJob: Job? = null
+    private var idleTimeoutJob: Job? = null
 
     /** Whether playback is currently managed externally (e.g. Spotify Connect). */
     private var isExternalPlayback = false
+
+    /**
+     * How long to keep the foreground service alive after external playback is paused.
+     * After this timeout, the service is fully demoted and the process may be killed.
+     */
+    private val IDLE_TIMEOUT_MS = 5L * 60 * 1000 // 5 minutes
 
     /**
      * Partial WakeLock held during external playback (Spotify/Apple Music) to keep
@@ -140,6 +147,7 @@ class PlaybackController @Inject constructor(
         positionUpdateJob?.cancel()
         spotifyStateJob?.cancel()
         appleMusicPollingJob?.cancel()
+        idleTimeoutJob?.cancel()
         if (isExternalPlayback) sendExternalPlaybackStop()
         controllerFuture?.let { MediaController.releaseFuture(it) }
         controllerFuture = null
@@ -302,9 +310,25 @@ class PlaybackController @Inject constructor(
                 if (isCurrentlyPlaying) {
                     handler.pause()
                     stateHolder.update { copy(isPlaying = false) }
+                    // Stop polling and release WakeLock — no need to keep the CPU
+                    // awake at 500ms intervals while paused.
+                    stopSpotifyStatePolling()
+                    stopAppleMusicStatePolling()
+                    // Demote from foreground and start idle timeout
+                    sendExternalPlaybackStop()
+                    startIdleTimeout()
                 } else {
+                    // Cancel idle timeout — user is resuming
+                    cancelIdleTimeout()
                     handler.resume()
                     stateHolder.update { copy(isPlaying = true) }
+                    // Re-promote to foreground and restart state polling
+                    val track = stateHolder.state.value.currentTrack
+                    if (track != null) sendExternalPlaybackStart(track)
+                    when (handler) {
+                        is AppleMusicPlaybackHandler -> startAppleMusicStatePolling()
+                        else -> startSpotifyStatePolling()
+                    }
                     // If resume didn't actually start playback (stale session),
                     // re-play the track from scratch after a brief check.
                     delay(1500)
@@ -313,9 +337,9 @@ class PlaybackController @Inject constructor(
                         else -> !router.getSpotifyHandler().isPlaying()
                     }
                     if (stillNotPlaying) {
-                        val track = stateHolder.state.value.currentTrack ?: return@launch
-                        Log.d(TAG, "togglePlayPause: resume failed, re-playing '${track.title}'")
-                        playTrackInternal(track)
+                        val replayTrack = stateHolder.state.value.currentTrack ?: return@launch
+                        Log.d(TAG, "togglePlayPause: resume failed, re-playing '${replayTrack.title}'")
+                        playTrackInternal(replayTrack)
                     }
                 }
             }
@@ -349,6 +373,9 @@ class PlaybackController @Inject constructor(
     }
 
     private suspend fun playTrackInternal(track: TrackEntity) {
+        // Cancel any idle timeout — we're actively playing now
+        cancelIdleTimeout()
+
         // Re-select the best resolver from cached sources before routing.
         // Stored tracks may have a stale `resolver` field from when they were first
         // added (e.g. "spotify"), but the user may now prioritize a different resolver
@@ -689,6 +716,26 @@ class PlaybackController @Inject constructor(
         releaseExternalPlaybackWakeLock()
         // Clear the callback to avoid stale references
         router.getAppleMusicHandler().musicKitBridge.onTrackEnded = null
+    }
+
+    /**
+     * After pausing external playback, start a timeout that will fully clean up
+     * the external playback state if the user doesn't resume within [IDLE_TIMEOUT_MS].
+     * This prevents the app from lingering indefinitely in a paused-but-connected state.
+     */
+    private fun startIdleTimeout() {
+        idleTimeoutJob?.cancel()
+        idleTimeoutJob = scope.launch {
+            delay(IDLE_TIMEOUT_MS)
+            Log.d(TAG, "Idle timeout reached — cleaning up paused external playback")
+            isExternalPlayback = false
+            router.stopExternalPlayback()
+        }
+    }
+
+    private fun cancelIdleTimeout() {
+        idleTimeoutJob?.cancel()
+        idleTimeoutJob = null
     }
 
     private fun acquireExternalPlaybackWakeLock() {

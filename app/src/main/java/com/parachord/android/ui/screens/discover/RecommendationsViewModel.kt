@@ -3,16 +3,21 @@ package com.parachord.android.ui.screens.discover
 import android.util.Log
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
+import com.parachord.android.data.db.entity.TrackEntity
 import com.parachord.android.data.repository.RecommendationsRepository
 import com.parachord.android.data.repository.RecommendedArtist
 import com.parachord.android.data.repository.RecommendedTrack
 import com.parachord.android.data.repository.Resource
+import com.parachord.android.playback.PlaybackController
 import com.parachord.android.resolver.ResolverManager
+import com.parachord.android.resolver.ResolverScoring
 import dagger.hilt.android.lifecycle.HiltViewModel
+import kotlinx.coroutines.Job
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.launch
+import java.util.UUID
 import javax.inject.Inject
 
 /**
@@ -25,10 +30,14 @@ import javax.inject.Inject
 class RecommendationsViewModel @Inject constructor(
     private val recommendationsRepository: RecommendationsRepository,
     private val resolverManager: ResolverManager,
+    private val resolverScoring: ResolverScoring,
+    private val playbackController: PlaybackController,
 ) : ViewModel() {
 
     companion object {
         private const val TAG = "RecommendationsVM"
+        /** Number of tracks to resolve before emitting a batch update. */
+        private const val RESOLVE_BATCH_SIZE = 5
     }
 
     // Initialize from singleton cache immediately — avoids flash of Loading state
@@ -52,6 +61,9 @@ class RecommendationsViewModel @Inject constructor(
     /** Track counts per source for filter chip labels */
     private val _sourceCounts = MutableStateFlow(SourceCounts())
     val sourceCounts: StateFlow<SourceCounts> = _sourceCounts
+
+    /** Active resolution job — cancelled when a new batch arrives. */
+    private var resolveJob: Job? = null
 
     init {
         // Set up filtered flows
@@ -99,6 +111,48 @@ class RecommendationsViewModel @Inject constructor(
         loadRecommendations()
     }
 
+    /**
+     * Resolve a recommended track through the resolver pipeline and play it.
+     * Builds a [TrackEntity] from the best resolved source, then hands it to [PlaybackController].
+     */
+    fun playTrack(track: RecommendedTrack) {
+        viewModelScope.launch {
+            try {
+                val query = "${track.title} ${track.artist}"
+                val sources = resolverManager.resolve(
+                    query,
+                    targetTitle = track.title,
+                    targetArtist = track.artist,
+                )
+                val best = resolverScoring.selectBest(sources)
+                if (best == null) {
+                    Log.w(TAG, "No resolver result for '${track.title}' by ${track.artist}")
+                    return@launch
+                }
+
+                val entity = TrackEntity(
+                    id = best.spotifyId ?: best.soundcloudId ?: best.appleMusicId
+                        ?: UUID.randomUUID().toString(),
+                    title = track.title,
+                    artist = track.artist,
+                    album = track.album,
+                    duration = track.duration,
+                    artworkUrl = track.artworkUrl,
+                    sourceType = best.sourceType,
+                    sourceUrl = best.url,
+                    resolver = best.resolver,
+                    spotifyUri = best.spotifyUri,
+                    spotifyId = best.spotifyId,
+                    soundcloudId = best.soundcloudId,
+                    appleMusicId = best.appleMusicId,
+                )
+                playbackController.playTrack(entity)
+            } catch (e: Exception) {
+                Log.e(TAG, "Failed to resolve and play '${track.title}'", e)
+            }
+        }
+    }
+
     private fun loadRecommendations() {
         viewModelScope.launch {
             recommendationsRepository.getRecommendedArtists().collect {
@@ -116,8 +170,9 @@ class RecommendationsViewModel @Inject constructor(
                         lastfm = tracks.count { it.source == "lastfm" },
                         listenbrainz = tracks.count { it.source == "listenbrainz" },
                     )
-                    // Progressively resolve tracks through the resolver pipeline
-                    resolveTracksProgressively(tracks)
+                    // Cancel any in-flight resolution and start fresh
+                    resolveJob?.cancel()
+                    resolveJob = resolveTracksProgressively(tracks)
                 }
             }
         }
@@ -127,11 +182,12 @@ class RecommendationsViewModel @Inject constructor(
      * Resolve recommendation tracks through the content resolver pipeline.
      * This gives us actual playback source badges (e.g. Spotify, YouTube)
      * rather than metadata source labels (Last.fm, ListenBrainz).
-     * Resolves progressively so badges appear as each track is resolved.
+     * Batches updates to avoid per-track recomposition jank.
      */
-    private fun resolveTracksProgressively(tracks: List<RecommendedTrack>) {
-        viewModelScope.launch {
+    private fun resolveTracksProgressively(tracks: List<RecommendedTrack>): Job {
+        return viewModelScope.launch {
             val mutableTracks = tracks.toMutableList()
+            var pendingUpdates = 0
             for ((index, track) in tracks.withIndex()) {
                 if (track.resolvers.isNotEmpty()) continue // already resolved
                 try {
@@ -140,11 +196,20 @@ class RecommendationsViewModel @Inject constructor(
                     if (sources.isNotEmpty()) {
                         val resolverNames = sources.map { it.resolver }.distinct()
                         mutableTracks[index] = track.copy(resolvers = resolverNames)
-                        _allTracks.value = Resource.Success(mutableTracks.toList())
+                        pendingUpdates++
+                        // Emit in batches to reduce recomposition churn
+                        if (pendingUpdates >= RESOLVE_BATCH_SIZE) {
+                            _allTracks.value = Resource.Success(mutableTracks.toList())
+                            pendingUpdates = 0
+                        }
                     }
                 } catch (e: Exception) {
                     Log.w(TAG, "Failed to resolve '${track.title}' by ${track.artist}", e)
                 }
+            }
+            // Flush any remaining updates
+            if (pendingUpdates > 0) {
+                _allTracks.value = Resource.Success(mutableTracks.toList())
             }
         }
     }
