@@ -542,6 +542,9 @@ class PlaybackController @Inject constructor(
             override fun onPlaybackStateChanged(playbackState: Int) {
                 if (!isExternalPlayback) {
                     syncState()
+                    stateHolder.update {
+                        copy(isBuffering = playbackState == Player.STATE_BUFFERING)
+                    }
                     if (playbackState == Player.STATE_ENDED) {
                         skipNextInternal(userInitiated = false)
                     }
@@ -617,6 +620,7 @@ class PlaybackController @Inject constructor(
                 stateHolder.update {
                     copy(
                         isPlaying = playing,
+                        isBuffering = spotify.isConnectionStalled,
                         position = position,
                         duration = duration,
                         streamingMetadata = streamingMeta,
@@ -683,6 +687,13 @@ class PlaybackController @Inject constructor(
         appleMusicPollingJob = scope.launch(Dispatchers.Default) {
             // Small initial delay to let the track start
             delay(1000)
+
+            // Stall recovery state — tracks consecutive stalled polls and
+            // uses exponential backoff between resume attempts.
+            var stallCount = 0
+            var lastRecoveryAttempt = 0L
+            val maxRecoveryBackoffMs = 16_000L
+
             while (isActive && isExternalPlayback) {
                 // Actively poll JS for fresh position/duration — the
                 // playbackStateDidChange event only fires on state transitions,
@@ -694,6 +705,7 @@ class PlaybackController @Inject constructor(
                 val position = handler.getPosition()
                 val duration = handler.getDuration()
                 val playing = handler.isPlaying()
+                val stateName = handler.musicKitBridge.playbackStateName
 
                 // Build streaming metadata from what MusicKit reports is actually playing
                 val streamingMeta = buildStreamingMetadata(
@@ -704,13 +716,48 @@ class PlaybackController @Inject constructor(
                     actualArtworkUrl = handler.musicKitBridge.actualArtworkUrl,
                 )
 
+                val isStalled = stateName == "stalled" || stateName == "loading"
                 stateHolder.update {
                     copy(
                         isPlaying = playing,
+                        isBuffering = isStalled,
                         position = position,
                         duration = duration,
                         streamingMetadata = streamingMeta,
                     )
+                }
+
+                // ── Stall recovery ──────────────────────────────────────
+                // MusicKit reports "stalled" when the buffer runs dry on
+                // spotty networks. Attempt to resume with exponential
+                // backoff so we pick up where we left off once the network
+                // recovers, rather than sitting silent.
+                if (stateName == "stalled" && position > 0) {
+                    stallCount++
+                    val now = System.currentTimeMillis()
+                    // Backoff: 2s, 4s, 8s, 16s (capped)
+                    val backoffMs = (2_000L * (1L shl (stallCount - 1).coerceAtMost(3)))
+                        .coerceAtMost(maxRecoveryBackoffMs)
+                    if (now - lastRecoveryAttempt >= backoffMs) {
+                        lastRecoveryAttempt = now
+                        Log.d(TAG, "Apple Music stalled (count=$stallCount), attempting recovery at pos=$position")
+                        withContext(Dispatchers.Main) {
+                            try {
+                                handler.seekTo(position)
+                                handler.resume()
+                            } catch (e: Exception) {
+                                Log.w(TAG, "Stall recovery attempt failed", e)
+                            }
+                        }
+                    }
+                } else if (stateName == "playing") {
+                    // Reset stall tracking once playback resumes
+                    if (stallCount > 0) {
+                        Log.d(TAG, "Apple Music recovered from stall after $stallCount polls")
+                        stateHolder.update { copy(isBuffering = false) }
+                    }
+                    stallCount = 0
+                    lastRecoveryAttempt = 0L
                 }
 
                 // Safety-net track completion detection

@@ -92,6 +92,11 @@ class MusicKitWebBridge @Inject constructor(
     private val _duration = MutableStateFlow(0L)
     val duration: StateFlow<Long> = _duration.asStateFlow()
 
+    /** Raw MusicKit playback state name (e.g. "playing", "stalled", "paused"). */
+    @Volatile
+    var playbackStateName: String = "none"
+        private set
+
     /** Callback invoked when the current track finishes playing (for auto-advance). */
     var onTrackEnded: (() -> Unit)? = null
 
@@ -590,6 +595,7 @@ class MusicKitWebBridge @Inject constructor(
             _isPlaying.value = state.isPlaying
             _position.value = state.position.toLong()
             _duration.value = state.duration.toLong()
+            playbackStateName = state.state ?: "unknown"
         } catch (e: Exception) {
             Log.w(TAG, "Failed to parse polled playback state: $result", e)
         }
@@ -614,6 +620,7 @@ class MusicKitWebBridge @Inject constructor(
                 // JS bridge already sends values in milliseconds
                 _position.value = state.position.toLong()
                 _duration.value = state.duration.toLong()
+                playbackStateName = state.state ?: "unknown"
                 // Detect ended state as a safety net — the JS side also fires
                 // onTrackEnded for this, but duplicates are harmless and this
                 // ensures we catch it even if the JS callback is missed.

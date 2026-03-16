@@ -6,6 +6,7 @@ import com.parachord.android.data.db.entity.TrackEntity
 data class PlaybackState(
     val currentTrack: TrackEntity? = null,
     val isPlaying: Boolean = false,
+    val isBuffering: Boolean = false,
     val position: Long = 0L,
     val duration: Long = 0L,
     val upNext: List<TrackEntity> = emptyList(),

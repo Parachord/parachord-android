@@ -16,6 +16,7 @@ import androidx.compose.material.icons.filled.FavoriteBorder
 import androidx.compose.material.icons.filled.Pause
 import androidx.compose.material.icons.filled.PlayArrow
 import androidx.compose.material.icons.filled.SkipNext
+import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.IconButtonDefaults
@@ -46,6 +47,7 @@ fun MiniPlayer(
     artistName: String,
     artworkUrl: String?,
     isPlaying: Boolean,
+    isBuffering: Boolean,
     isFavorited: Boolean,
     progress: Float,
     onPlayPause: () -> Unit,
@@ -122,7 +124,7 @@ fun MiniPlayer(
                 )
             }
 
-            // Play/Pause button
+            // Play/Pause button — shows spinner when buffering
             IconButton(
                 onClick = onPlayPause,
                 modifier = Modifier.size(40.dp),
@@ -130,11 +132,19 @@ fun MiniPlayer(
                     contentColor = PlayerTextPrimary,
                 ),
             ) {
-                Icon(
-                    imageVector = if (isPlaying) Icons.Default.Pause else Icons.Default.PlayArrow,
-                    contentDescription = if (isPlaying) "Pause" else "Play",
-                    modifier = Modifier.size(24.dp),
-                )
+                if (isBuffering) {
+                    CircularProgressIndicator(
+                        modifier = Modifier.size(20.dp),
+                        color = PlayerTextPrimary,
+                        strokeWidth = 2.dp,
+                    )
+                } else {
+                    Icon(
+                        imageVector = if (isPlaying) Icons.Default.Pause else Icons.Default.PlayArrow,
+                        contentDescription = if (isPlaying) "Pause" else "Play",
+                        modifier = Modifier.size(24.dp),
+                    )
+                }
             }
 
             // Skip next button

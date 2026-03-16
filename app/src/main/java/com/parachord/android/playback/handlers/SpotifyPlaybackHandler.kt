@@ -83,6 +83,10 @@ class SpotifyPlaybackHandler @Inject constructor(
     /** Consecutive polls where position didn't change while "playing". */
     private var stalePositionCount = 0
 
+    /** True when the connection to Spotify is experiencing issues (poll failures or stale position). */
+    val isConnectionStalled: Boolean
+        get() = consecutivePollFailures > 0 || stalePositionCount >= 2
+
     override val isConnected: Boolean get() = _isConnected
 
     override fun canHandle(track: TrackEntity): Boolean =
