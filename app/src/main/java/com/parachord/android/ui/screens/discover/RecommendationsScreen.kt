@@ -108,6 +108,7 @@ fun RecommendationsScreen(
                 1 -> SongsTab(
                     tracks = recommendedTracks,
                     onRefresh = viewModel::refresh,
+                    onPlayTrack = viewModel::playTrack,
                 )
             }
         }
@@ -292,6 +293,7 @@ private fun RecommendedArtistItem(artist: RecommendedArtist, onClick: () -> Unit
 private fun SongsTab(
     tracks: Resource<List<RecommendedTrack>>,
     onRefresh: () -> Unit,
+    onPlayTrack: (RecommendedTrack) -> Unit = {},
 ) {
     when (tracks) {
         is Resource.Loading -> {
@@ -314,7 +316,7 @@ private fun SongsTab(
                             // Show content resolver badges (Spotify, YouTube, etc.) from the
                             // resolver pipeline — NOT metadata source labels (Last.fm, ListenBrainz).
                             resolvers = track.resolvers.ifEmpty { null },
-                            onClick = { /* TODO: resolve and play */ },
+                            onClick = { onPlayTrack(track) },
                         )
                     }
                 }
