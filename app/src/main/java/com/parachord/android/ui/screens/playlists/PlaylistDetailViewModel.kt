@@ -82,7 +82,7 @@ class PlaylistDetailViewModel @Inject constructor(
         val entities = trackList.map { libraryRepository.playlistTrackToTrackEntity(it) }
         val context = PlaybackContext(
             type = "playlist",
-            name = playlist.value?.title ?: "Playlist",
+            name = playlist.value?.name ?: "Playlist",
             id = playlistId,
         )
         playbackController.playQueue(entities, startIndex, context = context)
