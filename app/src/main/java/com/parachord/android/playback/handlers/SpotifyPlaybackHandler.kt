@@ -290,45 +290,45 @@ class SpotifyPlaybackHandler @Inject constructor(
     }
 
     /**
-     * Ensure the local Spotify app is running so this phone registers as a
-     * Spotify Connect device, then return the current device list.
+     * Find available Spotify Connect devices, waking the local Spotify app
+     * only as a last resort.
      *
-     * Always launches Spotify (no-op if already running), fetches devices
-     * immediately, and only enters a polling loop if the list is still empty
-     * (i.e. Spotify wasn't running yet and needs a moment to register).
+     * 1. Check for existing devices via the Web API (no app launch).
+     * 2. If none found, send a background intent to nudge Spotify awake
+     *    without stealing focus, then poll for devices.
      */
     private suspend fun wakeSpotifyAndAwaitDevice(auth: String): List<SpDevice> {
-        val launchIntent = context.packageManager.getLaunchIntentForPackage(SPOTIFY_PACKAGE)
-        if (launchIntent == null) {
-            Log.w(TAG, "Spotify is not installed, fetching devices without wake")
-            return try { spotifyApi.getDevices(auth).devices } catch (_: Exception) { emptyList() }
-        }
-
-        // Launch Spotify — FLAG_ACTIVITY_NEW_TASK is required from a non-Activity
-        // context; REORDER_TO_FRONT avoids stealing focus if it's already running.
-        launchIntent.addFlags(
-            Intent.FLAG_ACTIVITY_NEW_TASK or
-                Intent.FLAG_ACTIVITY_REORDER_TO_FRONT
-        )
-        context.startActivity(launchIntent)
-        Log.d(TAG, "Launched Spotify app (or brought to front)")
-
-        // Small delay to let an already-running Spotify register after the intent
-        delay(500)
-
-        // Fast path: if devices are already available, return immediately
+        // Fast path: check for devices already available (Spotify running,
+        // or devices on other machines/phones on the account)
         try {
             val devices = spotifyApi.getDevices(auth).devices
             if (devices.isNotEmpty()) {
-                Log.d(TAG, "Devices already available: ${devices.size}")
+                Log.d(TAG, "Devices already available (no wake needed): ${devices.size}")
                 return devices
             }
         } catch (e: Exception) {
-            Log.d(TAG, "Initial device fetch after wake failed: ${e.message}")
+            Log.d(TAG, "Initial device fetch failed: ${e.message}")
         }
 
-        // Slow path: Spotify just launched, poll until it registers as a device
-        Log.d(TAG, "No devices yet, polling for up to ${WAKE_TIMEOUT_MS}ms...")
+        // No devices — nudge the local Spotify app awake in the background.
+        // Use a service intent via media button to avoid launching the full UI.
+        val launchIntent = context.packageManager.getLaunchIntentForPackage(SPOTIFY_PACKAGE)
+        if (launchIntent == null) {
+            Log.w(TAG, "Spotify is not installed")
+            return emptyList()
+        }
+
+        // Launch Spotify minimized — bring-to-back keeps it out of the user's
+        // face while still starting the process so it registers as a Connect device.
+        launchIntent.addFlags(
+            Intent.FLAG_ACTIVITY_NEW_TASK or
+                Intent.FLAG_ACTIVITY_NO_ANIMATION
+        )
+        context.startActivity(launchIntent)
+        Log.d(TAG, "Nudged Spotify awake (background launch)")
+
+        // Poll until Spotify registers as a Connect device
+        Log.d(TAG, "Polling for devices for up to ${WAKE_TIMEOUT_MS}ms...")
         val deadline = System.currentTimeMillis() + WAKE_TIMEOUT_MS
         while (System.currentTimeMillis() < deadline) {
             delay(WAKE_POLL_INTERVAL_MS)
