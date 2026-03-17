@@ -21,6 +21,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import com.parachord.android.data.api.SpDevice
+import com.parachord.android.playback.handlers.SpotifyPlaybackHandler
 
 /**
  * Device picker dialog matching the desktop app's Spotify device picker.
@@ -41,7 +42,7 @@ fun SpotifyDevicePickerDialog(
         text = {
             Column {
                 Text(
-                    text = "Multiple devices are available. Where would you like to play?",
+                    text = "Where would you like to play?",
                     style = MaterialTheme.typography.bodyMedium,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
@@ -68,6 +69,7 @@ private fun DeviceRow(
     device: SpDevice,
     onClick: () -> Unit,
 ) {
+    val isLocal = device.id == SpotifyPlaybackHandler.LOCAL_DEVICE_ID
     Surface(
         modifier = Modifier
             .fillMaxWidth()
@@ -89,17 +91,25 @@ private fun DeviceRow(
             Spacer(modifier = Modifier.width(12.dp))
             Column(modifier = Modifier.weight(1f)) {
                 Text(
-                    text = device.name,
+                    text = if (isLocal) "This device" else device.name,
                     style = MaterialTheme.typography.bodyLarge,
                     maxLines = 1,
                     overflow = TextOverflow.Ellipsis,
                 )
-                device.volumePercent?.let { vol ->
+                if (isLocal) {
                     Text(
-                        text = "Volume $vol%",
+                        text = device.name,
                         style = MaterialTheme.typography.bodySmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                     )
+                } else {
+                    device.volumePercent?.let { vol ->
+                        Text(
+                            text = "Volume $vol%",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        )
+                    }
                 }
             }
             if (device.isActive) {
