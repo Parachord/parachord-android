@@ -44,8 +44,18 @@ android {
     }
 
     signingConfigs {
-        // CI builds use the auto-generated debug keystore so no release
-        // keystore needs to be checked in or configured as a secret.
+        // CI builds decode a stable keystore from the CI_KEYSTORE_BASE64
+        // environment variable so that every build produces identically-signed
+        // APKs. Local builds fall back to the default debug keystore.
+        val ciKeystorePath = System.getenv("CI_KEYSTORE_PATH")
+        if (ciKeystorePath != null) {
+            create("ciRelease") {
+                storeFile = file(ciKeystorePath)
+                storePassword = "parachord-ci"
+                keyAlias = "ci-release"
+                keyPassword = "parachord-ci"
+            }
+        }
         named("debug")
     }
 
@@ -53,7 +63,8 @@ android {
         release {
             isMinifyEnabled = true
             isShrinkResources = true
-            signingConfig = signingConfigs.getByName("debug")
+            signingConfig = signingConfigs.findByName("ciRelease")
+                ?: signingConfigs.getByName("debug")
             proguardFiles(
                 getDefaultProguardFile("proguard-android-optimize.txt"),
                 "proguard-rules.pro"
