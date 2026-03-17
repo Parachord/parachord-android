@@ -10,11 +10,14 @@ import com.parachord.android.data.api.SpTransferRequest
 import com.parachord.android.data.api.SpotifyApi
 import com.parachord.android.data.db.entity.TrackEntity
 import com.parachord.android.data.store.SettingsStore
+import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
 import retrofit2.HttpException
@@ -24,11 +27,11 @@ import javax.inject.Singleton
 /**
  * Handles Spotify playback via the Web API (Spotify Connect).
  *
- * Unlike the desktop app (which prefers Computer devices), the Android app
- * forces playback to THIS phone. Device selection:
- * 1. Match this device by name (Build.MODEL)
- * 2. Any Smartphone-type device
- * 3. Only if no phone is available, fall back to other device types
+ * Device selection (matching desktop device picker):
+ * 1. Use preferred device if set and available
+ * 2. Single device: auto-select without prompting
+ * 3. Multiple devices, none preferred: show device picker dialog
+ * 4. Preferred device unavailable: show picker again
  *
  * Requires an active Spotify device and Premium account.
  */
@@ -44,6 +47,26 @@ class SpotifyPlaybackHandler @Inject constructor(
         private const val MAX_POLL_FAILURES = 10
         /** ~8 seconds of stale position (8 polls at 1s interval). */
         private const val MAX_STALE_POSITION = 8
+    }
+
+    /**
+     * Request for the UI to show a device picker dialog.
+     * Contains the list of available devices and a deferred to complete with the user's choice.
+     */
+    data class DevicePickerRequest(
+        val devices: List<SpDevice>,
+        val deferred: CompletableDeferred<SpDevice?>,
+    )
+
+    private val _devicePickerRequest = MutableStateFlow<DevicePickerRequest?>(null)
+    /** Observed by the UI to show the device picker dialog. Null when no picker is needed. */
+    val devicePickerRequest: StateFlow<DevicePickerRequest?> = _devicePickerRequest
+
+    /** Called by the UI when the user selects a device (or null to cancel). */
+    fun onDevicePicked(device: SpDevice?) {
+        val request = _devicePickerRequest.value ?: return
+        request.deferred.complete(device)
+        _devicePickerRequest.value = null
     }
 
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Main)
@@ -158,10 +181,11 @@ class SpotifyPlaybackHandler @Inject constructor(
 
     /**
      * Single attempt to find a device and start playback.
-     * Mirrors the desktop's spotify.axe play() logic:
-     * 1. Get devices, pick best one
-     * 2. Transfer if not active (wait 1000ms like desktop)
-     * 3. Start playback with device_id
+     * Device selection (mirrors desktop device picker):
+     * 1. Check preferred device — use it if available
+     * 2. Single device — auto-select (no UX regression)
+     * 3. Multiple devices — show picker dialog, save choice as preferred
+     * 4. Preferred device unavailable — show picker again
      */
     private suspend fun attemptPlay(auth: String, uri: String): Boolean {
         val devices = spotifyApi.getDevices(auth).devices
@@ -174,7 +198,7 @@ class SpotifyPlaybackHandler @Inject constructor(
 
         val targetDevice = pickDevice(devices)
         if (targetDevice == null) {
-            Log.w(TAG, "No suitable device found")
+            Log.w(TAG, "No suitable device found (user cancelled or no devices)")
             return false
         }
         Log.d(TAG, "Target device: '${targetDevice.name}' (type=${targetDevice.type}, active=${targetDevice.isActive})")
@@ -245,56 +269,57 @@ class SpotifyPlaybackHandler @Inject constructor(
     }
 
     /**
-     * Pick the best device to play on.
+     * Pick the best device to play on (matches desktop device picker behavior).
      *
-     * Adapted from the desktop's device selection for Android — we strongly prefer
-     * THIS phone as the playback target. Remote devices (TVs, speakers, Chromecasts)
-     * are excluded from automatic selection since they're typically on other networks
-     * or in other rooms and shouldn't be hijacked by the phone app.
-     *
-     * Priority:
-     * 1. THIS phone by device name (Build.MODEL)
-     * 2. Any Smartphone-type device
-     * 3. Any Computer-type device (e.g. tablet registered as Computer)
-     * 4. Never auto-select: TV, Speaker, CastVideo, CastAudio, GameConsole
+     * 1. Preferred device (saved from previous picker selection) — use if available
+     * 2. Single device — auto-select without prompting
+     * 3. Multiple devices — show picker dialog, save selection as preferred
+     * 4. Preferred device not found — show picker again
      */
-    private fun pickDevice(devices: List<SpDevice>): SpDevice? {
+    private suspend fun pickDevice(devices: List<SpDevice>): SpDevice? {
         val controllable = devices.filter { !it.isRestricted }
         val available = controllable.ifEmpty { devices }
 
-        val localModel = Build.MODEL
-        val localFull = "${Build.MANUFACTURER} ${Build.MODEL}"
-        Log.d(TAG, "pickDevice: localModel='$localModel', " +
-                "devices=${available.map { "'${it.name}'(type=${it.type}, active=${it.isActive})" }}")
+        Log.d(TAG, "pickDevice: devices=${available.map { "'${it.name}'(type=${it.type}, active=${it.isActive})" }}")
 
-        // Remote device types that should NEVER be auto-selected from the phone app.
-        // These are typically on other networks, in other rooms, or shared devices.
-        val remoteTypes = setOf("TV", "Speaker", "CastVideo", "CastAudio", "GameConsole", "AVR")
+        // 1. Check preferred device
+        val preferredId = settingsStore.getPreferredSpotifyDeviceId()
+        if (preferredId != null) {
+            val preferred = available.firstOrNull { it.id == preferredId }
+            if (preferred != null) {
+                Log.d(TAG, "Using preferred device: '${preferred.name}'")
+                return preferred
+            }
+            // Preferred device not available — fall through to picker
+            Log.d(TAG, "Preferred device $preferredId not available, showing picker")
+        }
 
-        // Filter to local-safe devices (phones, computers, unknown types — NOT TVs/speakers)
-        val localDevices = available.filter { it.type !in remoteTypes }
+        // 2. Single device — auto-select (no UX regression for simple setups)
+        if (available.size == 1) {
+            Log.d(TAG, "Single device, auto-selecting '${available[0].name}'")
+            return available[0]
+        }
 
-        // Best match: this exact phone by name (check any type — Spotify sometimes
-        // reports phones as different types)
-        localDevices.firstOrNull {
-            it.name.contains(localModel, ignoreCase = true) ||
-            it.name.contains(localFull, ignoreCase = true)
-        }?.let { return it }
+        // 3. Already-active device with no preferred set — use it
+        if (preferredId == null) {
+            available.firstOrNull { it.isActive }?.let { active ->
+                Log.d(TAG, "No preferred set, using already-active device '${active.name}'")
+                return active
+            }
+        }
 
-        // Any Smartphone device
-        localDevices.firstOrNull { it.type == "Smartphone" }?.let { return it }
+        // 4. Multiple devices — show picker dialog and wait for user choice
+        Log.d(TAG, "Multiple devices available, showing picker dialog")
+        val deferred = CompletableDeferred<SpDevice?>()
+        _devicePickerRequest.value = DevicePickerRequest(available, deferred)
 
-        // Any Computer-type device (tablet, etc.)
-        localDevices.firstOrNull { it.type == "Computer" }?.let { return it }
-
-        // Any remaining non-remote device
-        localDevices.firstOrNull()?.let { return it }
-
-        // If ONLY remote devices exist, log warning and return null —
-        // don't hijack a TV/speaker the user isn't using from this phone
-        Log.w(TAG, "Only remote devices available (${available.map { "${it.name}(${it.type})" }})" +
-                " — not auto-selecting. Ensure Spotify is open on this phone.")
-        return null
+        val chosen = deferred.await()
+        if (chosen != null) {
+            // Save as preferred device (desktop: preferred_spotify_device_id)
+            settingsStore.setPreferredSpotifyDeviceId(chosen.id)
+            Log.d(TAG, "User picked device '${chosen.name}', saved as preferred")
+        }
+        return chosen
     }
 
     /**

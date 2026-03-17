@@ -69,6 +69,7 @@ import com.parachord.android.ui.components.ActionOverlay
 import com.parachord.android.ui.components.CreatePlaylistDialog
 import com.parachord.android.ui.components.DeepLinkConfirmationDialog
 import com.parachord.android.ui.components.ImportPlaylistDialog
+import com.parachord.android.ui.components.SpotifyDevicePickerDialog
 import com.parachord.android.ui.components.DrawerContent
 import com.parachord.android.ui.components.MiniPlayer
 import com.parachord.android.ui.navigation.BottomNavItem
@@ -255,6 +256,16 @@ private fun ParachordAppContent(mainViewModel: MainViewModel) {
                     Toast.makeText(context, event.message, Toast.LENGTH_SHORT).show()
             }
         }
+    }
+
+    // Spotify device picker dialog (matches desktop's device picker)
+    val devicePickerRequest by mainViewModel.spotifyDevicePickerRequest.collectAsStateWithLifecycle()
+    devicePickerRequest?.let { request ->
+        SpotifyDevicePickerDialog(
+            devices = request.devices,
+            onDeviceSelected = { mainViewModel.onSpotifyDevicePicked(it) },
+            onDismiss = { mainViewModel.onSpotifyDevicePicked(null) },
+        )
     }
 
     var showActionOverlay by rememberSaveable { mutableStateOf(false) }

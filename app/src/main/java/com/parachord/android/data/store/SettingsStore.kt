@@ -68,6 +68,7 @@ class SettingsStore @Inject constructor(
         val APPLE_MUSIC_DEVELOPER_TOKEN = stringPreferencesKey("apple_music_developer_token")
         val APPLE_MUSIC_STOREFRONT = stringPreferencesKey("apple_music_storefront")
         val APPLE_MUSIC_USER_TOKEN = stringPreferencesKey("apple_music_user_token")
+        val PREFERRED_SPOTIFY_DEVICE_ID = stringPreferencesKey("preferred_spotify_device_id")
 
         /** Default canonical order matching the desktop app. */
         private const val DEFAULT_RESOLVER_ORDER = "spotify,applemusic,bandcamp,soundcloud,localfiles,youtube"
@@ -387,6 +388,22 @@ class SettingsStore @Inject constructor(
 
     suspend fun clearAppleMusicUserToken() {
         dataStore.edit { it.remove(APPLE_MUSIC_USER_TOKEN) }
+    }
+
+    // --- Preferred Spotify Device ---
+
+    suspend fun getPreferredSpotifyDeviceId(): String? =
+        dataStore.data.first()[PREFERRED_SPOTIFY_DEVICE_ID]
+
+    fun getPreferredSpotifyDeviceIdFlow(): Flow<String?> =
+        dataStore.data.map { it[PREFERRED_SPOTIFY_DEVICE_ID] }
+
+    suspend fun setPreferredSpotifyDeviceId(deviceId: String) {
+        dataStore.edit { it[PREFERRED_SPOTIFY_DEVICE_ID] = deviceId }
+    }
+
+    suspend fun clearPreferredSpotifyDeviceId() {
+        dataStore.edit { it.remove(PREFERRED_SPOTIFY_DEVICE_ID) }
     }
 
     // --- Metadata provider enable/disable ---

@@ -242,6 +242,7 @@ fun SettingsScreen(
     val themeMode by viewModel.themeMode.collectAsStateWithLifecycle()
     val scrobbling by viewModel.scrobblingEnabled.collectAsStateWithLifecycle()
     val spotifyConnected by viewModel.spotifyConnected.collectAsStateWithLifecycle()
+    val hasPreferredSpotifyDevice by viewModel.hasPreferredSpotifyDevice.collectAsStateWithLifecycle()
     val lastFmConnected by viewModel.lastFmConnected.collectAsStateWithLifecycle()
     val listenBrainzConnected by viewModel.listenBrainzConnected.collectAsStateWithLifecycle()
     val libreFmConnected by viewModel.libreFmConnected.collectAsStateWithLifecycle()
@@ -280,6 +281,8 @@ fun SettingsScreen(
             when (page) {
                 0 -> PlugInsTab(
                     spotifyConnected = spotifyConnected,
+                    hasPreferredSpotifyDevice = hasPreferredSpotifyDevice,
+                    onClearPreferredSpotifyDevice = { viewModel.clearPreferredSpotifyDevice() },
                     lastFmConnected = lastFmConnected,
                     listenBrainzConnected = listenBrainzConnected,
                     libreFmConnected = libreFmConnected,
@@ -350,6 +353,8 @@ fun SettingsScreen(
 @Composable
 private fun PlugInsTab(
     spotifyConnected: Boolean,
+    hasPreferredSpotifyDevice: Boolean = false,
+    onClearPreferredSpotifyDevice: () -> Unit = {},
     lastFmConnected: Boolean,
     listenBrainzConnected: Boolean,
     libreFmConnected: Boolean,
@@ -592,6 +597,8 @@ private fun PlugInsTab(
             onSaveAiModel = onSaveAiModel,
             getAiModel = getAiModel,
             onClearAiProvider = onClearAiProvider,
+            hasPreferredSpotifyDevice = hasPreferredSpotifyDevice,
+            onClearPreferredSpotifyDevice = onClearPreferredSpotifyDevice,
         )
     }
 }
@@ -815,6 +822,8 @@ private fun PluginConfigSheet(
     onSaveAiModel: (String, String) -> Unit = { _, _ -> },
     getAiModel: (String) -> StateFlow<String> = { MutableStateFlow("") },
     onClearAiProvider: (String) -> Unit = {},
+    hasPreferredSpotifyDevice: Boolean = false,
+    onClearPreferredSpotifyDevice: () -> Unit = {},
 ) {
     val sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
 
@@ -913,7 +922,13 @@ private fun PluginConfigSheet(
 
             // Plugin-specific config
             when (plugin.id) {
-                "spotify" -> SpotifyConfig(isConnected, onToggleConnection)
+                "spotify" -> SpotifyConfig(
+                    isConnected = isConnected,
+                    onToggle = onToggleConnection,
+                    hasPreferredDevice = hasPreferredSpotifyDevice,
+                    onClearPreferredDevice = onClearPreferredSpotifyDevice,
+                )
+
                 "soundcloud" -> SoundCloudConfig(
                     isConnected = isConnected,
                     credentialsSaved = soundCloudCredentialsSaved,
@@ -981,7 +996,12 @@ private fun PluginConfigSheet(
 // ── Spotify Config ─────────────────────────────────────────────────
 
 @Composable
-private fun SpotifyConfig(isConnected: Boolean, onToggle: () -> Unit) {
+private fun SpotifyConfig(
+    isConnected: Boolean,
+    onToggle: () -> Unit,
+    hasPreferredDevice: Boolean = false,
+    onClearPreferredDevice: () -> Unit = {},
+) {
     Spacer(modifier = Modifier.height(16.dp))
     HorizontalDivider()
     Spacer(modifier = Modifier.height(16.dp))
@@ -1011,6 +1031,36 @@ private fun SpotifyConfig(isConnected: Boolean, onToggle: () -> Unit) {
         Spacer(modifier = Modifier.height(12.dp))
         TextButton(onClick = onToggle) {
             Text("Disconnect", color = MaterialTheme.colorScheme.error)
+        }
+
+        // Preferred Device setting (matches desktop's "Preferred Device" row)
+        Spacer(modifier = Modifier.height(16.dp))
+        HorizontalDivider()
+        Spacer(modifier = Modifier.height(16.dp))
+
+        Text(
+            text = "Preferred Device",
+            style = MaterialTheme.typography.bodyMedium,
+            fontWeight = FontWeight.Medium,
+        )
+        Spacer(modifier = Modifier.height(8.dp))
+
+        if (hasPreferredDevice) {
+            Text(
+                text = "A preferred device is saved. It will be used automatically for playback.",
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+            Spacer(modifier = Modifier.height(8.dp))
+            TextButton(onClick = onClearPreferredDevice) {
+                Text("Clear", color = MaterialTheme.colorScheme.error)
+            }
+        } else {
+            Text(
+                text = "No preferred device set. You\u2019ll be prompted to choose when multiple devices are available.",
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
         }
     } else {
         Text(
