@@ -80,6 +80,7 @@ class PlaylistImportManager @Inject constructor(
             } else {
                 when (e.code()) {
                     401 -> throw IllegalStateException("Spotify session expired. Reconnect Spotify in Settings.")
+                    403 -> throw IllegalStateException("Spotify access denied. Reconnect Spotify in Settings to grant updated permissions.")
                     404 -> throw IllegalArgumentException("Playlist not found. It may be private or deleted.")
                     else -> throw IllegalStateException("Spotify error: HTTP ${e.code()}")
                 }

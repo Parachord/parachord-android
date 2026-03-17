@@ -139,6 +139,9 @@ class PlaybackController @Inject constructor(
                 queuePersistence.startObserving()
                 scrobbleManager.startObserving()
                 widgetUpdater.startObserving()
+                // Eagerly warm the MusicKit WebView + JS bridge so the first
+                // Apple Music play doesn't pay the ~500ms initialization cost.
+                router.getAppleMusicHandler().warmUp()
             }
         }, MoreExecutors.directExecutor())
     }
@@ -478,6 +481,14 @@ class PlaybackController @Inject constructor(
         // If the track has no artwork, try to fetch it in the background
         enrichArtworkIfMissing(routedTrack)
 
+        // Pre-resolve the next few queue tracks so their resolver IDs
+        // (spotifyId, appleMusicId, etc.) are ready before we need them.
+        // This eliminates resolver latency from track transitions.
+        val upcoming = snapshot.upNext.take(3)
+        if (upcoming.isNotEmpty()) {
+            trackResolverCache.resolveInBackground(upcoming)
+        }
+
         // Check spinoff availability for the new track (unless in spinoff mode)
         if (!stateHolder.state.value.spinoffMode) {
             checkSpinoffAvailability()
@@ -542,6 +553,9 @@ class PlaybackController @Inject constructor(
             override fun onPlaybackStateChanged(playbackState: Int) {
                 if (!isExternalPlayback) {
                     syncState()
+                    stateHolder.update {
+                        copy(isBuffering = playbackState == Player.STATE_BUFFERING)
+                    }
                     if (playbackState == Player.STATE_ENDED) {
                         skipNextInternal(userInitiated = false)
                     }
@@ -617,6 +631,7 @@ class PlaybackController @Inject constructor(
                 stateHolder.update {
                     copy(
                         isPlaying = playing,
+                        isBuffering = spotify.isConnectionStalled,
                         position = position,
                         duration = duration,
                         streamingMetadata = streamingMeta,
@@ -654,11 +669,27 @@ class PlaybackController @Inject constructor(
         // call skipNextInternal() multiple times, skipping tracks in the queue.
         val trackEndHandled = java.util.concurrent.atomic.AtomicBoolean(false)
 
-        // Register track-ended callback from MusicKit JS
+        // Register track-ended callback from MusicKit JS.
+        // On spotty networks MusicKit can fire "ended" when it fails to buffer
+        // mid-song. Guard against premature advancement by cross-checking the
+        // reported position against the known track duration — only accept the
+        // signal if we're genuinely near the end (within 15 seconds) or if we
+        // have no duration data to compare against.
         handler.musicKitBridge.onTrackEnded = {
-            if (trackEndHandled.compareAndSet(false, true)) {
-                Log.d(TAG, "Apple Music track ended (JS callback)")
+            val position = handler.getPosition()
+            val duration = handler.getDuration()
+            val knownDuration = stateHolder.state.value.currentTrack?.duration
+            val effectiveDuration = when {
+                knownDuration != null && knownDuration > 0 -> knownDuration
+                duration > 0 -> duration
+                else -> null
+            }
+            val nearEnd = effectiveDuration == null || effectiveDuration - position < 15_000
+            if (nearEnd && trackEndHandled.compareAndSet(false, true)) {
+                Log.d(TAG, "Apple Music track ended (JS callback, pos=$position dur=$effectiveDuration)")
                 scope.launch(Dispatchers.Main) { skipNextInternal(userInitiated = false) }
+            } else if (!nearEnd) {
+                Log.w(TAG, "Ignoring spurious track-ended signal (pos=$position dur=$effectiveDuration) — likely network stall")
             }
         }
 
@@ -667,6 +698,16 @@ class PlaybackController @Inject constructor(
         appleMusicPollingJob = scope.launch(Dispatchers.Default) {
             // Small initial delay to let the track start
             delay(1000)
+
+            // Stall recovery state — tracks consecutive stalled polls and
+            // uses exponential backoff between resume attempts.
+            var stallCount = 0
+            var lastRecoveryAttempt = 0L
+            val maxRecoveryBackoffMs = 16_000L
+            // Prefetch: preload the next track's catalog data once we're
+            // within 30 seconds of the end of the current track.
+            var nextTrackPreloaded = false
+
             while (isActive && isExternalPlayback) {
                 // Actively poll JS for fresh position/duration — the
                 // playbackStateDidChange event only fires on state transitions,
@@ -678,6 +719,7 @@ class PlaybackController @Inject constructor(
                 val position = handler.getPosition()
                 val duration = handler.getDuration()
                 val playing = handler.isPlaying()
+                val stateName = handler.musicKitBridge.playbackStateName
 
                 // Build streaming metadata from what MusicKit reports is actually playing
                 val streamingMeta = buildStreamingMetadata(
@@ -688,13 +730,63 @@ class PlaybackController @Inject constructor(
                     actualArtworkUrl = handler.musicKitBridge.actualArtworkUrl,
                 )
 
+                val isStalled = stateName == "stalled" || stateName == "loading"
                 stateHolder.update {
                     copy(
                         isPlaying = playing,
+                        isBuffering = isStalled,
                         position = position,
                         duration = duration,
                         streamingMetadata = streamingMeta,
                     )
+                }
+
+                // ── Stall recovery ──────────────────────────────────────
+                // MusicKit reports "stalled" when the buffer runs dry on
+                // spotty networks. Attempt to resume with exponential
+                // backoff so we pick up where we left off once the network
+                // recovers, rather than sitting silent.
+                if (stateName == "stalled" && position > 0) {
+                    stallCount++
+                    val now = System.currentTimeMillis()
+                    // Backoff: 2s, 4s, 8s, 16s (capped)
+                    val backoffMs = (2_000L * (1L shl (stallCount - 1).coerceAtMost(3)))
+                        .coerceAtMost(maxRecoveryBackoffMs)
+                    if (now - lastRecoveryAttempt >= backoffMs) {
+                        lastRecoveryAttempt = now
+                        Log.d(TAG, "Apple Music stalled (count=$stallCount), attempting recovery at pos=$position")
+                        withContext(Dispatchers.Main) {
+                            try {
+                                handler.seekTo(position)
+                                handler.resume()
+                            } catch (e: Exception) {
+                                Log.w(TAG, "Stall recovery attempt failed", e)
+                            }
+                        }
+                    }
+                } else if (stateName == "playing") {
+                    // Reset stall tracking once playback resumes
+                    if (stallCount > 0) {
+                        Log.d(TAG, "Apple Music recovered from stall after $stallCount polls")
+                        stateHolder.update { copy(isBuffering = false) }
+                    }
+                    stallCount = 0
+                    lastRecoveryAttempt = 0L
+                }
+
+                // ── Next-track prefetch ──────────────────────────────────
+                // When within 30s of the end, preload the next Apple Music
+                // track's catalog data so setQueue() is near-instant.
+                if (!nextTrackPreloaded && duration > 0 && duration - position in 1..30_000) {
+                    val nextTrack = queueManager.snapshot.value.upNext.firstOrNull()
+                    val nextAmId = nextTrack?.let { reselectBestSource(it) }?.appleMusicId
+                    if (nextAmId != null) {
+                        nextTrackPreloaded = true
+                        Log.d(TAG, "Preloading next Apple Music track: $nextAmId")
+                        withContext(Dispatchers.Main) {
+                            handler.musicKitBridge.preload(nextAmId)
+                        }
+                    }
                 }
 
                 // Safety-net track completion detection

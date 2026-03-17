@@ -425,7 +425,7 @@ fun NowPlayingScreen(
                         )
                     }
 
-                    // Play/Pause — large purple circle
+                    // Play/Pause — large purple circle; shows spinner when buffering
                     IconButton(
                         onClick = { viewModel.togglePlayPause() },
                         modifier = Modifier
@@ -436,11 +436,19 @@ fun NowPlayingScreen(
                             contentColor = Color.White,
                         ),
                     ) {
-                        Icon(
-                            imageVector = if (playbackState.isPlaying) Icons.Default.Pause else Icons.Default.PlayArrow,
-                            contentDescription = if (playbackState.isPlaying) "Pause" else "Play",
-                            modifier = Modifier.size(36.dp),
-                        )
+                        if (playbackState.isBuffering) {
+                            CircularProgressIndicator(
+                                modifier = Modifier.size(32.dp),
+                                color = Color.White,
+                                strokeWidth = 3.dp,
+                            )
+                        } else {
+                            Icon(
+                                imageVector = if (playbackState.isPlaying) Icons.Default.Pause else Icons.Default.PlayArrow,
+                                contentDescription = if (playbackState.isPlaying) "Pause" else "Play",
+                                modifier = Modifier.size(36.dp),
+                            )
+                        }
                     }
 
                     // Skip Next

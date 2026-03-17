@@ -92,6 +92,11 @@ class MusicKitWebBridge @Inject constructor(
     private val _duration = MutableStateFlow(0L)
     val duration: StateFlow<Long> = _duration.asStateFlow()
 
+    /** Raw MusicKit playback state name (e.g. "playing", "stalled", "paused"). */
+    @Volatile
+    var playbackStateName: String = "none"
+        private set
+
     /** Callback invoked when the current track finishes playing (for auto-advance). */
     var onTrackEnded: (() -> Unit)? = null
 
@@ -533,6 +538,16 @@ class MusicKitWebBridge @Inject constructor(
 
     // ── Playback Control ──────────────────────────────────────────
 
+    /**
+     * Preload a song's catalog data so a subsequent [play] starts faster.
+     * Non-blocking and best-effort — failures are silently ignored.
+     */
+    suspend fun preload(songId: String) {
+        if (!musicKitReady.isCompleted) return
+        val escaped = songId.replace("'", "\\'")
+        evaluate("preload('$escaped')")
+    }
+
     /** Play a song by Apple Music catalog ID. Returns true on success. */
     suspend fun play(songId: String): Boolean {
         musicKitReady.await()
@@ -590,6 +605,7 @@ class MusicKitWebBridge @Inject constructor(
             _isPlaying.value = state.isPlaying
             _position.value = state.position.toLong()
             _duration.value = state.duration.toLong()
+            playbackStateName = state.state ?: "unknown"
         } catch (e: Exception) {
             Log.w(TAG, "Failed to parse polled playback state: $result", e)
         }
@@ -614,12 +630,23 @@ class MusicKitWebBridge @Inject constructor(
                 // JS bridge already sends values in milliseconds
                 _position.value = state.position.toLong()
                 _duration.value = state.duration.toLong()
+                playbackStateName = state.state ?: "unknown"
                 // Detect ended state as a safety net — the JS side also fires
                 // onTrackEnded for this, but duplicates are harmless and this
                 // ensures we catch it even if the JS callback is missed.
+                // Guard: on spotty networks MusicKit may report "ended" when
+                // buffering fails mid-song. Only fire if position is within
+                // 15 seconds of the reported duration (or duration is unknown).
                 if (state.state == "ended" || state.state == "completed") {
-                    Log.d(TAG, "Playback state is '${state.state}', firing onTrackEnded")
-                    onTrackEnded?.invoke()
+                    val pos = state.position.toLong()
+                    val dur = state.duration.toLong()
+                    val nearEnd = dur <= 0 || dur - pos < 15_000
+                    if (nearEnd) {
+                        Log.d(TAG, "Playback state is '${state.state}', firing onTrackEnded (pos=$pos dur=$dur)")
+                        onTrackEnded?.invoke()
+                    } else {
+                        Log.w(TAG, "Ignoring '${state.state}' state mid-song (pos=$pos dur=$dur) — likely network stall")
+                    }
                 }
             } catch (e: Exception) {
                 Log.e(TAG, "Failed to parse playback state: $jsonStr", e)
@@ -655,7 +682,16 @@ class MusicKitWebBridge @Inject constructor(
         @JavascriptInterface
         fun onTrackEnded(jsonStr: String) {
             Log.d(TAG, "Track ended: $jsonStr")
-            onTrackEnded?.invoke()
+            // Cross-check position vs duration — on spotty networks MusicKit
+            // can fire "ended" when buffering fails mid-song.
+            val pos = _position.value
+            val dur = _duration.value
+            val nearEnd = dur <= 0 || dur - pos < 15_000
+            if (nearEnd) {
+                onTrackEnded?.invoke()
+            } else {
+                Log.w(TAG, "Ignoring JS onTrackEnded mid-song (pos=$pos dur=$dur)")
+            }
         }
 
         @JavascriptInterface

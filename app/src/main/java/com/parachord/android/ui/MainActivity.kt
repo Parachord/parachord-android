@@ -416,6 +416,7 @@ private fun ParachordAppContent(mainViewModel: MainViewModel) {
                                     artistName = streamMeta?.artist ?: currentTrack.artist,
                                     artworkUrl = streamMeta?.artworkUrl ?: currentTrack.artworkUrl,
                                     isPlaying = playbackState.isPlaying,
+                                    isBuffering = playbackState.isBuffering,
                                     isFavorited = isCurrentTrackFavorited,
                                     progress = progress,
                                     onPlayPause = { mainViewModel.togglePlayPause() },
