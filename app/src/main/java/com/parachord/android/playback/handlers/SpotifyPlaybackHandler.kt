@@ -117,9 +117,9 @@ class SpotifyPlaybackHandler @Inject constructor(
     /** Consecutive polls where position didn't change while "playing". */
     private var stalePositionCount = 0
 
-    /** True when the connection to Spotify is experiencing issues (poll failures or stale position). */
+    /** True when the connection to Spotify is experiencing sustained issues (not transient blips). */
     val isConnectionStalled: Boolean
-        get() = consecutivePollFailures > 0 || stalePositionCount >= 2
+        get() = consecutivePollFailures >= 3 || stalePositionCount >= 4
 
     override val isConnected: Boolean get() = _isConnected
 
