@@ -80,6 +80,7 @@ fun NowPlayingScreen(
     onBack: () -> Unit,
     onNavigateToArtist: (artistName: String) -> Unit = {},
     onNavigateToAlbum: (albumTitle: String, artistName: String) -> Unit = { _, _ -> },
+    onNavigateToPlaylist: (playlistId: String) -> Unit = {},
     listenAlongFriend: FriendEntity? = null,
     onStopListenAlong: () -> Unit = {},
     modifier: Modifier = Modifier,
@@ -160,7 +161,10 @@ fun NowPlayingScreen(
                             onNavigateToAlbum(ctx.name, artist)
                         }
                         "artist" -> onNavigateToArtist(ctx.name)
-                        "playlist" -> { /* playlist navigation not yet wired */ }
+                        "playlist" -> {
+                            val id = ctx.id ?: return@QueueSheet
+                            onNavigateToPlaylist(id)
+                        }
                     }
                 },
             )

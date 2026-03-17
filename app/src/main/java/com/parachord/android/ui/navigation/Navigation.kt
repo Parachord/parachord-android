@@ -200,6 +200,9 @@ fun ParachordNavHost(
                 onNavigateToAlbum = { albumTitle, artistName ->
                     navController.navigate(Routes.album(albumTitle, artistName))
                 },
+                onNavigateToPlaylist = { playlistId ->
+                    navController.navigate(Routes.playlistDetail(playlistId))
+                },
                 listenAlongFriend = listenAlongFriend,
                 onStopListenAlong = onStopListenAlong,
             )

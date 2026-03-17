@@ -9,6 +9,7 @@ import com.parachord.android.data.db.entity.PlaylistTrackEntity
 import com.parachord.android.data.db.entity.TrackEntity
 import com.parachord.android.data.repository.LibraryRepository
 import com.parachord.android.data.store.SettingsStore
+import com.parachord.android.playback.PlaybackContext
 import com.parachord.android.playback.PlaybackController
 import com.parachord.android.resolver.PlaylistTrackInfo
 import com.parachord.android.resolver.TrackResolverCache
@@ -79,7 +80,12 @@ class PlaylistDetailViewModel @Inject constructor(
         val trackList = tracks.value
         if (trackList.isEmpty()) return
         val entities = trackList.map { libraryRepository.playlistTrackToTrackEntity(it) }
-        playbackController.playQueue(entities, startIndex)
+        val context = PlaybackContext(
+            type = "playlist",
+            name = playlist.value?.title ?: "Playlist",
+            id = playlistId,
+        )
+        playbackController.playQueue(entities, startIndex, context = context)
     }
 
     /** Play a single track from the playlist. */

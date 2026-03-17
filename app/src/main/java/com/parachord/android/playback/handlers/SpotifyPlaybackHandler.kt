@@ -56,6 +56,8 @@ class SpotifyPlaybackHandler @Inject constructor(
         private const val WAKE_TIMEOUT_MS = 8000L
         /** Interval between device-list polls while waiting for Spotify to wake. */
         private const val WAKE_POLL_INTERVAL_MS = 1000L
+        /** Sentinel ID for the synthetic "This device" entry in the picker. */
+        const val LOCAL_DEVICE_ID = "__local_device__"
     }
 
     /**
@@ -211,16 +213,37 @@ class SpotifyPlaybackHandler @Inject constructor(
         }
         Log.d(TAG, "Devices: ${devices.map { "${it.name}(active=${it.isActive}, type=${it.type})" }}")
 
-        if (devices.isEmpty()) {
-            Log.w(TAG, "No Spotify devices available — is Spotify installed/running?")
-            return false
-        }
-
-        val targetDevice = pickDevice(devices)
-        if (targetDevice == null) {
+        // Even with zero API devices, pickDevice() injects "This device" so
+        // the user can always force-wake Spotify on this phone.
+        val pickedDevice = pickDevice(devices)
+        if (pickedDevice == null) {
             Log.w(TAG, "No suitable device found (user cancelled or no devices)")
             return false
         }
+
+        // If the user picked the synthetic "This device" entry, wake Spotify
+        // locally and resolve the real Connect device ID for this phone.
+        val targetDevice = if (isLocalPlaceholder(pickedDevice)) {
+            Log.d(TAG, "Local device selected — waking Spotify to get real device ID")
+            val localDevices = wakeSpotifyAndAwaitDevice(auth)
+            val localModel = Build.MODEL.lowercase()
+            val resolved = localDevices.firstOrNull {
+                it.type == "Smartphone" && it.name.lowercase().contains(localModel)
+            } ?: localDevices.firstOrNull { it.type == "Smartphone" }
+              ?: localDevices.firstOrNull()
+            if (resolved == null) {
+                Log.w(TAG, "Could not find local device after waking Spotify")
+                return false
+            }
+            hasWokenSpotify = true
+            // Update the preferred device to the real ID so we skip the picker next time
+            settingsStore.setPreferredSpotifyDeviceId(resolved.id)
+            Log.d(TAG, "Resolved local device: '${resolved.name}' id=${resolved.id}")
+            resolved
+        } else {
+            pickedDevice
+        }
+
         Log.d(TAG, "Target device: '${targetDevice.name}' (type=${targetDevice.type}, active=${targetDevice.isActive})")
 
         // Transfer playback to the target device if it's not already active
@@ -355,16 +378,44 @@ class SpotifyPlaybackHandler @Inject constructor(
      * 3. Multiple devices — show picker dialog, save selection as preferred
      * 4. Preferred device not found — show picker again
      */
+    /**
+     * Build a synthetic "This device" entry so the local phone always appears
+     * in the picker — even when Spotify hasn't registered it yet.
+     */
+    private fun localDeviceEntry(): SpDevice = SpDevice(
+        id = LOCAL_DEVICE_ID,
+        name = "${Build.MANUFACTURER.replaceFirstChar { it.uppercase() }} ${Build.MODEL}",
+        isActive = false,
+        isRestricted = false,
+        type = "Smartphone",
+    )
+
+    /**
+     * True when [device] is the synthetic "This device" placeholder, meaning
+     * we need to wake Spotify locally and resolve a real device ID.
+     */
+    private fun isLocalPlaceholder(device: SpDevice): Boolean =
+        device.id == LOCAL_DEVICE_ID
+
     private suspend fun pickDevice(devices: List<SpDevice>): SpDevice? {
         val controllable = devices.filter { !it.isRestricted }
         val available = controllable.ifEmpty { devices }
 
-        Log.d(TAG, "pickDevice: devices=${available.map { "'${it.name}'(type=${it.type}, active=${it.isActive})" }}")
+        // Always ensure the local device appears in the list. If Spotify
+        // hasn't registered this phone yet, inject a synthetic entry so the
+        // user can pick "This device" and we'll wake Spotify on demand.
+        val localModel = Build.MODEL.lowercase()
+        val hasLocalDevice = available.any {
+            it.type == "Smartphone" && it.name.lowercase().contains(localModel)
+        }
+        val withLocal = if (hasLocalDevice) available else available + localDeviceEntry()
+
+        Log.d(TAG, "pickDevice: devices=${withLocal.map { "'${it.name}'(type=${it.type}, active=${it.isActive})" }}")
 
         // 1. Check preferred device
         val preferredId = settingsStore.getPreferredSpotifyDeviceId()
-        if (preferredId != null) {
-            val preferred = available.firstOrNull { it.id == preferredId }
+        if (preferredId != null && preferredId != LOCAL_DEVICE_ID) {
+            val preferred = withLocal.firstOrNull { it.id == preferredId }
             if (preferred != null) {
                 Log.d(TAG, "Using preferred device: '${preferred.name}'")
                 return preferred
@@ -374,14 +425,14 @@ class SpotifyPlaybackHandler @Inject constructor(
         }
 
         // 2. Single device — auto-select (no UX regression for simple setups)
-        if (available.size == 1) {
-            Log.d(TAG, "Single device, auto-selecting '${available[0].name}'")
-            return available[0]
+        if (withLocal.size == 1) {
+            Log.d(TAG, "Single device, auto-selecting '${withLocal[0].name}'")
+            return withLocal[0]
         }
 
         // 3. Already-active device with no preferred set — use it
         if (preferredId == null) {
-            available.firstOrNull { it.isActive }?.let { active ->
+            withLocal.firstOrNull { it.isActive }?.let { active ->
                 Log.d(TAG, "No preferred set, using already-active device '${active.name}'")
                 return active
             }
@@ -390,7 +441,7 @@ class SpotifyPlaybackHandler @Inject constructor(
         // 4. Multiple devices — show picker dialog and wait for user choice
         Log.d(TAG, "Multiple devices available, showing picker dialog")
         val deferred = CompletableDeferred<SpDevice?>()
-        _devicePickerRequest.value = DevicePickerRequest(available, deferred)
+        _devicePickerRequest.value = DevicePickerRequest(withLocal, deferred)
 
         val chosen = deferred.await()
         if (chosen != null) {
