@@ -597,6 +597,8 @@ private fun PlugInsTab(
             onSaveAiModel = onSaveAiModel,
             getAiModel = getAiModel,
             onClearAiProvider = onClearAiProvider,
+            hasPreferredSpotifyDevice = hasPreferredSpotifyDevice,
+            onClearPreferredSpotifyDevice = onClearPreferredSpotifyDevice,
         )
     }
 }
@@ -820,6 +822,8 @@ private fun PluginConfigSheet(
     onSaveAiModel: (String, String) -> Unit = { _, _ -> },
     getAiModel: (String) -> StateFlow<String> = { MutableStateFlow("") },
     onClearAiProvider: (String) -> Unit = {},
+    hasPreferredSpotifyDevice: Boolean = false,
+    onClearPreferredSpotifyDevice: () -> Unit = {},
 ) {
     val sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
 
@@ -924,6 +928,7 @@ private fun PluginConfigSheet(
                     hasPreferredDevice = hasPreferredSpotifyDevice,
                     onClearPreferredDevice = onClearPreferredSpotifyDevice,
                 )
+
                 "soundcloud" -> SoundCloudConfig(
                     isConnected = isConnected,
                     credentialsSaved = soundCloudCredentialsSaved,
