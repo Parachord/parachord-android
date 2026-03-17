@@ -38,6 +38,11 @@ class SettingsViewModel @Inject constructor(
         .map { it != null }
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), false)
 
+    /** Whether a preferred Spotify device ID is saved. */
+    val hasPreferredSpotifyDevice: StateFlow<Boolean> = settingsStore.getPreferredSpotifyDeviceIdFlow()
+        .map { it != null }
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), false)
+
     val lastFmConnected: StateFlow<Boolean> = settingsStore.getLastFmSessionKeyFlow()
         .map { it != null }
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), false)
@@ -108,6 +113,10 @@ class SettingsViewModel @Inject constructor(
 
     fun disconnectSpotify() {
         viewModelScope.launch { settingsStore.clearSpotifyTokens() }
+    }
+
+    fun clearPreferredSpotifyDevice() {
+        viewModelScope.launch { settingsStore.clearPreferredSpotifyDeviceId() }
     }
 
     fun disconnectLastFm() {

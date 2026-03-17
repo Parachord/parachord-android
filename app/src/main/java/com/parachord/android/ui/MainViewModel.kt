@@ -22,6 +22,7 @@ import com.parachord.android.playlist.PlaylistImportManager
 import com.parachord.android.playback.PlaybackContext
 import com.parachord.android.playback.PlaybackController
 import com.parachord.android.playback.handlers.MusicKitWebBridge
+import com.parachord.android.playback.handlers.SpotifyPlaybackHandler
 import com.parachord.android.playback.PlaybackState
 import com.parachord.android.playback.PlaybackStateHolder
 import com.parachord.android.playback.effectiveTrack
@@ -46,6 +47,7 @@ class MainViewModel @Inject constructor(
     private val resolverManager: ResolverManager,
     private val resolverScoring: ResolverScoring,
     private val musicKitBridge: MusicKitWebBridge,
+    private val spotifyPlaybackHandler: SpotifyPlaybackHandler,
     settingsStore: SettingsStore,
     private val playlistImportManager: PlaylistImportManager,
 ) : ViewModel() {
@@ -79,6 +81,10 @@ class MainViewModel @Inject constructor(
 
     val resolverOrder: StateFlow<List<String>> = settingsStore.getResolverOrderFlow()
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), emptyList())
+
+    /** Spotify device picker request — observed by the UI to show the picker dialog. */
+    val spotifyDevicePickerRequest: StateFlow<SpotifyPlaybackHandler.DevicePickerRequest?> =
+        spotifyPlaybackHandler.devicePickerRequest
 
     /** Pinned friends for the sidebar drawer (on-air auto-pins + manual pins). */
     val friends: StateFlow<List<FriendEntity>> = friendsRepository.getPinnedFriends()
@@ -114,6 +120,10 @@ class MainViewModel @Inject constructor(
 
     fun skipNext() {
         playbackController.skipNext()
+    }
+
+    fun onSpotifyDevicePicked(device: com.parachord.android.data.api.SpDevice?) {
+        spotifyPlaybackHandler.onDevicePicked(device)
     }
 
     /** Toggle the current track's collection status (heart/favorite).

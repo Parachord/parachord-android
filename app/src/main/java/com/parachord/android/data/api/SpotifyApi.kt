@@ -346,6 +346,7 @@ data class SpDevice(
     @SerialName("is_active") val isActive: Boolean = false,
     @SerialName("is_restricted") val isRestricted: Boolean = false,
     val type: String = "",
+    @SerialName("volume_percent") val volumePercent: Int? = null,
 )
 
 @Serializable
