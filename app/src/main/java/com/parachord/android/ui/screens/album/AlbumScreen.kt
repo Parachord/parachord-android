@@ -63,6 +63,7 @@ import com.parachord.android.ui.components.ModalDivider
 import com.parachord.android.ui.components.ModalTextActive
 import com.parachord.android.ui.components.ModalTextPrimary
 import com.parachord.android.ui.components.ShimmerTrackRow
+import com.parachord.android.ui.components.shimmerBrush
 import com.parachord.android.ui.components.TrackContextInfo
 import com.parachord.android.ui.components.TrackContextMenuHost
 import com.parachord.android.ui.components.TrackRow
@@ -102,13 +103,24 @@ fun AlbumScreen(
     Column(modifier = modifier.fillMaxSize()) {
         TopAppBar(
             title = {
-                Text(
-                    text = (albumDetail?.title ?: "Album").uppercase(),
-                    style = MaterialTheme.typography.titleLarge.copy(
-                        fontWeight = FontWeight.Light,
-                        letterSpacing = 0.2.em,
-                    ),
-                )
+                if (isLoading && albumDetail == null) {
+                    val brush = shimmerBrush()
+                    Box(
+                        modifier = Modifier
+                            .width(120.dp)
+                            .height(20.dp)
+                            .clip(RoundedCornerShape(4.dp))
+                            .background(brush),
+                    )
+                } else {
+                    Text(
+                        text = (albumDetail?.title ?: "Album").uppercase(),
+                        style = MaterialTheme.typography.titleLarge.copy(
+                            fontWeight = FontWeight.Light,
+                            letterSpacing = 0.2.em,
+                        ),
+                    )
+                }
             },
             navigationIcon = {
                 IconButton(onClick = onBack) {
@@ -123,9 +135,67 @@ fun AlbumScreen(
         }
 
         if (isLoading) {
-            // Shimmer loading skeleton
-            Column(modifier = Modifier.fillMaxSize().padding(16.dp)) {
-                repeat(6) { ShimmerTrackRow() }
+            // Shimmer loading skeleton — header + track rows
+            val brush = shimmerBrush()
+            Column(modifier = Modifier.fillMaxSize()) {
+                // Album header skeleton
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(16.dp),
+                    verticalAlignment = Alignment.Top,
+                ) {
+                    // Album art placeholder
+                    Box(
+                        modifier = Modifier
+                            .size(140.dp)
+                            .clip(RoundedCornerShape(8.dp))
+                            .background(brush),
+                    )
+                    Spacer(modifier = Modifier.width(16.dp))
+                    Column {
+                        // Title
+                        Box(
+                            modifier = Modifier
+                                .fillMaxWidth(0.8f)
+                                .height(18.dp)
+                                .clip(RoundedCornerShape(4.dp))
+                                .background(brush),
+                        )
+                        Spacer(modifier = Modifier.height(8.dp))
+                        // Artist
+                        Box(
+                            modifier = Modifier
+                                .fillMaxWidth(0.5f)
+                                .height(14.dp)
+                                .clip(RoundedCornerShape(4.dp))
+                                .background(brush),
+                        )
+                        Spacer(modifier = Modifier.height(8.dp))
+                        // Release type + year
+                        Box(
+                            modifier = Modifier
+                                .width(80.dp)
+                                .height(12.dp)
+                                .clip(RoundedCornerShape(4.dp))
+                                .background(brush),
+                        )
+                        Spacer(modifier = Modifier.height(16.dp))
+                        // Play button placeholder
+                        Box(
+                            modifier = Modifier
+                                .width(100.dp)
+                                .height(36.dp)
+                                .clip(RoundedCornerShape(20.dp))
+                                .background(brush),
+                        )
+                    }
+                }
+                HorizontalDivider()
+                // Track row skeletons
+                Column(modifier = Modifier.padding(top = 4.dp)) {
+                    repeat(6) { ShimmerTrackRow() }
+                }
             }
         } else {
             val detail = albumDetail
