@@ -1,5 +1,7 @@
 package com.parachord.android.playback.handlers
 
+import android.content.Context
+import android.content.Intent
 import android.os.Build
 import android.util.Log
 import com.parachord.android.auth.OAuthManager
@@ -20,6 +22,7 @@ import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
+import dagger.hilt.android.qualifiers.ApplicationContext
 import retrofit2.HttpException
 import javax.inject.Inject
 import javax.inject.Singleton
@@ -40,6 +43,7 @@ class SpotifyPlaybackHandler @Inject constructor(
     private val spotifyApi: SpotifyApi,
     private val settingsStore: SettingsStore,
     private val oAuthManager: OAuthManager,
+    @ApplicationContext private val context: Context,
 ) : SourceHandler, ExternalPlaybackHandler {
 
     companion object {
@@ -47,6 +51,11 @@ class SpotifyPlaybackHandler @Inject constructor(
         private const val MAX_POLL_FAILURES = 10
         /** ~8 seconds of stale position (8 polls at 1s interval). */
         private const val MAX_STALE_POSITION = 8
+        private const val SPOTIFY_PACKAGE = "com.spotify.music"
+        /** Max time to wait for Spotify to register as a Connect device after launching. */
+        private const val WAKE_TIMEOUT_MS = 8000L
+        /** Interval between device-list polls while waiting for Spotify to wake. */
+        private const val WAKE_POLL_INTERVAL_MS = 1000L
     }
 
     /**
@@ -77,6 +86,8 @@ class SpotifyPlaybackHandler @Inject constructor(
     private var cachedPosition = 0L
     private var cachedDuration = 0L
     private var _isConnected = false
+    /** True after we've successfully woken Spotify and found devices this session. */
+    private var hasWokenSpotify = false
 
     // Actual track metadata from the Spotify API (what's REALLY playing)
     /** Title of the track Spotify reports as currently playing. */
@@ -188,11 +199,20 @@ class SpotifyPlaybackHandler @Inject constructor(
      * 4. Preferred device unavailable — show picker again
      */
     private suspend fun attemptPlay(auth: String, uri: String): Boolean {
-        val devices = spotifyApi.getDevices(auth).devices
+        // On the first play of a session, wake the local Spotify app so this
+        // phone registers as a Connect device. Subsequent tracks skip the wake
+        // since Spotify is already running.
+        val devices = if (!hasWokenSpotify) {
+            val result = wakeSpotifyAndAwaitDevice(auth)
+            if (result.isNotEmpty()) hasWokenSpotify = true
+            result
+        } else {
+            spotifyApi.getDevices(auth).devices
+        }
         Log.d(TAG, "Devices: ${devices.map { "${it.name}(active=${it.isActive}, type=${it.type})" }}")
 
         if (devices.isEmpty()) {
-            Log.w(TAG, "No Spotify devices available — is Spotify running?")
+            Log.w(TAG, "No Spotify devices available — is Spotify installed/running?")
             return false
         }
 
@@ -266,6 +286,65 @@ class SpotifyPlaybackHandler @Inject constructor(
     fun disconnect() {
         stopStatePolling()
         _isConnected = false
+        hasWokenSpotify = false
+    }
+
+    /**
+     * Ensure the local Spotify app is running so this phone registers as a
+     * Spotify Connect device, then return the current device list.
+     *
+     * Always launches Spotify (no-op if already running), fetches devices
+     * immediately, and only enters a polling loop if the list is still empty
+     * (i.e. Spotify wasn't running yet and needs a moment to register).
+     */
+    private suspend fun wakeSpotifyAndAwaitDevice(auth: String): List<SpDevice> {
+        val launchIntent = context.packageManager.getLaunchIntentForPackage(SPOTIFY_PACKAGE)
+        if (launchIntent == null) {
+            Log.w(TAG, "Spotify is not installed, fetching devices without wake")
+            return try { spotifyApi.getDevices(auth).devices } catch (_: Exception) { emptyList() }
+        }
+
+        // Launch Spotify — FLAG_ACTIVITY_NEW_TASK is required from a non-Activity
+        // context; REORDER_TO_FRONT avoids stealing focus if it's already running.
+        launchIntent.addFlags(
+            Intent.FLAG_ACTIVITY_NEW_TASK or
+                Intent.FLAG_ACTIVITY_REORDER_TO_FRONT
+        )
+        context.startActivity(launchIntent)
+        Log.d(TAG, "Launched Spotify app (or brought to front)")
+
+        // Small delay to let an already-running Spotify register after the intent
+        delay(500)
+
+        // Fast path: if devices are already available, return immediately
+        try {
+            val devices = spotifyApi.getDevices(auth).devices
+            if (devices.isNotEmpty()) {
+                Log.d(TAG, "Devices already available: ${devices.size}")
+                return devices
+            }
+        } catch (e: Exception) {
+            Log.d(TAG, "Initial device fetch after wake failed: ${e.message}")
+        }
+
+        // Slow path: Spotify just launched, poll until it registers as a device
+        Log.d(TAG, "No devices yet, polling for up to ${WAKE_TIMEOUT_MS}ms...")
+        val deadline = System.currentTimeMillis() + WAKE_TIMEOUT_MS
+        while (System.currentTimeMillis() < deadline) {
+            delay(WAKE_POLL_INTERVAL_MS)
+            try {
+                val devices = spotifyApi.getDevices(auth).devices
+                if (devices.isNotEmpty()) {
+                    Log.d(TAG, "Spotify woke up — found ${devices.size} device(s)")
+                    return devices
+                }
+            } catch (e: Exception) {
+                Log.d(TAG, "Device poll during wake failed: ${e.message}")
+            }
+        }
+
+        Log.w(TAG, "Timed out waiting for Spotify device after ${WAKE_TIMEOUT_MS}ms")
+        return emptyList()
     }
 
     /**
