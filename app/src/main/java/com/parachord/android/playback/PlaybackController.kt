@@ -226,6 +226,8 @@ class PlaybackController @Inject constructor(
         if (next == null) {
             Log.d(TAG, "skipNext: queue empty, stopping playback")
             if (isExternalPlayback) {
+                stopSpotifyStatePolling()
+                stopAppleMusicStatePolling()
                 scope.launch { router.stopExternalPlayback() }
                 sendExternalPlaybackStop()
                 isExternalPlayback = false
@@ -611,43 +613,49 @@ class PlaybackController @Inject constructor(
         // Run on Dispatchers.Default so Doze mode doesn't throttle the polling
         // loop — Dispatchers.Main gets deferred when the screen is off.
         spotifyStateJob = scope.launch(Dispatchers.Default) {
-            val spotify = router.getSpotifyHandler()
-            // Small initial delay to let the track start
-            delay(1000)
-            while (isActive && isExternalPlayback) {
-                val playing = spotify.isPlaying()
-                val position = spotify.getPosition()
-                val duration = spotify.getDuration()
+            try {
+                val spotify = router.getSpotifyHandler()
+                // Small initial delay to let the track start
+                delay(1000)
+                while (isActive && isExternalPlayback) {
+                    val playing = spotify.isPlaying()
+                    val position = spotify.getPosition()
+                    val duration = spotify.getDuration()
 
-                // Build streaming metadata from what Spotify reports is actually playing
-                val streamingMeta = buildStreamingMetadata(
-                    queuedTrack = stateHolder.state.value.currentTrack,
-                    actualTitle = spotify.actualTitle,
-                    actualArtist = spotify.actualArtist,
-                    actualAlbum = spotify.actualAlbum,
-                    actualArtworkUrl = spotify.actualArtworkUrl,
-                )
-
-                stateHolder.update {
-                    copy(
-                        isPlaying = playing,
-                        isBuffering = spotify.isConnectionStalled,
-                        position = position,
-                        duration = duration,
-                        streamingMetadata = streamingMeta,
+                    // Build streaming metadata from what Spotify reports is actually playing
+                    val streamingMeta = buildStreamingMetadata(
+                        queuedTrack = stateHolder.state.value.currentTrack,
+                        actualTitle = spotify.actualTitle,
+                        actualArtist = spotify.actualArtist,
+                        actualAlbum = spotify.actualAlbum,
+                        actualArtworkUrl = spotify.actualArtworkUrl,
                     )
-                }
 
-                // Auto-advance: detect when our track is done via multiple signals
-                // (natural end, Spotify autoplay to different track, or item cleared)
-                if (spotify.isOurTrackDone()) {
-                    withContext(Dispatchers.Main) {
-                        skipNextInternal(userInitiated = false)
+                    stateHolder.update {
+                        copy(
+                            isPlaying = playing,
+                            isBuffering = spotify.isConnectionStalled,
+                            position = position,
+                            duration = duration,
+                            streamingMetadata = streamingMeta,
+                        )
                     }
-                    break
-                }
 
-                delay(500)
+                    // Auto-advance: detect when our track is done via multiple signals
+                    // (natural end, Spotify autoplay to different track, or item cleared)
+                    if (spotify.isOurTrackDone()) {
+                        withContext(Dispatchers.Main) {
+                            skipNextInternal(userInitiated = false)
+                        }
+                        break
+                    }
+
+                    delay(500)
+                }
+            } finally {
+                // Release wake lock when the loop exits for any reason
+                // (isExternalPlayback became false, track ended, etc.)
+                releaseExternalPlaybackWakeLock()
             }
         }
     }
@@ -696,109 +704,115 @@ class PlaybackController @Inject constructor(
         // Run on Dispatchers.Default so Doze mode doesn't throttle the polling
         // loop — Dispatchers.Main gets deferred when the screen is off.
         appleMusicPollingJob = scope.launch(Dispatchers.Default) {
-            // Small initial delay to let the track start
-            delay(1000)
+            try {
+                // Small initial delay to let the track start
+                delay(1000)
 
-            // Stall recovery state — tracks consecutive stalled polls and
-            // uses exponential backoff between resume attempts.
-            var stallCount = 0
-            var lastRecoveryAttempt = 0L
-            val maxRecoveryBackoffMs = 16_000L
-            // Prefetch: preload the next track's catalog data once we're
-            // within 30 seconds of the end of the current track.
-            var nextTrackPreloaded = false
+                // Stall recovery state — tracks consecutive stalled polls and
+                // uses exponential backoff between resume attempts.
+                var stallCount = 0
+                var lastRecoveryAttempt = 0L
+                val maxRecoveryBackoffMs = 16_000L
+                // Prefetch: preload the next track's catalog data once we're
+                // within 30 seconds of the end of the current track.
+                var nextTrackPreloaded = false
 
-            while (isActive && isExternalPlayback) {
-                // Actively poll JS for fresh position/duration — the
-                // playbackStateDidChange event only fires on state transitions,
-                // not continuously during playback.
-                withContext(Dispatchers.Main) {
-                    handler.musicKitBridge.pollPlaybackState()
-                }
+                while (isActive && isExternalPlayback) {
+                    // Actively poll JS for fresh position/duration — the
+                    // playbackStateDidChange event only fires on state transitions,
+                    // not continuously during playback.
+                    withContext(Dispatchers.Main) {
+                        handler.musicKitBridge.pollPlaybackState()
+                    }
 
-                val position = handler.getPosition()
-                val duration = handler.getDuration()
-                val playing = handler.isPlaying()
-                val stateName = handler.musicKitBridge.playbackStateName
+                    val position = handler.getPosition()
+                    val duration = handler.getDuration()
+                    val playing = handler.isPlaying()
+                    val stateName = handler.musicKitBridge.playbackStateName
 
-                // Build streaming metadata from what MusicKit reports is actually playing
-                val streamingMeta = buildStreamingMetadata(
-                    queuedTrack = stateHolder.state.value.currentTrack,
-                    actualTitle = handler.musicKitBridge.actualTitle,
-                    actualArtist = handler.musicKitBridge.actualArtist,
-                    actualAlbum = handler.musicKitBridge.actualAlbum,
-                    actualArtworkUrl = handler.musicKitBridge.actualArtworkUrl,
-                )
-
-                val isStalled = stateName == "stalled" || stateName == "loading"
-                stateHolder.update {
-                    copy(
-                        isPlaying = playing,
-                        isBuffering = isStalled,
-                        position = position,
-                        duration = duration,
-                        streamingMetadata = streamingMeta,
+                    // Build streaming metadata from what MusicKit reports is actually playing
+                    val streamingMeta = buildStreamingMetadata(
+                        queuedTrack = stateHolder.state.value.currentTrack,
+                        actualTitle = handler.musicKitBridge.actualTitle,
+                        actualArtist = handler.musicKitBridge.actualArtist,
+                        actualAlbum = handler.musicKitBridge.actualAlbum,
+                        actualArtworkUrl = handler.musicKitBridge.actualArtworkUrl,
                     )
-                }
 
-                // ── Stall recovery ──────────────────────────────────────
-                // MusicKit reports "stalled" when the buffer runs dry on
-                // spotty networks. Attempt to resume with exponential
-                // backoff so we pick up where we left off once the network
-                // recovers, rather than sitting silent.
-                if (stateName == "stalled" && position > 0) {
-                    stallCount++
-                    val now = System.currentTimeMillis()
-                    // Backoff: 2s, 4s, 8s, 16s (capped)
-                    val backoffMs = (2_000L * (1L shl (stallCount - 1).coerceAtMost(3)))
-                        .coerceAtMost(maxRecoveryBackoffMs)
-                    if (now - lastRecoveryAttempt >= backoffMs) {
-                        lastRecoveryAttempt = now
-                        Log.d(TAG, "Apple Music stalled (count=$stallCount), attempting recovery at pos=$position")
-                        withContext(Dispatchers.Main) {
-                            try {
-                                handler.seekTo(position)
-                                handler.resume()
-                            } catch (e: Exception) {
-                                Log.w(TAG, "Stall recovery attempt failed", e)
+                    val isStalled = stateName == "stalled" || stateName == "loading"
+                    stateHolder.update {
+                        copy(
+                            isPlaying = playing,
+                            isBuffering = isStalled,
+                            position = position,
+                            duration = duration,
+                            streamingMetadata = streamingMeta,
+                        )
+                    }
+
+                    // ── Stall recovery ──────────────────────────────────────
+                    // MusicKit reports "stalled" when the buffer runs dry on
+                    // spotty networks. Attempt to resume with exponential
+                    // backoff so we pick up where we left off once the network
+                    // recovers, rather than sitting silent.
+                    if (stateName == "stalled" && position > 0) {
+                        stallCount++
+                        val now = System.currentTimeMillis()
+                        // Backoff: 2s, 4s, 8s, 16s (capped)
+                        val backoffMs = (2_000L * (1L shl (stallCount - 1).coerceAtMost(3)))
+                            .coerceAtMost(maxRecoveryBackoffMs)
+                        if (now - lastRecoveryAttempt >= backoffMs) {
+                            lastRecoveryAttempt = now
+                            Log.d(TAG, "Apple Music stalled (count=$stallCount), attempting recovery at pos=$position")
+                            withContext(Dispatchers.Main) {
+                                try {
+                                    handler.seekTo(position)
+                                    handler.resume()
+                                } catch (e: Exception) {
+                                    Log.w(TAG, "Stall recovery attempt failed", e)
+                                }
+                            }
+                        }
+                    } else if (stateName == "playing") {
+                        // Reset stall tracking once playback resumes
+                        if (stallCount > 0) {
+                            Log.d(TAG, "Apple Music recovered from stall after $stallCount polls")
+                            stateHolder.update { copy(isBuffering = false) }
+                        }
+                        stallCount = 0
+                        lastRecoveryAttempt = 0L
+                    }
+
+                    // ── Next-track prefetch ──────────────────────────────────
+                    // When within 30s of the end, preload the next Apple Music
+                    // track's catalog data so setQueue() is near-instant.
+                    if (!nextTrackPreloaded && duration > 0 && duration - position in 1..30_000) {
+                        val nextTrack = queueManager.snapshot.value.upNext.firstOrNull()
+                        val nextAmId = nextTrack?.let { reselectBestSource(it) }?.appleMusicId
+                        if (nextAmId != null) {
+                            nextTrackPreloaded = true
+                            Log.d(TAG, "Preloading next Apple Music track: $nextAmId")
+                            withContext(Dispatchers.Main) {
+                                handler.musicKitBridge.preload(nextAmId)
                             }
                         }
                     }
-                } else if (stateName == "playing") {
-                    // Reset stall tracking once playback resumes
-                    if (stallCount > 0) {
-                        Log.d(TAG, "Apple Music recovered from stall after $stallCount polls")
-                        stateHolder.update { copy(isBuffering = false) }
-                    }
-                    stallCount = 0
-                    lastRecoveryAttempt = 0L
-                }
 
-                // ── Next-track prefetch ──────────────────────────────────
-                // When within 30s of the end, preload the next Apple Music
-                // track's catalog data so setQueue() is near-instant.
-                if (!nextTrackPreloaded && duration > 0 && duration - position in 1..30_000) {
-                    val nextTrack = queueManager.snapshot.value.upNext.firstOrNull()
-                    val nextAmId = nextTrack?.let { reselectBestSource(it) }?.appleMusicId
-                    if (nextAmId != null) {
-                        nextTrackPreloaded = true
-                        Log.d(TAG, "Preloading next Apple Music track: $nextAmId")
+                    // Safety-net track completion detection
+                    if (handler.isOurTrackDone() && trackEndHandled.compareAndSet(false, true)) {
+                        Log.d(TAG, "Apple Music track done (safety net)")
                         withContext(Dispatchers.Main) {
-                            handler.musicKitBridge.preload(nextAmId)
+                            skipNextInternal(userInitiated = false)
                         }
+                        break
                     }
-                }
 
-                // Safety-net track completion detection
-                if (handler.isOurTrackDone() && trackEndHandled.compareAndSet(false, true)) {
-                    Log.d(TAG, "Apple Music track done (safety net)")
-                    withContext(Dispatchers.Main) {
-                        skipNextInternal(userInitiated = false)
-                    }
-                    break
+                    delay(500)
                 }
-
-                delay(500)
+            } finally {
+                // Release wake lock when the loop exits for any reason
+                // (isExternalPlayback became false, track ended, etc.)
+                releaseExternalPlaybackWakeLock()
             }
         }
     }
