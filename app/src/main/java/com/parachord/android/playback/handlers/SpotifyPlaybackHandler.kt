@@ -86,6 +86,8 @@ class SpotifyPlaybackHandler @Inject constructor(
     private var cachedPosition = 0L
     private var cachedDuration = 0L
     private var _isConnected = false
+    /** True after we've successfully woken Spotify and found devices this session. */
+    private var hasWokenSpotify = false
 
     // Actual track metadata from the Spotify API (what's REALLY playing)
     /** Title of the track Spotify reports as currently playing. */
@@ -197,13 +199,20 @@ class SpotifyPlaybackHandler @Inject constructor(
      * 4. Preferred device unavailable — show picker again
      */
     private suspend fun attemptPlay(auth: String, uri: String): Boolean {
-        // Always try to wake the local Spotify app so this phone appears as a
-        // device option, even if other devices (laptop, speaker) are already online.
-        val devices = wakeSpotifyAndAwaitDevice(auth)
+        // On the first play of a session, wake the local Spotify app so this
+        // phone registers as a Connect device. Subsequent tracks skip the wake
+        // since Spotify is already running.
+        val devices = if (!hasWokenSpotify) {
+            val result = wakeSpotifyAndAwaitDevice(auth)
+            if (result.isNotEmpty()) hasWokenSpotify = true
+            result
+        } else {
+            spotifyApi.getDevices(auth).devices
+        }
         Log.d(TAG, "Devices: ${devices.map { "${it.name}(active=${it.isActive}, type=${it.type})" }}")
 
         if (devices.isEmpty()) {
-            Log.w(TAG, "No Spotify devices available after wake attempt — is Spotify installed?")
+            Log.w(TAG, "No Spotify devices available — is Spotify installed/running?")
             return false
         }
 
@@ -277,6 +286,7 @@ class SpotifyPlaybackHandler @Inject constructor(
     fun disconnect() {
         stopStatePolling()
         _isConnected = false
+        hasWokenSpotify = false
     }
 
     /**
