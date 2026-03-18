@@ -246,7 +246,7 @@ fun NowPlayingScreen(
                         }
                     },
                     navigationIcon = {
-                        IconButton(onClick = onBack) {
+                        IconButton(onClick = { haptic(); onBack() }) {
                             Icon(
                                 Icons.Default.KeyboardArrowDown,
                                 contentDescription = "Close",
@@ -257,7 +257,7 @@ fun NowPlayingScreen(
                     },
                     actions = {
                         if (listenAlongFriend != null) {
-                            IconButton(onClick = onStopListenAlong) {
+                            IconButton(onClick = { haptic(); onStopListenAlong() }) {
                                 Icon(
                                     imageVector = Icons.Default.Close,
                                     contentDescription = "Stop listening along",
@@ -401,7 +401,7 @@ fun NowPlayingScreen(
                 ) {
                     // Shuffle (disabled during spinoff)
                     IconButton(
-                        onClick = { viewModel.toggleShuffle() },
+                        onClick = { haptic(); viewModel.toggleShuffle() },
                         enabled = !playbackState.spinoffMode,
                         colors = IconButtonDefaults.iconButtonColors(
                             contentColor = if (playbackState.shuffleEnabled) ActiveControlColor else InactiveControlColor,
