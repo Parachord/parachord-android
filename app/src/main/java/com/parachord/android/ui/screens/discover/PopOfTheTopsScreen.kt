@@ -2,7 +2,7 @@ package com.parachord.android.ui.screens.discover
 
 import androidx.compose.animation.animateContentSize
 import androidx.compose.foundation.background
-import androidx.compose.foundation.clickable
+import com.parachord.android.ui.components.hapticClickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -212,7 +212,7 @@ private fun ChartsFilterBar(
                 Row(
                     modifier = Modifier
                         .clip(RoundedCornerShape(8.dp))
-                        .clickable { countryDropdownOpen = true }
+                        .hapticClickable { countryDropdownOpen = true }
                         .padding(horizontal = 10.dp, vertical = 6.dp),
                     verticalAlignment = Alignment.CenterVertically,
                 ) {
@@ -275,7 +275,7 @@ private fun ChartsFilterBar(
                     Row(
                         modifier = Modifier
                             .clip(RoundedCornerShape(8.dp))
-                            .clickable { sourceDropdownOpen = true }
+                            .hapticClickable { sourceDropdownOpen = true }
                             .padding(horizontal = 10.dp, vertical = 6.dp),
                         verticalAlignment = Alignment.CenterVertically,
                     ) {
@@ -383,7 +383,7 @@ private fun ChartsFilterBar(
                         contentDescription = "Clear",
                         modifier = Modifier
                             .size(18.dp)
-                            .clickable { onSearchQueryChange("") },
+                            .hapticClickable { onSearchQueryChange("") },
                         tint = MaterialTheme.colorScheme.onSurfaceVariant,
                     )
                 }
@@ -445,7 +445,7 @@ private fun AlbumGridItem(album: ChartAlbum, onClick: () -> Unit) {
     Column(
         modifier = Modifier
             .clip(RoundedCornerShape(8.dp))
-            .clickable(onClick = onClick),
+            .hapticClickable(onClick = onClick),
     ) {
         Box {
             AlbumArtCard(

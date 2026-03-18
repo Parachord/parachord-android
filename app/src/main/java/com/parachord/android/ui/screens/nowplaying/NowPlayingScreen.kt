@@ -1,7 +1,6 @@
 package com.parachord.android.ui.screens.nowplaying
 
 import androidx.compose.foundation.background
-import androidx.compose.foundation.clickable
 import androidx.compose.foundation.gestures.detectVerticalDragGestures
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -58,6 +57,8 @@ import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.Headphones
 import com.parachord.android.data.db.entity.FriendEntity
 import com.parachord.android.playback.effectiveTrack
+import com.parachord.android.ui.components.hapticClickable
+import com.parachord.android.ui.components.rememberHapticClick
 import com.parachord.android.ui.components.AlbumArtCardFill
 import com.parachord.android.ui.components.ResolverIconSquare
 import com.parachord.android.ui.components.TrackContextInfo
@@ -95,6 +96,7 @@ fun NowPlayingScreen(
     val scope = rememberCoroutineScope()
     val playlists by viewModel.playlists.collectAsStateWithLifecycle()
     val contextMenuState = rememberTrackContextMenuState()
+    val haptic = rememberHapticClick()
 
     // Context menu host
     TrackContextMenuHost(
@@ -244,7 +246,7 @@ fun NowPlayingScreen(
                         }
                     },
                     navigationIcon = {
-                        IconButton(onClick = onBack) {
+                        IconButton(onClick = { haptic(); onBack() }) {
                             Icon(
                                 Icons.Default.KeyboardArrowDown,
                                 contentDescription = "Close",
@@ -255,7 +257,7 @@ fun NowPlayingScreen(
                     },
                     actions = {
                         if (listenAlongFriend != null) {
-                            IconButton(onClick = onStopListenAlong) {
+                            IconButton(onClick = { haptic(); onStopListenAlong() }) {
                                 Icon(
                                     imageVector = Icons.Default.Close,
                                     contentDescription = "Stop listening along",
@@ -269,7 +271,7 @@ fun NowPlayingScreen(
                         containerColor = Color.Transparent,
                     ),
                     windowInsets = WindowInsets(0),
-                    modifier = Modifier.clickable { onBack() },
+                    modifier = Modifier.hapticClickable { onBack() },
                 )
 
                 Spacer(modifier = Modifier.height(16.dp))
@@ -286,7 +288,7 @@ fun NowPlayingScreen(
                         .padding(horizontal = 8.dp)
                         .then(
                             if (track?.album != null && track.artist.isNotBlank()) {
-                                Modifier.clickable {
+                                Modifier.hapticClickable {
                                     onNavigateToAlbum(track.album, track.artist)
                                 }
                             } else Modifier
@@ -325,7 +327,7 @@ fun NowPlayingScreen(
                         maxLines = 1,
                         overflow = TextOverflow.Ellipsis,
                         modifier = if (displayArtist.isNotBlank()) {
-                            Modifier.clickable { onNavigateToArtist(displayArtist) }
+                            Modifier.hapticClickable { onNavigateToArtist(displayArtist) }
                         } else Modifier,
                     )
 
@@ -339,7 +341,7 @@ fun NowPlayingScreen(
                             textAlign = TextAlign.Center,
                             maxLines = 1,
                             overflow = TextOverflow.Ellipsis,
-                            modifier = Modifier.clickable {
+                            modifier = Modifier.hapticClickable {
                                 onNavigateToAlbum(displayAlbum, displayArtist)
                             },
                         )
@@ -399,7 +401,7 @@ fun NowPlayingScreen(
                 ) {
                     // Shuffle (disabled during spinoff)
                     IconButton(
-                        onClick = { viewModel.toggleShuffle() },
+                        onClick = { haptic(); viewModel.toggleShuffle() },
                         enabled = !playbackState.spinoffMode,
                         colors = IconButtonDefaults.iconButtonColors(
                             contentColor = if (playbackState.shuffleEnabled) ActiveControlColor else InactiveControlColor,
@@ -417,7 +419,7 @@ fun NowPlayingScreen(
 
                     // Skip Previous
                     IconButton(
-                        onClick = { viewModel.skipPrevious() },
+                        onClick = { haptic(); viewModel.skipPrevious() },
                         colors = IconButtonDefaults.iconButtonColors(
                             contentColor = PlayerTextPrimary,
                         ),
@@ -431,7 +433,7 @@ fun NowPlayingScreen(
 
                     // Play/Pause — large purple circle; shows spinner when buffering
                     IconButton(
-                        onClick = { viewModel.togglePlayPause() },
+                        onClick = { haptic(); viewModel.togglePlayPause() },
                         modifier = Modifier
                             .size(72.dp)
                             .clip(CircleShape)
@@ -457,7 +459,7 @@ fun NowPlayingScreen(
 
                     // Skip Next
                     IconButton(
-                        onClick = { viewModel.skipNext() },
+                        onClick = { haptic(); viewModel.skipNext() },
                         colors = IconButtonDefaults.iconButtonColors(
                             contentColor = PlayerTextPrimary,
                         ),
@@ -476,6 +478,7 @@ fun NowPlayingScreen(
                     // reflect the actual streaming track metadata
                     IconButton(
                         onClick = {
+                            haptic()
                             val effective = playbackState.effectiveTrack
                             if (effective != null) {
                                 contextMenuState.show(
@@ -520,6 +523,7 @@ fun NowPlayingScreen(
                     ) {
                         IconButton(
                             onClick = {
+                                haptic()
                                 scope.launch {
                                     if (sheetState.currentValue == SheetValue.Expanded) {
                                         sheetState.partialExpand()
@@ -559,7 +563,7 @@ fun NowPlayingScreen(
 
                     // Spinoff button — states: loading (spinner), active (purple), available (gray), unavailable (dim)
                     IconButton(
-                        onClick = { viewModel.toggleSpinoff() },
+                        onClick = { haptic(); viewModel.toggleSpinoff() },
                         enabled = !playbackState.spinoffLoading && playbackState.spinoffAvailable != false,
                         colors = IconButtonDefaults.iconButtonColors(
                             contentColor = when {

@@ -14,7 +14,7 @@ import androidx.compose.animation.core.tween
 import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.background
 import androidx.compose.foundation.basicMarquee
-import androidx.compose.foundation.clickable
+import com.parachord.android.ui.components.hapticClickable
 import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.isSystemInDarkTheme
 import androidx.compose.foundation.layout.Arrangement
@@ -431,7 +431,7 @@ private fun RecentAlbumCard(
     Column(
         modifier = Modifier
             .width(140.dp)
-            .clickable(onClick = onClick),
+            .hapticClickable(onClick = onClick),
     ) {
         AlbumArtCard(
             artworkUrl = album.artworkUrl,
@@ -468,7 +468,7 @@ private fun PlaylistCard(
     Column(
         modifier = Modifier
             .width(130.dp)
-            .clickable(onClick = onClick),
+            .hapticClickable(onClick = onClick),
     ) {
         AlbumArtCard(
             artworkUrl = playlist.artworkUrl,
@@ -590,7 +590,7 @@ private fun DiscoverCard(
             .aspectRatio(1.6f)
             .clip(RoundedCornerShape(12.dp))
             .background(Brush.linearGradient(gradient))
-            .clickable(onClick = onClick)
+            .hapticClickable(onClick = onClick)
             .padding(12.dp),
     ) {
         Column(
@@ -994,7 +994,7 @@ private fun ContinueListeningCard(
                         },
                     ),
                 )
-                .clickable(onClick = onClick)
+                .hapticClickable(onClick = onClick)
                 .padding(14.dp),
             verticalAlignment = Alignment.CenterVertically,
         ) {
@@ -1141,7 +1141,7 @@ private fun NoAiPluginsCard(
                 modifier = Modifier
                     .clip(RoundedCornerShape(50))
                     .background(Color.White.copy(alpha = 0.2f))
-                    .clickable { /* TODO: navigate to settings → AI plugins */ }
+                    .hapticClickable { /* TODO: navigate to settings → AI plugins */ }
                     .padding(horizontal = 24.dp, vertical = 10.dp),
             ) {
                 Text(
@@ -1255,7 +1255,7 @@ private fun AiSuggestionsSection(
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
                 modifier = Modifier
                     .fillMaxWidth()
-                    .clickable { onRefresh() }
+                    .hapticClickable { onRefresh() }
                     .padding(vertical = 24.dp),
                 textAlign = TextAlign.Center,
             )
@@ -1287,7 +1287,7 @@ private fun AiAlbumCard(
     Column(
         modifier = Modifier
             .width(120.dp)
-            .clickable(onClick = onClick),
+            .hapticClickable(onClick = onClick),
     ) {
         AlbumArtCard(
             artworkUrl = album.artworkUrl,
@@ -1322,7 +1322,7 @@ private fun AiArtistCard(
     Column(
         modifier = Modifier
             .width(100.dp)
-            .clickable(onClick = onClick),
+            .hapticClickable(onClick = onClick),
         horizontalAlignment = Alignment.CenterHorizontally,
     ) {
         AlbumArtCard(
@@ -1521,7 +1521,7 @@ private fun StatCard(
             .width(90.dp)
             .clip(RoundedCornerShape(10.dp))
             .background(bg)
-            .clickable(onClick = onClick)
+            .hapticClickable(onClick = onClick)
             .padding(12.dp),
         horizontalAlignment = Alignment.CenterHorizontally,
     ) {

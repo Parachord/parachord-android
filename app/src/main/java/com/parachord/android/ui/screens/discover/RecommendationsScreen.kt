@@ -1,6 +1,6 @@
 package com.parachord.android.ui.screens.discover
 
-import androidx.compose.foundation.clickable
+import com.parachord.android.ui.components.hapticClickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -256,7 +256,7 @@ private fun RecommendedArtistItem(artist: RecommendedArtist, onClick: () -> Unit
         horizontalAlignment = Alignment.CenterHorizontally,
         modifier = Modifier
             .fillMaxWidth()
-            .clickable(onClick = onClick),
+            .hapticClickable(onClick = onClick),
     ) {
         AlbumArtCard(
             artworkUrl = artist.imageUrl,

@@ -1,7 +1,7 @@
 package com.parachord.android.ui.screens.nowplaying
 
 import androidx.compose.foundation.background
-import androidx.compose.foundation.clickable
+import com.parachord.android.ui.components.hapticClickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -116,7 +116,7 @@ fun QueueSheet(
                         maxLines = 1,
                         overflow = TextOverflow.Ellipsis,
                         modifier = if (isNavigable) {
-                            Modifier.clickable { onNavigateToContext?.invoke(playbackContext) }
+                            Modifier.hapticClickable { onNavigateToContext?.invoke(playbackContext) }
                         } else Modifier,
                     )
                 }
@@ -211,7 +211,7 @@ private fun QueueTrackRow(
             modifier = Modifier
                 .fillMaxWidth()
                 .background(PlayerSurface)
-                .clickable(onClick = onTap)
+                .hapticClickable(onClick = onTap)
                 .padding(horizontal = 12.dp, vertical = 8.dp),
             verticalAlignment = Alignment.CenterVertically,
         ) {

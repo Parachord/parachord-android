@@ -109,7 +109,7 @@ fun ActionOverlay(
                             .size(48.dp)
                             .clip(CircleShape)
                             .background(CloseButtonBg)
-                            .clickable { onDismiss() },
+                            .hapticClickable { onDismiss() },
                         contentAlignment = Alignment.Center,
                     ) {
                         Icon(
