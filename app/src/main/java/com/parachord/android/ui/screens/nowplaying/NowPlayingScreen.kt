@@ -1,7 +1,6 @@
 package com.parachord.android.ui.screens.nowplaying
 
 import androidx.compose.foundation.background
-import androidx.compose.foundation.clickable
 import androidx.compose.foundation.gestures.detectVerticalDragGestures
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -58,6 +57,8 @@ import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.Headphones
 import com.parachord.android.data.db.entity.FriendEntity
 import com.parachord.android.playback.effectiveTrack
+import com.parachord.android.ui.components.hapticClickable
+import com.parachord.android.ui.components.rememberHapticClick
 import com.parachord.android.ui.components.AlbumArtCardFill
 import com.parachord.android.ui.components.ResolverIconSquare
 import com.parachord.android.ui.components.TrackContextInfo
@@ -95,6 +96,7 @@ fun NowPlayingScreen(
     val scope = rememberCoroutineScope()
     val playlists by viewModel.playlists.collectAsStateWithLifecycle()
     val contextMenuState = rememberTrackContextMenuState()
+    val haptic = rememberHapticClick()
 
     // Context menu host
     TrackContextMenuHost(
@@ -269,7 +271,7 @@ fun NowPlayingScreen(
                         containerColor = Color.Transparent,
                     ),
                     windowInsets = WindowInsets(0),
-                    modifier = Modifier.clickable { onBack() },
+                    modifier = Modifier.hapticClickable { onBack() },
                 )
 
                 Spacer(modifier = Modifier.height(16.dp))
@@ -286,7 +288,7 @@ fun NowPlayingScreen(
                         .padding(horizontal = 8.dp)
                         .then(
                             if (track?.album != null && track.artist.isNotBlank()) {
-                                Modifier.clickable {
+                                Modifier.hapticClickable {
                                     onNavigateToAlbum(track.album, track.artist)
                                 }
                             } else Modifier
@@ -325,7 +327,7 @@ fun NowPlayingScreen(
                         maxLines = 1,
                         overflow = TextOverflow.Ellipsis,
                         modifier = if (displayArtist.isNotBlank()) {
-                            Modifier.clickable { onNavigateToArtist(displayArtist) }
+                            Modifier.hapticClickable { onNavigateToArtist(displayArtist) }
                         } else Modifier,
                     )
 
@@ -339,7 +341,7 @@ fun NowPlayingScreen(
                             textAlign = TextAlign.Center,
                             maxLines = 1,
                             overflow = TextOverflow.Ellipsis,
-                            modifier = Modifier.clickable {
+                            modifier = Modifier.hapticClickable {
                                 onNavigateToAlbum(displayAlbum, displayArtist)
                             },
                         )

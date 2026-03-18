@@ -2,8 +2,8 @@ package com.parachord.android.ui.screens.library
 
 import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.background
-import androidx.compose.foundation.clickable
-import androidx.compose.foundation.combinedClickable
+import com.parachord.android.ui.components.hapticClickable
+import com.parachord.android.ui.components.hapticCombinedClickable
 import androidx.compose.foundation.isSystemInDarkTheme
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -231,7 +231,7 @@ fun CollectionScreen(
                                         horizontalAlignment = Alignment.CenterHorizontally,
                                         modifier = Modifier
                                             .fillMaxWidth()
-                                            .combinedClickable(
+                                            .hapticCombinedClickable(
                                                 onClick = { onNavigateToArtist(artist.name) },
                                                 onLongClick = { showMenu = true },
                                             ),
@@ -327,7 +327,7 @@ fun CollectionScreen(
                                     Column(
                                         modifier = Modifier
                                             .clip(RoundedCornerShape(8.dp))
-                                            .combinedClickable(
+                                            .hapticCombinedClickable(
                                                 onClick = { onNavigateToAlbum(album.title, album.artist) },
                                                 onLongClick = { showMenu = true },
                                             ),
@@ -583,7 +583,7 @@ private fun FriendsTab(
                             modifier = Modifier
                                 .fillMaxWidth()
                                 .background(surfaceColor)
-                                .combinedClickable(
+                                .hapticCombinedClickable(
                                     onClick = { onNavigateToFriend(friend.id) },
                                     onLongClick = { showMenu = true },
                                 )
