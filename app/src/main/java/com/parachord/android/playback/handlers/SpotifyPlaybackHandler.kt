@@ -225,14 +225,15 @@ class SpotifyPlaybackHandler @Inject constructor(
         // locally and resolve the real Connect device ID for this phone.
         val targetDevice = if (isLocalPlaceholder(pickedDevice)) {
             Log.d(TAG, "Local device selected — waking Spotify to get real device ID")
-            val localDevices = wakeSpotifyAndAwaitDevice(auth)
+            // Force-wake the local Spotify app — don't use the fast path that
+            // short-circuits on already-available remote devices (e.g. "bedroom TV").
+            val localDevices = wakeLocalSpotifyApp(auth)
             val localModel = Build.MODEL.lowercase()
             val resolved = localDevices.firstOrNull {
                 it.type == "Smartphone" && it.name.lowercase().contains(localModel)
             } ?: localDevices.firstOrNull { it.type == "Smartphone" }
-              ?: localDevices.firstOrNull()
             if (resolved == null) {
-                Log.w(TAG, "Could not find local device after waking Spotify")
+                Log.w(TAG, "Could not find local Smartphone device after waking Spotify")
                 return false
             }
             hasWokenSpotify = true
@@ -368,6 +369,53 @@ class SpotifyPlaybackHandler @Inject constructor(
 
         Log.w(TAG, "Timed out waiting for Spotify device after ${WAKE_TIMEOUT_MS}ms")
         return emptyList()
+    }
+
+    /**
+     * Force-wake Spotify on this phone and wait for it to register as a
+     * Connect device. Unlike [wakeSpotifyAndAwaitDevice], this always launches
+     * the Spotify app — even when remote devices (speakers, TVs) are already
+     * available — because the user explicitly asked for "This device".
+     */
+    private suspend fun wakeLocalSpotifyApp(auth: String): List<SpDevice> {
+        val launchIntent = context.packageManager.getLaunchIntentForPackage(SPOTIFY_PACKAGE)
+        if (launchIntent == null) {
+            Log.w(TAG, "Spotify is not installed")
+            return emptyList()
+        }
+
+        launchIntent.addFlags(
+            Intent.FLAG_ACTIVITY_NEW_TASK or
+                Intent.FLAG_ACTIVITY_NO_ANIMATION
+        )
+        context.startActivity(launchIntent)
+        Log.d(TAG, "Force-waking local Spotify for 'This device' selection")
+
+        // Poll until we see a Smartphone device (the local phone)
+        val localModel = Build.MODEL.lowercase()
+        val deadline = System.currentTimeMillis() + WAKE_TIMEOUT_MS
+        while (System.currentTimeMillis() < deadline) {
+            delay(WAKE_POLL_INTERVAL_MS)
+            try {
+                val devices = spotifyApi.getDevices(auth).devices
+                val hasLocal = devices.any {
+                    it.type == "Smartphone" && it.name.lowercase().contains(localModel)
+                } || devices.any { it.type == "Smartphone" }
+                if (hasLocal) {
+                    Log.d(TAG, "Local Spotify device found after wake: ${devices.size} device(s)")
+                    return devices
+                }
+            } catch (e: Exception) {
+                Log.d(TAG, "Device poll during local wake failed: ${e.message}")
+            }
+        }
+
+        // Last resort — return whatever devices exist even if no smartphone found
+        return try {
+            spotifyApi.getDevices(auth).devices
+        } catch (e: Exception) {
+            emptyList()
+        }
     }
 
     /**
