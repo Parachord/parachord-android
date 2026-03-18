@@ -1,6 +1,5 @@
 package com.parachord.android.ui.components
 
-import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
@@ -79,7 +78,7 @@ private fun DeviceRow(
     ) {
         Row(
             modifier = Modifier
-                .clickable(onClick = onClick)
+                .hapticClickable(onClick = onClick)
                 .padding(horizontal = 16.dp, vertical = 12.dp),
             verticalAlignment = Alignment.CenterVertically,
         ) {
