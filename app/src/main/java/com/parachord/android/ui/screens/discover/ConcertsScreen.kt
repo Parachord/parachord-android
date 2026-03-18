@@ -63,6 +63,9 @@ import coil.compose.AsyncImage
 import com.parachord.android.data.repository.ConcertEvent
 import com.parachord.android.data.repository.Resource
 
+/** Concert accent color — teal, matching the desktop's concert feature. */
+private val ConcertTeal = Color(0xFF10C9B4)
+
 private val RADIUS_OPTIONS = listOf(10, 25, 50, 100, 200)
 
 /** Well-known cities with coordinates for quick location selection. */
@@ -127,7 +130,7 @@ fun ConcertsScreen(
             Icon(
                 Icons.Default.LocationOn,
                 contentDescription = null,
-                tint = Color(0xFF7C3AED),
+                tint = ConcertTeal,
                 modifier = Modifier.size(20.dp),
             )
             Spacer(modifier = Modifier.width(8.dp))
@@ -161,8 +164,8 @@ fun ConcertsScreen(
                         onClick = { viewModel.setRadius(radius) },
                         label = { Text("${radius}mi") },
                         colors = FilterChipDefaults.filterChipColors(
-                            selectedContainerColor = Color(0xFF7C3AED).copy(alpha = 0.15f),
-                            selectedLabelColor = Color(0xFF7C3AED),
+                            selectedContainerColor = ConcertTeal.copy(alpha = 0.15f),
+                            selectedLabelColor = ConcertTeal,
                         ),
                     )
                 }
@@ -190,7 +193,7 @@ fun ConcertsScreen(
                             modifier = Modifier.fillMaxSize(),
                             contentAlignment = Alignment.Center,
                         ) {
-                            CircularProgressIndicator(color = Color(0xFF7C3AED))
+                            CircularProgressIndicator(color = ConcertTeal)
                         }
                     }
                     is Resource.Error -> {
@@ -275,7 +278,7 @@ private fun LocationPickerPrompt(
                 Icon(
                     Icons.Default.LocationOn,
                     contentDescription = null,
-                    tint = Color(0xFF7C3AED),
+                    tint = ConcertTeal,
                     modifier = Modifier.size(48.dp),
                 )
                 Spacer(modifier = Modifier.height(12.dp))
@@ -344,7 +347,7 @@ private fun LocationPickerDialog(
                         color = MaterialTheme.colorScheme.onSurface,
                         fontSize = 14.sp,
                     ),
-                    cursorBrush = SolidColor(Color(0xFF7C3AED)),
+                    cursorBrush = SolidColor(ConcertTeal),
                     decorationBox = { inner ->
                         Row(
                             modifier = Modifier
@@ -377,7 +380,7 @@ private fun LocationPickerDialog(
                                 .clip(RoundedCornerShape(6.dp))
                                 .then(
                                     if (isSelected) Modifier.background(
-                                        Color(0xFF7C3AED).copy(alpha = 0.1f),
+                                        ConcertTeal.copy(alpha = 0.1f),
                                     ) else Modifier,
                                 )
                                 .clickable { onCitySelected(city) }
@@ -387,7 +390,7 @@ private fun LocationPickerDialog(
                             Text(
                                 text = city.name,
                                 style = MaterialTheme.typography.bodyMedium,
-                                color = if (isSelected) Color(0xFF7C3AED)
+                                color = if (isSelected) ConcertTeal
                                 else MaterialTheme.colorScheme.onSurface,
                                 fontWeight = if (isSelected) FontWeight.Medium else FontWeight.Normal,
                             )
@@ -571,7 +574,7 @@ private fun ConcertEventCard(
                     Icons.Default.OpenInNew,
                     contentDescription = "Buy tickets",
                     modifier = Modifier.size(18.dp),
-                    tint = Color(0xFF7C3AED),
+                    tint = ConcertTeal,
                 )
             }
         }

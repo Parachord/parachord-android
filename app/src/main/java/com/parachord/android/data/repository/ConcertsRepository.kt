@@ -43,6 +43,7 @@ data class ConcertEvent(
     val dateTime: String? = null,     // ISO datetime
     val imageUrl: String? = null,
     val ticketUrl: String? = null,
+    val lineup: List<String> = emptyList(), // All performing artists
     val source: String = "ticketmaster", // "ticketmaster" or "seatgeek"
     val status: String? = null,       // "onsale", "offsale", "cancelled", etc.
 ) {
@@ -296,27 +297,37 @@ class ConcertsRepository @Inject constructor(
         mergeAndDedupe(tmEvents + sgEvents)
     }
 
+    /**
+     * Fetch artist events using two-step resolution (matching desktop):
+     * 1. Resolve artist name to attraction ID / performer slug
+     * 2. Fetch events by that ID/slug (more precise than keyword search)
+     */
     private suspend fun fetchArtistEvents(artistName: String): List<ConcertEvent> = coroutineScope {
+        val now = LocalDateTime.now(ZoneId.systemDefault())
+            .format(DateTimeFormatter.ofPattern("yyyy-MM-dd'T'HH:mm:ss'Z'"))
+
         val tmDeferred = async {
             try {
                 val tmKey = BuildConfig.TICKETMASTER_API_KEY
                 if (tmKey.isBlank()) return@async emptyList()
-                val now = LocalDateTime.now(ZoneId.systemDefault())
-                    .format(DateTimeFormatter.ofPattern("yyyy-MM-dd'T'HH:mm:ss'Z'"))
-                val response = ticketmasterApi.searchEvents(
+
+                // Step 1: Resolve artist to attraction ID
+                val attractions = ticketmasterApi.searchAttractions(
                     keyword = artistName,
                     apiKey = tmKey,
-                    startDateTime = now,
-                    size = 30,
                 )
-                response.embedded?.events
-                    ?.filter { event ->
-                        event.embedded?.attractions?.any {
-                            it.name.equals(artistName, ignoreCase = true)
-                        } == true
-                    }
-                    ?.map { it.toConcertEvent() }
-                    ?: emptyList()
+                val attraction = attractions.embedded?.attractions
+                    ?.firstOrNull { it.name.equals(artistName, ignoreCase = true) }
+                    ?: return@async emptyList()
+                val attractionId = attraction.id ?: return@async emptyList()
+
+                // Step 2: Fetch events by attraction ID
+                val response = ticketmasterApi.getEventsByAttraction(
+                    attractionId = attractionId,
+                    apiKey = tmKey,
+                    startDateTime = now,
+                )
+                response.embedded?.events?.map { it.toConcertEvent() } ?: emptyList()
             } catch (e: Exception) {
                 Log.w(TAG, "Ticketmaster artist search failed for '$artistName'", e)
                 emptyList()
@@ -327,21 +338,26 @@ class ConcertsRepository @Inject constructor(
             try {
                 val sgKey = BuildConfig.SEATGEEK_CLIENT_ID
                 if (sgKey.isBlank()) return@async emptyList()
-                val now = LocalDateTime.now()
-                    .format(DateTimeFormatter.ofPattern("yyyy-MM-dd'T'HH:mm:ss"))
-                val response = seatGeekApi.searchEvents(
+
+                // Step 1: Resolve artist to performer slug
+                val performers = seatGeekApi.searchPerformers(
                     query = artistName,
                     clientId = sgKey,
-                    datetimeGte = now,
-                    perPage = 30,
                 )
-                response.events
-                    .filter { event ->
-                        event.performers.any {
-                            it.name.equals(artistName, ignoreCase = true)
-                        }
-                    }
-                    .map { it.toConcertEvent() }
+                val performer = performers.performers
+                    .firstOrNull { it.name.equals(artistName, ignoreCase = true) }
+                    ?: return@async emptyList()
+                val slug = performer.slug ?: return@async emptyList()
+
+                // Step 2: Fetch events by performer slug
+                val nowLocal = LocalDateTime.now()
+                    .format(DateTimeFormatter.ofPattern("yyyy-MM-dd'T'HH:mm:ss"))
+                val response = seatGeekApi.getEventsByPerformer(
+                    performerSlug = slug,
+                    clientId = sgKey,
+                    datetimeGte = nowLocal,
+                )
+                response.events.map { it.toConcertEvent() }
             } catch (e: Exception) {
                 Log.w(TAG, "SeatGeek artist search failed for '$artistName'", e)
                 emptyList()
@@ -353,16 +369,27 @@ class ConcertsRepository @Inject constructor(
         mergeAndDedupe(tmEvents + sgEvents)
     }
 
+    /**
+     * Deduplicate events using two strategies (matching desktop):
+     * 1. Text-based: date + normalized artist + venue prefix (20 chars)
+     * 2. Events with same date + artist but different venue spellings still merge
+     */
     private fun mergeAndDedupe(events: List<ConcertEvent>): List<ConcertEvent> {
         val seen = mutableSetOf<String>()
         return events
             .filter { event ->
-                val key = "${event.name.lowercase()}|${event.date}|${event.venueName?.lowercase()}"
+                val artist = normalizeForDedup(event.artistName ?: event.name)
+                val venuePrefix = normalizeForDedup(event.venueName ?: "").take(20)
+                val key = "${event.date}-$artist-$venuePrefix"
                 seen.add(key)
             }
             .filter { it.isUpcoming }
             .sortedBy { it.date ?: "" }
     }
+
+    /** Normalize string for deduplication: lowercase, strip non-alphanumeric except spaces. */
+    private fun normalizeForDedup(str: String): String =
+        str.lowercase().replace(Regex("[^a-z0-9 ]"), "").replace(Regex("\\s+"), " ").trim()
 }
 
 // ── Extension mappers ───────────────────────────────────────────
@@ -393,6 +420,7 @@ private fun com.parachord.android.data.api.TmEvent.toConcertEvent(): ConcertEven
         dateTime = dates?.start?.dateTime,
         imageUrl = image?.url,
         ticketUrl = url,
+        lineup = embedded?.attractions?.mapNotNull { it.name } ?: emptyList(),
         source = "ticketmaster",
         status = dates?.status?.code,
     )
@@ -419,6 +447,7 @@ private fun com.parachord.android.data.api.SgEvent.toConcertEvent(): ConcertEven
         dateTime = datetimeUtc,
         imageUrl = mainPerformer?.image,
         ticketUrl = url,
+        lineup = performers.mapNotNull { it.name },
         source = "seatgeek",
     )
 }

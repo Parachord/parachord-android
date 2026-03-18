@@ -348,7 +348,7 @@ fun NowPlayingScreen(
                         )
                     }
 
-                    // Resolver icon + On Tour badge
+                    // Resolver icon + On Tour dot
                     Row(
                         verticalAlignment = Alignment.CenterVertically,
                         horizontalArrangement = Arrangement.spacedBy(8.dp),
@@ -359,16 +359,12 @@ fun NowPlayingScreen(
                         }
                         if (isOnTour) {
                             Spacer(modifier = Modifier.height(8.dp))
-                            Text(
-                                text = "ON TOUR",
-                                fontSize = 10.sp,
-                                fontWeight = FontWeight.Bold,
-                                letterSpacing = 0.5.sp,
-                                color = Color(0xFFA78BFA),
+                            // Small teal dot matching desktop's On Tour indicator
+                            Box(
                                 modifier = Modifier
-                                    .clip(androidx.compose.foundation.shape.RoundedCornerShape(4.dp))
-                                    .background(Color(0xFFA78BFA).copy(alpha = 0.15f))
-                                    .padding(horizontal = 8.dp, vertical = 3.dp),
+                                    .size(7.dp)
+                                    .clip(CircleShape)
+                                    .background(Color(0xFF10C9B4)),
                             )
                         }
                     }

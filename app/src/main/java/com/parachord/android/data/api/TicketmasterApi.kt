@@ -25,6 +25,31 @@ interface TicketmasterApi {
         @Query("endDateTime") endDateTime: String? = null,
     ): TmSearchResponse
 
+    /**
+     * Step 1 of two-step artist resolution: resolve artist name to attraction ID.
+     * Desktop pattern: search attractions, find exact case-insensitive name match.
+     */
+    @GET("discovery/v2/attractions.json")
+    suspend fun searchAttractions(
+        @Query("keyword") keyword: String,
+        @Query("classificationName") classificationName: String = "music",
+        @Query("size") size: Int = 5,
+        @Query("apikey") apiKey: String,
+    ): TmAttractionsResponse
+
+    /**
+     * Step 2: fetch events by attraction ID (more precise than keyword search).
+     */
+    @GET("discovery/v2/events.json")
+    suspend fun getEventsByAttraction(
+        @Query("attractionId") attractionId: String,
+        @Query("classificationName") classificationName: String = "music",
+        @Query("sort") sort: String = "date,asc",
+        @Query("size") size: Int = 50,
+        @Query("startDateTime") startDateTime: String? = null,
+        @Query("apikey") apiKey: String,
+    ): TmSearchResponse
+
     @GET("discovery/v2/events.json")
     suspend fun getLocalEvents(
         @Query("classificationName") classificationName: String = "music",
@@ -137,4 +162,14 @@ data class TmLocation(
 data class TmAttraction(
     val id: String? = null,
     val name: String? = null,
+)
+
+@Serializable
+data class TmAttractionsResponse(
+    @SerialName("_embedded") val embedded: TmAttractionsEmbedded? = null,
+)
+
+@Serializable
+data class TmAttractionsEmbedded(
+    val attractions: List<TmAttraction> = emptyList(),
 )

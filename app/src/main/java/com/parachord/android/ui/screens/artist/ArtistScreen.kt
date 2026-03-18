@@ -779,7 +779,7 @@ private fun TourDateRow(
                 text = month,
                 fontSize = 11.sp,
                 fontWeight = FontWeight.SemiBold,
-                color = Color(0xFF7C3AED),
+                color = Color(0xFF10C9B4), // Concert teal
                 letterSpacing = 0.5.sp,
             )
             Text(
@@ -844,7 +844,7 @@ private fun TourDateRow(
                     Icons.Default.OpenInNew,
                     contentDescription = "Tickets",
                     modifier = Modifier.size(18.dp),
-                    tint = Color(0xFF7C3AED),
+                    tint = Color(0xFF10C9B4), // Concert teal
                 )
             }
         }

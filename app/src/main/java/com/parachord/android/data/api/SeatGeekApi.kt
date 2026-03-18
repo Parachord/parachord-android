@@ -11,6 +11,28 @@ import retrofit2.http.Query
  */
 interface SeatGeekApi {
 
+    /**
+     * Step 1: resolve artist name to performer slug.
+     * Desktop pattern: search performers, find exact case-insensitive name match.
+     */
+    @GET("performers")
+    suspend fun searchPerformers(
+        @Query("q") query: String,
+        @Query("client_id") clientId: String,
+    ): SgPerformersResponse
+
+    /**
+     * Step 2: fetch events by performer slug (more precise than keyword search).
+     */
+    @GET("events")
+    suspend fun getEventsByPerformer(
+        @Query("performers.slug") performerSlug: String,
+        @Query("datetime_utc.gte") datetimeGte: String? = null,
+        @Query("sort") sort: String = "datetime_local.asc",
+        @Query("per_page") perPage: Int = 50,
+        @Query("client_id") clientId: String,
+    ): SgSearchResponse
+
     @GET("events")
     suspend fun searchEvents(
         @Query("q") query: String,
@@ -87,7 +109,13 @@ data class SgLocation(
 data class SgPerformer(
     val id: Long? = null,
     val name: String? = null,
+    val slug: String? = null,
     val image: String? = null,
     @SerialName("short_name") val shortName: String? = null,
     val type: String? = null,
+)
+
+@Serializable
+data class SgPerformersResponse(
+    val performers: List<SgPerformer> = emptyList(),
 )
