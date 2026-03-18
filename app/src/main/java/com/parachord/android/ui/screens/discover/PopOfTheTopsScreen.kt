@@ -383,7 +383,7 @@ private fun ChartsFilterBar(
                         contentDescription = "Clear",
                         modifier = Modifier
                             .size(18.dp)
-                            .clickable { onSearchQueryChange("") },
+                            .hapticClickable { onSearchQueryChange("") },
                         tint = MaterialTheme.colorScheme.onSurfaceVariant,
                     )
                 }
@@ -445,7 +445,7 @@ private fun AlbumGridItem(album: ChartAlbum, onClick: () -> Unit) {
     Column(
         modifier = Modifier
             .clip(RoundedCornerShape(8.dp))
-            .clickable(onClick = onClick),
+            .hapticClickable(onClick = onClick),
     ) {
         Box {
             AlbumArtCard(

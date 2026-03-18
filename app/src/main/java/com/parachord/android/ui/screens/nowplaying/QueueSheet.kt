@@ -211,7 +211,7 @@ private fun QueueTrackRow(
             modifier = Modifier
                 .fillMaxWidth()
                 .background(PlayerSurface)
-                .clickable(onClick = onTap)
+                .hapticClickable(onClick = onTap)
                 .padding(horizontal = 12.dp, vertical = 8.dp),
             verticalAlignment = Alignment.CenterVertically,
         ) {

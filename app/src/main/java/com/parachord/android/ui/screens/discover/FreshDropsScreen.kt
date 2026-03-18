@@ -377,7 +377,7 @@ private fun FreshDropsFilterBar(
                         contentDescription = "Clear",
                         modifier = Modifier
                             .size(18.dp)
-                            .clickable { onSearchQueryChange("") },
+                            .hapticClickable { onSearchQueryChange("") },
                         tint = MaterialTheme.colorScheme.onSurfaceVariant,
                     )
                 }
@@ -416,7 +416,7 @@ private fun FreshDropRow(
     Row(
         modifier = Modifier
             .fillMaxWidth()
-            .clickable(onClick = onReleaseClick)
+            .hapticClickable(onClick = onReleaseClick)
             .padding(horizontal = 16.dp, vertical = 8.dp),
     ) {
         AlbumArtCard(
@@ -441,7 +441,7 @@ private fun FreshDropRow(
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
                 maxLines = 1,
                 overflow = TextOverflow.Ellipsis,
-                modifier = Modifier.clickable(onClick = onArtistClick),
+                modifier = Modifier.hapticClickable(onClick = onArtistClick),
             )
             Spacer(modifier = Modifier.height(4.dp))
             // Date + type badge row

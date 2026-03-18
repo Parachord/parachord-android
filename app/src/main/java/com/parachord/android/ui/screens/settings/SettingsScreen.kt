@@ -719,7 +719,7 @@ private fun PluginTile(
                 .aspectRatio(1f)
                 .clip(RoundedCornerShape(16.dp))
                 .background(plugin.bgColor.copy(alpha = tileAlpha))
-                .clickable(onClick = onClick),
+                .hapticClickable(onClick = onClick),
             contentAlignment = Alignment.Center,
         ) {
             // Service logo SVG icon (white, centered)

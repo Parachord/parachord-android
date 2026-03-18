@@ -256,7 +256,7 @@ private fun RecommendedArtistItem(artist: RecommendedArtist, onClick: () -> Unit
         horizontalAlignment = Alignment.CenterHorizontally,
         modifier = Modifier
             .fillMaxWidth()
-            .clickable(onClick = onClick),
+            .hapticClickable(onClick = onClick),
     ) {
         AlbumArtCard(
             artworkUrl = artist.imageUrl,

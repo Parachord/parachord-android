@@ -237,7 +237,7 @@ fun PlaylistsScreen(
                                 modifier = Modifier
                                     .fillMaxWidth()
                                     .background(MaterialTheme.colorScheme.surface)
-                                    .combinedClickable(
+                                    .hapticCombinedClickable(
                                         onClick = { onNavigateToPlaylist(playlist.id) },
                                         onLongClick = { showMenu = true },
                                     )

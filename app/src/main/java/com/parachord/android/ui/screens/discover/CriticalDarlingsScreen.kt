@@ -389,7 +389,7 @@ private fun CriticsFilterBar(
                         contentDescription = "Clear",
                         modifier = Modifier
                             .size(18.dp)
-                            .clickable { onSearchQueryChange("") },
+                            .hapticClickable { onSearchQueryChange("") },
                         tint = MaterialTheme.colorScheme.onSurfaceVariant,
                     )
                 }
@@ -428,7 +428,7 @@ private fun CriticsPickRow(
     Row(
         modifier = Modifier
             .fillMaxWidth()
-            .clickable(onClick = onAlbumClick)
+            .hapticClickable(onClick = onAlbumClick)
             .padding(horizontal = 16.dp, vertical = 8.dp),
     ) {
         AlbumArtCard(
@@ -451,7 +451,7 @@ private fun CriticsPickRow(
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
                 maxLines = 1,
                 overflow = TextOverflow.Ellipsis,
-                modifier = Modifier.clickable(onClick = onArtistClick),
+                modifier = Modifier.hapticClickable(onClick = onArtistClick),
             )
             if (album.description.isNotBlank()) {
                 Spacer(modifier = Modifier.height(4.dp))

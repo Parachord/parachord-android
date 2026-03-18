@@ -269,7 +269,7 @@ private fun RecentTrackRow(track: RecentTrack, resolvers: List<String>? = null, 
     Row(
         modifier = Modifier
             .fillMaxWidth()
-            .clickable(onClick = onClick)
+            .hapticClickable(onClick = onClick)
             .padding(horizontal = 16.dp, vertical = 6.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
@@ -406,7 +406,7 @@ private fun AlbumGridItem(album: HistoryAlbum, onClick: () -> Unit = {}) {
     Column(
         modifier = Modifier
             .clip(RoundedCornerShape(8.dp))
-            .clickable(onClick = onClick),
+            .hapticClickable(onClick = onClick),
     ) {
         Box {
             AlbumArtCard(
@@ -524,7 +524,7 @@ private fun ArtistGridItem(artist: HistoryArtist, onClick: () -> Unit = {}) {
         horizontalAlignment = Alignment.CenterHorizontally,
         modifier = Modifier
             .fillMaxWidth()
-            .clickable(onClick = onClick),
+            .hapticClickable(onClick = onClick),
     ) {
         AlbumArtCard(
             artworkUrl = artist.imageUrl,

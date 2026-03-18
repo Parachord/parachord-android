@@ -419,7 +419,7 @@ fun NowPlayingScreen(
 
                     // Skip Previous
                     IconButton(
-                        onClick = { viewModel.skipPrevious() },
+                        onClick = { haptic(); viewModel.skipPrevious() },
                         colors = IconButtonDefaults.iconButtonColors(
                             contentColor = PlayerTextPrimary,
                         ),
@@ -433,7 +433,7 @@ fun NowPlayingScreen(
 
                     // Play/Pause — large purple circle; shows spinner when buffering
                     IconButton(
-                        onClick = { viewModel.togglePlayPause() },
+                        onClick = { haptic(); viewModel.togglePlayPause() },
                         modifier = Modifier
                             .size(72.dp)
                             .clip(CircleShape)
@@ -459,7 +459,7 @@ fun NowPlayingScreen(
 
                     // Skip Next
                     IconButton(
-                        onClick = { viewModel.skipNext() },
+                        onClick = { haptic(); viewModel.skipNext() },
                         colors = IconButtonDefaults.iconButtonColors(
                             contentColor = PlayerTextPrimary,
                         ),
@@ -478,6 +478,7 @@ fun NowPlayingScreen(
                     // reflect the actual streaming track metadata
                     IconButton(
                         onClick = {
+                            haptic()
                             val effective = playbackState.effectiveTrack
                             if (effective != null) {
                                 contextMenuState.show(
@@ -522,6 +523,7 @@ fun NowPlayingScreen(
                     ) {
                         IconButton(
                             onClick = {
+                                haptic()
                                 scope.launch {
                                     if (sheetState.currentValue == SheetValue.Expanded) {
                                         sheetState.partialExpand()
@@ -561,7 +563,7 @@ fun NowPlayingScreen(
 
                     // Spinoff button — states: loading (spinner), active (purple), available (gray), unavailable (dim)
                     IconButton(
-                        onClick = { viewModel.toggleSpinoff() },
+                        onClick = { haptic(); viewModel.toggleSpinoff() },
                         enabled = !playbackState.spinoffLoading && playbackState.spinoffAvailable != false,
                         colors = IconButtonDefaults.iconButtonColors(
                             contentColor = when {
