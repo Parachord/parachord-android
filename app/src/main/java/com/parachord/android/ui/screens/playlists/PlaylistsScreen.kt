@@ -1,6 +1,5 @@
 package com.parachord.android.ui.screens.playlists
 
-import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.background
 import com.parachord.android.ui.components.hapticCombinedClickable
 import androidx.compose.foundation.layout.Arrangement
@@ -66,7 +65,7 @@ import com.parachord.android.ui.components.ModalTextActive
 import com.parachord.android.ui.components.ModalTextPrimary
 import com.parachord.android.ui.screens.library.CollectionFilterBar
 
-@OptIn(ExperimentalMaterial3Api::class, ExperimentalFoundationApi::class)
+@OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun PlaylistsScreen(
     onOpenDrawer: () -> Unit = {},
