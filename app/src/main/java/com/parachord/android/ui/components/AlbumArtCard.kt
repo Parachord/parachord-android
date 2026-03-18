@@ -1,5 +1,7 @@
 package com.parachord.android.ui.components
 
+import androidx.compose.animation.Crossfade
+import androidx.compose.animation.core.tween
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.aspectRatio
@@ -46,47 +48,55 @@ fun AlbumArtCard(
         .shadow(elevation, shape)
         .clip(shape)
 
-    if (!artworkUrl.isNullOrBlank()) {
-        SubcomposeAsyncImage(
-            model = ImageRequest.Builder(LocalContext.current)
-                .data(artworkUrl)
-                .crossfade(true)
-                .build(),
-            contentDescription = contentDescription,
-            modifier = commonModifier,
-            contentScale = ContentScale.Crop,
-            loading = {
-                if (placeholderName != null) {
-                    GradientPlaceholder(
-                        name = placeholderName,
-                        modifier = Modifier.size(size),
-                        fontSize = (size.value * 0.35f).sp,
-                    )
-                } else {
-                    ArtPlaceholderSimple(Modifier.size(size), size)
-                }
-            },
-            error = {
-                if (placeholderName != null) {
-                    GradientPlaceholder(
-                        name = placeholderName,
-                        modifier = Modifier.size(size),
-                        fontSize = (size.value * 0.35f).sp,
-                    )
-                } else {
-                    ArtPlaceholderSimple(Modifier.size(size), size)
-                }
-            },
-        )
-    } else {
-        if (placeholderName != null) {
-            GradientPlaceholder(
-                name = placeholderName,
-                modifier = commonModifier,
-                fontSize = (size.value * 0.35f).sp,
+    // Animate between different artwork URLs (track switches) with a smooth crossfade
+    Crossfade(
+        targetState = artworkUrl,
+        animationSpec = tween(durationMillis = 300),
+        modifier = commonModifier,
+        label = "album-art-crossfade",
+    ) { url ->
+        if (!url.isNullOrBlank()) {
+            SubcomposeAsyncImage(
+                model = ImageRequest.Builder(LocalContext.current)
+                    .data(url)
+                    .crossfade(300)
+                    .build(),
+                contentDescription = contentDescription,
+                modifier = Modifier.size(size),
+                contentScale = ContentScale.Crop,
+                loading = {
+                    if (placeholderName != null) {
+                        GradientPlaceholder(
+                            name = placeholderName,
+                            modifier = Modifier.size(size),
+                            fontSize = (size.value * 0.35f).sp,
+                        )
+                    } else {
+                        ArtPlaceholderSimple(Modifier.size(size), size)
+                    }
+                },
+                error = {
+                    if (placeholderName != null) {
+                        GradientPlaceholder(
+                            name = placeholderName,
+                            modifier = Modifier.size(size),
+                            fontSize = (size.value * 0.35f).sp,
+                        )
+                    } else {
+                        ArtPlaceholderSimple(Modifier.size(size), size)
+                    }
+                },
             )
         } else {
-            ArtPlaceholderSimple(commonModifier, size)
+            if (placeholderName != null) {
+                GradientPlaceholder(
+                    name = placeholderName,
+                    modifier = Modifier.size(size),
+                    fontSize = (size.value * 0.35f).sp,
+                )
+            } else {
+                ArtPlaceholderSimple(Modifier.size(size), size)
+            }
         }
     }
 }
@@ -110,47 +120,55 @@ fun AlbumArtCardFill(
         .shadow(elevation, shape)
         .clip(shape)
 
-    if (!artworkUrl.isNullOrBlank()) {
-        SubcomposeAsyncImage(
-            model = ImageRequest.Builder(LocalContext.current)
-                .data(artworkUrl)
-                .crossfade(true)
-                .build(),
-            contentDescription = contentDescription,
-            modifier = commonModifier,
-            contentScale = ContentScale.Crop,
-            loading = {
-                if (placeholderName != null) {
-                    GradientPlaceholder(
-                        name = placeholderName,
-                        modifier = Modifier.aspectRatio(1f),
-                        fontSize = 32.sp,
-                    )
-                } else {
-                    ArtPlaceholderSimple(Modifier.aspectRatio(1f), 48.dp)
-                }
-            },
-            error = {
-                if (placeholderName != null) {
-                    GradientPlaceholder(
-                        name = placeholderName,
-                        modifier = Modifier.aspectRatio(1f),
-                        fontSize = 32.sp,
-                    )
-                } else {
-                    ArtPlaceholderSimple(Modifier.aspectRatio(1f), 48.dp)
-                }
-            },
-        )
-    } else {
-        if (placeholderName != null) {
-            GradientPlaceholder(
-                name = placeholderName,
-                modifier = commonModifier,
-                fontSize = 32.sp,
+    // Smooth crossfade when artwork URL changes (e.g. track switch on now-playing screen)
+    Crossfade(
+        targetState = artworkUrl,
+        animationSpec = tween(durationMillis = 400),
+        modifier = commonModifier,
+        label = "album-art-fill-crossfade",
+    ) { url ->
+        if (!url.isNullOrBlank()) {
+            SubcomposeAsyncImage(
+                model = ImageRequest.Builder(LocalContext.current)
+                    .data(url)
+                    .crossfade(400)
+                    .build(),
+                contentDescription = contentDescription,
+                modifier = Modifier.aspectRatio(1f),
+                contentScale = ContentScale.Crop,
+                loading = {
+                    if (placeholderName != null) {
+                        GradientPlaceholder(
+                            name = placeholderName,
+                            modifier = Modifier.aspectRatio(1f),
+                            fontSize = 32.sp,
+                        )
+                    } else {
+                        ArtPlaceholderSimple(Modifier.aspectRatio(1f), 48.dp)
+                    }
+                },
+                error = {
+                    if (placeholderName != null) {
+                        GradientPlaceholder(
+                            name = placeholderName,
+                            modifier = Modifier.aspectRatio(1f),
+                            fontSize = 32.sp,
+                        )
+                    } else {
+                        ArtPlaceholderSimple(Modifier.aspectRatio(1f), 48.dp)
+                    }
+                },
             )
         } else {
-            ArtPlaceholderSimple(commonModifier, 48.dp)
+            if (placeholderName != null) {
+                GradientPlaceholder(
+                    name = placeholderName,
+                    modifier = Modifier.aspectRatio(1f),
+                    fontSize = 32.sp,
+                )
+            } else {
+                ArtPlaceholderSimple(Modifier.aspectRatio(1f), 48.dp)
+            }
         }
     }
 }
