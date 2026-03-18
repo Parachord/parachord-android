@@ -4,6 +4,7 @@ import android.content.Context
 import android.content.Intent
 import android.os.Build
 import android.util.Log
+import android.view.KeyEvent
 import com.parachord.android.auth.OAuthManager
 import com.parachord.android.data.api.SpPlaybackRequest
 import com.parachord.android.data.api.SpPlaybackState
@@ -336,22 +337,10 @@ class SpotifyPlaybackHandler @Inject constructor(
             Log.d(TAG, "Initial device fetch failed: ${e.message}")
         }
 
-        // No devices — nudge the local Spotify app awake in the background.
-        // Use a service intent via media button to avoid launching the full UI.
-        val launchIntent = context.packageManager.getLaunchIntentForPackage(SPOTIFY_PACKAGE)
-        if (launchIntent == null) {
-            Log.w(TAG, "Spotify is not installed")
-            return emptyList()
-        }
-
-        // Launch Spotify minimized — bring-to-back keeps it out of the user's
-        // face while still starting the process so it registers as a Connect device.
-        launchIntent.addFlags(
-            Intent.FLAG_ACTIVITY_NEW_TASK or
-                Intent.FLAG_ACTIVITY_NO_ANIMATION
-        )
-        context.startActivity(launchIntent)
-        Log.d(TAG, "Nudged Spotify awake (background launch)")
+        // No devices — nudge Spotify awake via a media button broadcast.
+        // This wakes Spotify's MediaBrowserService in the background without
+        // launching the full UI or stealing focus from our app.
+        nudgeSpotifyBackground()
 
         // Poll until Spotify registers as a Connect device
         Log.d(TAG, "Polling for devices for up to ${WAKE_TIMEOUT_MS}ms...")
@@ -375,23 +364,12 @@ class SpotifyPlaybackHandler @Inject constructor(
 
     /**
      * Force-wake Spotify on this phone and wait for it to register as a
-     * Connect device. Unlike [wakeSpotifyAndAwaitDevice], this always launches
-     * the Spotify app — even when remote devices (speakers, TVs) are already
+     * Connect device. Unlike [wakeSpotifyAndAwaitDevice], this always nudges
+     * Spotify — even when remote devices (speakers, TVs) are already
      * available — because the user explicitly asked for "This device".
      */
     private suspend fun wakeLocalSpotifyApp(auth: String): List<SpDevice> {
-        val launchIntent = context.packageManager.getLaunchIntentForPackage(SPOTIFY_PACKAGE)
-        if (launchIntent == null) {
-            Log.w(TAG, "Spotify is not installed")
-            return emptyList()
-        }
-
-        launchIntent.addFlags(
-            Intent.FLAG_ACTIVITY_NEW_TASK or
-                Intent.FLAG_ACTIVITY_NO_ANIMATION
-        )
-        context.startActivity(launchIntent)
-        Log.d(TAG, "Force-waking local Spotify for 'This device' selection")
+        nudgeSpotifyBackground()
 
         // Poll until we see a Smartphone device (the local phone)
         val localModel = Build.MODEL.lowercase()
@@ -417,6 +395,44 @@ class SpotifyPlaybackHandler @Inject constructor(
             spotifyApi.getDevices(auth).devices
         } catch (e: Exception) {
             emptyList()
+        }
+    }
+
+    /**
+     * Silently nudge Spotify awake via a media button broadcast.
+     * This wakes Spotify's MediaBrowserService process without launching
+     * its activity or stealing focus from our app.
+     */
+    private fun nudgeSpotifyBackground() {
+        try {
+            // Send a PLAY media button event targeted at Spotify's package.
+            // This wakes the Spotify process and registers it as a Connect
+            // device, without opening the Spotify UI.
+            val downEvent = KeyEvent(KeyEvent.ACTION_DOWN, KeyEvent.KEYCODE_MEDIA_PLAY)
+            val downIntent = Intent(Intent.ACTION_MEDIA_BUTTON).apply {
+                setPackage(SPOTIFY_PACKAGE)
+                putExtra(Intent.EXTRA_KEY_EVENT, downEvent)
+            }
+            context.sendBroadcast(downIntent)
+
+            val upEvent = KeyEvent(KeyEvent.ACTION_UP, KeyEvent.KEYCODE_MEDIA_PLAY)
+            val upIntent = Intent(Intent.ACTION_MEDIA_BUTTON).apply {
+                setPackage(SPOTIFY_PACKAGE)
+                putExtra(Intent.EXTRA_KEY_EVENT, upEvent)
+            }
+            context.sendBroadcast(upIntent)
+            Log.d(TAG, "Nudged Spotify awake via media button broadcast")
+        } catch (e: Exception) {
+            Log.w(TAG, "Media button broadcast failed, falling back to launch intent")
+            // Fallback: launch activity if broadcast doesn't work (older Android)
+            val launchIntent = context.packageManager.getLaunchIntentForPackage(SPOTIFY_PACKAGE)
+            if (launchIntent != null) {
+                launchIntent.addFlags(
+                    Intent.FLAG_ACTIVITY_NEW_TASK or
+                        Intent.FLAG_ACTIVITY_NO_ANIMATION
+                )
+                context.startActivity(launchIntent)
+            }
         }
     }
 
