@@ -371,14 +371,6 @@ class SpotifyPlaybackHandler @Inject constructor(
     }
 
     /**
-     * Pick the best device to play on (matches desktop device picker behavior).
-     *
-     * 1. Preferred device (saved from previous picker selection) — use if available
-     * 2. Single device — auto-select without prompting
-     * 3. Multiple devices — show picker dialog, save selection as preferred
-     * 4. Preferred device not found — show picker again
-     */
-    /**
      * Build a synthetic "This device" entry so the local phone always appears
      * in the picker — even when Spotify hasn't registered it yet.
      */
@@ -397,6 +389,17 @@ class SpotifyPlaybackHandler @Inject constructor(
     private fun isLocalPlaceholder(device: SpDevice): Boolean =
         device.id == LOCAL_DEVICE_ID
 
+    /**
+     * Pick the best device to play on (matches desktop device picker behavior).
+     *
+     * 1. Preferred device (saved from previous picker selection) — use if available
+     * 2. Single device — auto-select without prompting
+     * 3. Multiple devices — show picker dialog, save selection as preferred
+     * 4. Preferred device not found — show picker again
+     *
+     * Always injects a synthetic "This device" entry so the local phone is
+     * selectable even when Spotify hasn't registered it as a Connect device yet.
+     */
     private suspend fun pickDevice(devices: List<SpDevice>): SpDevice? {
         val controllable = devices.filter { !it.isRestricted }
         val available = controllable.ifEmpty { devices }
