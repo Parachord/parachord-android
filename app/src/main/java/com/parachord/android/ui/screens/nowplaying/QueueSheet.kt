@@ -116,7 +116,7 @@ fun QueueSheet(
                         maxLines = 1,
                         overflow = TextOverflow.Ellipsis,
                         modifier = if (isNavigable) {
-                            Modifier.clickable { onNavigateToContext?.invoke(playbackContext) }
+                            Modifier.hapticClickable { onNavigateToContext?.invoke(playbackContext) }
                         } else Modifier,
                     )
                 }

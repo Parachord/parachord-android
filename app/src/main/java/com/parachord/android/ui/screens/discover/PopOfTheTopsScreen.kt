@@ -212,7 +212,7 @@ private fun ChartsFilterBar(
                 Row(
                     modifier = Modifier
                         .clip(RoundedCornerShape(8.dp))
-                        .clickable { countryDropdownOpen = true }
+                        .hapticClickable { countryDropdownOpen = true }
                         .padding(horizontal = 10.dp, vertical = 6.dp),
                     verticalAlignment = Alignment.CenterVertically,
                 ) {
@@ -275,7 +275,7 @@ private fun ChartsFilterBar(
                     Row(
                         modifier = Modifier
                             .clip(RoundedCornerShape(8.dp))
-                            .clickable { sourceDropdownOpen = true }
+                            .hapticClickable { sourceDropdownOpen = true }
                             .padding(horizontal = 10.dp, vertical = 6.dp),
                         verticalAlignment = Alignment.CenterVertically,
                     ) {

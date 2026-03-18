@@ -1165,7 +1165,7 @@ private fun SoundCloudConfig(
             style = MaterialTheme.typography.bodySmall,
             fontWeight = FontWeight.Medium,
             color = MaterialTheme.colorScheme.primary,
-            modifier = Modifier.clickable {
+            modifier = Modifier.hapticClickable {
                 uriHandler.openUri("https://soundcloud.com/you/apps")
             },
         )
@@ -1928,7 +1928,7 @@ private fun AiProviderConfig(
         style = MaterialTheme.typography.bodySmall,
         fontWeight = FontWeight.Medium,
         color = MaterialTheme.colorScheme.primary,
-        modifier = Modifier.clickable { uriHandler.openUri(linkUrl) },
+        modifier = Modifier.hapticClickable { uriHandler.openUri(linkUrl) },
     )
 
     Spacer(modifier = Modifier.height(12.dp))
