@@ -2,6 +2,7 @@ package com.parachord.android.ui.screens.sync
 
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
+import com.parachord.android.data.db.dao.SyncSourceDao
 import com.parachord.android.data.store.SettingsStore
 import com.parachord.android.sync.SpotifySyncProvider
 import com.parachord.android.sync.SyncEngine
@@ -17,6 +18,7 @@ class SyncViewModel @Inject constructor(
     private val syncScheduler: SyncScheduler,
     private val settingsStore: SettingsStore,
     private val spotifyProvider: SpotifySyncProvider,
+    private val syncSourceDao: SyncSourceDao,
 ) : ViewModel() {
 
     enum class SetupStep { OPTIONS, PLAYLISTS, SYNCING, COMPLETE }
@@ -92,13 +94,21 @@ class SyncViewModel @Inject constructor(
                 try {
                     val playlists = spotifyProvider.fetchPlaylists()
                     _availablePlaylists.value = playlists
-                    // Restore previously saved selection; default to all if first time
+                    // Restore previously saved selection from DataStore.
+                    // If DataStore was wiped (app update, data clear), recover
+                    // from the sync_sources table which tracks what was synced.
                     val saved = settingsStore.getSyncSettings().selectedPlaylistIds
                     val allIds = playlists.map { it.spotifyId }.toSet()
                     _selectedPlaylistIds.value = if (saved.isNotEmpty()) {
                         saved.intersect(allIds) // keep only IDs that still exist
                     } else {
-                        allIds
+                        // Recover from Room: if playlists were previously synced,
+                        // their Spotify IDs are in sync_sources.externalId
+                        val synced = syncSourceDao.getByProvider("spotify", "playlist")
+                            .mapNotNull { it.externalId }
+                            .toSet()
+                        val recovered = synced.intersect(allIds)
+                        if (recovered.isNotEmpty()) recovered else allIds
                     }
                 } catch (e: Exception) {
                     _playlistsError.value = e.message ?: "Failed to load playlists"
