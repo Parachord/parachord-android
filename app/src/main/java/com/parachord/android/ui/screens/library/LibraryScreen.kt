@@ -17,7 +17,13 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.WindowInsets
+import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.grid.GridCells
+import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
+import androidx.compose.foundation.lazy.grid.items
+import androidx.compose.foundation.lazy.grid.rememberLazyGridState
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.shape.CircleShape
@@ -66,6 +72,7 @@ import androidx.compose.ui.graphics.Path
 import androidx.compose.ui.graphics.Shape
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.Density
 import androidx.compose.ui.unit.LayoutDirection
@@ -177,12 +184,12 @@ fun CollectionScreen(
         ) { page ->
             when (page) {
                 0 -> {
-                    val artistListState = rememberLazyListState()
+                    val artistGridState = rememberLazyGridState()
                     val artistScope = rememberCoroutineScope()
 
                     // Scroll to top when sort or search changes
                     LaunchedEffect(artistSort, searchQuery) {
-                        artistListState.scrollToItem(0)
+                        artistGridState.scrollToItem(0)
                     }
 
                     Column(modifier = Modifier.fillMaxSize()) {
@@ -191,7 +198,7 @@ fun CollectionScreen(
                             sortOptions = ArtistSort.entries.map { sort ->
                                 sort.label to {
                                     viewModel.setArtistSort(sort)
-                                    artistScope.launch { artistListState.scrollToItem(0) }
+                                    artistScope.launch { artistGridState.scrollToItem(0) }
                                 }
                             },
                             selectedSortLabel = artistSort.label,
@@ -202,7 +209,14 @@ fun CollectionScreen(
                         if (sortedArtists.isEmpty()) {
                             EmptyState("No artists yet", Icons.Default.Person, onSyncClick = { showSyncSheet = true })
                         } else {
-                            LazyColumn(state = artistListState, modifier = Modifier.fillMaxSize()) {
+                            LazyVerticalGrid(
+                                state = artistGridState,
+                                columns = GridCells.Fixed(3),
+                                contentPadding = PaddingValues(horizontal = 16.dp, vertical = 8.dp),
+                                horizontalArrangement = Arrangement.spacedBy(12.dp),
+                                verticalArrangement = Arrangement.spacedBy(16.dp),
+                                modifier = Modifier.fillMaxSize(),
+                            ) {
                                 items(sortedArtists, key = { it.id }) { artist ->
                                     // Trigger lazy image enrichment for artists with no image
                                     if (artist.imageUrl == null) {
@@ -213,28 +227,29 @@ fun CollectionScreen(
 
                                     var showMenu by remember { mutableStateOf(false) }
 
-                                    Row(
+                                    Column(
+                                        horizontalAlignment = Alignment.CenterHorizontally,
                                         modifier = Modifier
                                             .fillMaxWidth()
                                             .combinedClickable(
                                                 onClick = { onNavigateToArtist(artist.name) },
                                                 onLongClick = { showMenu = true },
-                                            )
-                                            .padding(horizontal = 16.dp, vertical = 10.dp),
-                                        verticalAlignment = Alignment.CenterVertically,
+                                            ),
                                     ) {
                                         AlbumArtCard(
                                             artworkUrl = artist.imageUrl,
-                                            size = 40.dp,
-                                            cornerRadius = 20.dp,
+                                            size = 96.dp,
+                                            cornerRadius = 48.dp,
                                             placeholderName = artist.name,
                                         )
-                                        Spacer(modifier = Modifier.width(12.dp))
+                                        Spacer(modifier = Modifier.height(6.dp))
                                         Text(
                                             text = artist.name,
-                                            style = MaterialTheme.typography.bodyLarge,
+                                            style = MaterialTheme.typography.bodySmall,
                                             maxLines = 1,
                                             overflow = TextOverflow.Ellipsis,
+                                            textAlign = TextAlign.Center,
+                                            modifier = Modifier.fillMaxWidth(),
                                         )
                                     }
 
@@ -267,11 +282,11 @@ fun CollectionScreen(
                     }
                 }
                 1 -> {
-                    val albumListState = rememberLazyListState()
+                    val albumGridState = rememberLazyGridState()
                     val albumScope = rememberCoroutineScope()
 
                     LaunchedEffect(albumSort, searchQuery) {
-                        albumListState.scrollToItem(0)
+                        albumGridState.scrollToItem(0)
                     }
 
                     Column(modifier = Modifier.fillMaxSize()) {
@@ -280,7 +295,7 @@ fun CollectionScreen(
                             sortOptions = AlbumSort.entries.map { sort ->
                                 sort.label to {
                                     viewModel.setAlbumSort(sort)
-                                    albumScope.launch { albumListState.scrollToItem(0) }
+                                    albumScope.launch { albumGridState.scrollToItem(0) }
                                 }
                             },
                             selectedSortLabel = albumSort.label,
@@ -291,7 +306,14 @@ fun CollectionScreen(
                         if (sortedAlbums.isEmpty()) {
                             EmptyState("No albums yet", Icons.Default.MusicNote, onSyncClick = { showSyncSheet = true })
                         } else {
-                            LazyColumn(state = albumListState, modifier = Modifier.fillMaxSize()) {
+                            LazyVerticalGrid(
+                                state = albumGridState,
+                                columns = GridCells.Fixed(2),
+                                contentPadding = PaddingValues(horizontal = 12.dp, vertical = 8.dp),
+                                horizontalArrangement = Arrangement.spacedBy(10.dp),
+                                verticalArrangement = Arrangement.spacedBy(12.dp),
+                                modifier = Modifier.fillMaxSize(),
+                            ) {
                                 items(sortedAlbums, key = { it.id }) { album ->
                                     // Trigger lazy artwork enrichment for albums with no artwork
                                     if (album.artworkUrl == null) {
@@ -302,38 +324,38 @@ fun CollectionScreen(
 
                                     var showMenu by remember { mutableStateOf(false) }
 
-                                    Row(
+                                    Column(
                                         modifier = Modifier
-                                            .fillMaxWidth()
+                                            .clip(RoundedCornerShape(8.dp))
                                             .combinedClickable(
                                                 onClick = { onNavigateToAlbum(album.title, album.artist) },
                                                 onLongClick = { showMenu = true },
-                                            )
-                                            .padding(horizontal = 16.dp, vertical = 10.dp),
-                                        verticalAlignment = Alignment.CenterVertically,
+                                            ),
                                     ) {
                                         AlbumArtCard(
                                             artworkUrl = album.artworkUrl,
-                                            size = 48.dp,
-                                            cornerRadius = 4.dp,
-                                            elevation = 1.dp,
+                                            size = 180.dp,
+                                            cornerRadius = 8.dp,
+                                            placeholderName = album.title,
                                         )
-                                        Spacer(modifier = Modifier.width(12.dp))
-                                        Column(modifier = Modifier.weight(1f)) {
-                                            Text(
-                                                text = album.title,
-                                                style = MaterialTheme.typography.bodyLarge,
-                                                maxLines = 1,
-                                                overflow = TextOverflow.Ellipsis,
-                                            )
-                                            Text(
-                                                text = album.artist,
-                                                style = MaterialTheme.typography.bodySmall,
-                                                color = MaterialTheme.colorScheme.onSurfaceVariant,
-                                                maxLines = 1,
-                                                overflow = TextOverflow.Ellipsis,
-                                            )
-                                        }
+                                        Spacer(modifier = Modifier.height(4.dp))
+                                        Text(
+                                            text = album.title,
+                                            style = MaterialTheme.typography.bodySmall.copy(
+                                                fontWeight = FontWeight.Medium,
+                                            ),
+                                            maxLines = 1,
+                                            overflow = TextOverflow.Ellipsis,
+                                            modifier = Modifier.padding(horizontal = 2.dp),
+                                        )
+                                        Text(
+                                            text = album.artist,
+                                            style = MaterialTheme.typography.labelSmall,
+                                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                            maxLines = 1,
+                                            overflow = TextOverflow.Ellipsis,
+                                            modifier = Modifier.padding(horizontal = 2.dp),
+                                        )
                                     }
 
                                     if (showMenu) {
