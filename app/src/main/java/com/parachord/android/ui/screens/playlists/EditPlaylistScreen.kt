@@ -63,7 +63,6 @@ import com.parachord.android.data.db.entity.PlaylistTrackEntity
 import com.parachord.android.ui.components.AlbumArtCard
 import com.parachord.android.ui.components.hapticClickable
 import com.parachord.android.ui.components.rememberDragHaptics
-import com.parachord.android.ui.components.rememberHapticClick
 import kotlin.math.roundToInt
 
 @OptIn(ExperimentalMaterial3Api::class)
