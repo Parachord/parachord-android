@@ -69,6 +69,10 @@ class SettingsStore @Inject constructor(
         val APPLE_MUSIC_STOREFRONT = stringPreferencesKey("apple_music_storefront")
         val APPLE_MUSIC_USER_TOKEN = stringPreferencesKey("apple_music_user_token")
         val PREFERRED_SPOTIFY_DEVICE_ID = stringPreferencesKey("preferred_spotify_device_id")
+        val CONCERT_LATITUDE = stringPreferencesKey("concert_latitude")
+        val CONCERT_LONGITUDE = stringPreferencesKey("concert_longitude")
+        val CONCERT_CITY = stringPreferencesKey("concert_city")
+        val CONCERT_RADIUS = stringPreferencesKey("concert_radius_miles")
 
         /** Default canonical order matching the desktop app. */
         private const val DEFAULT_RESOLVER_ORDER = "spotify,applemusic,bandcamp,soundcloud,localfiles,youtube"
@@ -634,6 +638,47 @@ class SettingsStore @Inject constructor(
             val current = it[DELETED_FRIEND_KEYS] ?: emptySet()
             it[DELETED_FRIEND_KEYS] = current - key
         }
+    }
+
+    // --- Concert Location ---
+
+    data class ConcertLocation(
+        val latitude: Double?,
+        val longitude: Double?,
+        val city: String?,
+        val radiusMiles: Int,
+    )
+
+    suspend fun getConcertLocation(): ConcertLocation {
+        val prefs = dataStore.data.first()
+        return ConcertLocation(
+            latitude = prefs[CONCERT_LATITUDE]?.toDoubleOrNull(),
+            longitude = prefs[CONCERT_LONGITUDE]?.toDoubleOrNull(),
+            city = prefs[CONCERT_CITY],
+            radiusMiles = prefs[CONCERT_RADIUS]?.toIntOrNull() ?: 50,
+        )
+    }
+
+    fun getConcertLocationFlow(): Flow<ConcertLocation> = dataStore.data.map { prefs ->
+        ConcertLocation(
+            latitude = prefs[CONCERT_LATITUDE]?.toDoubleOrNull(),
+            longitude = prefs[CONCERT_LONGITUDE]?.toDoubleOrNull(),
+            city = prefs[CONCERT_CITY],
+            radiusMiles = prefs[CONCERT_RADIUS]?.toIntOrNull() ?: 50,
+        )
+    }
+
+    suspend fun setConcertLocation(lat: Double, lon: Double, city: String, radiusMiles: Int = 50) {
+        dataStore.edit {
+            it[CONCERT_LATITUDE] = lat.toString()
+            it[CONCERT_LONGITUDE] = lon.toString()
+            it[CONCERT_CITY] = city
+            it[CONCERT_RADIUS] = radiusMiles.toString()
+        }
+    }
+
+    suspend fun setConcertRadius(radiusMiles: Int) {
+        dataStore.edit { it[CONCERT_RADIUS] = radiusMiles.toString() }
     }
 
     private fun defaultVolumeOffsets(): Map<String, Int> = mapOf(

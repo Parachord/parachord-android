@@ -3,7 +3,9 @@ package com.parachord.android.app
 import com.parachord.android.data.api.AppleMusicApi
 import com.parachord.android.data.api.LastFmApi
 import com.parachord.android.data.api.MusicBrainzApi
+import com.parachord.android.data.api.SeatGeekApi
 import com.parachord.android.data.api.SpotifyApi
+import com.parachord.android.data.api.TicketmasterApi
 import dagger.Module
 import dagger.Provides
 import dagger.hilt.InstallIn
@@ -89,6 +91,36 @@ object ApiModule {
     @Singleton
     fun provideAppleMusicApi(@Named("itunes") retrofit: Retrofit): AppleMusicApi =
         retrofit.create(AppleMusicApi::class.java)
+
+    @Provides
+    @Singleton
+    @Named("ticketmaster")
+    fun provideTicketmasterRetrofit(json: Json, client: OkHttpClient): Retrofit =
+        Retrofit.Builder()
+            .baseUrl("https://app.ticketmaster.com/")
+            .client(client)
+            .addConverterFactory(json.asConverterFactory("application/json".toMediaType()))
+            .build()
+
+    @Provides
+    @Singleton
+    fun provideTicketmasterApi(@Named("ticketmaster") retrofit: Retrofit): TicketmasterApi =
+        retrofit.create(TicketmasterApi::class.java)
+
+    @Provides
+    @Singleton
+    @Named("seatgeek")
+    fun provideSeatGeekRetrofit(json: Json, client: OkHttpClient): Retrofit =
+        Retrofit.Builder()
+            .baseUrl("https://api.seatgeek.com/2/")
+            .client(client)
+            .addConverterFactory(json.asConverterFactory("application/json".toMediaType()))
+            .build()
+
+    @Provides
+    @Singleton
+    fun provideSeatGeekApi(@Named("seatgeek") retrofit: Retrofit): SeatGeekApi =
+        retrofit.create(SeatGeekApi::class.java)
 
     private fun userAgentInterceptor(userAgent: String) = Interceptor { chain ->
         chain.proceed(

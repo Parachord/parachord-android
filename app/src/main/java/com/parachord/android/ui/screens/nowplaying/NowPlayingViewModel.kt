@@ -4,15 +4,21 @@ import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.parachord.android.data.db.entity.PlaylistEntity
 import com.parachord.android.data.db.entity.TrackEntity
+import com.parachord.android.data.repository.ConcertsRepository
 import com.parachord.android.data.repository.LibraryRepository
 import com.parachord.android.data.store.SettingsStore
 import com.parachord.android.playback.PlaybackController
 import com.parachord.android.playback.PlaybackState
 import com.parachord.android.playback.PlaybackStateHolder
 import com.parachord.android.resolver.TrackResolverCache
+import android.util.Log
 import dagger.hilt.android.lifecycle.HiltViewModel
+import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.distinctUntilChanged
+import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
 import javax.inject.Inject
@@ -24,6 +30,7 @@ class NowPlayingViewModel @Inject constructor(
     private val libraryRepository: LibraryRepository,
     private val settingsStore: SettingsStore,
     private val trackResolverCache: TrackResolverCache,
+    private val concertsRepository: ConcertsRepository,
 ) : ViewModel() {
 
     val playbackState: StateFlow<PlaybackState> = playbackStateHolder.state
@@ -40,6 +47,11 @@ class NowPlayingViewModel @Inject constructor(
     val trackResolvers: StateFlow<Map<String, List<String>>> = trackResolverCache.trackResolvers
     val trackResolverConfidences: StateFlow<Map<String, Map<String, Float>>> = trackResolverCache.trackResolverConfidences
 
+    /** Whether the currently playing artist is on tour. */
+    private val _isOnTour = MutableStateFlow(false)
+    val isOnTour: StateFlow<Boolean> = _isOnTour.asStateFlow()
+    private var lastCheckedArtist: String? = null
+
     init {
         // Resolve queue tracks in background as they change (concurrent, deduplicated)
         viewModelScope.launch {
@@ -52,6 +64,23 @@ class NowPlayingViewModel @Inject constructor(
                     trackResolverCache.resolveInBackground(allTracks, backfillDb = false)
                 }
             }
+        }
+
+        // Check if current artist is on tour when track changes
+        viewModelScope.launch {
+            playbackState
+                .map { it.currentTrack?.artist }
+                .distinctUntilChanged()
+                .collect { artist ->
+                    if (artist.isNullOrBlank() || artist == lastCheckedArtist) return@collect
+                    lastCheckedArtist = artist
+                    _isOnTour.value = false // Reset while checking
+                    try {
+                        _isOnTour.value = concertsRepository.checkOnTour(artist)
+                    } catch (e: Exception) {
+                        Log.w("NowPlayingVM", "On-tour check failed for '$artist'", e)
+                    }
+                }
         }
     }
 

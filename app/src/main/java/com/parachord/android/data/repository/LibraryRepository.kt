@@ -148,6 +148,33 @@ class LibraryRepository @Inject constructor(
         ))
     }
 
+    /** Rename a playlist. */
+    suspend fun renamePlaylist(playlistId: String, newName: String) {
+        val playlist = playlistDao.getById(playlistId) ?: return
+        val now = System.currentTimeMillis()
+        playlistDao.update(playlist.copy(
+            name = newName,
+            updatedAt = now,
+            lastModified = now,
+            locallyModified = true,
+        ))
+    }
+
+    /** Reorder playlist tracks by replacing all positions. */
+    suspend fun reorderPlaylistTracks(playlistId: String, tracks: List<PlaylistTrackEntity>) {
+        val reindexed = tracks.mapIndexed { index, track ->
+            track.copy(position = index)
+        }
+        playlistTrackDao.replaceAll(playlistId, reindexed)
+        val playlist = playlistDao.getById(playlistId) ?: return
+        val now = System.currentTimeMillis()
+        playlistDao.update(playlist.copy(
+            updatedAt = now,
+            lastModified = now,
+            locallyModified = true,
+        ))
+    }
+
     /** Remove a single track from a playlist by position and update the count. */
     suspend fun removeTrackFromPlaylist(playlistId: String, position: Int) {
         playlistTrackDao.deleteTrack(playlistId, position)

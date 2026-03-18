@@ -91,6 +91,7 @@ fun NowPlayingScreen(
     val resolverOrder by viewModel.resolverOrder.collectAsStateWithLifecycle()
     val trackResolvers by viewModel.trackResolvers.collectAsStateWithLifecycle()
     val trackResolverConfidences by viewModel.trackResolverConfidences.collectAsStateWithLifecycle()
+    val isOnTour by viewModel.isOnTour.collectAsStateWithLifecycle()
     val track = playbackState.currentTrack
     val upNext = playbackState.upNext
     val scope = rememberCoroutineScope()
@@ -347,10 +348,25 @@ fun NowPlayingScreen(
                         )
                     }
 
-                    // Resolver icon
-                    if (track?.resolver != null) {
-                        Spacer(modifier = Modifier.height(8.dp))
-                        ResolverIconSquare(resolver = track.resolver!!, size = 24.dp)
+                    // Resolver icon + On Tour dot
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(8.dp),
+                    ) {
+                        if (track?.resolver != null) {
+                            Spacer(modifier = Modifier.height(8.dp))
+                            ResolverIconSquare(resolver = track.resolver!!, size = 24.dp)
+                        }
+                        if (isOnTour) {
+                            Spacer(modifier = Modifier.height(8.dp))
+                            // Small teal dot matching desktop's On Tour indicator
+                            Box(
+                                modifier = Modifier
+                                    .size(7.dp)
+                                    .clip(CircleShape)
+                                    .background(Color(0xFF10C9B4)),
+                            )
+                        }
                     }
                 }
 

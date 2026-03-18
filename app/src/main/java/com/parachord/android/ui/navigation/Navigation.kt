@@ -25,6 +25,7 @@ object Routes {
     const val SEARCH = "search"
     const val PLAYLISTS = "playlists"
     const val PLAYLIST_DETAIL = "playlist/{playlistId}"
+    const val PLAYLIST_EDIT = "playlist/{playlistId}/edit"
     const val NOW_PLAYING = "now_playing"
     const val SETTINGS = "settings"
     const val ARTIST = "artist/{artistName}"
@@ -50,6 +51,9 @@ object Routes {
 
     fun playlistDetail(playlistId: String): String =
         "playlist/${Uri.encode(playlistId)}"
+
+    fun playlistEdit(playlistId: String): String =
+        "playlist/${Uri.encode(playlistId)}/edit"
 
     fun friendDetail(friendId: String): String =
         "friend/${Uri.encode(friendId)}"
@@ -149,12 +153,28 @@ fun ParachordNavHost(
         composable(
             route = Routes.PLAYLIST_DETAIL,
             arguments = listOf(navArgument("playlistId") { type = NavType.StringType }),
-        ) {
+        ) { backStackEntry ->
+            val playlistId = backStackEntry.arguments?.getString("playlistId") ?: ""
             com.parachord.android.ui.screens.playlists.PlaylistDetailScreen(
                 onBack = { navController.popBackStack() },
                 onNavigateToArtist = { name -> navController.navigate(Routes.artist(name)) },
                 onNavigateToAlbum = { albumTitle, artistName ->
                     navController.navigate(Routes.album(albumTitle, artistName))
+                },
+                onNavigateToEdit = {
+                    navController.navigate(Routes.playlistEdit(playlistId))
+                },
+            )
+        }
+        composable(
+            route = Routes.PLAYLIST_EDIT,
+            arguments = listOf(navArgument("playlistId") { type = NavType.StringType }),
+        ) {
+            com.parachord.android.ui.screens.playlists.EditPlaylistScreen(
+                onBack = { navController.popBackStack() },
+                onPlaylistDeleted = {
+                    // Pop back to the playlists list (remove both edit and detail from stack)
+                    navController.popBackStack(Routes.PLAYLISTS, false)
                 },
             )
         }
@@ -327,6 +347,9 @@ fun ParachordNavHost(
         composable(Routes.CONCERTS) {
             com.parachord.android.ui.screens.discover.ConcertsScreen(
                 onBack = { navController.popBackStack() },
+                onNavigateToArtist = { name ->
+                    navController.navigate(Routes.artist(name))
+                },
             )
         }
         composable(Routes.FRIENDS) {

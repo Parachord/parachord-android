@@ -61,3 +61,22 @@ fun rememberHapticClick(): () -> Unit {
     val view = LocalView.current
     return { view.performHapticFeedback(HapticFeedbackConstants.CONTEXT_CLICK) }
 }
+
+/**
+ * Provides haptic callbacks for drag-to-reorder gestures.
+ * [onDragStart] fires a long-press haptic, [onDragMove] fires a lighter tick
+ * when the dragged item crosses an index boundary.
+ */
+@Composable
+fun rememberDragHaptics(): DragHaptics {
+    val view = LocalView.current
+    return DragHaptics(
+        onDragStart = { view.performHapticFeedback(HapticFeedbackConstants.LONG_PRESS) },
+        onDragMove = { view.performHapticFeedback(HapticFeedbackConstants.CLOCK_TICK) },
+    )
+}
+
+data class DragHaptics(
+    val onDragStart: () -> Unit,
+    val onDragMove: () -> Unit,
+)
