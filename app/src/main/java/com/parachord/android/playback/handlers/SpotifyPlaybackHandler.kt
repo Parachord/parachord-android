@@ -271,7 +271,9 @@ class SpotifyPlaybackHandler @Inject constructor(
             Log.d(TAG, "Playback started on '${targetDevice.name}' for $uri")
             true
         } else {
-            Log.w(TAG, "Start playback failed: ${response.code()}")
+            Log.w(TAG, "Start playback failed on '${targetDevice.name}': ${response.code()}")
+            // Clear stale device preference so the picker shows on next retry
+            settingsStore.clearPreferredSpotifyDeviceId()
             false
         }
     }
@@ -463,16 +465,23 @@ class SpotifyPlaybackHandler @Inject constructor(
 
         Log.d(TAG, "pickDevice: devices=${withLocal.map { "'${it.name}'(type=${it.type}, active=${it.isActive})" }}")
 
-        // 1. Check preferred device
+        // 1. Check preferred device — only auto-select if it's currently active.
+        // Inactive preferred devices (phantom speakers, TVs on other networks)
+        // should not be auto-targeted; show the picker so the user can choose.
         val preferredId = settingsStore.getPreferredSpotifyDeviceId()
         if (preferredId != null && preferredId != LOCAL_DEVICE_ID) {
             val preferred = withLocal.firstOrNull { it.id == preferredId }
-            if (preferred != null) {
-                Log.d(TAG, "Using preferred device: '${preferred.name}'")
+            if (preferred != null && preferred.isActive) {
+                Log.d(TAG, "Using preferred device (active): '${preferred.name}'")
                 return preferred
             }
-            // Preferred device not available — fall through to picker
-            Log.d(TAG, "Preferred device $preferredId not available, showing picker")
+            if (preferred != null) {
+                Log.d(TAG, "Preferred device '${preferred.name}' found but not active, clearing preference")
+            } else {
+                Log.d(TAG, "Preferred device $preferredId not available, clearing preference")
+            }
+            // Clear stale preference so the picker shows and user can pick fresh
+            settingsStore.clearPreferredSpotifyDeviceId()
         }
 
         // 2. Single device — auto-select (no UX regression for simple setups)
