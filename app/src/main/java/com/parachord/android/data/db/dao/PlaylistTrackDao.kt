@@ -28,4 +28,11 @@ interface PlaylistTrackDao {
     /** Get the max position in a playlist (for appending new tracks). */
     @Query("SELECT COALESCE(MAX(position), -1) FROM playlist_tracks WHERE playlistId = :playlistId")
     suspend fun getMaxPosition(playlistId: String): Int
+
+    /** Delete all tracks for a playlist then reinsert — used for reorder. */
+    @androidx.room.Transaction
+    suspend fun replaceAll(playlistId: String, tracks: List<PlaylistTrackEntity>) {
+        deleteByPlaylistId(playlistId)
+        insertAll(tracks)
+    }
 }

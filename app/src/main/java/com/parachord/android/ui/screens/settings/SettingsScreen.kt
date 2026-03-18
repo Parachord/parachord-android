@@ -5,6 +5,7 @@ import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import com.parachord.android.ui.components.hapticClickable
+import com.parachord.android.ui.components.rememberDragHaptics
 import androidx.compose.foundation.text.selection.SelectionContainer
 import androidx.compose.foundation.gestures.detectDragGesturesAfterLongPress
 import androidx.compose.foundation.layout.Arrangement
@@ -616,6 +617,7 @@ private fun DraggableResolverRow(
     val density = LocalDensity.current
     var draggingIndex by remember { mutableIntStateOf(-1) }
     var dragOffsetX by remember { mutableStateOf(0f) }
+    val dragHaptics = rememberDragHaptics()
 
     // Calculate tile width based on available space
     // Each tile is ~1/3 of the row width with spacing
@@ -658,6 +660,7 @@ private fun DraggableResolverRow(
                             onDragStart = {
                                 draggingIndex = index
                                 dragOffsetX = 0f
+                                dragHaptics.onDragStart()
                             },
                             onDragEnd = {
                                 // Calculate target index based on drag offset
@@ -666,6 +669,7 @@ private fun DraggableResolverRow(
                                 val targetIndex = (index + indexShift).coerceIn(0, resolverOrder.size - 1)
                                 if (targetIndex != index) {
                                     onReorder(index, targetIndex)
+                                    dragHaptics.onDragMove()
                                 }
                                 draggingIndex = -1
                                 dragOffsetX = 0f

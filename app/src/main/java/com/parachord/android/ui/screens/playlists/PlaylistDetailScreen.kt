@@ -19,6 +19,7 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.automirrored.filled.QueueMusic
 import androidx.compose.material.icons.filled.Delete
+import androidx.compose.material.icons.filled.Edit
 import androidx.compose.material.icons.filled.MoreVert
 import androidx.compose.material.icons.filled.PlayArrow
 import androidx.compose.material3.AlertDialog
@@ -72,6 +73,7 @@ fun PlaylistDetailScreen(
     onBack: () -> Unit,
     onNavigateToArtist: (String) -> Unit = {},
     onNavigateToAlbum: (albumTitle: String, artistName: String) -> Unit = { _, _ -> },
+    onNavigateToEdit: () -> Unit = {},
     modifier: Modifier = Modifier,
     viewModel: PlaylistDetailViewModel = hiltViewModel(),
 ) {
@@ -244,6 +246,10 @@ fun PlaylistDetailScreen(
                     artworkUrl = pl.artworkUrl,
                     trackCount = tracks.size,
                     onDismiss = { showPlaylistMenu = false },
+                    onEditPlaylist = {
+                        showPlaylistMenu = false
+                        onNavigateToEdit()
+                    },
                     onQueuePlaylist = {
                         showPlaylistMenu = false
                         viewModel.queueAll()
@@ -334,6 +340,7 @@ private fun PlaylistOptionsSheet(
     artworkUrl: String?,
     trackCount: Int,
     onDismiss: () -> Unit,
+    onEditPlaylist: () -> Unit,
     onQueuePlaylist: () -> Unit,
     onDeletePlaylist: () -> Unit,
 ) {
@@ -391,6 +398,14 @@ private fun PlaylistOptionsSheet(
             }
 
             HorizontalDivider(color = ModalDivider, modifier = Modifier.padding(vertical = 8.dp))
+
+            ContextMenuItem(
+                icon = Icons.Filled.Edit,
+                label = "Edit Playlist",
+                onClick = onEditPlaylist,
+            )
+
+            HorizontalDivider(color = ModalDivider, modifier = Modifier.padding(vertical = 4.dp))
 
             ContextMenuItem(
                 icon = Icons.AutoMirrored.Filled.QueueMusic,
