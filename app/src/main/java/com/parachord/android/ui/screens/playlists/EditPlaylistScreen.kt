@@ -63,6 +63,7 @@ import com.parachord.android.data.db.entity.PlaylistTrackEntity
 import com.parachord.android.ui.components.AlbumArtCard
 import com.parachord.android.ui.components.hapticClickable
 import com.parachord.android.ui.components.rememberDragHaptics
+import com.parachord.android.ui.components.rememberHapticClick
 import kotlin.math.roundToInt
 
 @OptIn(ExperimentalMaterial3Api::class)
@@ -225,6 +226,20 @@ fun EditPlaylistScreen(
                     },
                     label = "dragBg",
                 )
+
+                // Purple drop indicator above the row that's about to receive the drop
+                val showDropIndicator = draggingIndex >= 0 && !isDragging &&
+                    index == (draggingIndex + (dragOffsetY / rowHeightPx).roundToInt())
+                        .coerceIn(0, tracks.size - 1) &&
+                    index != draggingIndex
+                if (showDropIndicator) {
+                    Box(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .height(2.dp)
+                            .background(Color(0xFF7C3AED)),
+                    )
+                }
 
                 EditableTrackRow(
                     track = track,

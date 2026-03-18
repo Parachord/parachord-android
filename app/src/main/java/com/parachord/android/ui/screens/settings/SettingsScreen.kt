@@ -623,6 +623,13 @@ private fun DraggableResolverRow(
     // Each tile is ~1/3 of the row width with spacing
     val tileWidthDp = 100.dp // approximate, will use weight in practice
 
+    // Compute drop target index during drag
+    val dropTargetIndex = if (draggingIndex >= 0) {
+        val tileWidthApprox = with(density) { 100.dp.toPx() + 12.dp.toPx() }
+        val shift = (dragOffsetX / tileWidthApprox).roundToInt()
+        (draggingIndex + shift).coerceIn(0, resolverOrder.size - 1)
+    } else -1
+
     Row(
         modifier = Modifier
             .fillMaxWidth()
@@ -632,6 +639,7 @@ private fun DraggableResolverRow(
         resolverOrder.forEachIndexed { index, pluginId ->
             val plugin = findPlugin(pluginId) ?: return@forEachIndexed
             val isDragging = draggingIndex == index
+            val isDropTarget = dropTargetIndex == index && !isDragging
             val elevation by animateDpAsState(
                 targetValue = if (isDragging) 8.dp else 0.dp,
                 label = "dragElevation",
@@ -651,6 +659,12 @@ private fun DraggableResolverRow(
                     .then(
                         if (isDragging) {
                             Modifier.shadow(elevation, RoundedCornerShape(16.dp))
+                        } else if (isDropTarget) {
+                            Modifier.border(
+                                width = 2.dp,
+                                color = Color(0xFF7C3AED),
+                                shape = RoundedCornerShape(16.dp),
+                            )
                         } else {
                             Modifier
                         },
