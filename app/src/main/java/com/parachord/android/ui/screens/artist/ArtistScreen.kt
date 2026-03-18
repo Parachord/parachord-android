@@ -31,6 +31,10 @@ import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
+import androidx.compose.material.icons.filled.CalendarToday
+import androidx.compose.material.icons.filled.ConfirmationNumber
+import androidx.compose.material.icons.filled.LocationOn
+import androidx.compose.material.icons.filled.OpenInNew
 import androidx.compose.material.icons.filled.Star
 import androidx.compose.material.icons.outlined.StarOutline
 import androidx.compose.foundation.lazy.LazyRow
@@ -84,6 +88,8 @@ import com.parachord.android.ui.components.rememberTrackContextMenuState
 import com.parachord.android.data.metadata.AlbumSearchResult
 import com.parachord.android.data.metadata.SimilarArtist
 import com.parachord.android.data.metadata.TrackSearchResult
+import com.parachord.android.data.repository.ConcertEvent
+import com.parachord.android.data.repository.Resource
 
 @OptIn(ExperimentalMaterial3Api::class, ExperimentalLayoutApi::class)
 @Composable
@@ -101,6 +107,8 @@ fun ArtistScreen(
     val trackResolvers by viewModel.trackResolvers.collectAsStateWithLifecycle()
     val trackResolverConfidences by viewModel.trackResolverConfidences.collectAsStateWithLifecycle()
     val isSaved by viewModel.isSaved.collectAsStateWithLifecycle()
+    val tourDates by viewModel.tourDates.collectAsStateWithLifecycle()
+    val isOnTour by viewModel.isOnTour.collectAsStateWithLifecycle()
     val playlists by viewModel.playlists.collectAsStateWithLifecycle()
     val contextMenuState = rememberTrackContextMenuState()
 
@@ -257,13 +265,23 @@ fun ArtistScreen(
                     }
                 }
 
-                // Tabs + pager
+                // Tabs + pager — show "On Tour" tab when artist has upcoming dates
+                val tabs = remember(isOnTour) {
+                    buildList {
+                        add("Discography")
+                        if (isOnTour) add("On Tour")
+                        add("Biography")
+                        add("Related Artists")
+                    }
+                }
+
                 SwipeableTabLayout(
-                    tabs = listOf("Discography", "Biography", "Related Artists"),
+                    tabs = tabs,
                     modifier = Modifier.fillMaxSize(),
                 ) { page ->
-                    when (page) {
-                        0 -> DiscographyTab(
+                    val tabName = tabs.getOrNull(page) ?: return@SwipeableTabLayout
+                    when (tabName) {
+                        "Discography" -> DiscographyTab(
                             albums = albums,
                             topTracks = topTracks,
                             onNavigateToAlbum = onNavigateToAlbum,
@@ -284,14 +302,15 @@ fun ArtistScreen(
                                 )
                             },
                         )
-                        1 -> BiographyTab(
+                        "On Tour" -> OnTourTab(tourDates = tourDates)
+                        "Biography" -> BiographyTab(
                             bio = artistInfo?.bio,
                             bioSource = artistInfo?.bioSource,
                             bioUrl = artistInfo?.bioUrl,
                             tags = artistInfo?.tags ?: emptyList(),
                             provider = artistInfo?.provider,
                         )
-                        2 -> RelatedArtistsTab(
+                        "Related Artists" -> RelatedArtistsTab(
                             similarArtists = artistInfo?.similarArtists ?: emptyList(),
                             onNavigateToArtist = onNavigateToArtist,
                         )
@@ -670,6 +689,163 @@ private fun RelatedArtistsTab(
                         modifier = Modifier.fillMaxWidth(),
                     )
                 }
+            }
+        }
+    }
+}
+
+@Composable
+private fun OnTourTab(
+    tourDates: Resource<List<ConcertEvent>>,
+) {
+    val uriHandler = LocalUriHandler.current
+
+    when (tourDates) {
+        is Resource.Loading -> {
+            Box(
+                modifier = Modifier.fillMaxSize(),
+                contentAlignment = Alignment.Center,
+            ) {
+                androidx.compose.material3.CircularProgressIndicator(
+                    color = Color(0xFF7C3AED),
+                )
+            }
+        }
+        is Resource.Error -> {
+            Box(
+                modifier = Modifier.fillMaxSize().padding(32.dp),
+                contentAlignment = Alignment.Center,
+            ) {
+                Text(
+                    text = tourDates.message,
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+            }
+        }
+        is Resource.Success -> {
+            if (tourDates.data.isEmpty()) {
+                Box(
+                    modifier = Modifier.fillMaxSize().padding(32.dp),
+                    contentAlignment = Alignment.Center,
+                ) {
+                    Text(
+                        text = "No upcoming tour dates",
+                        style = MaterialTheme.typography.bodyMedium,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                }
+            } else {
+                LazyColumn(
+                    modifier = Modifier.fillMaxSize(),
+                    contentPadding = PaddingValues(bottom = 80.dp),
+                ) {
+                    items(tourDates.data, key = { it.id }) { event ->
+                        TourDateRow(
+                            event = event,
+                            onTicketClick = {
+                                event.ticketUrl?.let { uriHandler.openUri(it) }
+                            },
+                        )
+                    }
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun TourDateRow(
+    event: ConcertEvent,
+    onTicketClick: () -> Unit,
+) {
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(horizontal = 16.dp, vertical = 10.dp),
+        verticalAlignment = Alignment.Top,
+    ) {
+        // Date column
+        Column(
+            modifier = Modifier.width(56.dp),
+            horizontalAlignment = Alignment.CenterHorizontally,
+        ) {
+            val dateParts = event.date?.split("-")
+            val month = dateParts?.getOrNull(1)?.toIntOrNull()?.let {
+                java.time.Month.of(it).name.take(3)
+            } ?: ""
+            val day = dateParts?.getOrNull(2) ?: ""
+            Text(
+                text = month,
+                fontSize = 11.sp,
+                fontWeight = FontWeight.SemiBold,
+                color = Color(0xFF7C3AED),
+                letterSpacing = 0.5.sp,
+            )
+            Text(
+                text = day,
+                fontSize = 22.sp,
+                fontWeight = FontWeight.Bold,
+                color = MaterialTheme.colorScheme.onSurface,
+            )
+        }
+
+        Spacer(modifier = Modifier.width(12.dp))
+
+        Column(modifier = Modifier.weight(1f)) {
+            Text(
+                text = event.name,
+                style = MaterialTheme.typography.bodyMedium,
+                fontWeight = FontWeight.Medium,
+                maxLines = 2,
+                overflow = TextOverflow.Ellipsis,
+            )
+            if (event.venueName != null) {
+                Text(
+                    text = event.venueName,
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                )
+            }
+            if (event.locationString.isNotBlank()) {
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Icon(
+                        Icons.Default.LocationOn,
+                        contentDescription = null,
+                        modifier = Modifier.size(12.dp),
+                        tint = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.6f),
+                    )
+                    Spacer(modifier = Modifier.width(2.dp))
+                    Text(
+                        text = event.locationString,
+                        fontSize = 11.sp,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.7f),
+                    )
+                    if (event.displayTime.isNotBlank()) {
+                        Text(
+                            text = " · ${event.displayTime}",
+                            fontSize = 11.sp,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.7f),
+                        )
+                    }
+                }
+            }
+        }
+
+        // Ticket link
+        if (event.ticketUrl != null) {
+            androidx.compose.material3.IconButton(
+                onClick = onTicketClick,
+                modifier = Modifier.size(36.dp),
+            ) {
+                Icon(
+                    Icons.Default.OpenInNew,
+                    contentDescription = "Tickets",
+                    modifier = Modifier.size(18.dp),
+                    tint = Color(0xFF7C3AED),
+                )
             }
         }
     }

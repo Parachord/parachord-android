@@ -91,6 +91,7 @@ fun NowPlayingScreen(
     val resolverOrder by viewModel.resolverOrder.collectAsStateWithLifecycle()
     val trackResolvers by viewModel.trackResolvers.collectAsStateWithLifecycle()
     val trackResolverConfidences by viewModel.trackResolverConfidences.collectAsStateWithLifecycle()
+    val isOnTour by viewModel.isOnTour.collectAsStateWithLifecycle()
     val track = playbackState.currentTrack
     val upNext = playbackState.upNext
     val scope = rememberCoroutineScope()
@@ -347,10 +348,29 @@ fun NowPlayingScreen(
                         )
                     }
 
-                    // Resolver icon
-                    if (track?.resolver != null) {
-                        Spacer(modifier = Modifier.height(8.dp))
-                        ResolverIconSquare(resolver = track.resolver!!, size = 24.dp)
+                    // Resolver icon + On Tour badge
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(8.dp),
+                    ) {
+                        if (track?.resolver != null) {
+                            Spacer(modifier = Modifier.height(8.dp))
+                            ResolverIconSquare(resolver = track.resolver!!, size = 24.dp)
+                        }
+                        if (isOnTour) {
+                            Spacer(modifier = Modifier.height(8.dp))
+                            Text(
+                                text = "ON TOUR",
+                                fontSize = 10.sp,
+                                fontWeight = FontWeight.Bold,
+                                letterSpacing = 0.5.sp,
+                                color = Color(0xFFA78BFA),
+                                modifier = Modifier
+                                    .clip(androidx.compose.foundation.shape.RoundedCornerShape(4.dp))
+                                    .background(Color(0xFFA78BFA).copy(alpha = 0.15f))
+                                    .padding(horizontal = 8.dp, vertical = 3.dp),
+                            )
+                        }
                     }
                 }
 

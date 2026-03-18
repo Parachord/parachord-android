@@ -347,6 +347,9 @@ fun ParachordNavHost(
         composable(Routes.CONCERTS) {
             com.parachord.android.ui.screens.discover.ConcertsScreen(
                 onBack = { navController.popBackStack() },
+                onNavigateToArtist = { name ->
+                    navController.navigate(Routes.artist(name))
+                },
             )
         }
         composable(Routes.FRIENDS) {

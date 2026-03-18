@@ -8,7 +8,10 @@ import com.parachord.android.data.db.dao.ArtistDao
 import com.parachord.android.data.db.entity.ArtistEntity
 import com.parachord.android.data.db.entity.PlaylistEntity
 import com.parachord.android.data.db.entity.TrackEntity
+import com.parachord.android.data.repository.ConcertEvent
+import com.parachord.android.data.repository.ConcertsRepository
 import com.parachord.android.data.repository.LibraryRepository
+import com.parachord.android.data.repository.Resource
 import com.parachord.android.data.metadata.AlbumSearchResult
 import com.parachord.android.data.metadata.ArtistInfo
 import com.parachord.android.data.metadata.MetadataService
@@ -42,6 +45,7 @@ class ArtistViewModel @Inject constructor(
     private val artistDao: ArtistDao,
     private val libraryRepository: LibraryRepository,
     private val trackResolverCache: TrackResolverCache,
+    private val concertsRepository: ConcertsRepository,
 ) : ViewModel() {
 
     private val artistName: String = savedStateHandle.get<String>("artistName") ?: ""
@@ -57,6 +61,12 @@ class ArtistViewModel @Inject constructor(
 
     private val _isLoading = MutableStateFlow(true)
     val isLoading: StateFlow<Boolean> = _isLoading.asStateFlow()
+
+    private val _tourDates = MutableStateFlow<Resource<List<ConcertEvent>>>(Resource.Loading)
+    val tourDates: StateFlow<Resource<List<ConcertEvent>>> = _tourDates.asStateFlow()
+
+    private val _isOnTour = MutableStateFlow(false)
+    val isOnTour: StateFlow<Boolean> = _isOnTour.asStateFlow()
 
     /** Whether this artist is saved in the user's collection. */
     val isSaved: StateFlow<Boolean> = artistDao.getByName(artistName)
@@ -117,6 +127,9 @@ class ArtistViewModel @Inject constructor(
                 _albums.value = albums
 
                 resolveTracksInBackground(tracks)
+
+                // Load tour dates in background
+                loadTourDates()
 
                 // Progressively enrich similar artist images that are missing
                 if (info != null) {
@@ -274,6 +287,22 @@ class ArtistViewModel @Inject constructor(
             soundcloudId = best?.soundcloudId,
             appleMusicId = best?.appleMusicId,
         )
+    }
+
+    private fun loadTourDates() {
+        viewModelScope.launch {
+            try {
+                concertsRepository.getArtistEvents(artistName).collect { resource ->
+                    _tourDates.value = resource
+                    if (resource is Resource.Success) {
+                        _isOnTour.value = resource.data.isNotEmpty()
+                    }
+                }
+            } catch (e: Exception) {
+                Log.w("ArtistVM", "Failed to load tour dates for '$artistName'", e)
+                _tourDates.value = Resource.Error("Failed to load tour dates")
+            }
+        }
     }
 
     private fun resolveTracksInBackground(tracks: List<TrackSearchResult>) {
