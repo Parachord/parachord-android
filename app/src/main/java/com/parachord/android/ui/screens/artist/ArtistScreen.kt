@@ -266,12 +266,14 @@ fun ArtistScreen(
                 }
 
                 // Tabs + pager — show "On Tour" tab when artist has upcoming dates
+                // Desktop puts "On Tour" last: Music | Biography | Related Artists | On Tour
+                // Appending at end avoids shifting existing tab indices when it appears
                 val tabs = remember(isOnTour) {
                     buildList {
                         add("Discography")
-                        if (isOnTour) add("On Tour")
                         add("Biography")
                         add("Related Artists")
+                        if (isOnTour) add("On Tour")
                     }
                 }
 
