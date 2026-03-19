@@ -30,6 +30,7 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Check
 import androidx.compose.material.icons.filled.FolderOpen
+import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material.icons.outlined.Info
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
@@ -88,6 +89,7 @@ import androidx.compose.ui.zIndex
 import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.parachord.android.BuildConfig
+import com.parachord.android.data.scanner.ScanProgress
 import com.parachord.android.ui.components.ResolverIconSquare
 import com.parachord.android.ui.components.ModalBg
 import com.parachord.android.ui.components.ModalBgDarker
@@ -261,6 +263,7 @@ fun SettingsScreen(
     val chatGptConnected by viewModel.chatGptConnected.collectAsStateWithLifecycle()
     val claudeConnected by viewModel.claudeConnected.collectAsStateWithLifecycle()
     val geminiConnected by viewModel.geminiConnected.collectAsStateWithLifecycle()
+    val scanProgress by viewModel.scanProgress.collectAsStateWithLifecycle()
 
     Column(modifier = modifier.fillMaxSize()) {
         TopAppBar(
@@ -334,6 +337,8 @@ fun SettingsScreen(
                     },
                     getAiModel = { viewModel.getAiModel(it) },
                     onClearAiProvider = { viewModel.clearAiProvider(it) },
+                    scanProgress = scanProgress,
+                    onScanLocalFiles = { viewModel.scanLocalFiles() },
                 )
                 1 -> GeneralTab(
                     themeMode = themeMode,
@@ -394,6 +399,8 @@ private fun PlugInsTab(
     onSaveAiModel: (String, String) -> Unit = { _, _ -> },
     getAiModel: (String) -> StateFlow<String> = { MutableStateFlow("") },
     onClearAiProvider: (String) -> Unit = {},
+    scanProgress: ScanProgress = ScanProgress(),
+    onScanLocalFiles: () -> Unit = {},
 ) {
     var selectedPlugin by remember { mutableStateOf<PluginInfo?>(null) }
 
@@ -600,6 +607,8 @@ private fun PlugInsTab(
             onClearAiProvider = onClearAiProvider,
             hasPreferredSpotifyDevice = hasPreferredSpotifyDevice,
             onClearPreferredSpotifyDevice = onClearPreferredSpotifyDevice,
+            scanProgress = scanProgress,
+            onScanLocalFiles = onScanLocalFiles,
         )
     }
 }
@@ -842,6 +851,8 @@ private fun PluginConfigSheet(
     onClearAiProvider: (String) -> Unit = {},
     hasPreferredSpotifyDevice: Boolean = false,
     onClearPreferredSpotifyDevice: () -> Unit = {},
+    scanProgress: ScanProgress = ScanProgress(),
+    onScanLocalFiles: () -> Unit = {},
 ) {
     val sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
 
@@ -965,7 +976,10 @@ private fun PluginConfigSheet(
                     onConnect = onAppleMusicAuthorize,
                     onDisconnect = onAppleMusicDisconnect,
                 )
-                "local-files" -> LocalFilesConfig()
+                "local-files" -> LocalFilesConfig(
+                    scanProgress = scanProgress,
+                    onScanLocalFiles = onScanLocalFiles,
+                )
                 "lastfm" -> LastFmConfig(isConnected, onToggleConnection, scrobbling, onScrobblingChanged)
                 "listenbrainz" -> ListenBrainzConfig(
                     isConnected = isConnected,
@@ -1479,7 +1493,10 @@ private fun AppleMusicConfig(
 // ── Local Files Config ─────────────────────────────────────────────
 
 @Composable
-private fun LocalFilesConfig() {
+private fun LocalFilesConfig(
+    scanProgress: ScanProgress = ScanProgress(),
+    onScanLocalFiles: () -> Unit = {},
+) {
     Spacer(modifier = Modifier.height(16.dp))
     HorizontalDivider()
     Spacer(modifier = Modifier.height(16.dp))
@@ -1512,6 +1529,46 @@ private fun LocalFilesConfig() {
         style = MaterialTheme.typography.bodySmall,
         color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.6f),
     )
+
+    Spacer(modifier = Modifier.height(16.dp))
+
+    if (scanProgress.isScanning) {
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            CircularProgressIndicator(
+                modifier = Modifier.size(16.dp),
+                strokeWidth = 2.dp,
+                color = MaterialTheme.colorScheme.primary,
+            )
+            Spacer(modifier = Modifier.width(12.dp))
+            Text(
+                text = "Scanning\u2026 ${scanProgress.tracksFound} tracks, ${scanProgress.albumsFound} albums",
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+        }
+    } else {
+        OutlinedButton(
+            onClick = onScanLocalFiles,
+            modifier = Modifier.fillMaxWidth(),
+            shape = RoundedCornerShape(8.dp),
+        ) {
+            Icon(
+                imageVector = Icons.Filled.Refresh,
+                contentDescription = null,
+                modifier = Modifier.size(18.dp),
+            )
+            Spacer(modifier = Modifier.width(8.dp))
+            Text(
+                text = if (scanProgress.tracksFound > 0)
+                    "Rescan (${scanProgress.tracksFound} tracks found)"
+                else
+                    "Scan local files",
+            )
+        }
+    }
 }
 
 // ── Last.fm Config ─────────────────────────────────────────────────

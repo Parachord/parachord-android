@@ -5,6 +5,8 @@ import androidx.lifecycle.viewModelScope
 import android.util.Log
 import com.parachord.android.auth.OAuthManager
 import com.parachord.android.data.api.ListenBrainzApi
+import com.parachord.android.data.scanner.MediaScanner
+import com.parachord.android.data.scanner.ScanProgress
 import com.parachord.android.data.store.SettingsStore
 import com.parachord.android.playback.QueuePersistence
 import com.parachord.android.playback.handlers.MusicKitWebBridge
@@ -26,6 +28,7 @@ class SettingsViewModel @Inject constructor(
     private val libreFmScrobbler: LibreFmScrobbler,
     private val listenBrainzApi: ListenBrainzApi,
     private val musicKitBridge: MusicKitWebBridge,
+    private val mediaScanner: MediaScanner,
 ) : ViewModel() {
 
     val themeMode: StateFlow<String> = settingsStore.themeMode
@@ -261,5 +264,13 @@ class SettingsViewModel @Inject constructor(
 
     fun clearAiProvider(providerId: String) {
         viewModelScope.launch { settingsStore.clearAiProviderApiKey(providerId) }
+    }
+
+    // --- Local Files Scanning ---
+
+    val scanProgress: StateFlow<ScanProgress> = mediaScanner.progress
+
+    fun scanLocalFiles() {
+        viewModelScope.launch { mediaScanner.scan() }
     }
 }
