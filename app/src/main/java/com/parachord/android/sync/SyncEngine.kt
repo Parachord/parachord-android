@@ -406,16 +406,36 @@ class SyncEngine @Inject constructor(
 
             if (existingSource == null) {
                 val now = System.currentTimeMillis()
+                // Check if a playlist with this spotifyId already exists under a
+                // different primary key (e.g. pushed local playlist or import).
+                // If so, merge into the existing entry to avoid duplicates.
+                val existingBySpotifyId = playlistDao.getBySpotifyId(remote.spotifyId)
+                val targetId = existingBySpotifyId?.id ?: remote.entity.id
+
+                if (existingBySpotifyId != null && existingBySpotifyId.id != remote.entity.id) {
+                    // Remove the old entry's tracks — they'll be replaced below
+                    playlistTrackDao.deleteByPlaylistId(existingBySpotifyId.id)
+                    playlistDao.delete(existingBySpotifyId)
+                    // Clean up any orphaned sync source for the old ID
+                    syncSourceDao.deleteAllForItem(existingBySpotifyId.id, "playlist")
+                }
+
                 playlistDao.insert(remote.entity.copy(
-                    createdAt = now,
+                    id = targetId,
+                    createdAt = existingBySpotifyId?.createdAt ?: now,
                     updatedAt = now,
                     lastModified = now,
                 ))
                 val tracks = spotifyProvider.fetchPlaylistTracks(remote.spotifyId)
-                playlistTrackDao.deleteByPlaylistId(remote.entity.id)
-                playlistTrackDao.insertAll(tracks)
+                playlistTrackDao.deleteByPlaylistId(targetId)
+                val remappedTracks = if (targetId != remote.entity.id) {
+                    tracks.map { it.copy(playlistId = targetId) }
+                } else {
+                    tracks
+                }
+                playlistTrackDao.insertAll(remappedTracks)
                 syncSourceDao.insert(SyncSourceEntity(
-                    itemId = remote.entity.id,
+                    itemId = targetId,
                     itemType = "playlist",
                     providerId = providerId,
                     externalId = remote.spotifyId,
