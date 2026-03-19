@@ -273,4 +273,44 @@ class SettingsViewModel @Inject constructor(
     fun scanLocalFiles() {
         viewModelScope.launch { mediaScanner.scan() }
     }
+
+    // --- Concert Providers (Ticketmaster / SeatGeek) ---
+
+    val ticketmasterConnected: StateFlow<Boolean> = settingsStore.getTicketmasterApiKeyFlow()
+        .map { !it.isNullOrBlank() }
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), false)
+
+    val seatGeekConnected: StateFlow<Boolean> = settingsStore.getSeatGeekClientIdFlow()
+        .map { !it.isNullOrBlank() }
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), false)
+
+    fun setTicketmasterApiKey(key: String) {
+        viewModelScope.launch { settingsStore.setTicketmasterApiKey(key) }
+    }
+
+    fun clearTicketmasterApiKey() {
+        viewModelScope.launch { settingsStore.clearTicketmasterApiKey() }
+    }
+
+    fun setSeatGeekClientId(id: String) {
+        viewModelScope.launch { settingsStore.setSeatGeekClientId(id) }
+    }
+
+    fun clearSeatGeekClientId() {
+        viewModelScope.launch { settingsStore.clearSeatGeekClientId() }
+    }
+
+    // --- Concert Location ---
+
+    val concertLocation: StateFlow<SettingsStore.ConcertLocation> =
+        settingsStore.getConcertLocationFlow()
+            .stateIn(
+                viewModelScope,
+                SharingStarted.WhileSubscribed(5_000),
+                SettingsStore.ConcertLocation(null, null, null, 50),
+            )
+
+    fun setConcertLocation(lat: Double, lon: Double, city: String) {
+        viewModelScope.launch { settingsStore.setConcertLocation(lat, lon, city) }
+    }
 }

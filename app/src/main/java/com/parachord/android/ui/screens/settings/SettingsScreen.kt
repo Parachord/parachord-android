@@ -28,9 +28,12 @@ import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
+import androidx.compose.foundation.clickable
 import androidx.compose.material.icons.filled.Check
 import androidx.compose.material.icons.filled.FolderOpen
+import androidx.compose.material.icons.filled.LocationOn
 import androidx.compose.material.icons.filled.Refresh
+import androidx.compose.material.icons.filled.Search
 import androidx.compose.material.icons.outlined.Info
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
@@ -90,6 +93,7 @@ import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.parachord.android.BuildConfig
 import com.parachord.android.data.scanner.ScanProgress
+import com.parachord.android.data.store.SettingsStore
 import com.parachord.android.ui.components.ResolverIconSquare
 import com.parachord.android.ui.components.ModalBg
 import com.parachord.android.ui.components.ModalBgDarker
@@ -121,6 +125,7 @@ private data class PluginInfo(
 private enum class PluginCategory(val label: String) {
     RESOLVER("Content Resolvers"),
     META_SERVICE("Meta Services"),
+    CONCERT_SERVICE("Concerts & Events"),
 }
 
 private val builtInPlugins = listOf(
@@ -232,6 +237,24 @@ private val builtInPlugins = listOf(
         capabilities = listOf("AI DJ", "Chat"),
         description = "Generate playlists and chat with AI DJ using Google Gemini.",
     ),
+    PluginInfo(
+        id = "ticketmaster",
+        name = "Ticketmaster",
+        resolverId = "ticketmaster",
+        bgColor = Color(0xFF026CDF),
+        category = PluginCategory.CONCERT_SERVICE,
+        capabilities = listOf("Concerts", "Events", "Tickets"),
+        description = "Discover concerts and buy tickets via Ticketmaster",
+    ),
+    PluginInfo(
+        id = "seatgeek",
+        name = "SeatGeek",
+        resolverId = "seatgeek",
+        bgColor = Color(0xFF4FAD48),
+        category = PluginCategory.CONCERT_SERVICE,
+        capabilities = listOf("Concerts", "Events", "Tickets"),
+        description = "Find live events and tickets via SeatGeek",
+    ),
 )
 
 // ── Settings Screen ────────────────────────────────────────────────
@@ -264,6 +287,9 @@ fun SettingsScreen(
     val claudeConnected by viewModel.claudeConnected.collectAsStateWithLifecycle()
     val geminiConnected by viewModel.geminiConnected.collectAsStateWithLifecycle()
     val scanProgress by viewModel.scanProgress.collectAsStateWithLifecycle()
+    val ticketmasterConnected by viewModel.ticketmasterConnected.collectAsStateWithLifecycle()
+    val seatGeekConnected by viewModel.seatGeekConnected.collectAsStateWithLifecycle()
+    val concertLocation by viewModel.concertLocation.collectAsStateWithLifecycle()
 
     Column(modifier = modifier.fillMaxSize()) {
         TopAppBar(
@@ -339,6 +365,16 @@ fun SettingsScreen(
                     onClearAiProvider = { viewModel.clearAiProvider(it) },
                     scanProgress = scanProgress,
                     onScanLocalFiles = { viewModel.scanLocalFiles() },
+                    ticketmasterConnected = ticketmasterConnected,
+                    seatGeekConnected = seatGeekConnected,
+                    onTicketmasterApiKeySubmit = { viewModel.setTicketmasterApiKey(it) },
+                    onTicketmasterDisconnect = { viewModel.clearTicketmasterApiKey() },
+                    onSeatGeekClientIdSubmit = { viewModel.setSeatGeekClientId(it) },
+                    onSeatGeekDisconnect = { viewModel.clearSeatGeekClientId() },
+                    concertLocation = concertLocation,
+                    onConcertLocationSelected = { lat, lon, city ->
+                        viewModel.setConcertLocation(lat, lon, city)
+                    },
                 )
                 1 -> GeneralTab(
                     themeMode = themeMode,
@@ -401,11 +437,20 @@ private fun PlugInsTab(
     onClearAiProvider: (String) -> Unit = {},
     scanProgress: ScanProgress = ScanProgress(),
     onScanLocalFiles: () -> Unit = {},
+    ticketmasterConnected: Boolean = false,
+    seatGeekConnected: Boolean = false,
+    onTicketmasterApiKeySubmit: (String) -> Unit = {},
+    onTicketmasterDisconnect: () -> Unit = {},
+    onSeatGeekClientIdSubmit: (String) -> Unit = {},
+    onSeatGeekDisconnect: () -> Unit = {},
+    concertLocation: SettingsStore.ConcertLocation = SettingsStore.ConcertLocation(null, null, null, 50),
+    onConcertLocationSelected: (Double, Double, String) -> Unit = { _, _, _ -> },
 ) {
     var selectedPlugin by remember { mutableStateOf<PluginInfo?>(null) }
 
     val resolverPlugins = builtInPlugins.filter { it.category == PluginCategory.RESOLVER }
     val metaServices = builtInPlugins.filter { it.category == PluginCategory.META_SERVICE }
+    val concertServices = builtInPlugins.filter { it.category == PluginCategory.CONCERT_SERVICE }
 
     // Lookup can be by id ("local-files") or resolverId ("localfiles")
     fun findPlugin(key: String): PluginInfo? =
@@ -428,6 +473,8 @@ private fun PlugInsTab(
             "chatgpt" -> chatGptConnected
             "claude" -> claudeConnected
             "gemini" -> geminiConnected
+            "ticketmaster" -> ticketmasterConnected
+            "seatgeek" -> seatGeekConnected
             else -> false
         }
     }
@@ -561,6 +608,45 @@ private fun PlugInsTab(
             }
         }
 
+        // Concerts & Events section
+        item { SectionHeader("Concerts & Events") }
+        item {
+            Text(
+                text = "Concert discovery and ticket providers",
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                modifier = Modifier.padding(horizontal = 16.dp, vertical = 0.dp),
+            )
+            Spacer(modifier = Modifier.height(12.dp))
+        }
+        val concertRows = concertServices.chunked(3)
+        concertRows.forEach { rowPlugins ->
+            item {
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(horizontal = 16.dp)
+                        .padding(bottom = if (rowPlugins !== concertRows.last()) 12.dp else 0.dp),
+                    horizontalArrangement = Arrangement.spacedBy(12.dp),
+                ) {
+                    rowPlugins.forEach { plugin ->
+                        val connected = isConnected(plugin.id)
+                        PluginTile(
+                            plugin = plugin,
+                            isConnected = connected,
+                            priorityNumber = null,
+                            onClick = { selectedPlugin = plugin },
+                            modifier = Modifier.weight(1f),
+                            grayed = !connected,
+                        )
+                    }
+                    repeat(3 - rowPlugins.size) {
+                        Spacer(modifier = Modifier.weight(1f))
+                    }
+                }
+            }
+        }
+
         item { Spacer(modifier = Modifier.height(32.dp)) }
     }
 
@@ -609,6 +695,12 @@ private fun PlugInsTab(
             onClearPreferredSpotifyDevice = onClearPreferredSpotifyDevice,
             scanProgress = scanProgress,
             onScanLocalFiles = onScanLocalFiles,
+            onTicketmasterApiKeySubmit = onTicketmasterApiKeySubmit,
+            onTicketmasterDisconnect = onTicketmasterDisconnect,
+            onSeatGeekClientIdSubmit = onSeatGeekClientIdSubmit,
+            onSeatGeekDisconnect = onSeatGeekDisconnect,
+            concertLocation = concertLocation,
+            onConcertLocationSelected = onConcertLocationSelected,
         )
     }
 }
@@ -853,6 +945,12 @@ private fun PluginConfigSheet(
     onClearPreferredSpotifyDevice: () -> Unit = {},
     scanProgress: ScanProgress = ScanProgress(),
     onScanLocalFiles: () -> Unit = {},
+    onTicketmasterApiKeySubmit: (String) -> Unit = {},
+    onTicketmasterDisconnect: () -> Unit = {},
+    onSeatGeekClientIdSubmit: (String) -> Unit = {},
+    onSeatGeekDisconnect: () -> Unit = {},
+    concertLocation: SettingsStore.ConcertLocation = SettingsStore.ConcertLocation(null, null, null, 50),
+    onConcertLocationSelected: (Double, Double, String) -> Unit = { _, _, _ -> },
 ) {
     val sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
 
@@ -1020,6 +1118,24 @@ private fun PluginConfigSheet(
                         currentModel = currentModel,
                     )
                 }
+                "ticketmaster" -> ConcertProviderConfig(
+                    isConnected = isConnected,
+                    keyLabel = "API Key",
+                    keyHint = "Enter your Ticketmaster API key",
+                    onSubmitKey = onTicketmasterApiKeySubmit,
+                    onDisconnect = onTicketmasterDisconnect,
+                    concertLocation = concertLocation,
+                    onConcertLocationSelected = onConcertLocationSelected,
+                )
+                "seatgeek" -> ConcertProviderConfig(
+                    isConnected = isConnected,
+                    keyLabel = "Client ID",
+                    keyHint = "Enter your SeatGeek Client ID",
+                    onSubmitKey = onSeatGeekClientIdSubmit,
+                    onDisconnect = onSeatGeekDisconnect,
+                    concertLocation = concertLocation,
+                    onConcertLocationSelected = onConcertLocationSelected,
+                )
             }
         }
     }
@@ -1567,6 +1683,216 @@ private fun LocalFilesConfig(
                 else
                     "Scan local files",
             )
+        }
+    }
+}
+
+// ── Concert Provider Config ────────────────────────────────────────
+
+private data class ConcertCity(val name: String, val lat: Double, val lon: Double)
+private val CONCERT_CITIES = listOf(
+    ConcertCity("New York", 40.7128, -74.0060),
+    ConcertCity("Los Angeles", 34.0522, -118.2437),
+    ConcertCity("Chicago", 41.8781, -87.6298),
+    ConcertCity("London", 51.5074, -0.1278),
+    ConcertCity("Toronto", 43.6532, -79.3832),
+    ConcertCity("San Francisco", 37.7749, -122.4194),
+    ConcertCity("Austin", 30.2672, -97.7431),
+    ConcertCity("Nashville", 36.1627, -86.7816),
+    ConcertCity("Berlin", 52.5200, 13.4050),
+    ConcertCity("Tokyo", 35.6762, 139.6503),
+    ConcertCity("Sydney", -33.8688, 151.2093),
+    ConcertCity("Seattle", 47.6062, -122.3321),
+    ConcertCity("Atlanta", 33.7490, -84.3880),
+    ConcertCity("Miami", 25.7617, -80.1918),
+    ConcertCity("Denver", 39.7392, -104.9903),
+    ConcertCity("Portland", 45.5152, -122.6784),
+    ConcertCity("Boston", 42.3601, -71.0589),
+    ConcertCity("Detroit", 42.3314, -83.0458),
+    ConcertCity("Minneapolis", 44.9778, -93.2650),
+    ConcertCity("Philadelphia", 39.9526, -75.1652),
+    ConcertCity("Phoenix", 33.4484, -112.0740),
+    ConcertCity("Paris", 48.8566, 2.3522),
+    ConcertCity("Amsterdam", 52.3676, 4.9041),
+    ConcertCity("Melbourne", -37.8136, 144.9631),
+    ConcertCity("Manchester", 53.4808, -2.2426),
+)
+
+@Composable
+private fun ConcertProviderConfig(
+    isConnected: Boolean,
+    keyLabel: String,
+    keyHint: String,
+    onSubmitKey: (String) -> Unit,
+    onDisconnect: () -> Unit,
+    concertLocation: SettingsStore.ConcertLocation,
+    onConcertLocationSelected: (Double, Double, String) -> Unit,
+) {
+    var apiKeyInput by remember { mutableStateOf("") }
+    var citySearch by remember { mutableStateOf("") }
+    var showCityPicker by remember { mutableStateOf(false) }
+
+    Spacer(modifier = Modifier.height(16.dp))
+    HorizontalDivider()
+    Spacer(modifier = Modifier.height(16.dp))
+
+    // API Key section
+    Text(
+        text = keyLabel,
+        style = MaterialTheme.typography.bodyMedium,
+        fontWeight = FontWeight.Medium,
+    )
+    Spacer(modifier = Modifier.height(8.dp))
+
+    if (isConnected) {
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            Icon(
+                Icons.Filled.Check,
+                contentDescription = null,
+                tint = Color(0xFF10B981),
+                modifier = Modifier.size(18.dp),
+            )
+            Spacer(modifier = Modifier.width(8.dp))
+            Text(
+                text = "$keyLabel saved",
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                modifier = Modifier.weight(1f),
+            )
+            TextButton(onClick = onDisconnect) {
+                Text("Remove", color = MaterialTheme.colorScheme.error)
+            }
+        }
+    } else {
+        OutlinedTextField(
+            value = apiKeyInput,
+            onValueChange = { apiKeyInput = it },
+            label = { Text(keyHint) },
+            singleLine = true,
+            modifier = Modifier.fillMaxWidth(),
+            visualTransformation = PasswordVisualTransformation(),
+        )
+        Spacer(modifier = Modifier.height(8.dp))
+        Button(
+            onClick = {
+                if (apiKeyInput.isNotBlank()) {
+                    onSubmitKey(apiKeyInput.trim())
+                    apiKeyInput = ""
+                }
+            },
+            modifier = Modifier.fillMaxWidth(),
+            enabled = apiKeyInput.isNotBlank(),
+            shape = RoundedCornerShape(8.dp),
+        ) {
+            Text("Save")
+        }
+    }
+
+    // Location section
+    Spacer(modifier = Modifier.height(16.dp))
+    HorizontalDivider()
+    Spacer(modifier = Modifier.height(16.dp))
+
+    Text(
+        text = "Location",
+        style = MaterialTheme.typography.bodyMedium,
+        fontWeight = FontWeight.Medium,
+    )
+    Spacer(modifier = Modifier.height(8.dp))
+
+    if (concertLocation.city != null) {
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            Icon(
+                Icons.Filled.LocationOn,
+                contentDescription = null,
+                tint = Color(0xFF10C9B4),
+                modifier = Modifier.size(18.dp),
+            )
+            Spacer(modifier = Modifier.width(8.dp))
+            Text(
+                text = concertLocation.city,
+                style = MaterialTheme.typography.bodyMedium,
+                modifier = Modifier.weight(1f),
+            )
+            TextButton(onClick = { showCityPicker = !showCityPicker }) {
+                Text("Change")
+            }
+        }
+    } else {
+        Text(
+            text = "Set your location to discover nearby concerts",
+            style = MaterialTheme.typography.bodySmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+        )
+        Spacer(modifier = Modifier.height(8.dp))
+        showCityPicker = true
+    }
+
+    if (showCityPicker) {
+        Spacer(modifier = Modifier.height(8.dp))
+
+        // City search field
+        OutlinedTextField(
+            value = citySearch,
+            onValueChange = { citySearch = it },
+            label = { Text("Search cities") },
+            singleLine = true,
+            modifier = Modifier.fillMaxWidth(),
+            leadingIcon = {
+                Icon(
+                    Icons.Filled.Search,
+                    contentDescription = null,
+                    modifier = Modifier.size(18.dp),
+                )
+            },
+        )
+        Spacer(modifier = Modifier.height(8.dp))
+
+        val filtered = remember(citySearch) {
+            if (citySearch.isBlank()) CONCERT_CITIES.take(8)
+            else CONCERT_CITIES.filter { it.name.contains(citySearch, ignoreCase = true) }.take(8)
+        }
+
+        Column {
+            filtered.forEach { city ->
+                val isSelected = city.name == concertLocation.city
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .clip(RoundedCornerShape(6.dp))
+                        .then(
+                            if (isSelected) Modifier.background(
+                                Color(0xFF10C9B4).copy(alpha = 0.1f),
+                            ) else Modifier,
+                        )
+                        .clickable {
+                            onConcertLocationSelected(city.lat, city.lon, city.name)
+                            showCityPicker = false
+                            citySearch = ""
+                        }
+                        .padding(horizontal = 12.dp, vertical = 10.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    Icon(
+                        Icons.Filled.LocationOn,
+                        contentDescription = null,
+                        tint = if (isSelected) Color(0xFF10C9B4)
+                        else MaterialTheme.colorScheme.onSurfaceVariant,
+                        modifier = Modifier.size(16.dp),
+                    )
+                    Spacer(modifier = Modifier.width(8.dp))
+                    Text(
+                        text = city.name,
+                        style = MaterialTheme.typography.bodyMedium,
+                        color = if (isSelected) Color(0xFF10C9B4)
+                        else MaterialTheme.colorScheme.onSurface,
+                        fontWeight = if (isSelected) FontWeight.Medium else FontWeight.Normal,
+                    )
+                }
+            }
         }
     }
 }

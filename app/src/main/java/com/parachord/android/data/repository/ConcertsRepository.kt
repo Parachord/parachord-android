@@ -105,6 +105,15 @@ class ConcertsRepository @Inject constructor(
 
     private val diskJson = Json { ignoreUnknownKeys = true; encodeDefaults = true }
 
+    /** Prefer user-provided key from SettingsStore, fall back to BuildConfig. */
+    private suspend fun ticketmasterKey(): String =
+        settingsStore.getTicketmasterApiKey()?.takeIf { it.isNotBlank() }
+            ?: BuildConfig.TICKETMASTER_API_KEY
+
+    private suspend fun seatGeekKey(): String =
+        settingsStore.getSeatGeekClientId()?.takeIf { it.isNotBlank() }
+            ?: BuildConfig.SEATGEEK_CLIENT_ID
+
     // ── Local events cache ──────────────────────────────────────
 
     private var cachedLocalEvents: List<ConcertEvent>? = null
@@ -255,9 +264,11 @@ class ConcertsRepository @Inject constructor(
             .format(DateTimeFormatter.ofPattern("yyyy-MM-dd'T'HH:mm:ss'Z'"))
         val latlong = "$lat,$lon"
 
+        val tmKey = ticketmasterKey()
+        val sgKey = seatGeekKey()
+
         val tmDeferred = async {
             try {
-                val tmKey = BuildConfig.TICKETMASTER_API_KEY
                 if (tmKey.isBlank()) return@async emptyList()
                 val response = ticketmasterApi.getLocalEvents(
                     apiKey = tmKey,
@@ -274,7 +285,6 @@ class ConcertsRepository @Inject constructor(
 
         val sgDeferred = async {
             try {
-                val sgKey = BuildConfig.SEATGEEK_CLIENT_ID
                 if (sgKey.isBlank()) return@async emptyList()
                 val response = seatGeekApi.getLocalEvents(
                     clientId = sgKey,
@@ -306,9 +316,11 @@ class ConcertsRepository @Inject constructor(
         val now = LocalDateTime.now(ZoneId.systemDefault())
             .format(DateTimeFormatter.ofPattern("yyyy-MM-dd'T'HH:mm:ss'Z'"))
 
+        val tmKey = ticketmasterKey()
+        val sgKey = seatGeekKey()
+
         val tmDeferred = async {
             try {
-                val tmKey = BuildConfig.TICKETMASTER_API_KEY
                 if (tmKey.isBlank()) return@async emptyList()
 
                 // Step 1: Resolve artist to attraction ID
@@ -336,7 +348,6 @@ class ConcertsRepository @Inject constructor(
 
         val sgDeferred = async {
             try {
-                val sgKey = BuildConfig.SEATGEEK_CLIENT_ID
                 if (sgKey.isBlank()) return@async emptyList()
 
                 // Step 1: Resolve artist to performer slug

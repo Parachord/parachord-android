@@ -73,6 +73,8 @@ class SettingsStore @Inject constructor(
         val CONCERT_LONGITUDE = stringPreferencesKey("concert_longitude")
         val CONCERT_CITY = stringPreferencesKey("concert_city")
         val CONCERT_RADIUS = stringPreferencesKey("concert_radius_miles")
+        val TICKETMASTER_API_KEY = stringPreferencesKey("ticketmaster_api_key")
+        val SEATGEEK_CLIENT_ID = stringPreferencesKey("seatgeek_client_id")
 
         /** Default canonical order matching the desktop app. */
         private const val DEFAULT_RESOLVER_ORDER = "spotify,applemusic,bandcamp,soundcloud,localfiles,youtube"
@@ -680,6 +682,18 @@ class SettingsStore @Inject constructor(
     suspend fun setConcertRadius(radiusMiles: Int) {
         dataStore.edit { it[CONCERT_RADIUS] = radiusMiles.toString() }
     }
+
+    // --- Concert API Keys ---
+
+    fun getTicketmasterApiKeyFlow(): Flow<String?> = dataStore.data.map { it[TICKETMASTER_API_KEY] }
+    suspend fun getTicketmasterApiKey(): String? = dataStore.data.first()[TICKETMASTER_API_KEY]
+    suspend fun setTicketmasterApiKey(key: String) { dataStore.edit { it[TICKETMASTER_API_KEY] = key } }
+    suspend fun clearTicketmasterApiKey() { dataStore.edit { it.remove(TICKETMASTER_API_KEY) } }
+
+    fun getSeatGeekClientIdFlow(): Flow<String?> = dataStore.data.map { it[SEATGEEK_CLIENT_ID] }
+    suspend fun getSeatGeekClientId(): String? = dataStore.data.first()[SEATGEEK_CLIENT_ID]
+    suspend fun setSeatGeekClientId(id: String) { dataStore.edit { it[SEATGEEK_CLIENT_ID] = id } }
+    suspend fun clearSeatGeekClientId() { dataStore.edit { it.remove(SEATGEEK_CLIENT_ID) } }
 
     private fun defaultVolumeOffsets(): Map<String, Int> = mapOf(
         "spotify" to 0,
