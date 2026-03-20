@@ -5,6 +5,8 @@ import androidx.lifecycle.viewModelScope
 import android.util.Log
 import com.parachord.android.auth.OAuthManager
 import com.parachord.android.data.api.ListenBrainzApi
+import com.parachord.android.data.scanner.MediaScanner
+import com.parachord.android.data.scanner.ScanProgress
 import com.parachord.android.data.store.SettingsStore
 import com.parachord.android.playback.QueuePersistence
 import com.parachord.android.playback.handlers.MusicKitWebBridge
@@ -26,6 +28,7 @@ class SettingsViewModel @Inject constructor(
     private val libreFmScrobbler: LibreFmScrobbler,
     private val listenBrainzApi: ListenBrainzApi,
     private val musicKitBridge: MusicKitWebBridge,
+    private val mediaScanner: MediaScanner,
 ) : ViewModel() {
 
     val themeMode: StateFlow<String> = settingsStore.themeMode
@@ -261,5 +264,53 @@ class SettingsViewModel @Inject constructor(
 
     fun clearAiProvider(providerId: String) {
         viewModelScope.launch { settingsStore.clearAiProviderApiKey(providerId) }
+    }
+
+    // --- Local Files Scanning ---
+
+    val scanProgress: StateFlow<ScanProgress> = mediaScanner.progress
+
+    fun scanLocalFiles() {
+        viewModelScope.launch { mediaScanner.scan() }
+    }
+
+    // --- Concert Providers (Ticketmaster / SeatGeek) ---
+
+    val ticketmasterConnected: StateFlow<Boolean> = settingsStore.getTicketmasterApiKeyFlow()
+        .map { !it.isNullOrBlank() }
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), false)
+
+    val seatGeekConnected: StateFlow<Boolean> = settingsStore.getSeatGeekClientIdFlow()
+        .map { !it.isNullOrBlank() }
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), false)
+
+    fun setTicketmasterApiKey(key: String) {
+        viewModelScope.launch { settingsStore.setTicketmasterApiKey(key) }
+    }
+
+    fun clearTicketmasterApiKey() {
+        viewModelScope.launch { settingsStore.clearTicketmasterApiKey() }
+    }
+
+    fun setSeatGeekClientId(id: String) {
+        viewModelScope.launch { settingsStore.setSeatGeekClientId(id) }
+    }
+
+    fun clearSeatGeekClientId() {
+        viewModelScope.launch { settingsStore.clearSeatGeekClientId() }
+    }
+
+    // --- Concert Location ---
+
+    val concertLocation: StateFlow<SettingsStore.ConcertLocation> =
+        settingsStore.getConcertLocationFlow()
+            .stateIn(
+                viewModelScope,
+                SharingStarted.WhileSubscribed(5_000),
+                SettingsStore.ConcertLocation(null, null, null, 50),
+            )
+
+    fun setConcertLocation(lat: Double, lon: Double, city: String) {
+        viewModelScope.launch { settingsStore.setConcertLocation(lat, lon, city) }
     }
 }

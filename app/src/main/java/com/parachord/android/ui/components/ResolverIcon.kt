@@ -44,6 +44,8 @@ object ResolverIconColors {
     val chatgpt = Color(0xFF10A37F)
     val claude = Color(0xFFD97757)
     val gemini = Color(0xFF4285F4)
+    val ticketmaster = Color(0xFF026CDF)
+    val seatgeek = Color(0xFF4FAD48)
 
     fun forResolver(resolver: String?): Color? = when (resolver?.lowercase()) {
         "spotify" -> spotify
@@ -61,6 +63,8 @@ object ResolverIconColors {
         "chatgpt" -> chatgpt
         "claude" -> claude
         "gemini" -> gemini
+        "ticketmaster" -> ticketmaster
+        "seatgeek" -> seatgeek
         else -> null
     }
 }
@@ -107,6 +111,12 @@ object ResolverIconPaths {
     // Gemini — Google AI sparkle/star
     val gemini = "M12 0L14.59 8.41L24 12L14.59 15.59L12 24L9.41 15.59L0 12L9.41 8.41L12 0z"
 
+    // Ticketmaster — ticket icon (Material confirmation_number)
+    val ticketmaster = "M22 10V6c0-1.11-.9-2-2-2H4c-1.1 0-1.99.89-1.99 2v4c1.1 0 1.99.9 1.99 2s-.89 2-2 2v4c0 1.1.9 2 2 2h16c1.1 0 2-.9 2-2v-4c-1.1 0-2-.9-2-2s.9-2 2-2zm-9 7.5h-2v-2h2v2zm0-4.5h-2v-2h2v2zm0-4.5h-2v-2h2v2z"
+
+    // SeatGeek — event/calendar star icon
+    val seatgeek = "M19 3h-1V1h-2v2H8V1H6v2H5c-1.11 0-1.99.9-1.99 2L3 19c0 1.1.89 2 2 2h14c1.1 0 2-.9 2-2V5c0-1.1-.9-2-2-2zm0 16H5V8h14v11zm-7-4.5l2.12 1.27-.56-2.41 1.87-1.62-2.47-.21L12 9.5l-.96 2.03-2.47.21 1.87 1.62-.56 2.41L12 14.5z"
+
     fun forResolver(resolver: String?): String? = when (resolver?.lowercase()) {
         "spotify" -> spotify
         "youtube" -> youtube
@@ -123,6 +133,8 @@ object ResolverIconPaths {
         "chatgpt" -> chatgpt
         "claude" -> claude
         "gemini" -> gemini
+        "ticketmaster" -> ticketmaster
+        "seatgeek" -> seatgeek
         else -> null
     }
 }
