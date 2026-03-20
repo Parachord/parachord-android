@@ -30,22 +30,22 @@ import com.parachord.android.ui.theme.LocalResolverOrder
  */
 object ResolverIconColors {
     val spotify = Color(0xFF1DB954)
-    val bandcamp = Color(0xFF1DA0C3)
+    val bandcamp = Color(0xFF629AA9)
     val qobuz = Color(0xFF4285F4)
     val youtube = Color(0xFFFF0000)
     val localfiles = Color(0xFFA855F7)
     val soundcloud = Color(0xFFFF5500)
-    val applemusic = Color(0xFFFA2D48)
+    val applemusic = Color(0xFFFA243C)
     val lastfm = Color(0xFFD51007)
     val listenbrainz = Color(0xFF353070)
-    val librefm = Color(0xFF2E7D32)
+    val librefm = Color(0xFF4CAF50)
     val discogs = Color(0xFF333333)
-    val wikipedia = Color(0xFF636466)
+    val wikipedia = Color(0xFF000000)
     val chatgpt = Color(0xFF10A37F)
     val claude = Color(0xFFD97757)
     val gemini = Color(0xFF4285F4)
     val ticketmaster = Color(0xFF026CDF)
-    val seatgeek = Color(0xFF4FAD48)
+    val seatgeek = Color(0xFFFC4C02)
 
     fun forResolver(resolver: String?): Color? = when (resolver?.lowercase()) {
         "spotify" -> spotify
