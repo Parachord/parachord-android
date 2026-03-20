@@ -151,7 +151,7 @@ private val builtInPlugins = listOf(
         id = "applemusic",
         name = "Apple Music",
         resolverId = "applemusic",
-        bgColor = Color(0xFFFC3C44),
+        bgColor = Color(0xFFFA243C), // Match ResolverIconColors.applemusic
         category = PluginCategory.RESOLVER,
         capabilities = listOf("Resolve", "Search", "Stream"),
         description = "Search and stream from Apple Music via MusicKit",
@@ -187,7 +187,7 @@ private val builtInPlugins = listOf(
         id = "librefm",
         name = "Libre.fm",
         resolverId = "librefm",
-        bgColor = Color(0xFF2E7D32),
+        bgColor = Color(0xFF4CAF50), // Match ResolverIconColors.librefm
         category = PluginCategory.META_SERVICE,
         capabilities = listOf("Scrobble"),
         description = "Free and open music scrobbling service",
@@ -196,7 +196,7 @@ private val builtInPlugins = listOf(
         id = "discogs",
         name = "Discogs",
         resolverId = "discogs",
-        bgColor = Color(0xFF333333),
+        bgColor = Color(0xFF333333), // Match ResolverIconColors.discogs
         category = PluginCategory.META_SERVICE,
         capabilities = listOf("Metadata", "Bios", "Images"),
         description = "Artist bios and images from the Discogs community database",
@@ -205,7 +205,7 @@ private val builtInPlugins = listOf(
         id = "wikipedia",
         name = "Wikipedia",
         resolverId = "wikipedia",
-        bgColor = Color(0xFF636466),
+        bgColor = Color(0xFF000000), // Match ResolverIconColors.wikipedia
         category = PluginCategory.META_SERVICE,
         capabilities = listOf("Metadata", "Bios", "Images"),
         description = "Encyclopedia-style artist bios and images via Wikidata",
@@ -250,7 +250,7 @@ private val builtInPlugins = listOf(
         id = "seatgeek",
         name = "SeatGeek",
         resolverId = "seatgeek",
-        bgColor = Color(0xFF4FAD48),
+        bgColor = Color(0xFFFC4C02), // Match ResolverIconColors.seatgeek
         category = PluginCategory.CONCERT_SERVICE,
         capabilities = listOf("Concerts", "Events", "Tickets"),
         description = "Find live events and tickets via SeatGeek",
@@ -1122,6 +1122,8 @@ private fun PluginConfigSheet(
                     isConnected = isConnected,
                     keyLabel = "API Key",
                     keyHint = "Enter your Ticketmaster API key",
+                    devPortalLabel = "developer-acct.ticketmaster.com",
+                    devPortalUrl = "https://developer-acct.ticketmaster.com/",
                     onSubmitKey = onTicketmasterApiKeySubmit,
                     onDisconnect = onTicketmasterDisconnect,
                     concertLocation = concertLocation,
@@ -1131,6 +1133,8 @@ private fun PluginConfigSheet(
                     isConnected = isConnected,
                     keyLabel = "Client ID",
                     keyHint = "Enter your SeatGeek Client ID",
+                    devPortalLabel = "seatgeek.com/account/develop",
+                    devPortalUrl = "https://seatgeek.com/account/develop",
                     onSubmitKey = onSeatGeekClientIdSubmit,
                     onDisconnect = onSeatGeekDisconnect,
                     concertLocation = concertLocation,
@@ -1723,11 +1727,14 @@ private fun ConcertProviderConfig(
     isConnected: Boolean,
     keyLabel: String,
     keyHint: String,
+    devPortalLabel: String,
+    devPortalUrl: String,
     onSubmitKey: (String) -> Unit,
     onDisconnect: () -> Unit,
     concertLocation: SettingsStore.ConcertLocation,
     onConcertLocationSelected: (Double, Double, String) -> Unit,
 ) {
+    val uriHandler = LocalUriHandler.current
     var apiKeyInput by remember { mutableStateOf("") }
     var citySearch by remember { mutableStateOf("") }
     var showCityPicker by remember { mutableStateOf(false) }
@@ -1767,6 +1774,22 @@ private fun ConcertProviderConfig(
             }
         }
     } else {
+        Text(
+            text = "Get your $keyLabel at:",
+            style = MaterialTheme.typography.bodySmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+        )
+        Spacer(modifier = Modifier.height(4.dp))
+        Text(
+            text = "$devPortalLabel \u2192",
+            style = MaterialTheme.typography.bodySmall,
+            fontWeight = FontWeight.Medium,
+            color = MaterialTheme.colorScheme.primary,
+            modifier = Modifier.hapticClickable {
+                uriHandler.openUri(devPortalUrl)
+            },
+        )
+        Spacer(modifier = Modifier.height(12.dp))
         OutlinedTextField(
             value = apiKeyInput,
             onValueChange = { apiKeyInput = it },
