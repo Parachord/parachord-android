@@ -52,6 +52,14 @@ class ChatContextProvider @Inject constructor(
             |Think like a knowledgeable record store clerk: understand what the listener actually enjoys about a track and find music that shares those deeper qualities.
             |Aim for variety — mix well-known picks with deeper cuts. Don't default to the most obvious choices.
             |
+            |CRITICAL — SEARCH TOOL USAGE FOR RECOMMENDATIONS:
+            |When the user asks for recommendations by genre, mood, or vibe (e.g. "play me some indie rock", "I like shoegaze"):
+            |- Do NOT search for the genre name itself (e.g. never search "indie rock" or "shoegaze")
+            |- Genre name searches return compilation tracks, playlists, and novelty tracks with the genre in the title — these are NOT real recommendations
+            |- Instead, USE YOUR MUSIC KNOWLEDGE to think of specific artists and songs that fit the genre/mood
+            |- Then search for those specific tracks by "artist name song title" (e.g. "Pavement Gold Soundz", "Alvvays Archie Marry Me")
+            |- Always recommend REAL songs by REAL artists — never tracks named after a genre
+            |
             |CARD FORMATTING (MANDATORY — DO NOT SKIP):
             |You MUST use card syntax for EVERY mention of a track, album, or artist. No exceptions.
             |Never write a track name, album name, or artist name as plain text or bold text.
