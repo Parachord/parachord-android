@@ -48,6 +48,7 @@ class FreshDropsRepository @Inject constructor(
         private const val MAX_ARTISTS_TO_CHECK = 50
         private const val STALE_THRESHOLD = 6 * 60 * 60 * 1000L // 6 hours
         private const val CACHE_FILE = "fresh_drops_cache.json"
+        private const val ROTATION_FILE = "fresh_drops_rotation.json"
     }
 
     private val diskJson = Json { ignoreUnknownKeys = true; encodeDefaults = true }
@@ -56,6 +57,10 @@ class FreshDropsRepository @Inject constructor(
     private var cachedReleases: List<FreshDrop>? = null
     private var lastFetchedAt: Long = 0L
     private var diskCacheLoaded = false
+
+    /** Round-robin rotation: tracks when each artist was last checked. */
+    private var artistLastChecked: MutableMap<String, Long> = mutableMapOf()
+    private var rotationLoaded = false
 
     /** Synchronous access to cached releases (for ViewModel initial state). */
     val cached: List<FreshDrop>?
@@ -92,6 +97,35 @@ class FreshDropsRepository @Inject constructor(
         } catch (e: Exception) {
             Log.w(TAG, "Failed to save disk cache", e)
         }
+    }
+
+    /** Load round-robin rotation state from disk. */
+    private fun loadRotation() {
+        rotationLoaded = true
+        try {
+            val file = File(context.filesDir, ROTATION_FILE)
+            if (!file.exists()) return
+            val map = diskJson.decodeFromString<Map<String, Long>>(file.readText())
+            artistLastChecked = map.toMutableMap()
+            Log.d(TAG, "Loaded rotation state for ${artistLastChecked.size} artists")
+        } catch (e: Exception) {
+            Log.w(TAG, "Failed to load rotation state", e)
+        }
+    }
+
+    /** Persist round-robin rotation state to disk. */
+    private fun saveRotation() {
+        try {
+            val file = File(context.filesDir, ROTATION_FILE)
+            file.writeText(diskJson.encodeToString(artistLastChecked.toMap()))
+        } catch (e: Exception) {
+            Log.w(TAG, "Failed to save rotation state", e)
+        }
+    }
+
+    /** Record that an artist was checked at the given time. */
+    private fun markArtistChecked(artistName: String) {
+        artistLastChecked[artistName.lowercase().trim()] = System.currentTimeMillis()
     }
 
     /**
@@ -156,6 +190,9 @@ class FreshDropsRepository @Inject constructor(
                     val withSource = releases.map { it.copy(artistSource = artist.source) }
                     allReleases.addAll(withSource)
 
+                    // Record this artist as checked for round-robin rotation
+                    markArtistChecked(artist.name)
+
                     // Emit progressive results every 5 artists (desktop pattern:
                     // show releases as they come in, merged with prior cache)
                     if (allReleases.isNotEmpty() && (index + 1) % 5 == 0) {
@@ -173,6 +210,9 @@ class FreshDropsRepository @Inject constructor(
                     Log.w(TAG, "Failed to fetch releases for '${artist.name}'", e)
                 }
             }
+
+            // Persist rotation state so next refresh picks up where we left off
+            withContext(Dispatchers.IO) { saveRotation() }
 
             // 3. Final merge: new results + prior cache, deduplicated and sorted
             val finalReleases = mergeAndDedupe(allReleases, priorCachedReleases)
@@ -221,9 +261,13 @@ class FreshDropsRepository @Inject constructor(
      * 2. Last.fm top artists
      * 3. ListenBrainz top artists
      *
-     * Deduplicates by lowercased name, shuffles, caps at MAX_ARTISTS_TO_CHECK.
+     * Deduplicates by lowercased name, then sorts by round-robin rotation
+     * (least-recently-checked first) so every artist eventually gets checked
+     * across successive refreshes. Caps at MAX_ARTISTS_TO_CHECK.
      */
     private suspend fun gatherArtists(): List<ArtistSource> {
+        if (!rotationLoaded) loadRotation()
+
         val seen = mutableSetOf<String>()
         val artists = mutableListOf<ArtistSource>()
 
@@ -235,7 +279,7 @@ class FreshDropsRepository @Inject constructor(
                 .distinct()
                 .filter { seen.add(it.lowercase().trim()) }
                 .map { ArtistSource(name = it, source = "library") }
-            artists.addAll(libraryArtists.shuffled())
+            artists.addAll(libraryArtists)
         } catch (e: Exception) {
             Log.w(TAG, "Failed to get library artists", e)
         }
@@ -253,7 +297,7 @@ class FreshDropsRepository @Inject constructor(
                     ?.filter { seen.add(it.lowercase().trim()) }
                     ?.map { ArtistSource(name = it, source = "history") }
                     ?: emptyList()
-                artists.addAll(lfmArtists.shuffled())
+                artists.addAll(lfmArtists)
             }
         } catch (e: Exception) {
             Log.w(TAG, "Failed to get Last.fm top artists", e)
@@ -267,14 +311,22 @@ class FreshDropsRepository @Inject constructor(
                     .map { it.name }
                     .filter { seen.add(it.lowercase().trim()) }
                     .map { ArtistSource(name = it, source = "history") }
-                artists.addAll(lbArtists.shuffled())
+                artists.addAll(lbArtists)
             }
         } catch (e: Exception) {
             Log.w(TAG, "Failed to get ListenBrainz top artists", e)
         }
 
-        Log.d(TAG, "Gathered ${artists.size} unique artists, checking ${minOf(artists.size, MAX_ARTISTS_TO_CHECK)}")
-        return artists.take(MAX_ARTISTS_TO_CHECK)
+        // Round-robin: sort by last-checked time (never-checked = 0, i.e. highest priority).
+        // Within same last-checked time (e.g. all never-checked), shuffle to avoid
+        // always processing the same source order.
+        val sorted = artists
+            .groupBy { artistLastChecked[it.name.lowercase().trim()] ?: 0L }
+            .toSortedMap()
+            .flatMap { (_, group) -> group.shuffled() }
+
+        Log.d(TAG, "Gathered ${sorted.size} unique artists, checking ${minOf(sorted.size, MAX_ARTISTS_TO_CHECK)}")
+        return sorted.take(MAX_ARTISTS_TO_CHECK)
     }
 
     /**
