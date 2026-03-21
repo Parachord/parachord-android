@@ -20,15 +20,20 @@ import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.BasicTextField
+import androidx.compose.foundation.text.KeyboardActions
+import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.CalendarToday
 import androidx.compose.material.icons.filled.ConfirmationNumber
 import androidx.compose.material.icons.filled.LocationOn
+import androidx.compose.material.icons.filled.MyLocation
 import androidx.compose.material.icons.filled.OpenInNew
 import androidx.compose.material.icons.filled.Search
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.CircularProgressIndicator
+import androidx.compose.material3.DropdownMenu
+import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.FilterChip
 import androidx.compose.material3.FilterChipDefaults
@@ -53,6 +58,8 @@ import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalUriHandler
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.input.ImeAction
+import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.em
@@ -62,28 +69,20 @@ import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import coil.compose.AsyncImage
 import com.parachord.android.data.repository.ConcertEvent
 import com.parachord.android.data.repository.Resource
+import com.parachord.android.data.repository.TicketSource
+import java.time.LocalDate
+import java.time.format.DateTimeFormatter
+import java.time.format.TextStyle as JavaTextStyle
+import java.util.Locale
 
 /** Concert accent color — teal, matching the desktop's concert feature. */
 private val ConcertTeal = Color(0xFF10C9B4)
 
-private val RADIUS_OPTIONS = listOf(10, 25, 50, 100, 200)
+/** Source-specific badge colors matching desktop */
+private val TicketmasterColor = Color(0xFF026CDF)
+private val SeatGeekColor = Color(0xFFFC4C02)
 
-/** Well-known cities with coordinates for quick location selection. */
-private data class QuickCity(val name: String, val lat: Double, val lon: Double)
-private val QUICK_CITIES = listOf(
-    QuickCity("New York", 40.7128, -74.0060),
-    QuickCity("Los Angeles", 34.0522, -118.2437),
-    QuickCity("Chicago", 41.8781, -87.6298),
-    QuickCity("London", 51.5074, -0.1278),
-    QuickCity("Toronto", 43.6532, -79.3832),
-    QuickCity("San Francisco", 37.7749, -122.4194),
-    QuickCity("Austin", 30.2672, -97.7431),
-    QuickCity("Nashville", 36.1627, -86.7816),
-    QuickCity("Berlin", 52.5200, 13.4050),
-    QuickCity("Tokyo", 35.6762, 139.6503),
-    QuickCity("Sydney", -33.8688, 151.2093),
-    QuickCity("Seattle", 47.6062, -122.3321),
-)
+private val RADIUS_OPTIONS = listOf(10, 25, 50, 100, 200)
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -98,6 +97,7 @@ fun ConcertsScreen(
     val locationCity by viewModel.locationCity.collectAsStateWithLifecycle()
     val radiusMiles by viewModel.radiusMiles.collectAsStateWithLifecycle()
     val hasLocation by viewModel.hasLocation.collectAsStateWithLifecycle()
+    val isDetectingLocation by viewModel.isDetectingLocation.collectAsStateWithLifecycle()
     var showLocationPicker by remember { mutableStateOf(false) }
 
     Column(modifier = modifier.fillMaxSize()) {
@@ -135,7 +135,11 @@ fun ConcertsScreen(
             )
             Spacer(modifier = Modifier.width(8.dp))
             Text(
-                text = locationCity ?: "Set your location",
+                text = when {
+                    isDetectingLocation -> "Detecting location…"
+                    locationCity != null -> locationCity!!
+                    else -> "Set your location"
+                },
                 style = MaterialTheme.typography.bodyMedium,
                 fontWeight = FontWeight.Medium,
                 color = if (locationCity != null) {
@@ -145,11 +149,19 @@ fun ConcertsScreen(
                 },
                 modifier = Modifier.weight(1f),
             )
-            Text(
-                text = "${radiusMiles}mi",
-                style = MaterialTheme.typography.labelMedium,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-            )
+            if (isDetectingLocation) {
+                CircularProgressIndicator(
+                    modifier = Modifier.size(16.dp),
+                    strokeWidth = 2.dp,
+                    color = ConcertTeal,
+                )
+            } else {
+                Text(
+                    text = "${radiusMiles}mi",
+                    style = MaterialTheme.typography.labelMedium,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+            }
         }
 
         // Radius filter chips
@@ -174,12 +186,11 @@ fun ConcertsScreen(
         }
 
         // Content
-        if (!hasLocation) {
-            // No location set — show location picker prompt
-            LocationPickerPrompt(
-                onCitySelected = { city ->
-                    viewModel.setLocation(city.lat, city.lon, city.name)
-                },
+        if (!hasLocation && !isDetectingLocation) {
+            // No location set — show prompt with detect button
+            LocationDetectPrompt(
+                onDetect = { viewModel.detectLocation() },
+                onPickManually = { showLocationPicker = true },
             )
         } else {
             PullToRefreshBox(
@@ -193,7 +204,15 @@ fun ConcertsScreen(
                             modifier = Modifier.fillMaxSize(),
                             contentAlignment = Alignment.Center,
                         ) {
-                            CircularProgressIndicator(color = ConcertTeal)
+                            Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                                CircularProgressIndicator(color = ConcertTeal)
+                                Spacer(modifier = Modifier.height(12.dp))
+                                Text(
+                                    text = "Finding concerts from your artists…",
+                                    style = MaterialTheme.typography.bodySmall,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                )
+                            }
                         }
                     }
                     is Resource.Error -> {
@@ -232,9 +251,14 @@ fun ConcertsScreen(
                                     )
                                     Spacer(modifier = Modifier.height(12.dp))
                                     Text(
-                                        text = "No upcoming concerts nearby",
+                                        text = "No upcoming concerts found",
                                         style = MaterialTheme.typography.bodyMedium,
                                         color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                    )
+                                    Text(
+                                        text = "Add artists to your collection or connect Last.fm",
+                                        style = MaterialTheme.typography.bodySmall,
+                                        color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.7f),
                                     )
                                 }
                             }
@@ -251,103 +275,97 @@ fun ConcertsScreen(
     }
 
     if (showLocationPicker) {
-        LocationPickerDialog(
+        LocationSearchDialog(
             currentCity = locationCity,
-            onDismiss = { showLocationPicker = false },
-            onCitySelected = { city ->
-                viewModel.setLocation(city.lat, city.lon, city.name)
+            onDismiss = {
                 showLocationPicker = false
+                viewModel.clearLocationSuggestions()
+            },
+            onSearch = { viewModel.searchLocation(it) },
+            suggestions = viewModel.locationSuggestions.collectAsStateWithLifecycle().value,
+            onLocationSelected = { geo ->
+                viewModel.setLocation(geo.lat, geo.lng, geo.displayName)
+                showLocationPicker = false
+                viewModel.clearLocationSuggestions()
             },
         )
     }
 }
 
 @Composable
-private fun LocationPickerPrompt(
-    onCitySelected: (QuickCity) -> Unit,
+private fun LocationDetectPrompt(
+    onDetect: () -> Unit,
+    onPickManually: () -> Unit,
 ) {
-    LazyColumn(
+    Box(
         modifier = Modifier.fillMaxSize(),
-        contentPadding = PaddingValues(16.dp),
+        contentAlignment = Alignment.Center,
     ) {
-        item {
-            Column(
-                modifier = Modifier.fillMaxWidth().padding(vertical = 24.dp),
-                horizontalAlignment = Alignment.CenterHorizontally,
-            ) {
-                Icon(
-                    Icons.Default.LocationOn,
-                    contentDescription = null,
-                    tint = ConcertTeal,
-                    modifier = Modifier.size(48.dp),
-                )
-                Spacer(modifier = Modifier.height(12.dp))
-                Text(
-                    text = "Set your location to discover concerts nearby",
-                    style = MaterialTheme.typography.bodyMedium,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                )
-                Spacer(modifier = Modifier.height(24.dp))
-                Text(
-                    text = "POPULAR CITIES",
-                    style = MaterialTheme.typography.labelMedium,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    letterSpacing = 1.sp,
-                )
+        Column(
+            horizontalAlignment = Alignment.CenterHorizontally,
+            modifier = Modifier.padding(32.dp),
+        ) {
+            Icon(
+                Icons.Default.LocationOn,
+                contentDescription = null,
+                tint = ConcertTeal,
+                modifier = Modifier.size(48.dp),
+            )
+            Spacer(modifier = Modifier.height(12.dp))
+            Text(
+                text = "Set your location to discover concerts",
+                style = MaterialTheme.typography.bodyMedium,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                textAlign = TextAlign.Center,
+            )
+            Spacer(modifier = Modifier.height(20.dp))
+            TextButton(onClick = onDetect) {
+                Icon(Icons.Default.MyLocation, contentDescription = null, modifier = Modifier.size(18.dp))
+                Spacer(modifier = Modifier.width(6.dp))
+                Text("Detect my location", color = ConcertTeal)
             }
-        }
-        items(QUICK_CITIES, key = { it.name }) { city ->
-            Row(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .clip(RoundedCornerShape(8.dp))
-                    .clickable { onCitySelected(city) }
-                    .padding(horizontal = 16.dp, vertical = 14.dp),
-                verticalAlignment = Alignment.CenterVertically,
-            ) {
-                Icon(
-                    Icons.Default.LocationOn,
-                    contentDescription = null,
-                    tint = MaterialTheme.colorScheme.onSurfaceVariant,
-                    modifier = Modifier.size(18.dp),
-                )
-                Spacer(modifier = Modifier.width(12.dp))
-                Text(
-                    text = city.name,
-                    style = MaterialTheme.typography.bodyLarge,
-                )
+            TextButton(onClick = onPickManually) {
+                Icon(Icons.Default.Search, contentDescription = null, modifier = Modifier.size(18.dp))
+                Spacer(modifier = Modifier.width(6.dp))
+                Text("Search for a city", color = ConcertTeal)
             }
         }
     }
 }
 
+/**
+ * Location search dialog with Nominatim geocoding (any city, matching desktop).
+ */
 @Composable
-private fun LocationPickerDialog(
+private fun LocationSearchDialog(
     currentCity: String?,
     onDismiss: () -> Unit,
-    onCitySelected: (QuickCity) -> Unit,
+    onSearch: (String) -> Unit,
+    suggestions: List<com.parachord.android.data.api.GeoLocationService.GeoLocation>,
+    onLocationSelected: (com.parachord.android.data.api.GeoLocationService.GeoLocation) -> Unit,
 ) {
     var searchQuery by remember { mutableStateOf("") }
-    val filtered = remember(searchQuery) {
-        if (searchQuery.isBlank()) QUICK_CITIES
-        else QUICK_CITIES.filter { it.name.contains(searchQuery, ignoreCase = true) }
-    }
 
     AlertDialog(
         onDismissRequest = onDismiss,
-        title = { Text("Select City") },
+        title = { Text("Search Location") },
         text = {
             Column {
-                // Search input
+                // Search input with Nominatim
                 BasicTextField(
                     value = searchQuery,
-                    onValueChange = { searchQuery = it },
+                    onValueChange = {
+                        searchQuery = it
+                        onSearch(it)
+                    },
                     singleLine = true,
                     textStyle = TextStyle(
                         color = MaterialTheme.colorScheme.onSurface,
                         fontSize = 14.sp,
                     ),
                     cursorBrush = SolidColor(ConcertTeal),
+                    keyboardOptions = KeyboardOptions(imeAction = ImeAction.Search),
+                    keyboardActions = KeyboardActions(onSearch = { onSearch(searchQuery) }),
                     decorationBox = { inner ->
                         Row(
                             modifier = Modifier
@@ -366,36 +384,58 @@ private fun LocationPickerDialog(
                                 tint = MaterialTheme.colorScheme.onSurfaceVariant,
                             )
                             Spacer(modifier = Modifier.width(8.dp))
-                            Box { inner() }
+                            Box {
+                                if (searchQuery.isEmpty()) {
+                                    Text(
+                                        "Type any city name…",
+                                        style = TextStyle(
+                                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                            fontSize = 14.sp,
+                                        ),
+                                    )
+                                }
+                                inner()
+                            }
                         }
                     },
                 )
                 Spacer(modifier = Modifier.height(8.dp))
-                Column {
-                    filtered.take(8).forEach { city ->
-                        val isSelected = city.name == currentCity
-                        Row(
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .clip(RoundedCornerShape(6.dp))
-                                .then(
-                                    if (isSelected) Modifier.background(
-                                        ConcertTeal.copy(alpha = 0.1f),
-                                    ) else Modifier,
+
+                // Search results
+                if (suggestions.isNotEmpty()) {
+                    Column {
+                        suggestions.forEach { location ->
+                            Row(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .clip(RoundedCornerShape(6.dp))
+                                    .clickable { onLocationSelected(location) }
+                                    .padding(horizontal = 12.dp, vertical = 10.dp),
+                                verticalAlignment = Alignment.CenterVertically,
+                            ) {
+                                Icon(
+                                    Icons.Default.LocationOn,
+                                    contentDescription = null,
+                                    modifier = Modifier.size(16.dp),
+                                    tint = MaterialTheme.colorScheme.onSurfaceVariant,
                                 )
-                                .clickable { onCitySelected(city) }
-                                .padding(horizontal = 12.dp, vertical = 10.dp),
-                            verticalAlignment = Alignment.CenterVertically,
-                        ) {
-                            Text(
-                                text = city.name,
-                                style = MaterialTheme.typography.bodyMedium,
-                                color = if (isSelected) ConcertTeal
-                                else MaterialTheme.colorScheme.onSurface,
-                                fontWeight = if (isSelected) FontWeight.Medium else FontWeight.Normal,
-                            )
+                                Spacer(modifier = Modifier.width(8.dp))
+                                Text(
+                                    text = location.displayName,
+                                    style = MaterialTheme.typography.bodyMedium,
+                                    maxLines = 2,
+                                    overflow = TextOverflow.Ellipsis,
+                                )
+                            }
                         }
                     }
+                } else if (searchQuery.isNotBlank()) {
+                    Text(
+                        text = "Type to search for any city…",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        modifier = Modifier.padding(12.dp),
+                    )
                 }
             }
         },
@@ -407,6 +447,10 @@ private fun LocationPickerDialog(
     )
 }
 
+/**
+ * Concert event list grouped by month, with date sidebar matching desktop layout.
+ * Events are sorted soonest-first (by date ascending).
+ */
 @Composable
 private fun ConcertEventList(
     events: List<ConcertEvent>,
@@ -414,37 +458,43 @@ private fun ConcertEventList(
 ) {
     val uriHandler = LocalUriHandler.current
 
-    // Group events by date
+    // Group events by month (YYYY-MM), matching desktop
     val grouped = remember(events) {
-        events.groupBy { it.date ?: "Unknown" }
+        events
+            .sortedBy { it.date ?: "" }
+            .groupBy { event ->
+                val d = event.date ?: return@groupBy "Unknown"
+                try {
+                    val parsed = LocalDate.parse(d)
+                    parsed.format(DateTimeFormatter.ofPattern("MMMM yyyy"))
+                } catch (_: Exception) { "Unknown" }
+            }
     }
 
     LazyColumn(
         modifier = Modifier.fillMaxSize(),
         contentPadding = PaddingValues(bottom = 80.dp),
     ) {
-        grouped.forEach { (date, dateEvents) ->
-            // Date header
-            item(key = "header-$date") {
-                val displayDate = dateEvents.firstOrNull()?.displayDate ?: date
+        grouped.forEach { (monthLabel, monthEvents) ->
+            // Month header (e.g. "March 2026")
+            item(key = "header-$monthLabel") {
                 Text(
-                    text = displayDate,
-                    style = MaterialTheme.typography.labelMedium,
+                    text = monthLabel,
+                    style = MaterialTheme.typography.titleSmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    letterSpacing = 0.5.sp,
                     fontWeight = FontWeight.SemiBold,
-                    modifier = Modifier.padding(horizontal = 16.dp, vertical = 8.dp),
+                    modifier = Modifier.padding(horizontal = 16.dp, vertical = 12.dp),
                 )
             }
 
-            items(dateEvents, key = { it.id }) { event ->
+            items(monthEvents, key = { it.id }) { event ->
                 ConcertEventCard(
                     event = event,
                     onArtistClick = {
                         event.artistName?.let { onNavigateToArtist(it) }
                     },
-                    onTicketClick = {
-                        event.ticketUrl?.let { url -> uriHandler.openUri(url) }
+                    onTicketClick = { url ->
+                        uriHandler.openUri(url)
                     },
                 )
             }
@@ -452,23 +502,71 @@ private fun ConcertEventList(
     }
 }
 
+/**
+ * Concert event card with date sidebar, matching desktop's layout:
+ * [Date Column] [Artist Image] [Event Details] [Tickets Button]
+ */
 @Composable
 private fun ConcertEventCard(
     event: ConcertEvent,
     onArtistClick: () -> Unit,
-    onTicketClick: () -> Unit,
+    onTicketClick: (String) -> Unit,
 ) {
+    // Parse date for sidebar display
+    val dateInfo = remember(event.date) {
+        event.date?.let { d ->
+            try {
+                val parsed = LocalDate.parse(d)
+                Triple(
+                    parsed.month.getDisplayName(JavaTextStyle.SHORT, Locale.getDefault()).uppercase(),
+                    parsed.dayOfMonth.toString(),
+                    parsed.dayOfWeek.getDisplayName(JavaTextStyle.SHORT, Locale.getDefault()),
+                )
+            } catch (_: Exception) { null }
+        }
+    }
+
     Row(
         modifier = Modifier
             .fillMaxWidth()
             .clickable { onArtistClick() }
-            .padding(horizontal = 16.dp, vertical = 10.dp),
+            .padding(horizontal = 16.dp, vertical = 8.dp),
         verticalAlignment = Alignment.Top,
     ) {
+        // Date sidebar (matching desktop: month + day + weekday)
+        if (dateInfo != null) {
+            Column(
+                horizontalAlignment = Alignment.CenterHorizontally,
+                modifier = Modifier
+                    .width(44.dp)
+                    .padding(top = 2.dp),
+            ) {
+                Text(
+                    text = dateInfo.first,
+                    fontSize = 10.sp,
+                    fontWeight = FontWeight.Bold,
+                    color = ConcertTeal,
+                    letterSpacing = 0.5.sp,
+                )
+                Text(
+                    text = dateInfo.second,
+                    fontSize = 20.sp,
+                    fontWeight = FontWeight.Bold,
+                    color = MaterialTheme.colorScheme.onSurface,
+                )
+                Text(
+                    text = dateInfo.third,
+                    fontSize = 10.sp,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+            }
+            Spacer(modifier = Modifier.width(10.dp))
+        }
+
         // Event image
         Box(
             modifier = Modifier
-                .size(64.dp)
+                .size(56.dp)
                 .clip(RoundedCornerShape(8.dp))
                 .background(MaterialTheme.colorScheme.surfaceVariant),
         ) {
@@ -492,91 +590,175 @@ private fun ConcertEventCard(
         Spacer(modifier = Modifier.width(12.dp))
 
         Column(modifier = Modifier.weight(1f)) {
+            // Artist name
             Text(
-                text = event.name,
+                text = event.artistName ?: event.name,
                 style = MaterialTheme.typography.bodyMedium,
                 fontWeight = FontWeight.Medium,
-                maxLines = 2,
+                maxLines = 1,
                 overflow = TextOverflow.Ellipsis,
             )
-            if (event.venueName != null) {
-                Row(verticalAlignment = Alignment.CenterVertically) {
-                    Text(
-                        text = event.venueName,
-                        style = MaterialTheme.typography.bodySmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                        maxLines = 1,
-                        overflow = TextOverflow.Ellipsis,
-                    )
+
+            // Source badges
+            Row(
+                horizontalArrangement = Arrangement.spacedBy(4.dp),
+                modifier = Modifier.padding(vertical = 2.dp),
+            ) {
+                val sources = event.ticketSources.ifEmpty {
+                    listOf(TicketSource(event.source, event.ticketUrl ?: "", sourceLabel(event.source)))
+                }
+                sources.forEach { src ->
+                    SourceBadge(source = src.source)
                 }
             }
+
+            // Venue
+            if (event.venueName != null) {
+                Text(
+                    text = event.venueName,
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                )
+            }
+
+            // Location + time
             Row(
                 verticalAlignment = Alignment.CenterVertically,
                 horizontalArrangement = Arrangement.spacedBy(8.dp),
             ) {
                 if (event.locationString.isNotBlank()) {
-                    Row(verticalAlignment = Alignment.CenterVertically) {
-                        Icon(
-                            Icons.Default.LocationOn,
-                            contentDescription = null,
-                            modifier = Modifier.size(12.dp),
-                            tint = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.6f),
-                        )
-                        Spacer(modifier = Modifier.width(2.dp))
-                        Text(
-                            text = event.locationString,
-                            fontSize = 11.sp,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.7f),
-                        )
-                    }
+                    Text(
+                        text = event.locationString,
+                        fontSize = 11.sp,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.7f),
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis,
+                        modifier = Modifier.weight(1f, fill = false),
+                    )
                 }
                 if (event.displayTime.isNotBlank()) {
-                    Row(verticalAlignment = Alignment.CenterVertically) {
-                        Icon(
-                            Icons.Default.CalendarToday,
-                            contentDescription = null,
-                            modifier = Modifier.size(11.dp),
-                            tint = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.6f),
-                        )
-                        Spacer(modifier = Modifier.width(2.dp))
-                        Text(
-                            text = event.displayTime,
-                            fontSize = 11.sp,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.7f),
-                        )
-                    }
+                    Text(
+                        text = event.displayTime,
+                        fontSize = 11.sp,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.7f),
+                    )
                 }
             }
 
-            // Source badge
-            val sourceColor = if (event.source == "ticketmaster") Color(0xFF0078D7) else Color(0xFFF95531)
-            val sourceName = if (event.source == "ticketmaster") "Ticketmaster" else "SeatGeek"
-            Text(
-                text = sourceName,
-                fontSize = 10.sp,
-                fontWeight = FontWeight.SemiBold,
-                color = sourceColor,
-                modifier = Modifier
-                    .padding(top = 4.dp)
-                    .clip(RoundedCornerShape(4.dp))
-                    .background(sourceColor.copy(alpha = 0.12f))
-                    .padding(horizontal = 6.dp, vertical = 2.dp),
-            )
+            // Artist source reason (matching desktop: "In your collection" / "From your listening history")
+            val reason = when (event.artistSource) {
+                "collection" -> "In your collection"
+                "library" -> "In your library"
+                "history" -> "From your listening history"
+                else -> null
+            }
+            if (reason != null) {
+                Text(
+                    text = reason,
+                    fontSize = 10.sp,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.5f),
+                    modifier = Modifier.padding(top = 2.dp),
+                )
+            }
         }
 
-        // Ticket link
-        if (event.ticketUrl != null) {
+        // Ticket button(s)
+        TicketButton(event = event, onTicketClick = onTicketClick)
+    }
+}
+
+/**
+ * Source badge (TM, SG) with provider-specific colors matching desktop.
+ */
+@Composable
+private fun SourceBadge(source: String) {
+    val (color, label) = when (source) {
+        "ticketmaster" -> TicketmasterColor to "TM"
+        "seatgeek" -> SeatGeekColor to "SG"
+        else -> MaterialTheme.colorScheme.onSurfaceVariant to source.take(2).uppercase()
+    }
+    Text(
+        text = label,
+        fontSize = 9.sp,
+        fontWeight = FontWeight.Bold,
+        color = color,
+        modifier = Modifier
+            .clip(RoundedCornerShape(3.dp))
+            .background(color.copy(alpha = 0.12f))
+            .padding(horizontal = 4.dp, vertical = 1.dp),
+    )
+}
+
+/**
+ * Ticket button — single source opens direct, multiple sources show dropdown
+ * (matching desktop's flyout behavior).
+ */
+@Composable
+private fun TicketButton(
+    event: ConcertEvent,
+    onTicketClick: (String) -> Unit,
+) {
+    val sources = event.ticketSources.filter { it.ticketUrl.isNotBlank() }
+    if (sources.isEmpty() && event.ticketUrl == null) return
+
+    if (sources.size <= 1) {
+        // Single source — direct link
+        val url = sources.firstOrNull()?.ticketUrl ?: event.ticketUrl ?: return
+        IconButton(
+            onClick = { onTicketClick(url) },
+            modifier = Modifier.size(36.dp),
+        ) {
+            Icon(
+                Icons.Default.OpenInNew,
+                contentDescription = "Buy tickets",
+                modifier = Modifier.size(18.dp),
+                tint = ConcertTeal,
+            )
+        }
+    } else {
+        // Multiple sources — dropdown
+        var expanded by remember { mutableStateOf(false) }
+        Box {
             IconButton(
-                onClick = onTicketClick,
+                onClick = { expanded = true },
                 modifier = Modifier.size(36.dp),
             ) {
                 Icon(
-                    Icons.Default.OpenInNew,
+                    Icons.Default.ConfirmationNumber,
                     contentDescription = "Buy tickets",
                     modifier = Modifier.size(18.dp),
                     tint = ConcertTeal,
                 )
             }
+            DropdownMenu(
+                expanded = expanded,
+                onDismissRequest = { expanded = false },
+            ) {
+                sources.forEach { src ->
+                    val color = when (src.source) {
+                        "ticketmaster" -> TicketmasterColor
+                        "seatgeek" -> SeatGeekColor
+                        else -> MaterialTheme.colorScheme.onSurface
+                    }
+                    DropdownMenuItem(
+                        text = {
+                            Text(src.label, color = color, fontWeight = FontWeight.Medium)
+                        },
+                        onClick = {
+                            expanded = false
+                            onTicketClick(src.ticketUrl)
+                        },
+                    )
+                }
+            }
         }
     }
+}
+
+private fun sourceLabel(source: String): String = when (source) {
+    "ticketmaster" -> "Ticketmaster"
+    "seatgeek" -> "SeatGeek"
+    else -> source.replaceFirstChar { it.uppercase() }
 }
