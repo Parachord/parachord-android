@@ -9,6 +9,7 @@ import com.parachord.android.data.db.entity.FriendEntity
 import com.parachord.android.data.db.entity.PlaylistEntity
 import com.parachord.android.data.db.entity.TrackEntity
 import com.parachord.android.data.repository.FriendsRepository
+import com.parachord.android.data.repository.ConcertsRepository
 import com.parachord.android.data.repository.LibraryRepository
 import com.parachord.android.resolver.ResolverManager
 import com.parachord.android.resolver.ResolverScoring
@@ -31,6 +32,8 @@ import dagger.hilt.android.qualifiers.ApplicationContext
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.flow.flatMapLatest
 import kotlinx.coroutines.flow.flowOf
 import kotlinx.coroutines.flow.map
@@ -50,6 +53,7 @@ class MainViewModel @Inject constructor(
     private val spotifyPlaybackHandler: SpotifyPlaybackHandler,
     settingsStore: SettingsStore,
     private val playlistImportManager: PlaylistImportManager,
+    private val concertsRepository: ConcertsRepository,
 ) : ViewModel() {
 
     companion object {
@@ -86,6 +90,11 @@ class MainViewModel @Inject constructor(
     val spotifyDevicePickerRequest: StateFlow<SpotifyPlaybackHandler.DevicePickerRequest?> =
         spotifyPlaybackHandler.devicePickerRequest
 
+    /** Whether the currently playing artist is on tour (for mini player dot). */
+    private val _isOnTour = MutableStateFlow(false)
+    val isOnTour: StateFlow<Boolean> = _isOnTour.asStateFlow()
+    private var lastCheckedArtist: String? = null
+
     /** Pinned friends for the sidebar drawer (on-air auto-pins + manual pins). */
     val friends: StateFlow<List<FriendEntity>> = friendsRepository.getPinnedFriends()
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), emptyList())
@@ -111,6 +120,22 @@ class MainViewModel @Inject constructor(
                     Log.w(TAG, "Friend activity poll failed", e)
                 }
             }
+        }
+        // Check if current artist is on tour when track changes (for mini player dot)
+        viewModelScope.launch {
+            playbackState
+                .map { it.currentTrack?.artist }
+                .distinctUntilChanged()
+                .collect { artist ->
+                    if (artist.isNullOrBlank() || artist == lastCheckedArtist) return@collect
+                    lastCheckedArtist = artist
+                    _isOnTour.value = false
+                    try {
+                        _isOnTour.value = concertsRepository.checkOnTour(artist)
+                    } catch (e: Exception) {
+                        Log.w(TAG, "On-tour check failed for '$artist'", e)
+                    }
+                }
         }
     }
 

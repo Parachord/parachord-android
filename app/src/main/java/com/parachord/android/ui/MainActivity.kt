@@ -178,6 +178,7 @@ private fun ParachordAppContent(mainViewModel: MainViewModel) {
     val playbackState by mainViewModel.playbackState.collectAsStateWithLifecycle()
     val currentTrack = playbackState.currentTrack
     val isCurrentTrackFavorited by mainViewModel.isCurrentTrackFavorited.collectAsStateWithLifecycle()
+    val isCurrentArtistOnTour by mainViewModel.isOnTour.collectAsStateWithLifecycle()
     val friends by mainViewModel.friends.collectAsStateWithLifecycle()
     val listenAlongFriend by mainViewModel.listenAlongFriend.collectAsStateWithLifecycle()
 
@@ -429,6 +430,7 @@ private fun ParachordAppContent(mainViewModel: MainViewModel) {
                                     isPlaying = playbackState.isPlaying,
                                     isBuffering = playbackState.isBuffering,
                                     isFavorited = isCurrentTrackFavorited,
+                                    isOnTour = isCurrentArtistOnTour,
                                     progress = progress,
                                     onPlayPause = { mainViewModel.togglePlayPause() },
                                     onSkipNext = { mainViewModel.skipNext() },
