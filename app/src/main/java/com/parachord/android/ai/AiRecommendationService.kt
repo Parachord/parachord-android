@@ -1,5 +1,6 @@
 package com.parachord.android.ai
 
+import android.content.Context
 import android.util.Log
 import com.parachord.android.ai.providers.ChatGptProvider
 import com.parachord.android.ai.providers.ClaudeProvider
@@ -18,9 +19,12 @@ import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.jsonArray
 import kotlinx.serialization.json.jsonObject
 import kotlinx.serialization.json.jsonPrimitive
+import dagger.hilt.android.qualifiers.ApplicationContext
+import java.io.File
 import javax.inject.Inject
 import javax.inject.Singleton
 
+@kotlinx.serialization.Serializable
 data class AiAlbumSuggestion(
     val title: String,
     val artist: String,
@@ -28,6 +32,7 @@ data class AiAlbumSuggestion(
     val artworkUrl: String? = null,
 )
 
+@kotlinx.serialization.Serializable
 data class AiArtistSuggestion(
     val name: String,
     val reason: String,
@@ -39,6 +44,13 @@ data class AiRecommendations(
     val artists: List<AiArtistSuggestion>,
 )
 
+@kotlinx.serialization.Serializable
+internal data class AiSuggestionsDiskCache(
+    val albums: List<AiAlbumSuggestion>,
+    val artists: List<AiArtistSuggestion>,
+    val savedAt: Long = 0L,
+)
+
 /**
  * Fetches AI-powered album and artist recommendations matching the desktop app's
  * loadAiRecommendations() logic. Uses the first configured AI provider to generate
@@ -46,6 +58,7 @@ data class AiRecommendations(
  */
 @Singleton
 class AiRecommendationService @Inject constructor(
+    @ApplicationContext private val context: Context,
     private val settingsStore: SettingsStore,
     private val historyRepository: HistoryRepository,
     private val libraryRepository: LibraryRepository,
@@ -56,17 +69,59 @@ class AiRecommendationService @Inject constructor(
 ) {
     companion object {
         private const val TAG = "AiRecommendationService"
+        private const val CACHE_FILE = "ai_suggestions_cache.json"
     }
 
     private val json = Json { ignoreUnknownKeys = true }
+    private val diskJson = Json { ignoreUnknownKeys = true; encodeDefaults = true }
 
     /** Previously suggested items to avoid repeats (matching desktop's previousAiSuggestions). */
     private val previousAlbums = mutableListOf<AiAlbumSuggestion>()
     private val previousArtists = mutableListOf<AiArtistSuggestion>()
 
+    /** Whether the disk cache has been loaded yet. */
+    private var diskCacheLoaded = false
+
     /** Last successfully fetched recommendations for stale-while-revalidate display. */
     var cachedRecommendations: AiRecommendations? = null
+        get() {
+            if (!diskCacheLoaded) loadDiskCache()
+            return field
+        }
         private set
+
+    /** Load cached recommendations from disk on first access (stale-while-revalidate). */
+    private fun loadDiskCache() {
+        diskCacheLoaded = true
+        try {
+            val file = File(context.filesDir, CACHE_FILE)
+            if (!file.exists()) return
+            val wrapper = diskJson.decodeFromString<AiSuggestionsDiskCache>(file.readText())
+            cachedRecommendations = AiRecommendations(
+                albums = wrapper.albums,
+                artists = wrapper.artists,
+            )
+            Log.d(TAG, "Loaded ${wrapper.albums.size} albums, ${wrapper.artists.size} artists from disk cache")
+        } catch (e: Exception) {
+            Log.w(TAG, "Failed to load AI suggestions disk cache", e)
+        }
+    }
+
+    /** Persist recommendations to disk for stale-while-revalidate on next cold start. */
+    private fun saveDiskCache(recommendations: AiRecommendations) {
+        try {
+            val wrapper = AiSuggestionsDiskCache(
+                albums = recommendations.albums,
+                artists = recommendations.artists,
+                savedAt = System.currentTimeMillis(),
+            )
+            val file = File(context.filesDir, CACHE_FILE)
+            file.writeText(diskJson.encodeToString(wrapper))
+            Log.d(TAG, "Saved ${recommendations.albums.size} albums, ${recommendations.artists.size} artists to disk cache")
+        } catch (e: Exception) {
+            Log.w(TAG, "Failed to save AI suggestions disk cache", e)
+        }
+    }
 
     /** 10 variety themes matching desktop exactly. */
     private val varietyThemes = listOf(
@@ -178,6 +233,7 @@ Variety guidance: $theme Be creative and surprising — avoid defaulting to the 
             artists = parsed.artists.take(5),
         )
         cachedRecommendations = enriched
+        saveDiskCache(enriched)
         return enriched
     }
 
