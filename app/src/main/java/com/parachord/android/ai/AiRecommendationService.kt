@@ -144,33 +144,33 @@ Variety guidance: $theme Be creative and surprising — avoid defaulting to the 
             ChatMessage(role = ChatRole.USER, content = userPrompt),
         )
 
-        return try {
-            val response = selectedProvider.chat(messages, emptyList(), selectedConfig)
-            val parsed = parseRecommendations(response.content)
+        val response = selectedProvider.chat(messages, emptyList(), selectedConfig)
+        val parsed = parseRecommendations(response.content)
 
-            // Track previous suggestions (keep last 20 albums, 50 artists like desktop)
-            previousAlbums.addAll(parsed.albums)
-            if (previousAlbums.size > 20) {
-                val excess = previousAlbums.size - 20
-                repeat(excess) { previousAlbums.removeFirst() }
-            }
-            previousArtists.addAll(parsed.artists)
-            if (previousArtists.size > 50) {
-                val excess = previousArtists.size - 50
-                repeat(excess) { previousArtists.removeFirst() }
-            }
-
-            // Enrich with artwork, then return up to 5 each
-            val enriched = enrichWithArtwork(
-                albums = parsed.albums.take(5),
-                artists = parsed.artists.take(5),
-            )
-            cachedRecommendations = enriched
-            enriched
-        } catch (e: Exception) {
-            Log.e(TAG, "Failed to load AI recommendations", e)
-            AiRecommendations(emptyList(), emptyList())
+        if (parsed.albums.isEmpty() && parsed.artists.isEmpty()) {
+            Log.w(TAG, "AI response parsed to empty recommendations. Raw content: ${response.content.take(200)}")
+            throw Exception("AI returned no valid recommendations — response may have been malformed")
         }
+
+        // Track previous suggestions (keep last 20 albums, 50 artists like desktop)
+        previousAlbums.addAll(parsed.albums)
+        if (previousAlbums.size > 20) {
+            val excess = previousAlbums.size - 20
+            repeat(excess) { previousAlbums.removeFirst() }
+        }
+        previousArtists.addAll(parsed.artists)
+        if (previousArtists.size > 50) {
+            val excess = previousArtists.size - 50
+            repeat(excess) { previousArtists.removeFirst() }
+        }
+
+        // Enrich with artwork, then return up to 5 each
+        val enriched = enrichWithArtwork(
+            albums = parsed.albums.take(5),
+            artists = parsed.artists.take(5),
+        )
+        cachedRecommendations = enriched
+        return enriched
     }
 
     /**
