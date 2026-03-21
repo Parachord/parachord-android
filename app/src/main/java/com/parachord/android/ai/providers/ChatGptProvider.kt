@@ -29,6 +29,7 @@ import okhttp3.MediaType.Companion.toMediaType
 import okhttp3.OkHttpClient
 import okhttp3.Request
 import okhttp3.RequestBody.Companion.toRequestBody
+import java.util.concurrent.TimeUnit
 import javax.inject.Inject
 import javax.inject.Singleton
 
@@ -37,6 +38,15 @@ class ChatGptProvider @Inject constructor(
     private val client: OkHttpClient,
     private val json: Json,
 ) : AiChatProvider {
+
+    /** Longer timeout client for AI generation — large responses (e.g. recommendations) can take 30+ seconds. */
+    private val aiClient: OkHttpClient by lazy {
+        client.newBuilder()
+            .readTimeout(60, TimeUnit.SECONDS)
+            .writeTimeout(30, TimeUnit.SECONDS)
+            .connectTimeout(15, TimeUnit.SECONDS)
+            .build()
+    }
 
     override val id: String = "chatgpt"
     override val name: String = "ChatGPT"
@@ -48,6 +58,9 @@ class ChatGptProvider @Inject constructor(
     ): AiChatResponse {
         val endpoint = config.endpoint.ifBlank { "https://api.openai.com/v1/chat/completions" }
         val model = config.model.ifBlank { "gpt-4o-mini" }
+
+        // Detect if the system prompt requests JSON-only output and enable structured output mode
+        val wantsJson = messages.any { it.role == ChatRole.SYSTEM && it.content.contains("JSON", ignoreCase = true) && it.content.contains("no markdown", ignoreCase = true) }
 
         val body = buildJsonObject {
             put("model", model)
@@ -63,6 +76,9 @@ class ChatGptProvider @Inject constructor(
                     }
                 })
             }
+            if (wantsJson && tools.isEmpty()) {
+                put("response_format", buildJsonObject { put("type", "json_object") })
+            }
         }
 
         val requestBody = json.encodeToString(JsonElement.serializer(), body)
@@ -76,7 +92,7 @@ class ChatGptProvider @Inject constructor(
             .build()
 
         return withContext(Dispatchers.IO) {
-            val response = client.newCall(request).execute()
+            val response = aiClient.newCall(request).execute()
             val responseBody = response.body?.string() ?: ""
 
             if (!response.isSuccessful) {

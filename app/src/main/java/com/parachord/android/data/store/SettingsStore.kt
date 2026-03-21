@@ -43,6 +43,7 @@ class SettingsStore @Inject constructor(
         val DISCOGS_TOKEN = stringPreferencesKey("discogs_personal_token")
         val DISABLED_META_PROVIDERS = stringPreferencesKey("disabled_meta_providers")
         val BLOCKED_RECOMMENDATIONS = stringPreferencesKey("blocked_recommendations")
+        val SEND_LISTENING_HISTORY = booleanPreferencesKey("send_listening_history")
         val CHATGPT_API_KEY = stringPreferencesKey("chatgpt_api_key")
         val CHATGPT_MODEL = stringPreferencesKey("chatgpt_model")
         val CLAUDE_API_KEY = stringPreferencesKey("claude_api_key")
@@ -457,6 +458,18 @@ class SettingsStore @Inject constructor(
         val current = getBlockedRecommendations().toMutableSet()
         current.add(entry)
         dataStore.edit { it[BLOCKED_RECOMMENDATIONS] = current.joinToString("\n") }
+    }
+
+    // --- Listening History for AI ---
+
+    suspend fun getSendListeningHistory(): Boolean =
+        dataStore.data.first()[SEND_LISTENING_HISTORY] ?: true
+
+    fun getSendListeningHistoryFlow(): Flow<Boolean> =
+        dataStore.data.map { it[SEND_LISTENING_HISTORY] ?: true }
+
+    suspend fun setSendListeningHistory(enabled: Boolean) {
+        dataStore.edit { it[SEND_LISTENING_HISTORY] = enabled }
     }
 
     // --- AI Providers ---

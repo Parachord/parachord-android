@@ -286,6 +286,7 @@ fun SettingsScreen(
     val chatGptConnected by viewModel.chatGptConnected.collectAsStateWithLifecycle()
     val claudeConnected by viewModel.claudeConnected.collectAsStateWithLifecycle()
     val geminiConnected by viewModel.geminiConnected.collectAsStateWithLifecycle()
+    val sendListeningHistory by viewModel.sendListeningHistory.collectAsStateWithLifecycle()
     val scanProgress by viewModel.scanProgress.collectAsStateWithLifecycle()
     val ticketmasterConnected by viewModel.ticketmasterConnected.collectAsStateWithLifecycle()
     val seatGeekConnected by viewModel.seatGeekConnected.collectAsStateWithLifecycle()
@@ -2366,6 +2367,40 @@ private fun AiProviderConfig(
         )
     }
     var modelDropdownExpanded by remember { mutableStateOf(false) }
+
+    // Listening history toggle — shared across all AI providers
+    val settingsViewModel: SettingsViewModel = hiltViewModel()
+    val sendListeningHistory by settingsViewModel.sendListeningHistory.collectAsStateWithLifecycle()
+
+    Spacer(modifier = Modifier.height(12.dp))
+    HorizontalDivider()
+    Spacer(modifier = Modifier.height(12.dp))
+
+    Row(
+        modifier = Modifier.fillMaxWidth(),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Column(modifier = Modifier.weight(1f)) {
+            Text(
+                text = "Include listening history",
+                style = MaterialTheme.typography.bodyMedium,
+                fontWeight = FontWeight.Medium,
+            )
+            Text(
+                text = "Send your listening data to improve recommendations",
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+        }
+        Switch(
+            checked = sendListeningHistory,
+            onCheckedChange = { settingsViewModel.setSendListeningHistory(it) },
+        )
+    }
+
+    Spacer(modifier = Modifier.height(12.dp))
+    HorizontalDivider()
+    Spacer(modifier = Modifier.height(12.dp))
 
     OutlinedTextField(
         value = apiKey,

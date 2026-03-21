@@ -4,6 +4,8 @@
 
 **Always match the desktop app's approach.** The desktop Parachord app (Electron + React 18 + Tailwind) at https://github.com/Parachord/parachord is the source of truth. Before implementing any feature, check how the desktop app does it first. We spent a lot of time refining those approaches and should not reinvent anything.
 
+**When told a feature should "work like desktop":** Do not make assumptions or do a partial implementation. Study the desktop implementation in detail first — read the relevant code in `app.js`, understand the data flow, the UI, the settings, and the edge cases. Ask follow-up questions if anything is unclear. The goal is feature parity, not a rough approximation. Half-implementations that miss settings, toggles, or data sources the desktop includes are worse than no implementation.
+
 Desktop app structure: single `app.js` (~57,700 lines), `.axe` resolver plugins, `index.html` with CSS design tokens.
 
 ## Architecture Patterns (from Desktop)
