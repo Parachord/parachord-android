@@ -265,6 +265,12 @@ static let darkAccentPurple = Color(hex: "#a78bfa")
 - **History pruning can orphan tool messages.** When trimming old messages, never split an ASSISTANT+toolCalls message from its TOOL result messages. Walk backward to keep these groups intact. Add a `sanitizeHistory()` pass to remove any orphaned TOOL messages.
 - **Claude expects tool results as user messages** with `tool_result` content blocks and `tool_use_id` fields.
 
+### AI Suggestions Caching (Stale-While-Revalidate)
+
+- **AI suggestions must load stale cache first, then refresh.** Like the desktop, `AiRecommendationService` persists recommendations to `ai_suggestions_cache.json` so cold starts show previous results immediately instead of a 30-60s shimmer wait. The disk cache is lazy-loaded on first access to `cachedRecommendations`, and saved after each successful AI fetch.
+- **No TTL — always refresh.** Unlike Fresh Drops (6h TTL) or Critical Darlings (4h TTL), AI suggestions always fetch fresh results but display stale cache during the wait. This matches desktop's pattern where cached albums/artists stay visible while `loading: true`.
+- **`AiAlbumSuggestion` and `AiArtistSuggestion` are `@Serializable`.** Required for disk cache persistence.
+
 ### Prompt Engineering for Music Recommendations
 
 - **AI models recommend genre names as track titles** if not explicitly told otherwise. Prompts must say "recommend real, specific songs by real artists — not genre names or descriptions."
