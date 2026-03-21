@@ -386,7 +386,19 @@ class PlaybackController @Inject constructor(
         // added (e.g. "spotify"), but the user may now prioritize a different resolver
         // (e.g. "applemusic"). The TrackResolverCache has live resolution results
         // sorted by the user's current priority order, so we pick the best one.
-        val routedTrack = reselectBestSource(track)
+        var routedTrack = reselectBestSource(track)
+
+        // If the track has no resolver and no source URL, try resolving on-the-fly.
+        // This handles ephemeral tracks (e.g. weekly playlists, recommendations)
+        // that haven't been through the resolver pipeline yet.
+        if (routedTrack.resolver == null && routedTrack.sourceUrl == null &&
+            routedTrack.spotifyUri == null && routedTrack.spotifyId == null &&
+            routedTrack.soundcloudId == null && routedTrack.appleMusicId == null
+        ) {
+            Log.d(TAG, "Track '${routedTrack.title}' has no source, resolving on-the-fly")
+            routedTrack = resolveOnTheFly(routedTrack)
+        }
+
         val action = router.route(routedTrack)
         val snapshot = queueManager.snapshot.value
 
@@ -1093,6 +1105,45 @@ class PlaybackController @Inject constructor(
             soundcloudId = best.soundcloudId ?: track.soundcloudId,
             appleMusicId = best.appleMusicId ?: track.appleMusicId,
         )
+    }
+
+    /**
+     * Resolve an unresolved track on-the-fly at play time.
+     * Used for ephemeral tracks (weekly playlists, recommendations) that haven't
+     * been through the resolver pipeline yet. Caches the result in TrackResolverCache
+     * so subsequent plays and queue items benefit.
+     */
+    private suspend fun resolveOnTheFly(track: TrackEntity): TrackEntity {
+        return try {
+            val query = "${track.title} ${track.artist}"
+            val sources = resolverManager.resolve(
+                query,
+                targetTitle = track.title,
+                targetArtist = track.artist,
+            )
+            if (sources.isEmpty()) {
+                Log.w(TAG, "No resolver results for '${track.title}' by ${track.artist}")
+                return track
+            }
+
+            // Cache the results so reselectBestSource works for queue tracks too
+            trackResolverCache.putSources(track.title, track.artist, sources)
+
+            val best = resolverScoring.selectBest(sources) ?: return track
+            Log.d(TAG, "On-the-fly resolved '${track.title}' → ${best.resolver}")
+            track.copy(
+                resolver = best.resolver,
+                sourceType = best.sourceType,
+                sourceUrl = best.url,
+                spotifyUri = best.spotifyUri,
+                spotifyId = best.spotifyId,
+                soundcloudId = best.soundcloudId,
+                appleMusicId = best.appleMusicId,
+            )
+        } catch (e: Exception) {
+            Log.e(TAG, "On-the-fly resolution failed for '${track.title}'", e)
+            track
+        }
     }
 
     /**

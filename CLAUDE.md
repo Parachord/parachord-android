@@ -58,6 +58,24 @@ The desktop plays SoundCloud natively via HTML5 Audio (not externally). The Andr
 
 Desktop resolvers are JSON-based plugin manifests with embedded JS. The Android app has a JS bridge architecture for running these, but native Kotlin resolvers are preferred for performance. The `ResolverManager` currently uses native API calls (Spotify Web API search) rather than the JS bridge.
 
+### On-the-fly Track Resolution
+
+Tracks from external sources (ListenBrainz weekly playlists, AI recommendations, DJ chat) arrive as metadata-only `TrackEntity` objects — they have title/artist/album but no `resolver`, `sourceUrl`, `spotifyUri`, or streaming IDs. These tracks must be resolved through the resolver pipeline before playback.
+
+**Two-layer resolution strategy:**
+1. **Background pre-resolution:** Call `TrackResolverCache.resolveInBackground(tracks)` when tracks are loaded into a list. This populates the cache with resolver results so (a) resolver badges appear in the UI and (b) playback starts instantly when the user taps a track.
+2. **On-the-fly fallback:** `PlaybackController.playTrackInternal` detects tracks with no source info and calls `resolveOnTheFly()` before routing. This catches any tracks that weren't pre-resolved (e.g. user tapped before background resolution finished).
+
+Results are cached in `TrackResolverCache.putSources()` so subsequent plays of the same track (or queue advancement) reuse the cached sources without re-resolving.
+
+### ListenBrainz Weekly Playlists
+
+The desktop fetches `GET /1/user/{username}/playlists/createdfor?count=100` (public, no auth token needed), filters by title containing "weekly jams" or "weekly exploration", sorts by date descending, and takes the most recent 4 of each type. Tracks are loaded lazily per playlist via `GET /1/playlist/{playlistId}`.
+
+On Android, `WeeklyPlaylistsRepository` mirrors this pattern. The home screen shows both sections as horizontal carousels (`LazyRow`). Tapping a card navigates to `WeeklyPlaylistScreen` (ephemeral view with a Save button). The play button on each card triggers immediate playback via `HomeViewModel.playWeeklyPlaylist()`.
+
+Ephemeral playlists use the ID format `listenbrainz-{playlistMbid}` when saved to Room.
+
 ## Design System & Theming
 
 ### Brand Colors
@@ -193,11 +211,13 @@ static let darkAccentPurple = Color(hex: "#a78bfa")
 |------|-------|
 | Resolver scoring | `resolver/ResolverScoring.kt` |
 | Track resolution | `resolver/ResolverManager.kt` |
+| Resolver cache | `resolver/TrackResolverCache.kt` |
 | Playback routing | `playback/PlaybackRouter.kt`, `PlaybackController.kt` |
 | Metadata cascade | `data/metadata/MetadataService.kt`, `*Provider.kt` |
 | Playback handlers | `playback/handlers/SpotifyPlaybackHandler.kt`, `SoundCloudPlaybackHandler.kt` |
 | Settings/defaults | `data/store/SettingsStore.kt` |
 | Theme | `ui/theme/Theme.kt` |
+| Weekly playlists | `data/repository/WeeklyPlaylistsRepository.kt`, `ui/screens/playlists/WeeklyPlaylistScreen.kt`, `WeeklyPlaylistViewModel.kt` |
 
 ## Common Mistakes to Avoid
 
@@ -211,6 +231,9 @@ static let darkAccentPurple = Color(hex: "#a78bfa")
 ### Android-Specific
 
 5. **Don't double URL-decode.** Jetpack Navigation already decodes URI path segments. Use `Uri.encode()` for encoding (not `URLEncoder.encode()` which uses `+` for spaces).
+6. **Don't play unresolved tracks without on-the-fly resolution.** Ephemeral tracks (weekly playlists, recommendations, DJ chat results) have no `resolver`, `sourceUrl`, or streaming IDs when first created — they're just metadata (title/artist/album). `PlaybackController.playTrackInternal` will resolve them on-the-fly if needed, but for best UX call `TrackResolverCache.resolveInBackground()` when tracks are loaded so resolver badges appear and playback starts faster.
+7. **Don't use grids for horizontally-scrollable content on mobile.** Desktop's multi-column grids don't work on narrow screens — use `LazyRow` carousels with fixed-width cards instead. The home screen's Weekly Jams/Exploration sections use this pattern.
+8. **Ephemeral playlists need their own screen and ViewModel.** Weekly playlists from ListenBrainz are not stored in Room — they use `WeeklyPlaylistScreen`/`WeeklyPlaylistViewModel` with a "Save" button (matching desktop's ephemeral playlist pattern). Don't try to reuse `PlaylistDetailScreen` which expects a Room-backed `PlaylistEntity`.
 
 ### iOS-Specific
 

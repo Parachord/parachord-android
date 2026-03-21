@@ -65,6 +65,7 @@ fun WeeklyPlaylistScreen(
     val isLoading by viewModel.isLoading.collectAsStateWithLifecycle()
     val saved by viewModel.saved.collectAsStateWithLifecycle()
     val nowPlayingTitle by viewModel.nowPlayingTitle.collectAsStateWithLifecycle()
+    val trackResolvers by viewModel.trackResolvers.collectAsStateWithLifecycle()
 
     Column(modifier = modifier.fillMaxSize()) {
         TopAppBar(
@@ -188,10 +189,12 @@ fun WeeklyPlaylistScreen(
 
                 // Track list
                 itemsIndexed(tracks, key = { index, track -> track.id }) { index, track ->
+                    val resolverKey = "${track.title.lowercase().trim()}|${track.artist.lowercase().trim()}"
                     TrackRow(
                         title = track.title,
                         artist = track.artist,
                         artworkUrl = track.artworkUrl,
+                        resolvers = trackResolvers[resolverKey],
                         duration = track.duration,
                         trackNumber = index + 1,
                         isPlaying = nowPlayingTitle == track.title,
