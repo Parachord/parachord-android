@@ -131,6 +131,7 @@ fun HomeScreen(
     onNavigateToFreshDrops: () -> Unit = {},
     onNavigateToCollection: (tab: Int) -> Unit = {},
     onNavigateToPlaylists: () -> Unit = {},
+    onNavigateToWeeklyPlaylist: (playlistId: String, contextType: String) -> Unit = { _, _ -> },
     modifier: Modifier = Modifier,
     viewModel: HomeViewModel = hiltViewModel(),
 ) {
@@ -344,6 +345,9 @@ fun HomeScreen(
                             onPlayPlaylist = { entry, contextType ->
                                 viewModel.playWeeklyPlaylist(entry, contextType)
                                 onNavigateToNowPlaying()
+                            },
+                            onOpenPlaylist = { entry, contextType ->
+                                onNavigateToWeeklyPlaylist(entry.id, contextType)
                             },
                         )
                         Spacer(modifier = Modifier.height(8.dp))
@@ -695,72 +699,51 @@ private fun WeeklyPlaylistsSection(
     covers: Map<String, List<String>>,
     trackCounts: Map<String, Int>,
     onPlayPlaylist: (WeeklyPlaylistEntry, String) -> Unit,
+    onOpenPlaylist: (WeeklyPlaylistEntry, String) -> Unit,
 ) {
-    Column(modifier = Modifier.padding(horizontal = 16.dp)) {
-        // Determine layout: side-by-side if both exist, full-width if only one
-        val hasBoth = !jams.isNullOrEmpty() && !exploration.isNullOrEmpty()
-
-        if (hasBoth) {
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.spacedBy(12.dp),
-            ) {
-                WeeklyColumn(
-                    title = "Weekly Jams",
-                    entries = jams!!,
-                    contextType = "weekly-jam",
-                    covers = covers,
-                    trackCounts = trackCounts,
-                    onPlay = onPlayPlaylist,
-                    modifier = Modifier.weight(1f),
-                )
-                WeeklyColumn(
-                    title = "Weekly Exploration",
-                    entries = exploration!!,
-                    contextType = "weekly-exploration",
-                    covers = covers,
-                    trackCounts = trackCounts,
-                    onPlay = onPlayPlaylist,
-                    modifier = Modifier.weight(1f),
-                )
-            }
-        } else {
-            val entries = jams ?: exploration ?: return
-            val title = if (jams != null) "Weekly Jams" else "Weekly Exploration"
-            val contextType = if (jams != null) "weekly-jam" else "weekly-exploration"
-            WeeklyColumn(
-                title = title,
-                entries = entries,
-                contextType = contextType,
+    Column(verticalArrangement = Arrangement.spacedBy(16.dp)) {
+        if (!jams.isNullOrEmpty()) {
+            WeeklyCarouselRow(
+                title = "Weekly Jams",
+                entries = jams,
+                contextType = "weekly-jam",
                 covers = covers,
                 trackCounts = trackCounts,
                 onPlay = onPlayPlaylist,
-                modifier = Modifier.fillMaxWidth(),
-                fullWidth = true,
+                onOpen = onOpenPlaylist,
+            )
+        }
+        if (!exploration.isNullOrEmpty()) {
+            WeeklyCarouselRow(
+                title = "Weekly Exploration",
+                entries = exploration,
+                contextType = "weekly-exploration",
+                covers = covers,
+                trackCounts = trackCounts,
+                onPlay = onPlayPlaylist,
+                onOpen = onOpenPlaylist,
             )
         }
     }
 }
 
 @Composable
-private fun WeeklyColumn(
+private fun WeeklyCarouselRow(
     title: String,
     entries: List<WeeklyPlaylistEntry>,
     contextType: String,
     covers: Map<String, List<String>>,
     trackCounts: Map<String, Int>,
     onPlay: (WeeklyPlaylistEntry, String) -> Unit,
-    modifier: Modifier = Modifier,
-    fullWidth: Boolean = false,
+    onOpen: (WeeklyPlaylistEntry, String) -> Unit,
 ) {
-    Column(
-        modifier = modifier,
-        verticalArrangement = Arrangement.spacedBy(8.dp),
-    ) {
+    Column {
         // Header with title + ListenBrainz badge
         Row(
             verticalAlignment = Alignment.CenterVertically,
-            modifier = Modifier.padding(bottom = 4.dp),
+            modifier = Modifier
+                .padding(horizontal = 16.dp)
+                .padding(bottom = 8.dp),
         ) {
             Text(
                 text = title,
@@ -773,59 +756,28 @@ private fun WeeklyColumn(
                 fontSize = 10.sp,
                 fontWeight = FontWeight.Medium,
                 color = ListenBrainzOrangeText,
+                maxLines = 1,
                 modifier = Modifier
                     .background(ListenBrainzOrangeBg, RoundedCornerShape(4.dp))
                     .padding(horizontal = 6.dp, vertical = 2.dp),
             )
         }
 
-        // Grid of cards: 2 columns if full-width, otherwise just stack them
-        if (fullWidth) {
-            // 4-column grid when only one type exists (matching desktop)
-            val rows = entries.chunked(4)
-            rows.forEach { rowEntries ->
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.spacedBy(8.dp),
-                ) {
-                    rowEntries.forEach { entry ->
-                        WeeklyPlaylistCard(
-                            entry = entry,
-                            covers = covers[entry.id].orEmpty(),
-                            trackCount = trackCounts[entry.id],
-                            contextType = contextType,
-                            onPlay = onPlay,
-                            modifier = Modifier.weight(1f),
-                        )
-                    }
-                    // Fill remaining space if row has fewer than 4 items
-                    repeat(4 - rowEntries.size) {
-                        Spacer(modifier = Modifier.weight(1f))
-                    }
-                }
-            }
-        } else {
-            // 2-column grid within each side
-            val rows = entries.chunked(2)
-            rows.forEach { rowEntries ->
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.spacedBy(8.dp),
-                ) {
-                    rowEntries.forEach { entry ->
-                        WeeklyPlaylistCard(
-                            entry = entry,
-                            covers = covers[entry.id].orEmpty(),
-                            trackCount = trackCounts[entry.id],
-                            contextType = contextType,
-                            onPlay = onPlay,
-                            modifier = Modifier.weight(1f),
-                        )
-                    }
-                    if (rowEntries.size == 1) {
-                        Spacer(modifier = Modifier.weight(1f))
-                    }
-                }
+        // Horizontal carousel of cards
+        LazyRow(
+            contentPadding = PaddingValues(horizontal = 16.dp),
+            horizontalArrangement = Arrangement.spacedBy(12.dp),
+        ) {
+            items(entries, key = { it.id }) { entry ->
+                WeeklyPlaylistCard(
+                    entry = entry,
+                    covers = covers[entry.id].orEmpty(),
+                    trackCount = trackCounts[entry.id],
+                    contextType = contextType,
+                    onPlay = onPlay,
+                    onClick = { onOpen(entry, contextType) },
+                    modifier = Modifier.width(140.dp),
+                )
             }
         }
     }
@@ -838,6 +790,7 @@ private fun WeeklyPlaylistCard(
     trackCount: Int?,
     contextType: String,
     onPlay: (WeeklyPlaylistEntry, String) -> Unit,
+    onClick: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
     val isDark = isSystemInDarkTheme()
@@ -847,7 +800,7 @@ private fun WeeklyPlaylistCard(
         modifier = modifier
             .clip(RoundedCornerShape(12.dp))
             .background(cardBg)
-            .hapticClickable(onClick = { onPlay(entry, contextType) }),
+            .hapticClickable(onClick = onClick),
     ) {
         // 2x2 mosaic album art area
         Box(
@@ -894,29 +847,22 @@ private fun WeeklyPlaylistCard(
                 }
             }
 
-            // Play button overlay on hover/tap area
+            // Play button at bottom-right
             Box(
                 modifier = Modifier
-                    .fillMaxSize()
-                    .background(Color.Black.copy(alpha = 0.0f)), // transparent by default
+                    .align(Alignment.BottomEnd)
+                    .padding(8.dp)
+                    .size(36.dp)
+                    .background(Color(0xFF7C3AED), CircleShape)
+                    .hapticClickable(onClick = { onPlay(entry, contextType) }),
                 contentAlignment = Alignment.Center,
             ) {
-                // Small play icon at bottom-right
-                Box(
-                    modifier = Modifier
-                        .align(Alignment.BottomEnd)
-                        .padding(8.dp)
-                        .size(36.dp)
-                        .background(Color(0xFF7C3AED), CircleShape),
-                    contentAlignment = Alignment.Center,
-                ) {
-                    Icon(
-                        imageVector = Icons.Filled.PlayArrow,
-                        contentDescription = "Play ${entry.weekLabel}",
-                        tint = Color.White,
-                        modifier = Modifier.size(20.dp),
-                    )
-                }
+                Icon(
+                    imageVector = Icons.Filled.PlayArrow,
+                    contentDescription = "Play ${entry.weekLabel}",
+                    tint = Color.White,
+                    modifier = Modifier.size(20.dp),
+                )
             }
         }
 
