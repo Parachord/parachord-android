@@ -182,7 +182,7 @@ fun ConcertsScreen(
                     )
                 }
             }
-            Spacer(modifier = Modifier.height(4.dp))
+            Spacer(modifier = Modifier.height(8.dp))
         }
 
         // Content
@@ -530,16 +530,13 @@ private fun ConcertEventCard(
         modifier = Modifier
             .fillMaxWidth()
             .clickable { onArtistClick() }
-            .padding(horizontal = 16.dp, vertical = 8.dp),
-        verticalAlignment = Alignment.Top,
+            .padding(horizontal = 16.dp, vertical = 10.dp),
     ) {
         // Date sidebar (matching desktop: month + day + weekday)
         if (dateInfo != null) {
             Column(
                 horizontalAlignment = Alignment.CenterHorizontally,
-                modifier = Modifier
-                    .width(44.dp)
-                    .padding(top = 2.dp),
+                modifier = Modifier.width(44.dp),
             ) {
                 Text(
                     text = dateInfo.first,
@@ -590,14 +587,18 @@ private fun ConcertEventCard(
         Spacer(modifier = Modifier.width(12.dp))
 
         Column(modifier = Modifier.weight(1f)) {
-            // Artist name
-            Text(
-                text = event.artistName ?: event.name,
-                style = MaterialTheme.typography.bodyMedium,
-                fontWeight = FontWeight.Medium,
-                maxLines = 1,
-                overflow = TextOverflow.Ellipsis,
-            )
+            // Artist name + ticket button on same line
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Text(
+                    text = event.artistName ?: event.name,
+                    style = MaterialTheme.typography.bodyMedium,
+                    fontWeight = FontWeight.Medium,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                    modifier = Modifier.weight(1f),
+                )
+                TicketButton(event = event, onTicketClick = onTicketClick)
+            }
 
             // Source badges
             Row(
@@ -663,9 +664,6 @@ private fun ConcertEventCard(
                 )
             }
         }
-
-        // Ticket button(s)
-        TicketButton(event = event, onTicketClick = onTicketClick)
     }
 }
 

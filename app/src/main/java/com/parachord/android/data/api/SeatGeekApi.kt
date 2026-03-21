@@ -30,6 +30,9 @@ interface SeatGeekApi {
         @Query("datetime_utc.gte") datetimeGte: String? = null,
         @Query("sort") sort: String = "datetime_local.asc",
         @Query("per_page") perPage: Int = 50,
+        @Query("lat") lat: Double? = null,
+        @Query("lon") lon: Double? = null,
+        @Query("range") range: String? = null,
         @Query("client_id") clientId: String,
     ): SgSearchResponse
 

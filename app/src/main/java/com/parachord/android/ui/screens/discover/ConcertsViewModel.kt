@@ -171,8 +171,12 @@ class ConcertsViewModel @Inject constructor(
                     }
                 } else {
                     // Personalized: search for user's artists' concerts
+                    val loc = settingsStore.getConcertLocation()
                     concertsRepository.getPersonalizedEvents(
                         artists = artists,
+                        lat = loc.latitude,
+                        lon = loc.longitude,
+                        radiusMiles = loc.radiusMiles,
                         forceRefresh = forceRefresh,
                     ).collect { _events.value = it }
                 }

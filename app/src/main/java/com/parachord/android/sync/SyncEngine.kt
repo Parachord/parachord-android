@@ -479,32 +479,72 @@ class SyncEngine @Inject constructor(
             }
         }
 
+        // Clean up duplicate playlists on Spotify created by earlier sync bugs.
+        // Group owned remote playlists by name — if there are multiple with the
+        // same name, keep the one we're already tracking locally (or the oldest)
+        // and delete the rest from Spotify.
+        val ownedByName = remotePlaylists.filter { it.isOwned }
+            .groupBy { it.entity.name.lowercase() }
+        for ((_, dupes) in ownedByName) {
+            if (dupes.size <= 1) continue
+            // Prefer the one we already have a sync source for
+            val trackedIds = localSources.mapNotNull { it.externalId }.toSet()
+            val tracked = dupes.filter { it.spotifyId in trackedIds }
+            val keep = tracked.firstOrNull() ?: dupes.first()
+            for (dupe in dupes) {
+                if (dupe.spotifyId == keep.spotifyId) continue
+                try {
+                    Log.d(TAG, "Removing duplicate Spotify playlist: ${dupe.entity.name} (${dupe.spotifyId})")
+                    spotifyProvider.deletePlaylist(dupe.spotifyId)
+                    removed++
+                } catch (e: Exception) {
+                    Log.e(TAG, "Failed to remove duplicate playlist ${dupe.spotifyId}", e)
+                }
+            }
+        }
+
         // Push local-only playlists to Spotify
         if (settings.pushLocalPlaylists) {
             val allPlaylists = playlistDao.getAllSync()
             val localOnly = allPlaylists.filter { it.spotifyId == null }
+            // Build a lookup of owned remote playlists by name for reuse
+            val ownedRemoteByName = remotePlaylists.filter { it.isOwned }
+                .associateBy { it.entity.name.lowercase() }
 
             for (playlist in localOnly) {
                 try {
-                    val created = spotifyProvider.createPlaylistOnSpotify(
-                        playlist.name, playlist.description
-                    )
-                    val createdId = created.id ?: continue
+                    // Check if an owned playlist with this name already exists
+                    // on Spotify (e.g. from a previous push before sync_sources
+                    // were cleared). Reuse it instead of creating a duplicate.
+                    val existing = ownedRemoteByName[playlist.name.lowercase()]
+                    val spotifyId: String
+                    val snapshotId: String?
+                    if (existing != null) {
+                        Log.d(TAG, "Reusing existing Spotify playlist '${playlist.name}' (${existing.spotifyId})")
+                        spotifyId = existing.spotifyId
+                        snapshotId = existing.snapshotId
+                    } else {
+                        val created = spotifyProvider.createPlaylistOnSpotify(
+                            playlist.name, playlist.description
+                        )
+                        spotifyId = created.id ?: continue
+                        snapshotId = created.snapshotId
+                    }
                     val tracks = playlistTrackDao.getByPlaylistIdSync(playlist.id)
                     val uris = tracks.mapNotNull { it.trackSpotifyUri }
                     if (uris.isNotEmpty()) {
-                        spotifyProvider.replacePlaylistTracks(createdId, uris)
+                        spotifyProvider.replacePlaylistTracks(spotifyId, uris)
                     }
                     playlistDao.update(playlist.copy(
-                        spotifyId = createdId,
-                        snapshotId = created.snapshotId,
+                        spotifyId = spotifyId,
+                        snapshotId = snapshotId,
                         locallyModified = false,
                     ))
                     syncSourceDao.insert(SyncSourceEntity(
                         itemId = playlist.id,
                         itemType = "playlist",
                         providerId = providerId,
-                        externalId = createdId,
+                        externalId = spotifyId,
                         syncedAt = System.currentTimeMillis(),
                     ))
                     added++
