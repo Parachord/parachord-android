@@ -221,3 +221,44 @@ static let darkAccentPurple = Color(hex: "#a78bfa")
 10. **Don't block the main actor.** Network calls and metadata lookups must run in a `Task` or detached context. Use `@MainActor` only for UI state updates.
 11. **Don't use `Timer` for playback progress.** Use `AVPlayer.addPeriodicTimeObserver(forInterval:queue:using:)` instead — it's synchronized with the audio clock.
 12. **Don't forget to handle Spotify SDK auth flow.** The iOS SDK requires handling the redirect URL in `SceneDelegate.scene(_:openURLContexts:)` or via `.onOpenURL` in SwiftUI.
+
+## AI Provider Integration Learnings
+
+### Timeouts & Reliability
+
+- **AI generation needs long timeouts.** LLM responses routinely take 30–60 seconds. Create a separate `OkHttpClient` (or `URLSession` config) with 60s read timeout for AI calls. The default 10–15s timeout will fail constantly.
+- **Always surface AI errors to the user.** Don't silently swallow failures — show a toast/snackbar so users know something went wrong rather than staring at an empty screen.
+
+### JSON Parsing from AI Providers
+
+- **AI models wrap JSON in preamble text.** Even when asked for JSON, models often add "Here's the JSON:" or markdown fences before the actual JSON. Use a brace-depth-tracking extractor (`extractJsonObject()`) to find the JSON within the response — don't assume the entire response is valid JSON.
+- **Use API-level JSON mode when available.** ChatGPT supports `response_format: { "type": "json_object" }`. Gemini supports `responseMimeType: "application/json"`. These dramatically improve reliability.
+- **Claude has no native JSON mode.** Use the prefill trick: set the first assistant character to `{` so Claude continues the JSON object directly. Then reconstruct: `"{" + response.content`.
+- **Always use `ignoreUnknownKeys = true`** when parsing AI-generated JSON. Models may add extra fields.
+
+### Tool Message Ordering (DJ Chat)
+
+- **ChatGPT requires strict tool message ordering:** `[ASSISTANT(toolCalls), TOOL(result1), TOOL(result2), ...]`. Tool result messages must immediately follow the assistant message that requested them, paired by `tool_call_id`.
+- **History pruning can orphan tool messages.** When trimming old messages, never split an ASSISTANT+toolCalls message from its TOOL result messages. Walk backward to keep these groups intact. Add a `sanitizeHistory()` pass to remove any orphaned TOOL messages.
+- **Claude expects tool results as user messages** with `tool_result` content blocks and `tool_use_id` fields.
+
+### Prompt Engineering for Music Recommendations
+
+- **AI models recommend genre names as track titles** if not explicitly told otherwise. Prompts must say "recommend real, specific songs by real artists — not genre names or descriptions."
+- **Always use the user's configured AI provider** (from settings), not a hardcoded default. Check `settingsStore.selectedChatPlugin`.
+- **Including listening history context** (recently played tracks, top artists) significantly improves recommendation quality. Make this opt-in with a user toggle for privacy.
+
+### Key AI Files
+
+| Area | Files |
+|------|-------|
+| Recommendation generation | `ai/AiRecommendationService.kt` |
+| DJ chat orchestration | `ai/AiChatService.kt` |
+| Provider interface | `ai/AiChatProvider.kt` |
+| ChatGPT provider | `ai/providers/ChatGptProvider.kt` |
+| Claude provider | `ai/providers/ClaudeProvider.kt` |
+| Gemini provider | `ai/providers/GeminiProvider.kt` |
+| DJ tool schemas | `ai/tools/DjToolDefinitions.kt` |
+| Tool execution | `ai/tools/DjToolExecutor.kt` |
+| Listening history context | `ai/ChatContextProvider.kt` |
+| Recommendations UI | `ui/screens/discover/RecommendationsScreen.kt`, `RecommendationsViewModel.kt` |

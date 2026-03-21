@@ -1,0 +1,139 @@
+package com.parachord.android.data.repository
+
+import android.util.Log
+import com.parachord.android.data.api.LbPlaylistTrack
+import com.parachord.android.data.api.ListenBrainzApi
+import com.parachord.android.data.store.SettingsStore
+import kotlinx.coroutines.async
+import kotlinx.coroutines.coroutineScope
+import javax.inject.Inject
+import javax.inject.Singleton
+
+/**
+ * Repository for ListenBrainz Weekly Jams and Weekly Exploration playlists.
+ * Matches the desktop's `loadWeeklyPlaylists` + `loadWeeklyJamTracks` pattern.
+ *
+ * Desktop fetches `/1/user/{username}/playlists/createdfor?count=100`, filters by title
+ * containing "weekly jams" or "weekly exploration", sorts by date descending, and takes
+ * the most recent 4 of each type. Tracks are loaded lazily per playlist.
+ */
+@Singleton
+class WeeklyPlaylistsRepository @Inject constructor(
+    private val listenBrainzApi: ListenBrainzApi,
+    private val settingsStore: SettingsStore,
+) {
+    companion object {
+        private const val TAG = "WeeklyPlaylistsRepo"
+        private const val MAX_WEEKS = 4
+    }
+
+    @Volatile
+    private var cachedResult: WeeklyPlaylistsResult? = null
+
+    /**
+     * Load Weekly Jams and Weekly Exploration playlists from ListenBrainz.
+     * Returns null if ListenBrainz username is not configured.
+     */
+    suspend fun loadWeeklyPlaylists(forceRefresh: Boolean = false): WeeklyPlaylistsResult? {
+        if (!forceRefresh) cachedResult?.let { return it }
+
+        val username = settingsStore.getListenBrainzUsername() ?: return null
+
+        return try {
+            val allPlaylists = listenBrainzApi.getCreatedForPlaylists(username)
+
+            val jamsPlaylists = allPlaylists
+                .filter { it.title.contains("weekly jams", ignoreCase = true) }
+                .sortedByDescending { it.date }
+                .take(MAX_WEEKS)
+
+            val explorationPlaylists = allPlaylists
+                .filter { it.title.contains("weekly exploration", ignoreCase = true) }
+                .sortedByDescending { it.date }
+                .take(MAX_WEEKS)
+
+            val weekLabels = listOf("This Week", "Last Week", "2 Weeks Ago", "3 Weeks Ago")
+
+            fun buildEntries(playlists: List<com.parachord.android.data.api.LbCreatedForPlaylist>, defaultDesc: String) =
+                playlists.mapIndexed { i, p ->
+                    WeeklyPlaylistEntry(
+                        id = p.id,
+                        title = p.title,
+                        weekLabel = weekLabels.getOrElse(i) { "${i} Weeks Ago" },
+                        description = p.annotation.ifBlank { defaultDesc },
+                        date = p.date,
+                    )
+                }
+
+            val jams = buildEntries(jamsPlaylists,
+                "Your favorite tracks from the past week, curated by ListenBrainz")
+            val exploration = buildEntries(explorationPlaylists,
+                "New discoveries based on your listening habits, curated by ListenBrainz")
+
+            val result = WeeklyPlaylistsResult(
+                jams = jams.ifEmpty { null },
+                exploration = exploration.ifEmpty { null },
+            )
+            cachedResult = result
+            result
+        } catch (e: Exception) {
+            Log.e(TAG, "Failed to load weekly playlists", e)
+            null
+        }
+    }
+
+    /**
+     * Load tracks for a specific weekly playlist and extract cover art URLs.
+     */
+    suspend fun loadPlaylistTracks(playlistId: String): List<LbPlaylistTrack> {
+        return try {
+            listenBrainzApi.getPlaylistTracksRich(playlistId)
+        } catch (e: Exception) {
+            Log.e(TAG, "Failed to load tracks for playlist $playlistId", e)
+            emptyList()
+        }
+    }
+
+    /**
+     * Load cover art URLs for a playlist (up to 4, for the 2x2 mosaic).
+     */
+    suspend fun loadPlaylistCovers(playlistId: String): List<String> {
+        val tracks = loadPlaylistTracks(playlistId)
+        return tracks.mapNotNull { it.albumArt }.distinct().take(4)
+    }
+
+    /**
+     * Load covers for all entries in parallel.
+     */
+    suspend fun loadAllCovers(
+        entries: List<WeeklyPlaylistEntry>,
+    ): Map<String, List<String>> = coroutineScope {
+        val deferred = entries.map { entry ->
+            async {
+                entry.id to loadPlaylistCovers(entry.id)
+            }
+        }
+        deferred.associate { it.await() }
+    }
+
+    fun clearCache() {
+        cachedResult = null
+    }
+}
+
+/** Combined result of Weekly Jams + Weekly Exploration. */
+data class WeeklyPlaylistsResult(
+    val jams: List<WeeklyPlaylistEntry>?,
+    val exploration: List<WeeklyPlaylistEntry>?,
+) {
+    val isEmpty: Boolean get() = jams.isNullOrEmpty() && exploration.isNullOrEmpty()
+}
+
+/** A single week's playlist entry (e.g. "This Week's Weekly Jams"). */
+data class WeeklyPlaylistEntry(
+    val id: String,             // Playlist MBID
+    val title: String,
+    val weekLabel: String,      // "This Week", "Last Week", etc.
+    val description: String,
+    val date: String,
+)

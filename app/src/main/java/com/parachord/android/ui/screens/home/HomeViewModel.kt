@@ -15,6 +15,8 @@ import com.parachord.android.data.repository.FriendsRepository
 import com.parachord.android.data.repository.LibraryRepository
 import com.parachord.android.data.repository.RecommendationsRepository
 import com.parachord.android.data.repository.Resource
+import com.parachord.android.data.repository.WeeklyPlaylistEntry
+import com.parachord.android.data.repository.WeeklyPlaylistsRepository
 import com.parachord.android.data.scanner.MediaScanner
 import com.parachord.android.data.scanner.ScanProgress
 import com.parachord.android.data.store.SettingsStore
@@ -59,6 +61,7 @@ class HomeViewModel @Inject constructor(
     private val freshDropsRepository: FreshDropsRepository,
     private val chartsRepository: ChartsRepository,
     private val aiRecommendationService: AiRecommendationService,
+    private val weeklyPlaylistsRepository: WeeklyPlaylistsRepository,
     private val settingsStore: SettingsStore,
     private val trackResolverCache: TrackResolverCache,
 ) : ViewModel() {
@@ -145,9 +148,26 @@ class HomeViewModel @Inject constructor(
     private val _aiError = MutableStateFlow<String?>(null)
     val aiError: StateFlow<String?> = _aiError
 
+    // ── Weekly Playlists (ListenBrainz) ─────────────────────────────
+
+    private val _weeklyJams = MutableStateFlow<List<WeeklyPlaylistEntry>?>(null)
+    val weeklyJams: StateFlow<List<WeeklyPlaylistEntry>?> = _weeklyJams
+
+    private val _weeklyExploration = MutableStateFlow<List<WeeklyPlaylistEntry>?>(null)
+    val weeklyExploration: StateFlow<List<WeeklyPlaylistEntry>?> = _weeklyExploration
+
+    /** Covers for each playlist entry ID → list of up to 4 album art URLs. */
+    private val _weeklyCovers = MutableStateFlow<Map<String, List<String>>>(emptyMap())
+    val weeklyCovers: StateFlow<Map<String, List<String>>> = _weeklyCovers
+
+    /** Track counts per playlist entry ID. */
+    private val _weeklyTrackCounts = MutableStateFlow<Map<String, Int>>(emptyMap())
+    val weeklyTrackCounts: StateFlow<Map<String, Int>> = _weeklyTrackCounts
+
     init {
         loadDiscoverPreviews()
         checkAiPlugins()
+        loadWeeklyPlaylists()
         // Run full resolver pipeline against stored tracks in background (concurrent, deduplicated)
         viewModelScope.launch {
             recentTracks.collect { tracks ->
@@ -250,6 +270,57 @@ class HomeViewModel @Inject constructor(
                     )
                 }
             } catch (_: Exception) { /* skip preview */ }
+        }
+    }
+
+    private fun loadWeeklyPlaylists() {
+        viewModelScope.launch {
+            val result = weeklyPlaylistsRepository.loadWeeklyPlaylists() ?: return@launch
+            _weeklyJams.value = result.jams
+            _weeklyExploration.value = result.exploration
+
+            // Load covers and track counts for all entries in parallel
+            val allEntries = (result.jams.orEmpty()) + (result.exploration.orEmpty())
+            if (allEntries.isEmpty()) return@launch
+
+            // Load covers and track counts concurrently per entry
+            allEntries.forEach { entry ->
+                launch {
+                    val tracks = weeklyPlaylistsRepository.loadPlaylistTracks(entry.id)
+                    _weeklyTrackCounts.value = _weeklyTrackCounts.value + (entry.id to tracks.size)
+                    val covers = tracks.mapNotNull { it.albumArt }.distinct().take(4)
+                    if (covers.isNotEmpty()) {
+                        _weeklyCovers.value = _weeklyCovers.value + (entry.id to covers)
+                    }
+                }
+            }
+        }
+    }
+
+    /**
+     * Play all tracks from a weekly playlist entry.
+     */
+    fun playWeeklyPlaylist(entry: WeeklyPlaylistEntry, contextType: String) {
+        viewModelScope.launch {
+            val tracks = weeklyPlaylistsRepository.loadPlaylistTracks(entry.id)
+            if (tracks.isEmpty()) return@launch
+            val trackEntities = tracks.map { lbTrack ->
+                com.parachord.android.data.db.entity.TrackEntity(
+                    id = lbTrack.id,
+                    title = lbTrack.title,
+                    artist = lbTrack.artist,
+                    album = lbTrack.album ?: "",
+                    duration = lbTrack.durationMs?.let { it / 1000 } ?: 0,
+                    artworkUrl = lbTrack.albumArt,
+                )
+            }
+            playbackController.playQueue(
+                tracks = trackEntities,
+                context = com.parachord.android.playback.PlaybackContext(
+                    type = contextType,
+                    name = "${entry.weekLabel}'s ${if (contextType == "weekly-jam") "Weekly Jams" else "Weekly Exploration"}",
+                ),
+            )
         }
     }
 

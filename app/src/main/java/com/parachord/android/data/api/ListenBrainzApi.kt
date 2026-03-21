@@ -338,6 +338,123 @@ class ListenBrainzApi @Inject constructor(
         }
 
     /**
+     * Fetch playlists "created for" a user by ListenBrainz (Weekly Jams, Weekly Exploration, etc.).
+     * Returns raw playlist metadata (title, identifier, date, annotation).
+     * No auth required.
+     */
+    suspend fun getCreatedForPlaylists(
+        username: String,
+        count: Int = 100,
+    ): List<LbCreatedForPlaylist> = withContext(Dispatchers.IO) {
+        val url = "$BASE_URL/1/user/${java.net.URLEncoder.encode(username, "UTF-8")}/playlists/createdfor?count=$count"
+        val request = Request.Builder().url(url).get().build()
+        return@withContext try {
+            val response = executeWithRetry(request)
+            val body = response.body?.string()
+            if (!response.isSuccessful || body == null) return@withContext emptyList()
+
+            val json = JSONObject(body)
+            val playlists = json.optJSONArray("playlists") ?: return@withContext emptyList()
+
+            (0 until playlists.length()).mapNotNull { i ->
+                try {
+                    val wrapper = playlists.getJSONObject(i)
+                    val playlist = wrapper.optJSONObject("playlist") ?: return@mapNotNull null
+                    val identifier = playlist.optString("identifier", "")
+                    val mbid = identifier.substringAfterLast("/").ifBlank { return@mapNotNull null }
+                    LbCreatedForPlaylist(
+                        id = mbid,
+                        title = playlist.optString("title", ""),
+                        date = playlist.optString("date", ""),
+                        annotation = playlist.optString("annotation", ""),
+                    )
+                } catch (_: Exception) { null }
+            }
+        } catch (e: Exception) {
+            Log.e(TAG, "Failed to fetch created-for playlists for $username", e)
+            emptyList()
+        }
+    }
+
+    /**
+     * Fetch tracks from a specific ListenBrainz playlist by MBID.
+     * Returns rich track data including album art from Cover Art Archive.
+     */
+    suspend fun getPlaylistTracksRich(playlistMbid: String): List<LbPlaylistTrack> =
+        withContext(Dispatchers.IO) {
+            val url = "$BASE_URL/1/playlist/$playlistMbid"
+            val request = Request.Builder().url(url).get().build()
+            return@withContext try {
+                val response = executeWithRetry(request)
+                val body = response.body?.string()
+                if (!response.isSuccessful || body == null) return@withContext emptyList()
+
+                val json = JSONObject(body)
+                val playlist = json.optJSONObject("playlist") ?: return@withContext emptyList()
+                val tracks = playlist.optJSONArray("track") ?: return@withContext emptyList()
+
+                (0 until tracks.length()).mapNotNull { i ->
+                    try {
+                        val track = tracks.getJSONObject(i)
+                        val ext = track.optJSONObject("extension")
+                            ?.optJSONObject("https://musicbrainz.org/doc/jspf#track")
+                        val addlMeta = ext?.optJSONObject("additional_metadata")
+                        val caaReleaseMbid = addlMeta?.optString("caa_release_mbid", "")
+                            ?.ifBlank { null }
+                        val albumArt = caaReleaseMbid?.let {
+                            "https://coverartarchive.org/release/$it/front-250"
+                        }
+                        val recordingMbid = track.optJSONArray("identifier")
+                            ?.optString(0, "")
+                            ?.substringAfterLast("/")
+                            ?.ifBlank { null }
+                        LbPlaylistTrack(
+                            id = recordingMbid ?: "lb-track-$playlistMbid-$i",
+                            title = track.optString("title", "Unknown Track"),
+                            artist = track.optString("creator", "Unknown Artist"),
+                            album = ext?.optString("release_name", "")?.ifBlank { null }
+                                ?: addlMeta?.optString("release_name", "")?.ifBlank { null },
+                            albumArt = albumArt,
+                            durationMs = track.optLong("duration", 0).takeIf { it > 0 },
+                            mbid = recordingMbid,
+                        )
+                    } catch (e: Exception) {
+                        Log.w(TAG, "Failed to parse playlist track at index $i", e)
+                        null
+                    }
+                }
+            } catch (e: Exception) {
+                Log.e(TAG, "Failed to fetch playlist $playlistMbid", e)
+                emptyList()
+            }
+        }
+
+    /**
+     * Execute a request with retry logic for 429/503 responses (matching desktop's fetchListenBrainz).
+     */
+    private fun executeWithRetry(request: Request, maxRetries: Int = 3): okhttp3.Response {
+        for (attempt in 0 until maxRetries) {
+            try {
+                val response = okHttpClient.newCall(request).execute()
+                if (response.isSuccessful) return response
+                if (response.code == 429 || response.code == 503) {
+                    response.close()
+                    val delay = Math.pow(2.0, attempt.toDouble()).toLong() * 1500
+                    Thread.sleep(delay)
+                    continue
+                }
+                return response
+            } catch (e: java.io.IOException) {
+                if (attempt < maxRetries - 1) {
+                    val delay = Math.pow(2.0, attempt.toDouble()).toLong() * 1500
+                    Thread.sleep(delay)
+                } else throw e
+            }
+        }
+        return okHttpClient.newCall(request).execute()
+    }
+
+    /**
      * Fetch user's top releases (albums) for a given time range.
      */
     suspend fun getUserTopReleases(
@@ -407,4 +524,23 @@ data class LbRecommendedTrack(
     val title: String,
     val artist: String,
     val album: String? = null,
+)
+
+/** A playlist "created for" a user by ListenBrainz (Weekly Jams, Weekly Exploration, etc.). */
+data class LbCreatedForPlaylist(
+    val id: String,      // Playlist MBID
+    val title: String,
+    val date: String,    // ISO date
+    val annotation: String = "",
+)
+
+/** A track from a ListenBrainz playlist with album art info. */
+data class LbPlaylistTrack(
+    val id: String,
+    val title: String,
+    val artist: String,
+    val album: String? = null,
+    val albumArt: String? = null,
+    val durationMs: Long? = null,
+    val mbid: String? = null,
 )

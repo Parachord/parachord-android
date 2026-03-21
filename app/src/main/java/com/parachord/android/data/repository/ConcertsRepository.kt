@@ -76,13 +76,34 @@ data class ConcertEvent(
             } catch (_: Exception) { t }
         }
 
-    /** Location string like "New York, NY" or "London, GB". */
+    /** Location string like "New York, NY, United States" or "London, United Kingdom". */
     val locationString: String
-        get() = displayLocation ?: buildString {
-            city?.let { append(it) }
-            state?.let { if (isNotEmpty()) append(", "); append(it) }
-            if (isEmpty()) country?.let { append(it) }
+        get() = buildString {
+            val base = displayLocation ?: buildString {
+                city?.let { append(it) }
+                state?.let { if (isNotEmpty()) append(", "); append(it) }
+            }
+            append(base)
+            val countryName = country?.let { resolveCountryName(it) }
+            if (countryName != null && !toString().contains(countryName, ignoreCase = true)) {
+                if (isNotEmpty()) append(", ")
+                append(countryName)
+            } else if (countryName != null && isEmpty()) {
+                append(countryName)
+            }
         }
+
+    companion object {
+        /** Convert a country code (e.g. "US") or name to a full display name. */
+        private fun resolveCountryName(country: String): String {
+            if (country.length == 2) {
+                return try {
+                    java.util.Locale("", country).displayCountry
+                } catch (_: Exception) { country }
+            }
+            return country
+        }
+    }
 
     /** True if event is in the future. */
     val isUpcoming: Boolean
