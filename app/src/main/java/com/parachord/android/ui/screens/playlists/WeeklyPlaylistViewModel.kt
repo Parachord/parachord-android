@@ -3,10 +3,10 @@ package com.parachord.android.ui.screens.playlists
 import androidx.lifecycle.SavedStateHandle
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
+import com.parachord.android.data.db.dao.PlaylistDao
 import com.parachord.android.data.db.entity.PlaylistEntity
 import com.parachord.android.data.db.entity.TrackEntity
 import com.parachord.android.data.repository.LibraryRepository
-import com.parachord.android.data.repository.WeeklyPlaylistEntry
 import com.parachord.android.data.repository.WeeklyPlaylistsRepository
 import com.parachord.android.playback.PlaybackContext
 import com.parachord.android.playback.PlaybackController
@@ -26,6 +26,7 @@ class WeeklyPlaylistViewModel @Inject constructor(
     savedStateHandle: SavedStateHandle,
     private val weeklyPlaylistsRepository: WeeklyPlaylistsRepository,
     private val libraryRepository: LibraryRepository,
+    private val playlistDao: PlaylistDao,
     private val playbackController: PlaybackController,
     private val playbackStateHolder: PlaybackStateHolder,
 ) : ViewModel() {
@@ -62,9 +63,14 @@ class WeeklyPlaylistViewModel @Inject constructor(
         loadPlaylist()
     }
 
+    private val savedPlaylistId get() = "listenbrainz-$playlistId"
+
     private fun loadPlaylist() {
         viewModelScope.launch {
             _isLoading.value = true
+
+            // Check if already saved to library
+            _saved.value = playlistDao.getById(savedPlaylistId) != null
 
             // Find the entry from cached data to get title/weekLabel
             val result = weeklyPlaylistsRepository.loadWeeklyPlaylists()
@@ -140,7 +146,7 @@ class WeeklyPlaylistViewModel @Inject constructor(
         if (trackList.isEmpty()) return
         viewModelScope.launch {
             val playlist = PlaylistEntity(
-                id = "listenbrainz-$playlistId",
+                id = savedPlaylistId,
                 name = _title.value,
                 description = _description.value,
                 trackCount = trackList.size,
