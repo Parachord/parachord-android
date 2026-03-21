@@ -116,7 +116,7 @@ class AiRecommendationService @Inject constructor(
                 savedAt = System.currentTimeMillis(),
             )
             val file = File(context.filesDir, CACHE_FILE)
-            file.writeText(diskJson.encodeToString(wrapper))
+            file.writeText(diskJson.encodeToString(AiSuggestionsDiskCache.serializer(), wrapper))
             Log.d(TAG, "Saved ${recommendations.albums.size} albums, ${recommendations.artists.size} artists to disk cache")
         } catch (e: Exception) {
             Log.w(TAG, "Failed to save AI suggestions disk cache", e)
