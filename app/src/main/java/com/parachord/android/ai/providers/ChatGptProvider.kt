@@ -29,6 +29,7 @@ import okhttp3.MediaType.Companion.toMediaType
 import okhttp3.OkHttpClient
 import okhttp3.Request
 import okhttp3.RequestBody.Companion.toRequestBody
+import java.util.concurrent.TimeUnit
 import javax.inject.Inject
 import javax.inject.Singleton
 
@@ -37,6 +38,15 @@ class ChatGptProvider @Inject constructor(
     private val client: OkHttpClient,
     private val json: Json,
 ) : AiChatProvider {
+
+    /** Longer timeout client for AI generation — large responses (e.g. recommendations) can take 30+ seconds. */
+    private val aiClient: OkHttpClient by lazy {
+        client.newBuilder()
+            .readTimeout(60, TimeUnit.SECONDS)
+            .writeTimeout(30, TimeUnit.SECONDS)
+            .connectTimeout(15, TimeUnit.SECONDS)
+            .build()
+    }
 
     override val id: String = "chatgpt"
     override val name: String = "ChatGPT"
@@ -76,7 +86,7 @@ class ChatGptProvider @Inject constructor(
             .build()
 
         return withContext(Dispatchers.IO) {
-            val response = client.newCall(request).execute()
+            val response = aiClient.newCall(request).execute()
             val responseBody = response.body?.string() ?: ""
 
             if (!response.isSuccessful) {
