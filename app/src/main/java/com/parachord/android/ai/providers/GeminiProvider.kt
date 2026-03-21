@@ -140,9 +140,17 @@ class GeminiProvider @Inject constructor(
             })
         }
 
+        // Detect if the system prompt requests JSON-only output and enable structured output mode
+        val wantsJson = messages.any { it.role == ChatRole.SYSTEM && it.content.contains("JSON", ignoreCase = true) && it.content.contains("no markdown", ignoreCase = true) }
+
         val body = buildJsonObject {
             put("contents", contents)
-            put("generationConfig", buildJsonObject { put("temperature", 0.7) })
+            put("generationConfig", buildJsonObject {
+                put("temperature", 0.7)
+                if (wantsJson && tools.isEmpty()) {
+                    put("responseMimeType", "application/json")
+                }
+            })
             systemInstruction?.let { put("system_instruction", it) }
             if (tools.isNotEmpty()) put("tools", geminiTools)
         }

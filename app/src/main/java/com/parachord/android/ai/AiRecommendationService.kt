@@ -139,13 +139,20 @@ Variety guidance: $theme Be creative and surprising — avoid defaulting to the 
 
         val userPrompt = "Based on this listening profile, recommend 12 albums and 20 artists I should check out. For artists, go deep — suggest a wide variety spanning different genres, eras, and regions. Avoid defaulting to the most well-known names:\n\n$contextInfo$exclusionNote"
 
-        val messages = listOf(
+        val messages = mutableListOf(
             ChatMessage(role = ChatRole.SYSTEM, content = systemPrompt),
             ChatMessage(role = ChatRole.USER, content = userPrompt),
         )
+        // For Claude, prefill assistant response with "{" to force JSON output
+        // (Claude has no native JSON mode, but respects assistant prefill)
+        if (chosen.id == "claude") {
+            messages.add(ChatMessage(role = ChatRole.ASSISTANT, content = "{"))
+        }
 
         val response = selectedProvider.chat(messages, emptyList(), selectedConfig)
-        val parsed = parseRecommendations(response.content)
+        // For Claude, prepend the prefilled "{" since the API continues from it
+        val rawContent = if (chosen.id == "claude") "{${response.content}" else response.content
+        val parsed = parseRecommendations(rawContent)
 
         if (parsed.albums.isEmpty() && parsed.artists.isEmpty()) {
             Log.w(TAG, "AI response parsed to empty recommendations. Raw content: ${response.content.take(200)}")

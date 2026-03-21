@@ -59,6 +59,9 @@ class ChatGptProvider @Inject constructor(
         val endpoint = config.endpoint.ifBlank { "https://api.openai.com/v1/chat/completions" }
         val model = config.model.ifBlank { "gpt-4o-mini" }
 
+        // Detect if the system prompt requests JSON-only output and enable structured output mode
+        val wantsJson = messages.any { it.role == ChatRole.SYSTEM && it.content.contains("JSON", ignoreCase = true) && it.content.contains("no markdown", ignoreCase = true) }
+
         val body = buildJsonObject {
             put("model", model)
             put("messages", buildJsonArray {
@@ -72,6 +75,9 @@ class ChatGptProvider @Inject constructor(
                         add(toolToJson(tool))
                     }
                 })
+            }
+            if (wantsJson && tools.isEmpty()) {
+                put("response_format", buildJsonObject { put("type", "json_object") })
             }
         }
 
