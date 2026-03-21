@@ -52,6 +52,9 @@ class AiChatService @Inject constructor(
             // Load from DB
             val entities = chatMessageDao.getByProvider(providerId)
             val messages = entities.map { it.toChatMessage() }.toMutableList()
+            // Remove orphaned TOOL messages that lost their parent ASSISTANT message
+            // (e.g. from 30-day pruning or previous trimming bugs)
+            sanitizeHistory(messages)
             histories[providerId] = messages
             loadedProviders.add(providerId)
         }
@@ -218,15 +221,72 @@ class AiChatService @Inject constructor(
     /**
      * Trim history to MAX_HISTORY_LENGTH.
      * Keeps the first message (often important context) and the last (N-1) messages.
+     * Never splits an assistant+tool_calls message from its corresponding tool result
+     * messages — OpenAI requires tool messages to follow their tool_calls message.
      */
     private fun trimHistory(history: MutableList<ChatMessage>) {
         if (history.size <= MAX_HISTORY_LENGTH) return
 
         val first = history.first()
-        val tail = history.takeLast(MAX_HISTORY_LENGTH - 1)
+        // Find a safe cut index in the tail — walk backward to find a boundary
+        // that isn't inside a tool-call sequence.
+        var cutIndex = history.size - (MAX_HISTORY_LENGTH - 1)
+        // If the message at cutIndex is a TOOL message, we'd orphan it.
+        // Walk backward to include the preceding ASSISTANT+tool_calls message.
+        while (cutIndex > 1 && history[cutIndex].role == ChatRole.TOOL) {
+            cutIndex--
+        }
+        // If we landed on an ASSISTANT message with tool_calls, its TOOL results
+        // follow — include them all. But if that pushes us to keep too many, just
+        // drop the whole tool-call group by skipping past it.
+        if (cutIndex > 1 &&
+            history[cutIndex].role == ChatRole.ASSISTANT &&
+            !history[cutIndex].toolCalls.isNullOrEmpty()
+        ) {
+            // Skip past this assistant+tools group
+            var nextAfterTools = cutIndex + 1
+            while (nextAfterTools < history.size && history[nextAfterTools].role == ChatRole.TOOL) {
+                nextAfterTools++
+            }
+            cutIndex = nextAfterTools
+        }
+
+        val tail = history.subList(cutIndex, history.size).toList()
         history.clear()
         history.add(first)
         history.addAll(tail)
+    }
+
+    /**
+     * Remove orphaned TOOL messages from the start of a loaded history.
+     * These can appear when DB pruning (deleteOlderThan) removes the preceding
+     * ASSISTANT message with tool_calls but leaves the tool result messages.
+     */
+    private fun sanitizeHistory(history: MutableList<ChatMessage>) {
+        // Drop leading TOOL messages that have no preceding ASSISTANT with tool_calls
+        while (history.isNotEmpty() && history.first().role == ChatRole.TOOL) {
+            history.removeFirst()
+        }
+        // Scan for orphaned TOOL messages in the middle of the history
+        var i = 0
+        while (i < history.size) {
+            if (history[i].role == ChatRole.TOOL) {
+                // Check that the nearest preceding ASSISTANT message has matching tool_calls
+                var foundParent = false
+                for (j in i - 1 downTo 0) {
+                    if (history[j].role == ChatRole.ASSISTANT && !history[j].toolCalls.isNullOrEmpty()) {
+                        foundParent = true
+                        break
+                    }
+                    if (history[j].role != ChatRole.TOOL) break
+                }
+                if (!foundParent) {
+                    history.removeAt(i)
+                    continue
+                }
+            }
+            i++
+        }
     }
 
     /** Map provider exceptions to user-friendly error messages, matching desktop patterns. */
