@@ -99,29 +99,31 @@ class AiRecommendationService @Inject constructor(
      * Matches desktop's loadAiRecommendations() logic.
      */
     suspend fun loadRecommendations(): AiRecommendations {
-        // Find first configured provider
-        val providers = listOf(
-            Triple("claude", claudeProvider as AiChatProvider, "claude-sonnet-4-20250514"),
+        // Use the user's selected chat provider (matching desktop's selectedChatProvider),
+        // falling back to the first configured provider if none is selected.
+        val allProviders = listOf(
             Triple("chatgpt", chatGptProvider as AiChatProvider, "gpt-4o-mini"),
+            Triple("claude", claudeProvider as AiChatProvider, "claude-sonnet-4-6-20250320"),
             Triple("gemini", geminiProvider as AiChatProvider, "gemini-2.0-flash"),
         )
 
-        var selectedProvider: AiChatProvider? = null
-        var selectedConfig = AiProviderConfig()
-
-        for ((id, provider, defaultModel) in providers) {
-            val apiKey = settingsStore.getAiProviderApiKey(id)
-            if (apiKey != null) {
-                selectedProvider = provider
-                val model = settingsStore.getAiProviderModel(id).ifBlank { defaultModel }
-                selectedConfig = AiProviderConfig(apiKey = apiKey, model = model)
-                break
-            }
+        // Only consider providers that have an API key configured
+        data class ConfiguredProvider(val id: String, val provider: AiChatProvider, val config: AiProviderConfig)
+        val configured = allProviders.mapNotNull { (id, provider, defaultModel) ->
+            val apiKey = settingsStore.getAiProviderApiKey(id) ?: return@mapNotNull null
+            val model = settingsStore.getAiProviderModel(id).ifBlank { defaultModel }
+            ConfiguredProvider(id, provider, AiProviderConfig(apiKey = apiKey, model = model))
         }
 
-        if (selectedProvider == null) {
+        if (configured.isEmpty()) {
             return AiRecommendations(emptyList(), emptyList())
         }
+
+        // Prefer the user's last-used chat provider, fall back to first configured
+        val selectedId = settingsStore.getSelectedChatProvider()
+        val chosen = configured.firstOrNull { it.id == selectedId } ?: configured.first()
+        val selectedProvider = chosen.provider
+        val selectedConfig = chosen.config
 
         // Build listening context
         val contextInfo = buildListeningContext()

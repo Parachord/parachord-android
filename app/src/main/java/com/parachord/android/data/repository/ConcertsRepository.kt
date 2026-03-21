@@ -9,9 +9,12 @@ import com.parachord.android.data.store.SettingsStore
 import dagger.hilt.android.qualifiers.ApplicationContext
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.async
+import kotlinx.coroutines.awaitAll
 import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.flow
+import kotlinx.coroutines.sync.Semaphore
+import kotlinx.coroutines.sync.withPermit
 import kotlinx.coroutines.withContext
 import kotlinx.serialization.Serializable
 import kotlinx.serialization.encodeToString
@@ -46,6 +49,8 @@ data class ConcertEvent(
     val lineup: List<String> = emptyList(), // All performing artists
     val source: String = "ticketmaster", // "ticketmaster" or "seatgeek"
     val status: String? = null,       // "onsale", "offsale", "cancelled", etc.
+    val artistSource: String? = null, // "collection", "library", or "history"
+    val ticketSources: List<TicketSource> = emptyList(), // merged ticket links from multiple providers
 ) {
     /** Formatted display date (e.g. "Sat, Mar 22, 2026"). */
     val displayDate: String
@@ -88,6 +93,23 @@ data class ConcertEvent(
             } catch (_: Exception) { true }
         }
 }
+
+@Serializable
+data class TicketSource(
+    val source: String,     // "ticketmaster" or "seatgeek"
+    val ticketUrl: String,
+    val label: String,      // "Ticketmaster" or "SeatGeek"
+)
+
+/**
+ * Artist gathered from the user's collection or listening history,
+ * used to personalize concert recommendations (matching desktop's gatherConcertsArtists).
+ */
+data class ConcertArtist(
+    val name: String,
+    val source: String,     // "collection", "library", or "history"
+    val imageUrl: String? = null,
+)
 
 @Singleton
 class ConcertsRepository @Inject constructor(
@@ -253,6 +275,46 @@ class ConcertsRepository @Inject constructor(
         }
     }
 
+    /**
+     * Get personalized events for the user's artists, matching desktop's gatherConcertsArtists.
+     * Searches for concerts by artists from the user's collection and listening history.
+     * Uses a concurrency pool (max 5 parallel requests) matching desktop behavior.
+     */
+    fun getPersonalizedEvents(
+        artists: List<ConcertArtist>,
+        forceRefresh: Boolean = false,
+    ): Flow<Resource<List<ConcertEvent>>> = flow {
+        if (!diskCacheLoaded) loadDiskCache()
+        val isStale = System.currentTimeMillis() - localFetchedAt > STALE_THRESHOLD
+
+        if (!forceRefresh && !isStale && cachedLocalEvents != null) {
+            emit(Resource.Success(cachedLocalEvents!!))
+            return@flow
+        }
+
+        cachedLocalEvents?.let { emit(Resource.Success(it)) } ?: emit(Resource.Loading)
+
+        if (artists.isEmpty()) {
+            emit(Resource.Success(emptyList()))
+            return@flow
+        }
+
+        try {
+            val events = withContext(Dispatchers.IO) {
+                fetchPersonalizedEvents(artists)
+            }
+            cachedLocalEvents = events
+            localFetchedAt = System.currentTimeMillis()
+            saveDiskCache(events, localFetchedAt)
+            emit(Resource.Success(events))
+        } catch (e: Exception) {
+            Log.e(TAG, "Failed to load personalized events", e)
+            if (cachedLocalEvents == null) {
+                emit(Resource.Error("Failed to load concerts: ${e.message}"))
+            }
+        }
+    }
+
     // ── Private fetching ────────────────────────────────────────
 
     private suspend fun fetchLocalEvents(
@@ -305,6 +367,32 @@ class ConcertsRepository @Inject constructor(
         val tmEvents = tmDeferred.await()
         val sgEvents = sgDeferred.await()
         mergeAndDedupe(tmEvents + sgEvents)
+    }
+
+    /**
+     * Fetch personalized events: query each artist with concurrency limit of 5
+     * (matching desktop's concurrency pool for multi-artist concert discovery).
+     */
+    private suspend fun fetchPersonalizedEvents(
+        artists: List<ConcertArtist>,
+    ): List<ConcertEvent> = coroutineScope {
+        val semaphore = Semaphore(5) // Max 5 concurrent requests (matching desktop)
+        val allEvents = artists.map { artist ->
+            async {
+                semaphore.withPermit {
+                    try {
+                        val events = fetchArtistEvents(artist.name)
+                        // Tag each event with the artist source
+                        events.map { it.copy(artistSource = artist.source) }
+                    } catch (e: Exception) {
+                        Log.w(TAG, "Failed to fetch events for '${artist.name}'", e)
+                        emptyList()
+                    }
+                }
+            }
+        }.awaitAll().flatten()
+
+        mergeAndDedupe(allEvents)
     }
 
     /**
@@ -384,18 +472,40 @@ class ConcertsRepository @Inject constructor(
      * Deduplicate events using two strategies (matching desktop):
      * 1. Text-based: date + normalized artist + venue prefix (20 chars)
      * 2. Events with same date + artist but different venue spellings still merge
+     * When duplicates are found, merge ticketSources from both providers.
      */
     private fun mergeAndDedupe(events: List<ConcertEvent>): List<ConcertEvent> {
-        val seen = mutableSetOf<String>()
-        return events
-            .filter { event ->
-                val artist = normalizeForDedup(event.artistName ?: event.name)
-                val venuePrefix = normalizeForDedup(event.venueName ?: "").take(20)
-                val key = "${event.date}-$artist-$venuePrefix"
-                seen.add(key)
+        val merged = linkedMapOf<String, ConcertEvent>()
+        for (event in events) {
+            if (!event.isUpcoming) continue
+            val artist = normalizeForDedup(event.artistName ?: event.name)
+            val venuePrefix = normalizeForDedup(event.venueName ?: "").take(20)
+            val key = "${event.date}-$artist-$venuePrefix"
+
+            val existing = merged[key]
+            if (existing != null) {
+                // Merge ticket sources
+                val existingSources = existing.ticketSources.ifEmpty {
+                    listOf(TicketSource(existing.source, existing.ticketUrl ?: "", sourceLabel(existing.source)))
+                }
+                val newSource = TicketSource(event.source, event.ticketUrl ?: "", sourceLabel(event.source))
+                val allSources = (existingSources + newSource).distinctBy { it.source }
+                merged[key] = existing.copy(ticketSources = allSources)
+            } else {
+                // Initialize ticketSources from single source
+                val sources = if (event.ticketUrl != null) {
+                    listOf(TicketSource(event.source, event.ticketUrl, sourceLabel(event.source)))
+                } else emptyList()
+                merged[key] = event.copy(ticketSources = sources)
             }
-            .filter { it.isUpcoming }
-            .sortedBy { it.date ?: "" }
+        }
+        return merged.values.sortedBy { it.date ?: "" }
+    }
+
+    private fun sourceLabel(source: String): String = when (source) {
+        "ticketmaster" -> "Ticketmaster"
+        "seatgeek" -> "SeatGeek"
+        else -> source.replaceFirstChar { it.uppercase() }
     }
 
     /** Normalize string for deduplication: lowercase, strip non-alphanumeric except spaces. */

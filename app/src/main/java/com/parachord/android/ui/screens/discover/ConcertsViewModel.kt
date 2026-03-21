@@ -3,6 +3,14 @@ package com.parachord.android.ui.screens.discover
 import android.util.Log
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
+import com.parachord.android.BuildConfig
+import com.parachord.android.data.api.GeoLocationService
+import com.parachord.android.data.api.LastFmApi
+import com.parachord.android.data.api.ListenBrainzApi
+import com.parachord.android.data.db.dao.ArtistDao
+import com.parachord.android.data.db.dao.TrackDao
+import com.parachord.android.data.db.dao.AlbumDao
+import com.parachord.android.data.repository.ConcertArtist
 import com.parachord.android.data.repository.ConcertEvent
 import com.parachord.android.data.repository.ConcertsRepository
 import com.parachord.android.data.repository.Resource
@@ -12,6 +20,7 @@ import kotlinx.coroutines.Job
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.launch
 import javax.inject.Inject
 
@@ -19,7 +28,18 @@ import javax.inject.Inject
 class ConcertsViewModel @Inject constructor(
     private val concertsRepository: ConcertsRepository,
     private val settingsStore: SettingsStore,
+    private val geoLocationService: GeoLocationService,
+    private val artistDao: ArtistDao,
+    private val trackDao: TrackDao,
+    private val albumDao: AlbumDao,
+    private val lastFmApi: LastFmApi,
+    private val listenBrainzApi: ListenBrainzApi,
 ) : ViewModel() {
+
+    companion object {
+        private const val TAG = "ConcertsVM"
+        private const val MAX_ARTISTS = 40 // Match desktop's max artist count
+    }
 
     private val _events = MutableStateFlow<Resource<List<ConcertEvent>>>(
         concertsRepository.cached?.let { Resource.Success(it) } ?: Resource.Loading,
@@ -38,7 +58,14 @@ class ConcertsViewModel @Inject constructor(
     private val _hasLocation = MutableStateFlow(false)
     val hasLocation: StateFlow<Boolean> = _hasLocation.asStateFlow()
 
+    private val _isDetectingLocation = MutableStateFlow(false)
+    val isDetectingLocation: StateFlow<Boolean> = _isDetectingLocation.asStateFlow()
+
+    private val _locationSuggestions = MutableStateFlow<List<GeoLocationService.GeoLocation>>(emptyList())
+    val locationSuggestions: StateFlow<List<GeoLocationService.GeoLocation>> = _locationSuggestions.asStateFlow()
+
     private var loadJob: Job? = null
+    private var searchJob: Job? = null
 
     init {
         viewModelScope.launch {
@@ -47,9 +74,54 @@ class ConcertsViewModel @Inject constructor(
             _radiusMiles.value = loc.radiusMiles
             if (loc.latitude != null && loc.longitude != null) {
                 _hasLocation.value = true
-                loadEvents(loc.latitude, loc.longitude, loc.radiusMiles)
+                loadEvents(forceRefresh = false)
+            } else {
+                // Auto-detect location via GeoIP (matching desktop behavior)
+                detectLocation()
             }
         }
+    }
+
+    /**
+     * Auto-detect location via GeoIP services (matching desktop's fallback chain).
+     */
+    fun detectLocation() {
+        viewModelScope.launch {
+            _isDetectingLocation.value = true
+            try {
+                val geo = geoLocationService.detectLocationByIp()
+                if (geo != null) {
+                    setLocation(geo.lat, geo.lng, geo.displayName)
+                }
+            } catch (e: Exception) {
+                Log.w(TAG, "GeoIP detection failed", e)
+            } finally {
+                _isDetectingLocation.value = false
+            }
+        }
+    }
+
+    /**
+     * Search for locations by query using Nominatim (matching desktop).
+     */
+    fun searchLocation(query: String) {
+        searchJob?.cancel()
+        if (query.isBlank()) {
+            _locationSuggestions.value = emptyList()
+            return
+        }
+        searchJob = viewModelScope.launch {
+            try {
+                val results = geoLocationService.searchLocations(query)
+                _locationSuggestions.value = results
+            } catch (e: Exception) {
+                Log.w(TAG, "Location search failed", e)
+            }
+        }
+    }
+
+    fun clearLocationSuggestions() {
+        _locationSuggestions.value = emptyList()
     }
 
     fun setLocation(lat: Double, lon: Double, city: String) {
@@ -58,7 +130,7 @@ class ConcertsViewModel @Inject constructor(
             settingsStore.setConcertLocation(lat, lon, city, radius)
             _locationCity.value = city
             _hasLocation.value = true
-            loadEvents(lat, lon, radius, forceRefresh = true)
+            loadEvents(forceRefresh = true)
         }
     }
 
@@ -66,40 +138,161 @@ class ConcertsViewModel @Inject constructor(
         viewModelScope.launch {
             _radiusMiles.value = radiusMiles
             settingsStore.setConcertRadius(radiusMiles)
-            val loc = settingsStore.getConcertLocation()
-            if (loc.latitude != null && loc.longitude != null) {
-                loadEvents(loc.latitude, loc.longitude, radiusMiles, forceRefresh = true)
-            }
+            loadEvents(forceRefresh = true)
         }
     }
 
     fun refresh() {
-        viewModelScope.launch {
-            val loc = settingsStore.getConcertLocation()
-            if (loc.latitude != null && loc.longitude != null) {
-                loadEvents(loc.latitude, loc.longitude, loc.radiusMiles, forceRefresh = true)
-            }
-        }
+        loadEvents(forceRefresh = true)
     }
 
-    private fun loadEvents(
-        lat: Double,
-        lon: Double,
-        radiusMiles: Int,
-        forceRefresh: Boolean = false,
-    ) {
+    /**
+     * Load personalized events: gather artists from collection + history,
+     * then search for their concerts (matching desktop's gatherConcertsArtists + fetchConcerts).
+     */
+    private fun loadEvents(forceRefresh: Boolean = false) {
         loadJob?.cancel()
         loadJob = viewModelScope.launch {
             _isRefreshing.value = true
             try {
-                concertsRepository.getLocalEvents(lat, lon, radiusMiles, forceRefresh).collect {
-                    _events.value = it
+                // Gather artists from collection and listening history
+                val artists = gatherArtists()
+                Log.d(TAG, "Gathered ${artists.size} artists for concert search")
+
+                if (artists.isEmpty()) {
+                    // Fall back to local events by location if no library artists
+                    val loc = settingsStore.getConcertLocation()
+                    if (loc.latitude != null && loc.longitude != null) {
+                        concertsRepository.getLocalEvents(
+                            loc.latitude, loc.longitude, loc.radiusMiles, forceRefresh,
+                        ).collect { _events.value = it }
+                    } else {
+                        _events.value = Resource.Success(emptyList())
+                    }
+                } else {
+                    // Personalized: search for user's artists' concerts
+                    concertsRepository.getPersonalizedEvents(
+                        artists = artists,
+                        forceRefresh = forceRefresh,
+                    ).collect { _events.value = it }
                 }
             } catch (e: Exception) {
-                Log.e("ConcertsVM", "Failed to load events", e)
+                Log.e(TAG, "Failed to load events", e)
             } finally {
                 _isRefreshing.value = false
             }
         }
+    }
+
+    /**
+     * Gather artists from user's collection and listening history.
+     * Matches desktop's gatherConcertsArtists():
+     * 1. Collection artists (explicit artist entries)
+     * 2. Library artists (from collection tracks & albums)
+     * 3. History artists (Last.fm + ListenBrainz top artists, 6-month period)
+     * De-duplicated by lowercase name, round-robin interleaved, max 40 artists.
+     */
+    private suspend fun gatherArtists(): List<ConcertArtist> {
+        val collectionArtists = mutableListOf<ConcertArtist>()
+        val libraryArtists = mutableListOf<ConcertArtist>()
+        val historyArtists = mutableListOf<ConcertArtist>()
+
+        try {
+            // 1. Collection artists (explicit artist entries in collection)
+            val artists = artistDao.getAll().first()
+            for (a in artists) {
+                collectionArtists.add(ConcertArtist(a.name, "collection", a.imageUrl))
+            }
+
+            // 2. Library artists (from tracks and albums in collection)
+            val seenLibrary = collectionArtists.map { it.name.lowercase() }.toMutableSet()
+            val tracks = trackDao.getAll().first()
+            for (t in tracks) {
+                val name = t.artist
+                if (name.lowercase() !in seenLibrary) {
+                    seenLibrary.add(name.lowercase())
+                    libraryArtists.add(ConcertArtist(name, "library"))
+                }
+            }
+            val albums = albumDao.getAll().first()
+            for (a in albums) {
+                val name = a.artist
+                if (name.lowercase() !in seenLibrary) {
+                    seenLibrary.add(name.lowercase())
+                    libraryArtists.add(ConcertArtist(name, "library"))
+                }
+            }
+        } catch (e: Exception) {
+            Log.w(TAG, "Failed to gather collection/library artists", e)
+        }
+
+        // 3. History artists from Last.fm + ListenBrainz (6-month period, limit 40)
+        try {
+            val lastfmUsername = settingsStore.getLastFmUsername()
+            if (lastfmUsername != null) {
+                val response = lastFmApi.getUserTopArtists(
+                    user = lastfmUsername,
+                    period = "6month",
+                    limit = 40,
+                    apiKey = BuildConfig.LASTFM_API_KEY,
+                )
+                response.topartists?.artist?.forEach { a ->
+                    historyArtists.add(ConcertArtist(a.name, "history"))
+                }
+            }
+        } catch (e: Exception) {
+            Log.w(TAG, "Failed to fetch Last.fm top artists", e)
+        }
+
+        try {
+            val lbUsername = settingsStore.getListenBrainzUsername()
+            if (lbUsername != null) {
+                val lbArtists = listenBrainzApi.getUserTopArtists(
+                    username = lbUsername,
+                    range = "half_yearly",
+                    count = 40,
+                )
+                for (a in lbArtists) {
+                    historyArtists.add(ConcertArtist(a.name, "history"))
+                }
+            }
+        } catch (e: Exception) {
+            Log.w(TAG, "Failed to fetch ListenBrainz top artists", e)
+        }
+
+        // Interleave sources for fair representation (matching desktop's round-robin)
+        return interleaveAndDedupe(collectionArtists, libraryArtists, historyArtists)
+    }
+
+    /**
+     * Round-robin interleave artists from multiple sources, de-duplicate by name,
+     * max [MAX_ARTISTS] total (matching desktop behavior).
+     */
+    private fun interleaveAndDedupe(
+        vararg sources: List<ConcertArtist>,
+    ): List<ConcertArtist> {
+        val result = mutableListOf<ConcertArtist>()
+        val seen = mutableSetOf<String>()
+        val iterators = sources.map { it.iterator() }.toMutableList()
+
+        while (result.size < MAX_ARTISTS && iterators.any { it.hasNext() }) {
+            val toRemove = mutableListOf<Iterator<ConcertArtist>>()
+            for (iter in iterators) {
+                if (result.size >= MAX_ARTISTS) break
+                // Skip to next unseen artist in this source
+                while (iter.hasNext()) {
+                    val artist = iter.next()
+                    val key = artist.name.lowercase()
+                    if (key !in seen) {
+                        seen.add(key)
+                        result.add(artist)
+                        break
+                    }
+                }
+                if (!iter.hasNext()) toRemove.add(iter)
+            }
+            iterators.removeAll(toRemove)
+        }
+        return result
     }
 }

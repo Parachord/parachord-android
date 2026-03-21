@@ -13,6 +13,7 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.WindowInsets
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.material.icons.Icons
@@ -80,6 +81,7 @@ private val ActiveControlColor = Color(0xFFC084FC)
 fun NowPlayingScreen(
     onBack: () -> Unit,
     onNavigateToArtist: (artistName: String) -> Unit = {},
+    onNavigateToArtistOnTour: (artistName: String) -> Unit = {},
     onNavigateToAlbum: (albumTitle: String, artistName: String) -> Unit = { _, _ -> },
     onNavigateToPlaylist: (playlistId: String) -> Unit = {},
     listenAlongFriend: FriendEntity? = null,
@@ -320,17 +322,36 @@ fun NowPlayingScreen(
                         overflow = TextOverflow.Ellipsis,
                     )
                     Spacer(modifier = Modifier.height(4.dp))
-                    Text(
-                        text = displayArtist,
-                        style = MaterialTheme.typography.bodyLarge,
-                        color = PlayerTextSecondary,
-                        textAlign = TextAlign.Center,
-                        maxLines = 1,
-                        overflow = TextOverflow.Ellipsis,
-                        modifier = if (displayArtist.isNotBlank()) {
-                            Modifier.hapticClickable { onNavigateToArtist(displayArtist) }
-                        } else Modifier,
-                    )
+
+                    // Artist name row with On Tour dot
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.Center,
+                        modifier = Modifier.fillMaxWidth(),
+                    ) {
+                        Text(
+                            text = displayArtist,
+                            style = MaterialTheme.typography.bodyLarge,
+                            color = PlayerTextSecondary,
+                            textAlign = TextAlign.Center,
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis,
+                            modifier = if (displayArtist.isNotBlank()) {
+                                Modifier.hapticClickable { onNavigateToArtist(displayArtist) }
+                            } else Modifier,
+                        )
+                        if (isOnTour && displayArtist.isNotBlank()) {
+                            Spacer(modifier = Modifier.width(6.dp))
+                            // Small teal dot — tapping opens the On Tour tab
+                            Box(
+                                modifier = Modifier
+                                    .size(7.dp)
+                                    .clip(CircleShape)
+                                    .background(Color(0xFF10C9B4))
+                                    .hapticClickable { onNavigateToArtistOnTour(displayArtist) },
+                            )
+                        }
+                    }
 
                     // Album name (tappable to navigate)
                     if (!displayAlbum.isNullOrBlank() && displayArtist.isNotBlank()) {
@@ -348,25 +369,10 @@ fun NowPlayingScreen(
                         )
                     }
 
-                    // Resolver icon + On Tour dot
-                    Row(
-                        verticalAlignment = Alignment.CenterVertically,
-                        horizontalArrangement = Arrangement.spacedBy(8.dp),
-                    ) {
-                        if (track?.resolver != null) {
-                            Spacer(modifier = Modifier.height(8.dp))
-                            ResolverIconSquare(resolver = track.resolver!!, size = 24.dp)
-                        }
-                        if (isOnTour) {
-                            Spacer(modifier = Modifier.height(8.dp))
-                            // Small teal dot matching desktop's On Tour indicator
-                            Box(
-                                modifier = Modifier
-                                    .size(7.dp)
-                                    .clip(CircleShape)
-                                    .background(Color(0xFF10C9B4)),
-                            )
-                        }
+                    // Resolver icon
+                    if (track?.resolver != null) {
+                        Spacer(modifier = Modifier.height(16.dp))
+                        ResolverIconSquare(resolver = track.resolver!!, size = 24.dp)
                     }
                 }
 

@@ -26,10 +26,10 @@ import java.io.IOException
 import javax.inject.Inject
 import javax.inject.Singleton
 
-private const val DEFAULT_MODEL = "claude-sonnet-4-20250514"
+private const val DEFAULT_MODEL = "claude-sonnet-4-6-20250320"
 private const val DEFAULT_ENDPOINT = "https://api.anthropic.com/v1/messages"
 private const val ANTHROPIC_VERSION = "2023-06-01"
-private const val MAX_TOKENS = 1024
+private const val MAX_TOKENS = 4096
 
 /**
  * AI chat provider for Anthropic's Claude API.
