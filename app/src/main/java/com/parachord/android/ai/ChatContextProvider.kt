@@ -1,7 +1,12 @@
 package com.parachord.android.ai
 
+import android.util.Log
+import com.parachord.android.data.repository.HistoryRepository
+import com.parachord.android.data.repository.LibraryRepository
+import com.parachord.android.data.repository.Resource
 import com.parachord.android.data.store.SettingsStore
 import com.parachord.android.playback.PlaybackStateHolder
+import kotlinx.coroutines.flow.firstOrNull
 import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
@@ -16,12 +21,15 @@ import javax.inject.Singleton
 class ChatContextProvider @Inject constructor(
     private val playbackStateHolder: PlaybackStateHolder,
     private val settingsStore: SettingsStore,
+    private val historyRepository: HistoryRepository,
+    private val libraryRepository: LibraryRepository,
 ) {
 
     suspend fun buildSystemPrompt(): String {
         val dateFormat = SimpleDateFormat("EEEE, MMMM d, yyyy", Locale.US)
         val currentDate = dateFormat.format(Date())
         val currentState = formatState()
+        val listeningHistory = buildListeningHistory()
 
         return """
             |You are a helpful music DJ assistant for Parachord, a multi-source music player.
@@ -31,6 +39,7 @@ class ChatContextProvider @Inject constructor(
             |
             |CURRENT STATE:
             |$currentState
+            |${if (listeningHistory.isNotBlank()) "\nLISTENING HISTORY:\n$listeningHistory" else ""}
             |
             |GUIDELINES:
             |- Be concise and helpful
@@ -130,5 +139,54 @@ class ChatContextProvider @Inject constructor(
         }
 
         return lines.joinToString("\n")
+    }
+
+    /**
+     * Build listening history context from Last.fm and local library,
+     * matching the desktop's sendListeningHistory toggle.
+     */
+    private suspend fun buildListeningHistory(): String {
+        if (!settingsStore.getSendListeningHistory()) return ""
+
+        val parts = mutableListOf<String>()
+
+        try {
+            val topArtists = historyRepository.getTopArtists("overall", limit = 15)
+                .firstOrNull { it is Resource.Success } as? Resource.Success
+            topArtists?.data?.takeIf { it.isNotEmpty() }?.let { artists ->
+                parts.add("Top artists: " + artists.map { it.name }.joinToString(", "))
+            }
+        } catch (e: Exception) {
+            Log.d("ChatContextProvider", "Failed to fetch top artists", e)
+        }
+
+        try {
+            val topTracks = historyRepository.getTopTracks("overall", limit = 10)
+                .firstOrNull { it is Resource.Success } as? Resource.Success
+            topTracks?.data?.takeIf { it.isNotEmpty() }?.let { tracks ->
+                parts.add("Top tracks: " + tracks.map { "${it.artist} - ${it.title}" }.joinToString(", "))
+            }
+        } catch (e: Exception) {
+            Log.d("ChatContextProvider", "Failed to fetch top tracks", e)
+        }
+
+        try {
+            val tracks = libraryRepository.getAllTracks().firstOrNull()
+            if (tracks != null && tracks.isNotEmpty()) {
+                val artists = tracks.map { it.artist }
+                    .filter { it.isNotBlank() }
+                    .groupingBy { it }.eachCount()
+                    .entries.sortedByDescending { it.value }
+                    .take(10)
+                    .map { it.key }
+                if (artists.isNotEmpty()) {
+                    parts.add("Artists in library: " + artists.joinToString(", "))
+                }
+            }
+        } catch (e: Exception) {
+            Log.d("ChatContextProvider", "Failed to fetch library tracks", e)
+        }
+
+        return parts.joinToString("\n")
     }
 }

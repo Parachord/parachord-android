@@ -88,6 +88,13 @@ class SettingsViewModel @Inject constructor(
         .map { it != null }
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), false)
 
+    val sendListeningHistory: StateFlow<Boolean> = settingsStore.getSendListeningHistoryFlow()
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), true)
+
+    fun setSendListeningHistory(enabled: Boolean) {
+        viewModelScope.launch { settingsStore.setSendListeningHistory(enabled) }
+    }
+
     /** Tracks Libre.fm auth error state for UI feedback. */
     val libreFmAuthError: MutableStateFlow<String?> = MutableStateFlow(null)
 

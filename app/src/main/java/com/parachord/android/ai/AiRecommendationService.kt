@@ -125,8 +125,9 @@ class AiRecommendationService @Inject constructor(
         val selectedProvider = chosen.provider
         val selectedConfig = chosen.config
 
-        // Build listening context
-        val contextInfo = buildListeningContext()
+        // Build listening context (only if user has opted in, matching desktop's sendListeningHistory toggle)
+        val sendHistory = settingsStore.getSendListeningHistory()
+        val contextInfo = if (sendHistory) buildListeningContext() else "No listening history provided. Recommend diverse, acclaimed music spanning multiple genres, eras, and regions."
         val theme = varietyThemes.random()
 
         // Build exclusion note from previous suggestions
