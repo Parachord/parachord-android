@@ -100,9 +100,10 @@ class AiRecommendationService @Inject constructor(
      */
     suspend fun loadRecommendations(): AiRecommendations {
         // Find first configured provider
+        // Use whichever provider the user has configured (matching chat screen order)
         val providers = listOf(
-            Triple("claude", claudeProvider as AiChatProvider, "claude-sonnet-4-6-20250320"),
             Triple("chatgpt", chatGptProvider as AiChatProvider, "gpt-4o-mini"),
+            Triple("claude", claudeProvider as AiChatProvider, "claude-sonnet-4-6-20250320"),
             Triple("gemini", geminiProvider as AiChatProvider, "gemini-2.0-flash"),
         )
 
