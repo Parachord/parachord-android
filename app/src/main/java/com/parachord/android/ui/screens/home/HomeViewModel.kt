@@ -142,6 +142,9 @@ class HomeViewModel @Inject constructor(
     private val _aiLoading = MutableStateFlow(false)
     val aiLoading: StateFlow<Boolean> = _aiLoading
 
+    private val _aiError = MutableStateFlow<String?>(null)
+    val aiError: StateFlow<String?> = _aiError
+
     init {
         loadDiscoverPreviews()
         checkAiPlugins()
@@ -170,10 +173,16 @@ class HomeViewModel @Inject constructor(
                 _aiRecommendations.value = cached
             }
             _aiLoading.value = true
+            _aiError.value = null
             try {
                 val recs = aiRecommendationService.loadRecommendations()
                 _aiRecommendations.value = recs
-            } catch (_: Exception) { /* handled in service */ }
+                _aiError.value = null
+            } catch (e: Exception) {
+                val msg = e.message ?: "Unknown error"
+                _aiError.value = msg
+                android.util.Log.e("HomeViewModel", "AI recommendations failed", e)
+            }
             _aiLoading.value = false
         }
     }

@@ -148,6 +148,7 @@ fun HomeScreen(
     val hasAiPlugins by viewModel.hasAiPlugins.collectAsStateWithLifecycle()
     val aiRecommendations by viewModel.aiRecommendations.collectAsStateWithLifecycle()
     val aiLoading by viewModel.aiLoading.collectAsStateWithLifecycle()
+    val aiError by viewModel.aiError.collectAsStateWithLifecycle()
     val playlists by viewModel.playlists.collectAsStateWithLifecycle()
     val resolverOrder by viewModel.resolverOrder.collectAsStateWithLifecycle()
     val trackResolvers by viewModel.trackResolvers.collectAsStateWithLifecycle()
@@ -353,6 +354,7 @@ fun HomeScreen(
                             AiSuggestionsSection(
                                 recommendations = aiRecommendations,
                                 isLoading = aiLoading,
+                                error = aiError,
                                 onRefresh = { viewModel.refreshAiRecommendations() },
                                 onAlbumClick = onNavigateToAlbum,
                                 onArtistClick = onNavigateToArtist,
@@ -1161,6 +1163,7 @@ private fun NoAiPluginsCard(
 private fun AiSuggestionsSection(
     recommendations: AiRecommendations?,
     isLoading: Boolean,
+    error: String? = null,
     onRefresh: () -> Unit,
     onAlbumClick: (albumTitle: String, artistName: String) -> Unit,
     onArtistClick: (String) -> Unit,
@@ -1170,6 +1173,34 @@ private fun AiSuggestionsSection(
         if (isLoading && recommendations == null) {
             // Loading shimmer
             AiSuggestionsShimmer(isLoading = true, onRefresh = onRefresh)
+        } else if (error != null && (recommendations == null || (recommendations.albums.isEmpty() && recommendations.artists.isEmpty()))) {
+            // Error state — show what went wrong with retry
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(bottom = 8.dp),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                Text(
+                    text = "AI SUGGESTIONS",
+                    style = MaterialTheme.typography.labelMedium,
+                    fontWeight = FontWeight.SemiBold,
+                    color = MaterialTheme.colorScheme.primary,
+                )
+                Spacer(modifier = Modifier.width(6.dp))
+                ShuffleupagusBadge()
+                Spacer(modifier = Modifier.weight(1f))
+                SpinningRefreshIcon(
+                    isLoading = false,
+                    onClick = onRefresh,
+                    tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+            }
+            Text(
+                text = error,
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.error,
+            )
         } else if (recommendations != null && (recommendations.albums.isNotEmpty() || recommendations.artists.isNotEmpty())) {
             // Album Suggestions
             if (recommendations.albums.isNotEmpty()) {

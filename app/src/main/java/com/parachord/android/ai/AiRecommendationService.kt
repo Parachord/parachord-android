@@ -144,33 +144,33 @@ Variety guidance: $theme Be creative and surprising — avoid defaulting to the 
             ChatMessage(role = ChatRole.USER, content = userPrompt),
         )
 
-        return try {
-            val response = selectedProvider.chat(messages, emptyList(), selectedConfig)
-            val parsed = parseRecommendations(response.content)
+        val response = selectedProvider.chat(messages, emptyList(), selectedConfig)
+        val parsed = parseRecommendations(response.content)
 
-            // Track previous suggestions (keep last 20 albums, 50 artists like desktop)
-            previousAlbums.addAll(parsed.albums)
-            if (previousAlbums.size > 20) {
-                val excess = previousAlbums.size - 20
-                repeat(excess) { previousAlbums.removeFirst() }
-            }
-            previousArtists.addAll(parsed.artists)
-            if (previousArtists.size > 50) {
-                val excess = previousArtists.size - 50
-                repeat(excess) { previousArtists.removeFirst() }
-            }
-
-            // Enrich with artwork, then return up to 5 each
-            val enriched = enrichWithArtwork(
-                albums = parsed.albums.take(5),
-                artists = parsed.artists.take(5),
-            )
-            cachedRecommendations = enriched
-            enriched
-        } catch (e: Exception) {
-            Log.e(TAG, "Failed to load AI recommendations", e)
-            AiRecommendations(emptyList(), emptyList())
+        if (parsed.albums.isEmpty() && parsed.artists.isEmpty()) {
+            Log.w(TAG, "AI response parsed to empty recommendations. Raw content: ${response.content.take(200)}")
+            throw Exception("AI returned no valid recommendations — response may have been malformed")
         }
+
+        // Track previous suggestions (keep last 20 albums, 50 artists like desktop)
+        previousAlbums.addAll(parsed.albums)
+        if (previousAlbums.size > 20) {
+            val excess = previousAlbums.size - 20
+            repeat(excess) { previousAlbums.removeFirst() }
+        }
+        previousArtists.addAll(parsed.artists)
+        if (previousArtists.size > 50) {
+            val excess = previousArtists.size - 50
+            repeat(excess) { previousArtists.removeFirst() }
+        }
+
+        // Enrich with artwork, then return up to 5 each
+        val enriched = enrichWithArtwork(
+            albums = parsed.albums.take(5),
+            artists = parsed.artists.take(5),
+        )
+        cachedRecommendations = enriched
+        return enriched
     }
 
     /**
@@ -313,16 +313,37 @@ Variety guidance: $theme Be creative and surprising — avoid defaulting to the 
     }
 
     /**
+     * Extract a JSON object from a string that may contain surrounding text.
+     * Finds the outermost `{...}` by tracking brace depth, which handles
+     * plain JSON, markdown-wrapped JSON, and responses with preamble text.
+     */
+    private fun extractJsonObject(content: String): String? {
+        val start = content.indexOf('{')
+        if (start == -1) return null
+        var depth = 0
+        var inString = false
+        var escape = false
+        for (i in start until content.length) {
+            val c = content[i]
+            if (escape) { escape = false; continue }
+            if (c == '\\' && inString) { escape = true; continue }
+            if (c == '"') { inString = !inString; continue }
+            if (inString) continue
+            if (c == '{') depth++
+            if (c == '}') { depth--; if (depth == 0) return content.substring(start, i + 1) }
+        }
+        return null
+    }
+
+    /**
      * Parse AI response JSON into recommendations.
-     * Handles potential markdown code block wrapping.
+     * Handles plain JSON, markdown code blocks, and responses with preamble text.
      */
     private fun parseRecommendations(content: String): AiRecommendations {
-        // Strip markdown code blocks if present
-        var jsonStr = content.trim()
-        if (jsonStr.startsWith("```")) {
-            jsonStr = jsonStr.removePrefix("```json").removePrefix("```")
-            jsonStr = jsonStr.removeSuffix("```").trim()
-        }
+        // Extract JSON object from the response — handles plain JSON, markdown code blocks,
+        // and responses with preamble/postscript text around the JSON.
+        val jsonStr = extractJsonObject(content)
+            ?: throw Exception("No JSON object found in AI response")
 
         val root = json.parseToJsonElement(jsonStr).jsonObject
 

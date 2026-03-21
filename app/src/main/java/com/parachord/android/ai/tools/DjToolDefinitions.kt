@@ -61,13 +61,13 @@ object DjToolDefinitions {
 
     val search = DjToolDefinition(
         name = "search",
-        description = "Search for tracks across all music sources. Returns a list of matching tracks.",
+        description = "Search for tracks across all music sources. Returns a list of matching tracks. IMPORTANT: Always search for specific 'artist name song title' queries — never search for genre names like 'indie rock' or 'jazz' as this returns irrelevant compilation tracks.",
         parameters = buildJsonObject {
             put("type", "object")
             putJsonObject("properties") {
                 putJsonObject("query") {
                     put("type", "string")
-                    put("description", "Search query (artist name, track title, or both)")
+                    put("description", "Search query — use specific artist and track names (e.g. 'Radiohead Creep'), NOT genre names")
                 }
                 putJsonObject("limit") {
                     put("type", "number")
