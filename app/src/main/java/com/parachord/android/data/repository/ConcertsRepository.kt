@@ -282,6 +282,9 @@ class ConcertsRepository @Inject constructor(
      */
     fun getPersonalizedEvents(
         artists: List<ConcertArtist>,
+        lat: Double? = null,
+        lon: Double? = null,
+        radiusMiles: Int = 50,
         forceRefresh: Boolean = false,
     ): Flow<Resource<List<ConcertEvent>>> = flow {
         if (!diskCacheLoaded) loadDiskCache()
@@ -301,7 +304,7 @@ class ConcertsRepository @Inject constructor(
 
         try {
             val events = withContext(Dispatchers.IO) {
-                fetchPersonalizedEvents(artists)
+                fetchPersonalizedEvents(artists, lat, lon, radiusMiles)
             }
             cachedLocalEvents = events
             localFetchedAt = System.currentTimeMillis()
@@ -375,13 +378,16 @@ class ConcertsRepository @Inject constructor(
      */
     private suspend fun fetchPersonalizedEvents(
         artists: List<ConcertArtist>,
+        lat: Double? = null,
+        lon: Double? = null,
+        radiusMiles: Int = 50,
     ): List<ConcertEvent> = coroutineScope {
         val semaphore = Semaphore(5) // Max 5 concurrent requests (matching desktop)
         val allEvents = artists.map { artist ->
             async {
                 semaphore.withPermit {
                     try {
-                        val events = fetchArtistEvents(artist.name)
+                        val events = fetchArtistEvents(artist.name, lat, lon, radiusMiles)
                         // Tag each event with the artist source
                         events.map { it.copy(artistSource = artist.source) }
                     } catch (e: Exception) {
@@ -400,7 +406,12 @@ class ConcertsRepository @Inject constructor(
      * 1. Resolve artist name to attraction ID / performer slug
      * 2. Fetch events by that ID/slug (more precise than keyword search)
      */
-    private suspend fun fetchArtistEvents(artistName: String): List<ConcertEvent> = coroutineScope {
+    private suspend fun fetchArtistEvents(
+        artistName: String,
+        lat: Double? = null,
+        lon: Double? = null,
+        radiusMiles: Int = 50,
+    ): List<ConcertEvent> = coroutineScope {
         val now = LocalDateTime.now(ZoneId.systemDefault())
             .format(DateTimeFormatter.ofPattern("yyyy-MM-dd'T'HH:mm:ss'Z'"))
 
@@ -422,10 +433,13 @@ class ConcertsRepository @Inject constructor(
                 val attractionId = attraction.id ?: return@async emptyList()
 
                 // Step 2: Fetch events by attraction ID
+                val latlong = if (lat != null && lon != null) "$lat,$lon" else null
                 val response = ticketmasterApi.getEventsByAttraction(
                     attractionId = attractionId,
                     apiKey = tmKey,
                     startDateTime = now,
+                    latlong = latlong,
+                    radius = if (latlong != null) radiusMiles else null,
                 )
                 response.embedded?.events?.map { it.toConcertEvent() } ?: emptyList()
             } catch (e: Exception) {
@@ -455,6 +469,9 @@ class ConcertsRepository @Inject constructor(
                     performerSlug = slug,
                     clientId = sgKey,
                     datetimeGte = nowLocal,
+                    lat = lat,
+                    lon = lon,
+                    range = if (lat != null && lon != null) "${radiusMiles}mi" else null,
                 )
                 response.events.map { it.toConcertEvent() }
             } catch (e: Exception) {

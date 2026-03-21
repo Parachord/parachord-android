@@ -47,6 +47,9 @@ interface TicketmasterApi {
         @Query("sort") sort: String = "date,asc",
         @Query("size") size: Int = 50,
         @Query("startDateTime") startDateTime: String? = null,
+        @Query("latlong") latlong: String? = null,
+        @Query("radius") radius: Int? = null,
+        @Query("unit") unit: String = "miles",
         @Query("apikey") apiKey: String,
     ): TmSearchResponse
 
