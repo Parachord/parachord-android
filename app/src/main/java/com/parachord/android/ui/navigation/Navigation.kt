@@ -42,6 +42,10 @@ object Routes {
     const val CONCERTS = "concerts"
     const val FRIENDS = "friends"
     const val FRIEND_DETAIL = "friend/{friendId}"
+    const val WEEKLY_PLAYLIST = "weekly_playlist/{playlistId}/{contextType}"
+
+    fun weeklyPlaylist(playlistId: String, contextType: String): String =
+        "weekly_playlist/${Uri.encode(playlistId)}/${Uri.encode(contextType)}"
 
     fun artist(name: String, tab: String? = null): String =
         if (tab != null) "artist/${Uri.encode(name)}?tab=${Uri.encode(tab)}"
@@ -122,6 +126,9 @@ fun ParachordNavHost(
                 onNavigateToFreshDrops = { navController.navigate(Routes.FRESH_DROPS) },
                 onNavigateToCollection = { tab -> navController.navigate(Routes.collection(tab)) },
                 onNavigateToPlaylists = { navController.navigate(Routes.PLAYLISTS) },
+                onNavigateToWeeklyPlaylist = { playlistId, contextType ->
+                    navController.navigate(Routes.weeklyPlaylist(playlistId, contextType))
+                },
             )
         }
         composable(
@@ -164,6 +171,21 @@ fun ParachordNavHost(
                 },
                 onNavigateToEdit = {
                     navController.navigate(Routes.playlistEdit(playlistId))
+                },
+            )
+        }
+        composable(
+            route = Routes.WEEKLY_PLAYLIST,
+            arguments = listOf(
+                navArgument("playlistId") { type = NavType.StringType },
+                navArgument("contextType") { type = NavType.StringType },
+            ),
+        ) {
+            com.parachord.android.ui.screens.playlists.WeeklyPlaylistScreen(
+                onBack = { navController.popBackStack() },
+                onNavigateToArtist = { name -> navController.navigate(Routes.artist(name)) },
+                onNavigateToAlbum = { albumTitle, artistName ->
+                    navController.navigate(Routes.album(albumTitle, artistName))
                 },
             )
         }
