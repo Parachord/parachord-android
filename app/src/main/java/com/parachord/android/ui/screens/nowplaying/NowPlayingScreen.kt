@@ -371,7 +371,7 @@ fun NowPlayingScreen(
 
                     // Resolver icon
                     if (track?.resolver != null) {
-                        Spacer(modifier = Modifier.height(8.dp))
+                        Spacer(modifier = Modifier.height(16.dp))
                         ResolverIconSquare(resolver = track.resolver!!, size = 24.dp)
                     }
                 }
