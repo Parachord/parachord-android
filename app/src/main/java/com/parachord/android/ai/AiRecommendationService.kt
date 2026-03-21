@@ -313,16 +313,37 @@ Variety guidance: $theme Be creative and surprising — avoid defaulting to the 
     }
 
     /**
+     * Extract a JSON object from a string that may contain surrounding text.
+     * Finds the outermost `{...}` by tracking brace depth, which handles
+     * plain JSON, markdown-wrapped JSON, and responses with preamble text.
+     */
+    private fun extractJsonObject(content: String): String? {
+        val start = content.indexOf('{')
+        if (start == -1) return null
+        var depth = 0
+        var inString = false
+        var escape = false
+        for (i in start until content.length) {
+            val c = content[i]
+            if (escape) { escape = false; continue }
+            if (c == '\\' && inString) { escape = true; continue }
+            if (c == '"') { inString = !inString; continue }
+            if (inString) continue
+            if (c == '{') depth++
+            if (c == '}') { depth--; if (depth == 0) return content.substring(start, i + 1) }
+        }
+        return null
+    }
+
+    /**
      * Parse AI response JSON into recommendations.
-     * Handles potential markdown code block wrapping.
+     * Handles plain JSON, markdown code blocks, and responses with preamble text.
      */
     private fun parseRecommendations(content: String): AiRecommendations {
-        // Strip markdown code blocks if present
-        var jsonStr = content.trim()
-        if (jsonStr.startsWith("```")) {
-            jsonStr = jsonStr.removePrefix("```json").removePrefix("```")
-            jsonStr = jsonStr.removeSuffix("```").trim()
-        }
+        // Extract JSON object from the response — handles plain JSON, markdown code blocks,
+        // and responses with preamble/postscript text around the JSON.
+        val jsonStr = extractJsonObject(content)
+            ?: throw Exception("No JSON object found in AI response")
 
         val root = json.parseToJsonElement(jsonStr).jsonObject
 
