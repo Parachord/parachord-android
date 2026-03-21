@@ -11,6 +11,7 @@ import com.parachord.android.data.repository.WeeklyPlaylistsRepository
 import com.parachord.android.playback.PlaybackContext
 import com.parachord.android.playback.PlaybackController
 import com.parachord.android.playback.PlaybackStateHolder
+import com.parachord.android.resolver.TrackResolverCache
 import dagger.hilt.android.lifecycle.HiltViewModel
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
@@ -29,6 +30,7 @@ class WeeklyPlaylistViewModel @Inject constructor(
     private val playlistDao: PlaylistDao,
     private val playbackController: PlaybackController,
     private val playbackStateHolder: PlaybackStateHolder,
+    private val trackResolverCache: TrackResolverCache,
 ) : ViewModel() {
 
     private val playlistId: String = savedStateHandle["playlistId"] ?: ""
@@ -58,6 +60,9 @@ class WeeklyPlaylistViewModel @Inject constructor(
     val nowPlayingTitle: StateFlow<String?> = playbackStateHolder.state
         .map { it.currentTrack?.title }
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), null)
+
+    /** Resolver badge names for UI display. */
+    val trackResolvers: StateFlow<Map<String, List<String>>> = trackResolverCache.trackResolvers
 
     init {
         loadPlaylist()
@@ -96,6 +101,11 @@ class WeeklyPlaylistViewModel @Inject constructor(
             _tracks.value = trackEntities
             _coverUrls.value = lbTracks.mapNotNull { it.albumArt }.distinct().take(4)
             _isLoading.value = false
+
+            // Resolve tracks in background for resolver badges and playback sources
+            if (trackEntities.isNotEmpty()) {
+                trackResolverCache.resolveInBackground(trackEntities, backfillDb = false)
+            }
         }
     }
 
