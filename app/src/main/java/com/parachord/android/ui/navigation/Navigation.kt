@@ -28,7 +28,7 @@ object Routes {
     const val PLAYLIST_EDIT = "playlist/{playlistId}/edit"
     const val NOW_PLAYING = "now_playing"
     const val SETTINGS = "settings"
-    const val ARTIST = "artist/{artistName}"
+    const val ARTIST = "artist/{artistName}?tab={tab}"
     const val ALBUM = "album/{albumTitle}/{artistName}"
 
     const val CHAT = "chat"
@@ -43,8 +43,9 @@ object Routes {
     const val FRIENDS = "friends"
     const val FRIEND_DETAIL = "friend/{friendId}"
 
-    fun artist(name: String): String =
-        "artist/${Uri.encode(name)}"
+    fun artist(name: String, tab: String? = null): String =
+        if (tab != null) "artist/${Uri.encode(name)}?tab=${Uri.encode(tab)}"
+        else "artist/${Uri.encode(name)}"
 
     fun album(albumTitle: String, artistName: String): String =
         "album/${Uri.encode(albumTitle)}/${Uri.encode(artistName)}"
@@ -217,6 +218,9 @@ fun ParachordNavHost(
             com.parachord.android.ui.screens.nowplaying.NowPlayingScreen(
                 onBack = { navController.popBackStack() },
                 onNavigateToArtist = { name -> navController.navigate(Routes.artist(name)) },
+                onNavigateToArtistOnTour = { name ->
+                    navController.navigate(Routes.artist(name, tab = "On Tour"))
+                },
                 onNavigateToAlbum = { albumTitle, artistName ->
                     navController.navigate(Routes.album(albumTitle, artistName))
                 },
@@ -232,14 +236,19 @@ fun ParachordNavHost(
         }
         composable(
             route = Routes.ARTIST,
-            arguments = listOf(navArgument("artistName") { type = NavType.StringType }),
-        ) {
+            arguments = listOf(
+                navArgument("artistName") { type = NavType.StringType },
+                navArgument("tab") { type = NavType.StringType; nullable = true; defaultValue = null },
+            ),
+        ) { backStackEntry ->
+            val initialTab = backStackEntry.arguments?.getString("tab")
             com.parachord.android.ui.screens.artist.ArtistScreen(
                 onBack = { navController.popBackStack() },
                 onNavigateToAlbum = { albumTitle, artistName ->
                     navController.navigate(Routes.album(albumTitle, artistName))
                 },
                 onNavigateToArtist = { name -> navController.navigate(Routes.artist(name)) },
+                initialTab = initialTab,
             )
         }
         composable(

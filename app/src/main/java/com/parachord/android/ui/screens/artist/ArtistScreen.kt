@@ -98,6 +98,7 @@ fun ArtistScreen(
     onBack: () -> Unit,
     onNavigateToAlbum: (albumTitle: String, artistName: String) -> Unit = { _, _ -> },
     onNavigateToArtist: (String) -> Unit = {},
+    initialTab: String? = null,
     modifier: Modifier = Modifier,
     viewModel: ArtistViewModel = hiltViewModel(),
 ) {
@@ -278,9 +279,14 @@ fun ArtistScreen(
                     }
                 }
 
+                val initialPage = initialTab?.let { tabName ->
+                    tabs.indexOf(tabName).takeIf { it >= 0 }
+                } ?: 0
+
                 SwipeableTabLayout(
                     tabs = tabs,
                     modifier = Modifier.fillMaxSize(),
+                    initialPage = initialPage,
                 ) { page ->
                     val tabName = tabs.getOrNull(page) ?: return@SwipeableTabLayout
                     when (tabName) {
