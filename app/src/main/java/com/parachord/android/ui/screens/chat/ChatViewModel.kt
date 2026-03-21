@@ -60,12 +60,16 @@ class ChatViewModel @Inject constructor(
     }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), emptyList())
 
     init {
-        // Auto-select first configured provider
+        // Load last used provider, or auto-select first configured one
         viewModelScope.launch {
+            val saved = settingsStore.getSelectedChatProvider()
             availableProviders.collect { providersList ->
                 if (_selectedProviderId.value == null) {
-                    val first = providersList.firstOrNull { it.isConfigured }
-                    first?.let { selectProvider(it.id) }
+                    val target = if (saved != null) {
+                        providersList.firstOrNull { it.id == saved && it.isConfigured }
+                    } else null
+                    val provider = target ?: providersList.firstOrNull { it.isConfigured }
+                    provider?.let { selectProvider(it.id) }
                 }
             }
         }
@@ -74,6 +78,7 @@ class ChatViewModel @Inject constructor(
     fun selectProvider(providerId: String) {
         _selectedProviderId.value = providerId
         viewModelScope.launch {
+            settingsStore.setSelectedChatProvider(providerId)
             _messages.value = chatService.getDisplayMessages(providerId)
         }
     }

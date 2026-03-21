@@ -49,6 +49,7 @@ class SettingsStore @Inject constructor(
         val CLAUDE_MODEL = stringPreferencesKey("claude_model")
         val GEMINI_API_KEY = stringPreferencesKey("gemini_api_key")
         val GEMINI_MODEL = stringPreferencesKey("gemini_model")
+        val SELECTED_CHAT_PROVIDER = stringPreferencesKey("selected_chat_provider")
         val SYNC_ENABLED = booleanPreferencesKey("sync_enabled")
         val SYNC_PROVIDER = stringPreferencesKey("sync_provider")
         val SYNC_TRACKS = booleanPreferencesKey("sync_tracks")
@@ -528,6 +529,16 @@ class SettingsStore @Inject constructor(
             else -> return
         }
         dataStore.edit { it[key] = model }
+    }
+
+    // --- Selected Chat Provider (persisted across sessions, matching desktop) ---
+
+    suspend fun getSelectedChatProvider(): String? {
+        return dataStore.data.first()[SELECTED_CHAT_PROVIDER]?.ifBlank { null }
+    }
+
+    suspend fun setSelectedChatProvider(providerId: String) {
+        dataStore.edit { it[SELECTED_CHAT_PROVIDER] = providerId }
     }
 
     // --- Sync Settings ---
