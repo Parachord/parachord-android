@@ -17,6 +17,7 @@ import com.parachord.android.BuildConfig
 import com.parachord.android.data.api.LastFmApi
 import com.parachord.android.data.db.entity.TrackEntity
 import com.parachord.android.data.metadata.ImageEnrichmentService
+import com.parachord.android.data.metadata.MbidEnrichmentService
 import com.parachord.android.playback.handlers.AppleMusicPlaybackHandler
 import com.parachord.android.playback.handlers.PlaybackAction
 import com.parachord.android.resolver.ResolverManager
@@ -56,6 +57,7 @@ class PlaybackController @Inject constructor(
     private val queuePersistence: QueuePersistence,
     private val scrobbleManager: ScrobbleManager,
     private val imageEnrichment: ImageEnrichmentService,
+    private val mbidEnrichment: MbidEnrichmentService,
     private val lastFmApi: LastFmApi,
     private val resolverManager: ResolverManager,
     private val resolverScoring: ResolverScoring,
@@ -185,12 +187,26 @@ class PlaybackController @Inject constructor(
     fun addToQueue(tracks: List<TrackEntity>) {
         queueManager.addToQueue(tracks)
         syncQueueState()
+        // Pre-enrich queued tracks with MBIDs so they're ready for scrobbling
+        enrichQueuedTracks(tracks)
     }
 
     /** Insert tracks at the front of the queue (play next). */
     fun insertNext(tracks: List<TrackEntity>) {
         queueManager.insertNext(tracks)
         syncQueueState()
+        // Pre-enrich queued tracks with MBIDs so they're ready for scrobbling
+        enrichQueuedTracks(tracks)
+    }
+
+    /** Fire MBID mapper lookups for tracks entering the queue. */
+    private fun enrichQueuedTracks(tracks: List<TrackEntity>) {
+        val requests = tracks
+            .filter { it.recordingMbid == null }
+            .map { com.parachord.android.data.metadata.TrackEnrichmentRequest(it.id, it.artist, it.title) }
+        if (requests.isNotEmpty()) {
+            mbidEnrichment.enrichBatchInBackground(requests)
+        }
     }
 
     fun skipNext() {
@@ -494,6 +510,9 @@ class PlaybackController @Inject constructor(
 
         // If the track has no artwork, try to fetch it in the background
         enrichArtworkIfMissing(routedTrack)
+
+        // Enrich with MusicBrainz MBIDs in the background
+        mbidEnrichment.enrichInBackground(routedTrack.id, routedTrack.artist, routedTrack.title)
 
         // Pre-resolve the next few queue tracks so their resolver IDs
         // (spotifyId, appleMusicId, etc.) are ready before we need them.
@@ -1171,7 +1190,24 @@ class PlaybackController @Inject constructor(
     }
 
     private fun enrichArtworkIfMissing(track: TrackEntity) {
-        if (!track.artworkUrl.isNullOrBlank()) return
+        // Obviously missing — go straight to enrichment
+        if (track.artworkUrl.isNullOrBlank()) {
+            fetchAndApplyArtwork(track)
+            return
+        }
+        // Local albumart content URI — might be broken, validate on IO thread
+        if (track.artworkUrl.startsWith("content://media/external/audio/albumart")) {
+            scope.launch(Dispatchers.IO) {
+                if (isStaleLocalArtwork(track.artworkUrl)) {
+                    fetchAndApplyArtwork(track)
+                }
+            }
+            return
+        }
+        // Has a real URL — nothing to do
+    }
+
+    private fun fetchAndApplyArtwork(track: TrackEntity) {
         scope.launch(Dispatchers.IO) {
             val url = imageEnrichment.enrichTrackArt(
                 trackId = track.id,
@@ -1185,6 +1221,22 @@ class PlaybackController @Inject constructor(
                     copy(currentTrack = currentTrack?.copy(artworkUrl = url))
                 } else this
             }
+        }
+    }
+
+    /**
+     * Check if a local file's album art content URI is broken/empty.
+     * MediaStore albumart URIs can exist as strings but point to no actual image data.
+     * Returns true if the URI looks like a local albumart URI that doesn't resolve.
+     */
+    private fun isStaleLocalArtwork(artworkUrl: String?): Boolean {
+        if (artworkUrl == null) return false
+        if (!artworkUrl.startsWith("content://media/external/audio/albumart")) return false
+        return try {
+            val uri = android.net.Uri.parse(artworkUrl)
+            context.contentResolver.openInputStream(uri)?.use { false } ?: true
+        } catch (_: Exception) {
+            true
         }
     }
 }

@@ -86,11 +86,12 @@ class MediaScanner @Inject constructor(
 
                 val contentUri = ContentUris.withAppendedId(collection, mediaId)
 
-                // Build album artwork URI
+                // Build album artwork URI — only use it if the content actually exists
                 val artworkUri = ContentUris.withAppendedId(
                     Uri.parse("content://media/external/audio/albumart"),
                     albumId,
-                ).toString()
+                )
+                val validatedArtworkUrl = validateContentUri(artworkUri)
 
                 val albumIdStr = "local-album-$albumId"
 
@@ -102,7 +103,7 @@ class MediaScanner @Inject constructor(
                         album = album,
                         albumId = albumIdStr,
                         duration = duration,
-                        artworkUrl = artworkUri,
+                        artworkUrl = validatedArtworkUrl,
                         sourceType = "local",
                         sourceUrl = contentUri.toString(),
                         resolver = "localfiles",
@@ -114,7 +115,7 @@ class MediaScanner @Inject constructor(
                         id = albumIdStr,
                         title = album,
                         artist = artist,
-                        artworkUrl = artworkUri,
+                        artworkUrl = validatedArtworkUrl,
                     )
                 }
 
@@ -141,5 +142,17 @@ class MediaScanner @Inject constructor(
         )
 
         tracks.size
+    }
+
+    /**
+     * Check if a content:// album art URI actually resolves to image data.
+     * Returns the URI string if valid, null if the content is missing/empty.
+     */
+    private fun validateContentUri(uri: Uri): String? {
+        return try {
+            context.contentResolver.openInputStream(uri)?.use { it.read(); uri.toString() }
+        } catch (_: Exception) {
+            null
+        }
     }
 }

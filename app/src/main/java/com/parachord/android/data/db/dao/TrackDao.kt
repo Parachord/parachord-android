@@ -93,4 +93,22 @@ interface TrackDao {
         appleMusicId: String?,
         soundcloudId: String?,
     )
+
+    /**
+     * Backfill MusicBrainz MBIDs on a track without overwriting existing values.
+     * Used by MbidEnrichmentService for background MBID enrichment.
+     */
+    @Query("""
+        UPDATE tracks SET
+            recordingMbid = CASE WHEN (recordingMbid IS NULL OR recordingMbid = '') THEN :recordingMbid ELSE recordingMbid END,
+            artistMbid = CASE WHEN (artistMbid IS NULL OR artistMbid = '') THEN :artistMbid ELSE artistMbid END,
+            releaseMbid = CASE WHEN (releaseMbid IS NULL OR releaseMbid = '') THEN :releaseMbid ELSE releaseMbid END
+        WHERE id = :trackId
+    """)
+    suspend fun backfillMbids(
+        trackId: String,
+        recordingMbid: String?,
+        artistMbid: String?,
+        releaseMbid: String?,
+    )
 }

@@ -2,6 +2,7 @@ package com.parachord.android.resolver
 
 import android.util.Log
 import com.parachord.android.data.db.entity.TrackEntity
+import com.parachord.android.data.metadata.MbidEnrichmentService
 import com.parachord.android.data.repository.LibraryRepository
 import com.parachord.android.data.store.SettingsStore
 import kotlinx.coroutines.CoroutineScope
@@ -39,6 +40,7 @@ class TrackResolverCache @Inject constructor(
     private val resolverManager: ResolverManager,
     private val libraryRepository: LibraryRepository,
     private val settingsStore: SettingsStore,
+    private val mbidEnrichment: MbidEnrichmentService,
 ) {
     companion object {
         private const val TAG = "TrackResolverCache"
@@ -102,6 +104,9 @@ class TrackResolverCache @Inject constructor(
         tracks: List<TrackEntity>,
         backfillDb: Boolean = true,
     ): Job = scope.launch {
+        // Fire MBID mapper lookups in parallel with resolver resolution
+        enrichTracksWithMbids(tracks)
+
         for (track in tracks) {
             val key = trackKey(track.title, track.artist)
             // Skip if already resolved (cross-context dedup)
@@ -192,6 +197,17 @@ class TrackResolverCache @Inject constructor(
     fun getSources(title: String, artist: String): List<ResolvedSource>? {
         val key = trackKey(title, artist)
         return _trackSources.value[key]?.ifEmpty { null }
+    }
+
+    /** Fire MBID mapper lookups for tracks that don't yet have MBIDs. */
+    private fun enrichTracksWithMbids(tracks: List<TrackEntity>) {
+        val needsEnrichment = tracks.filter { it.recordingMbid == null }
+        if (needsEnrichment.isEmpty()) return
+        mbidEnrichment.enrichBatchInBackground(
+            needsEnrichment.map {
+                com.parachord.android.data.metadata.TrackEnrichmentRequest(it.id, it.artist, it.title)
+            }
+        )
     }
 
     /** Persist any newly-discovered resolver IDs back to the database. */
