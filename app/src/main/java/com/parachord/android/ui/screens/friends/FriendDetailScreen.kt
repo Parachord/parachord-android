@@ -174,6 +174,7 @@ fun FriendDetailScreen(
                 0 -> FriendRecentTab(
                     recentTracks = recentTracks,
                     onPlayTrack = viewModel::playRecentTrack,
+                    onRetry = viewModel::refresh,
                     trackResolvers = trackResolvers,
                     trackResolverConfidences = trackResolverConfidences,
                 )
@@ -235,6 +236,7 @@ private fun PeriodFilter(
 private fun FriendRecentTab(
     recentTracks: Resource<List<RecentTrack>>,
     onPlayTrack: (Int) -> Unit,
+    onRetry: () -> Unit = {},
     trackResolvers: Map<String, List<String>> = emptyMap(),
     trackResolverConfidences: Map<String, Map<String, Float>> = emptyMap(),
 ) {
@@ -244,17 +246,19 @@ private fun FriendRecentTab(
                 items(10) { ShimmerTrackRow(modifier = Modifier.padding(horizontal = 16.dp)) }
             }
         }
-        is Resource.Error -> ErrorState(recentTracks.message)
+        is Resource.Error -> ErrorState(recentTracks.message, onRetry)
         is Resource.Success -> {
             if (recentTracks.data.isEmpty()) {
                 EmptyState("No recent listening activity")
             } else {
                 LazyColumn(contentPadding = PaddingValues(bottom = 16.dp)) {
                     items(recentTracks.data.size) { index ->
+                        val track = recentTracks.data[index]
+                        val key = "${track.title.lowercase().trim()}|${track.artist.lowercase().trim()}"
                         RecentTrackRow(
-                            track = recentTracks.data[index],
-                            resolvers = trackResolvers["${recentTracks.data[index].title.lowercase().trim()}|${recentTracks.data[index].artist.lowercase().trim()}"]?.ifEmpty { null },
-                            resolverConfidences = trackResolverConfidences["${recentTracks.data[index].title.lowercase().trim()}|${recentTracks.data[index].artist.lowercase().trim()}"],
+                            track = track,
+                            resolvers = trackResolvers[key],
+                            resolverConfidences = trackResolverConfidences[key],
                             onClick = { onPlayTrack(index) },
                         )
                     }
@@ -342,13 +346,14 @@ private fun FriendTopSongsTab(
                     LazyColumn(contentPadding = PaddingValues(bottom = 16.dp)) {
                         items(tracks.data.size) { index ->
                             val track = tracks.data[index]
+                            val key = "${track.title.lowercase().trim()}|${track.artist.lowercase().trim()}"
                             TrackRow(
                                 title = track.title,
                                 artist = "${track.artist}  •  ${formatPlayCount(track.playCount)}",
                                 artworkUrl = track.artworkUrl,
                                 trackNumber = track.rank,
-                                resolvers = trackResolvers["${track.title.lowercase().trim()}|${track.artist.lowercase().trim()}"]?.ifEmpty { null },
-                                resolverConfidences = trackResolverConfidences["${track.title.lowercase().trim()}|${track.artist.lowercase().trim()}"],
+                                resolvers = trackResolvers[key],
+                                resolverConfidences = trackResolverConfidences[key],
                                 onClick = { onPlayTrack(index) },
                             )
                         }
@@ -554,18 +559,26 @@ private fun ArtistGridItem(artist: HistoryArtist, onClick: () -> Unit = {}) {
 // ---------- Shared ----------
 
 @Composable
-private fun ErrorState(message: String) {
+private fun ErrorState(message: String, onRetry: (() -> Unit)? = null) {
     Box(
         modifier = Modifier.fillMaxSize(),
         contentAlignment = Alignment.Center,
     ) {
-        Text(
-            text = message,
-            style = MaterialTheme.typography.bodyMedium,
-            color = MaterialTheme.colorScheme.error,
-            textAlign = TextAlign.Center,
-            modifier = Modifier.padding(horizontal = 32.dp),
-        )
+        Column(horizontalAlignment = Alignment.CenterHorizontally) {
+            Text(
+                text = message,
+                style = MaterialTheme.typography.bodyMedium,
+                color = MaterialTheme.colorScheme.error,
+                textAlign = TextAlign.Center,
+                modifier = Modifier.padding(horizontal = 32.dp),
+            )
+            if (onRetry != null) {
+                Spacer(modifier = Modifier.height(12.dp))
+                OutlinedButton(onClick = onRetry) {
+                    Text("Retry")
+                }
+            }
+        }
     }
 }
 

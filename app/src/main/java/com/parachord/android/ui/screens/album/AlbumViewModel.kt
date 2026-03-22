@@ -76,21 +76,36 @@ class AlbumViewModel @Inject constructor(
     }
 
     private fun loadAlbum() {
+        // Check local DB for cached artwork (available instantly from collection)
+        viewModelScope.launch {
+            val cachedArtwork = libraryRepository.getAlbumByTitleAndArtist(albumTitle, artistName)
+                ?.artworkUrl
+            if (cachedArtwork != null && _albumDetail.value == null) {
+                // Pre-populate artwork so the header shows immediately
+                _albumDetail.value = AlbumDetail(
+                    title = albumTitle,
+                    artist = artistName,
+                    artworkUrl = cachedArtwork,
+                )
+            }
+        }
+
+        // Progressive load: each provider emits as it completes
         viewModelScope.launch {
             _isLoading.value = true
             try {
-                // Check local DB for cached artwork (available instantly from collection)
-                val cachedArtwork = libraryRepository.getAlbumByTitleAndArtist(albumTitle, artistName)
-                    ?.artworkUrl
-
-                val detail = metadataService.getAlbumTracks(albumTitle, artistName)
-                // Use local DB artwork as fallback if providers didn't return any
-                _albumDetail.value = if (detail != null && detail.artworkUrl == null && cachedArtwork != null) {
-                    detail.copy(artworkUrl = cachedArtwork)
-                } else {
-                    detail
+                metadataService.getAlbumTracksProgressively(albumTitle, artistName).collect { detail ->
+                    // Preserve local DB artwork if providers didn't return any
+                    val current = _albumDetail.value
+                    val enriched = if (detail.artworkUrl == null && current?.artworkUrl != null) {
+                        detail.copy(artworkUrl = current.artworkUrl)
+                    } else {
+                        detail
+                    }
+                    _albumDetail.value = enriched
+                    // Kick off resolver resolution on each update (idempotent — already-resolved tracks are skipped)
+                    resolveTracksInBackground(enriched.tracks)
                 }
-                _albumDetail.value?.tracks?.let { resolveTracksInBackground(it) }
             } catch (_: Exception) {
                 // partial results still shown
             } finally {
