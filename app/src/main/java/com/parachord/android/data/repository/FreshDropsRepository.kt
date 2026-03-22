@@ -5,6 +5,7 @@ import android.util.Log
 import com.parachord.android.BuildConfig
 import com.parachord.android.data.api.LastFmApi
 import com.parachord.android.data.api.ListenBrainzApi
+import com.parachord.android.data.api.MbReleaseGroupEntry
 import com.parachord.android.data.api.MusicBrainzApi
 import com.parachord.android.data.db.dao.TrackDao
 import com.parachord.android.data.metadata.MusicBrainzProvider
@@ -204,7 +205,8 @@ class FreshDropsRepository @Inject constructor(
                         emit(Resource.Success(progressMerged))
                     }
 
-                    // Rate limit MusicBrainz (1 req/sec policy — 2 calls per artist)
+                    // Rate limit MusicBrainz (1 req/sec policy; pagination adds
+                    // its own delays internally for prolific artists)
                     delay(1100)
                 } catch (e: Exception) {
                     Log.w(TAG, "Failed to fetch releases for '${artist.name}'", e)
@@ -350,11 +352,29 @@ class FreshDropsRepository @Inject constructor(
                 artist.id
             }
 
-        // Browse release-groups
-        val response = musicBrainzApi.browseReleaseGroups(mbid, limit = 100)
+        // Browse release-groups with pagination — MusicBrainz browse results are
+        // NOT ordered by date, so with limit=100 we can miss the newest releases
+        // for prolific artists whose discography exceeds one page.
+        val allReleaseGroups = mutableListOf<MbReleaseGroupEntry>()
+        var offset = 0
+        var totalCount = Int.MAX_VALUE
+        var lastPageSize: Int
+        val pageSize = 100
+        do {
+            val response = musicBrainzApi.browseReleaseGroups(mbid, limit = pageSize, offset = offset)
+            allReleaseGroups.addAll(response.releaseGroups)
+            totalCount = response.releaseGroupCount
+            lastPageSize = response.releaseGroups.size
+            offset += lastPageSize
+            // Rate-limit between pages (MusicBrainz 1 req/sec policy)
+            if (offset < totalCount && lastPageSize == pageSize) {
+                delay(1100)
+            }
+        } while (offset < totalCount && offset < 500 && lastPageSize == pageSize)
+
         val cutoffStr = cutoffDate.format(DateTimeFormatter.ISO_LOCAL_DATE)
 
-        return response.releaseGroups
+        return allReleaseGroups
             .filter { rg ->
                 // Must have a release date
                 val date = rg.firstReleaseDate ?: return@filter false
