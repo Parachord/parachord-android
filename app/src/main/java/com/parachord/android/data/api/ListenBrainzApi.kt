@@ -1,5 +1,6 @@
 package com.parachord.android.data.api
 
+import android.net.Uri
 import android.util.Log
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
@@ -143,7 +144,8 @@ class ListenBrainzApi @Inject constructor(
         token: String? = null,
         count: Int = 50,
     ): List<LbListen> = withContext(Dispatchers.IO) {
-        val url = "$BASE_URL/1/user/$username/listens?count=$count"
+        val encoded = Uri.encode(username)
+        val url = "$BASE_URL/1/user/$encoded/listens?count=$count"
         val requestBuilder = Request.Builder().url(url).get()
         if (token != null) {
             requestBuilder.addHeader("Authorization", "Token $token")
@@ -192,7 +194,8 @@ class ListenBrainzApi @Inject constructor(
         range: String = "month",
         count: Int = 50,
     ): List<LbArtistStat> = withContext(Dispatchers.IO) {
-        val url = "$BASE_URL/1/stats/user/$username/artists?range=$range&count=$count"
+        val encoded = Uri.encode(username)
+        val url = "$BASE_URL/1/stats/user/$encoded/artists?range=$range&count=$count"
         val request = Request.Builder().url(url).get().build()
         return@withContext try {
             val response = okHttpClient.newCall(request).execute()
@@ -226,7 +229,8 @@ class ListenBrainzApi @Inject constructor(
         range: String = "month",
         count: Int = 50,
     ): List<LbRecordingStat> = withContext(Dispatchers.IO) {
-        val url = "$BASE_URL/1/stats/user/$username/recordings?range=$range&count=$count"
+        val encoded = Uri.encode(username)
+        val url = "$BASE_URL/1/stats/user/$encoded/recordings?range=$range&count=$count"
         val request = Request.Builder().url(url).get().build()
         return@withContext try {
             val response = okHttpClient.newCall(request).execute()
@@ -508,7 +512,8 @@ class ListenBrainzApi @Inject constructor(
         range: String = "month",
         count: Int = 50,
     ): List<LbReleaseStat> = withContext(Dispatchers.IO) {
-        val url = "$BASE_URL/1/stats/user/$username/releases?range=$range&count=$count"
+        val encoded = Uri.encode(username)
+        val url = "$BASE_URL/1/stats/user/$encoded/releases?range=$range&count=$count"
         val request = Request.Builder().url(url).get().build()
         return@withContext try {
             val response = okHttpClient.newCall(request).execute()

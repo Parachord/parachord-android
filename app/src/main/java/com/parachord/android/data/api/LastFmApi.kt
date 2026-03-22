@@ -369,10 +369,6 @@ data class LfmImage(
 fun List<LfmImage>.bestImageUrl(): String? =
     lastOrNull { it.isUsable }?.url
 
-/**
- * Last.fm returns `track` as either a single object (1 track) or an array (multiple tracks).
- * This serializer handles both cases.
- */
 // --- Artist top tracks / top albums ---
 
 @Serializable
@@ -504,6 +500,7 @@ data class LfmUserRecentTracksResponse(
 
 @Serializable
 data class LfmUserRecentTracks(
+    @Serializable(with = LfmRecentTrackListSerializer::class)
     val track: List<LfmUserRecentTrack> = emptyList(),
 )
 
@@ -599,6 +596,34 @@ object LfmAlbumTrackListSerializer : KSerializer<LfmAlbumTrackList> {
                 LfmAlbumTrackList(listOf(item))
             }
             else -> LfmAlbumTrackList()
+        }
+    }
+}
+
+/**
+ * Last.fm returns `track` as either a single object (1 track) or an array (multiple tracks).
+ * This serializer handles both cases, matching LfmAlbumTrackListSerializer.
+ */
+object LfmRecentTrackListSerializer : KSerializer<List<LfmUserRecentTrack>> {
+    override val descriptor: SerialDescriptor = buildClassSerialDescriptor("LfmRecentTrackList")
+
+    override fun serialize(encoder: Encoder, value: List<LfmUserRecentTrack>) {
+        encoder.encodeSerializableValue(
+            ListSerializer(LfmUserRecentTrack.serializer()),
+            value,
+        )
+    }
+
+    override fun deserialize(decoder: Decoder): List<LfmUserRecentTrack> {
+        val jsonDecoder = decoder as JsonDecoder
+        return when (val element = jsonDecoder.decodeJsonElement()) {
+            is JsonArray -> element.map {
+                jsonDecoder.json.decodeFromJsonElement(LfmUserRecentTrack.serializer(), it)
+            }
+            is JsonObject -> listOf(
+                jsonDecoder.json.decodeFromJsonElement(LfmUserRecentTrack.serializer(), element),
+            )
+            else -> emptyList()
         }
     }
 }
