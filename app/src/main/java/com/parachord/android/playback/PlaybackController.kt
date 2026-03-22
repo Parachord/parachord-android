@@ -17,6 +17,7 @@ import com.parachord.android.BuildConfig
 import com.parachord.android.data.api.LastFmApi
 import com.parachord.android.data.db.entity.TrackEntity
 import com.parachord.android.data.metadata.ImageEnrichmentService
+import com.parachord.android.data.metadata.MbidEnrichmentService
 import com.parachord.android.playback.handlers.AppleMusicPlaybackHandler
 import com.parachord.android.playback.handlers.PlaybackAction
 import com.parachord.android.resolver.ResolverManager
@@ -56,6 +57,7 @@ class PlaybackController @Inject constructor(
     private val queuePersistence: QueuePersistence,
     private val scrobbleManager: ScrobbleManager,
     private val imageEnrichment: ImageEnrichmentService,
+    private val mbidEnrichment: MbidEnrichmentService,
     private val lastFmApi: LastFmApi,
     private val resolverManager: ResolverManager,
     private val resolverScoring: ResolverScoring,
@@ -494,6 +496,9 @@ class PlaybackController @Inject constructor(
 
         // If the track has no artwork, try to fetch it in the background
         enrichArtworkIfMissing(routedTrack)
+
+        // Enrich with MusicBrainz MBIDs in the background
+        mbidEnrichment.enrichInBackground(routedTrack.id, routedTrack.artist, routedTrack.title)
 
         // Pre-resolve the next few queue tracks so their resolver IDs
         // (spotifyId, appleMusicId, etc.) are ready before we need them.

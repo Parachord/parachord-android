@@ -37,7 +37,7 @@ import com.parachord.android.data.db.entity.TrackEntity
         SyncSourceEntity::class,
         ArtistEntity::class,
     ],
-    version = 11,
+    version = 12,
     exportSchema = false,
 )
 abstract class ParachordDatabase : RoomDatabase() {
@@ -231,13 +231,25 @@ abstract class ParachordDatabase : RoomDatabase() {
             }
         }
 
+        /**
+         * Migration from v11 → v12: add MusicBrainz MBID columns to tracks table.
+         * Populated by MbidEnrichmentService via the ListenBrainz MBID Mapper.
+         */
+        private val MIGRATION_11_12 = object : Migration(11, 12) {
+            override fun migrate(db: SupportSQLiteDatabase) {
+                db.execSQL("ALTER TABLE `tracks` ADD COLUMN `recordingMbid` TEXT")
+                db.execSQL("ALTER TABLE `tracks` ADD COLUMN `artistMbid` TEXT")
+                db.execSQL("ALTER TABLE `tracks` ADD COLUMN `releaseMbid` TEXT")
+            }
+        }
+
         fun create(context: Context): ParachordDatabase =
             Room.databaseBuilder(
                 context,
                 ParachordDatabase::class.java,
                 "parachord.db"
             )
-                .addMigrations(MIGRATION_4_5, MIGRATION_5_6, MIGRATION_6_7, MIGRATION_7_8, MIGRATION_8_9, MIGRATION_9_10, MIGRATION_10_11)
+                .addMigrations(MIGRATION_4_5, MIGRATION_5_6, MIGRATION_6_7, MIGRATION_7_8, MIGRATION_8_9, MIGRATION_9_10, MIGRATION_10_11, MIGRATION_11_12)
                 // Only fall back to destructive for very old versions (pre-v4)
                 // that we can't reasonably migrate from
                 .fallbackToDestructiveMigrationFrom(1, 2, 3)

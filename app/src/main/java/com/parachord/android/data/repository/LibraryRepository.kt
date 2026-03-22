@@ -10,6 +10,8 @@ import com.parachord.android.data.db.entity.ArtistEntity
 import com.parachord.android.data.db.entity.PlaylistEntity
 import com.parachord.android.data.db.entity.PlaylistTrackEntity
 import com.parachord.android.data.db.entity.TrackEntity
+import com.parachord.android.data.metadata.MbidEnrichmentService
+import com.parachord.android.data.metadata.TrackEnrichmentRequest
 import com.parachord.android.sync.SyncEngine
 import kotlinx.coroutines.flow.Flow
 import java.util.UUID
@@ -24,6 +26,7 @@ class LibraryRepository @Inject constructor(
     private val playlistDao: PlaylistDao,
     private val playlistTrackDao: PlaylistTrackDao,
     private val syncEngine: SyncEngine,
+    private val mbidEnrichment: MbidEnrichmentService,
 ) {
     fun getAllTracks(): Flow<List<TrackEntity>> = trackDao.getAll()
     fun getAllAlbums(): Flow<List<AlbumEntity>> = albumDao.getAll()
@@ -42,8 +45,16 @@ class LibraryRepository @Inject constructor(
         val existing = trackDao.getById(track.id)
         // Preserve the synced addedAt timestamp if one exists
         trackDao.insert(if (existing != null) track.copy(addedAt = existing.addedAt) else track)
+        // Background MBID enrichment
+        mbidEnrichment.enrichInBackground(track.id, track.artist, track.title)
     }
-    suspend fun addTracks(tracks: List<TrackEntity>) = trackDao.insertAll(tracks)
+    suspend fun addTracks(tracks: List<TrackEntity>) {
+        trackDao.insertAll(tracks)
+        // Background MBID enrichment for batch imports
+        mbidEnrichment.enrichBatchInBackground(
+            tracks.map { TrackEnrichmentRequest(it.id, it.artist, it.title) }
+        )
+    }
     suspend fun addAlbum(album: AlbumEntity) = albumDao.insert(album)
     suspend fun addAlbums(albums: List<AlbumEntity>) = albumDao.insertAll(albums)
     suspend fun addArtist(artist: ArtistEntity) = artistDao.insert(artist)

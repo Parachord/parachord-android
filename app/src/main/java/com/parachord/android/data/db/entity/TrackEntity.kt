@@ -25,6 +25,12 @@ data class TrackEntity(
     val spotifyId: String? = null,
     /** Apple Music catalog song ID (e.g. "1440935467"). */
     val appleMusicId: String? = null,
+    /** MusicBrainz recording MBID (enriched via MBID Mapper). */
+    val recordingMbid: String? = null,
+    /** MusicBrainz artist MBID (enriched via MBID Mapper). */
+    val artistMbid: String? = null,
+    /** MusicBrainz release MBID (enriched via MBID Mapper). */
+    val releaseMbid: String? = null,
 ) {
     /**
      * Derive all available resolvers from stored IDs.

@@ -8,6 +8,7 @@ import com.parachord.android.data.api.ListenBrainzApi
 import com.parachord.android.data.api.MbReleaseGroupEntry
 import com.parachord.android.data.api.MusicBrainzApi
 import com.parachord.android.data.db.dao.TrackDao
+import com.parachord.android.data.metadata.MbidEnrichmentService
 import com.parachord.android.data.metadata.MusicBrainzProvider
 import com.parachord.android.data.store.SettingsStore
 import dagger.hilt.android.qualifiers.ApplicationContext
@@ -47,15 +48,14 @@ class FreshDropsRepository @Inject constructor(
     private val listenBrainzApi: ListenBrainzApi,
     private val settingsStore: SettingsStore,
     private val trackDao: TrackDao,
+    private val mbidEnrichment: MbidEnrichmentService,
 ) {
     companion object {
         private const val TAG = "FreshDropsRepo"
         private const val MAX_ARTISTS_TO_CHECK = 50
         private const val STALE_THRESHOLD = 6 * 60 * 60 * 1000L // 6 hours
-        private const val MBID_CACHE_TTL = 90L * 24 * 60 * 60 * 1000 // 90 days
         private const val CACHE_FILE = "fresh_drops_cache.json"
         private const val ROTATION_FILE = "fresh_drops_rotation.json"
-        private const val MBID_CACHE_FILE = "mbid_mapper_cache.json"
     }
 
     private val diskJson = Json { ignoreUnknownKeys = true; encodeDefaults = true }
@@ -77,16 +77,8 @@ class FreshDropsRepository @Inject constructor(
         }
     val isCacheStale: Boolean get() = System.currentTimeMillis() - lastFetchedAt > STALE_THRESHOLD
 
-    /** In-memory MBID cache: artist name (lowercase) → MBID. */
+    /** In-memory MBID cache for this session: artist name (lowercase) → MBID. */
     private val mbidCache = mutableMapOf<String, String>()
-
-    /**
-     * Persistent MBID cache with timestamps for 90-day TTL.
-     * Matches desktop's cache_mbid_mapper pattern. Misses are cached too
-     * (as empty string) to avoid repeated lookups for unknown artists.
-     */
-    private var mbidDiskCache: MutableMap<String, MbidCacheEntry> = mutableMapOf()
-    private var mbidDiskCacheLoaded = false
 
     /** Load cache from disk on first access. */
     private fun loadDiskCache() {
@@ -143,48 +135,13 @@ class FreshDropsRepository @Inject constructor(
         artistLastChecked[artistName.lowercase().trim()] = System.currentTimeMillis()
     }
 
-    // --- MBID Mapper disk cache (90-day TTL, matching desktop's cache_mbid_mapper) ---
-
-    private fun loadMbidDiskCache() {
-        mbidDiskCacheLoaded = true
-        try {
-            val file = File(context.filesDir, MBID_CACHE_FILE)
-            if (!file.exists()) return
-            val entries = diskJson.decodeFromString<Map<String, MbidCacheEntry>>(file.readText())
-            // Evict expired entries on load
-            val now = System.currentTimeMillis()
-            mbidDiskCache = entries.filterValues { now - it.cachedAt < MBID_CACHE_TTL }.toMutableMap()
-            // Pre-populate in-memory cache
-            mbidDiskCache.forEach { (key, entry) ->
-                if (entry.mbid.isNotBlank()) mbidCache[key] = entry.mbid
-            }
-            Log.d(TAG, "Loaded ${mbidDiskCache.size} cached MBIDs from disk")
-        } catch (e: Exception) {
-            Log.w(TAG, "Failed to load MBID disk cache", e)
-        }
-    }
-
-    private fun saveMbidDiskCache() {
-        try {
-            val file = File(context.filesDir, MBID_CACHE_FILE)
-            file.writeText(diskJson.encodeToString(mbidDiskCache.toMap()))
-        } catch (e: Exception) {
-            Log.w(TAG, "Failed to save MBID disk cache", e)
-        }
-    }
-
-    /** Cache an MBID result (both hits and misses). */
-    private fun cacheMbid(artistKey: String, mbid: String) {
-        mbidDiskCache[artistKey] = MbidCacheEntry(mbid = mbid, cachedAt = System.currentTimeMillis())
-        if (mbid.isNotBlank()) mbidCache[artistKey] = mbid
-    }
-
     /**
-     * Resolve artist MBID using the MBID Mapper, falling back to MusicBrainz search.
+     * Resolve artist MBID using the shared MbidEnrichmentService, falling back
+     * to MusicBrainz search.
      *
-     * The MBID Mapper resolves in ~4ms with no strict rate limits, vs 500ms+
-     * for MusicBrainz search which is rate-limited to 1 req/sec. We use library
-     * tracks as the recording context the mapper requires.
+     * The enrichment service uses the MBID Mapper (~4ms, no rate limits) with a
+     * 90-day disk cache. We only fall back to rate-limited MusicBrainz search for
+     * artists without library tracks (e.g. Last.fm/ListenBrainz-only artists).
      */
     private suspend fun resolveArtistMbid(
         artistName: String,
@@ -192,34 +149,23 @@ class FreshDropsRepository @Inject constructor(
     ): MbidResolution {
         val key = artistName.lowercase().trim()
 
-        // 1. Check in-memory cache first
+        // 1. Check session cache
         mbidCache[key]?.let { return MbidResolution(it, usedMbSearch = false) }
 
-        // 2. Check disk cache (with TTL)
-        if (!mbidDiskCacheLoaded) loadMbidDiskCache()
-        mbidDiskCache[key]?.let { entry ->
-            if (entry.mbid.isNotBlank()) {
-                mbidCache[key] = entry.mbid
-                return MbidResolution(entry.mbid, usedMbSearch = false)
-            }
-            // Cached miss — skip mapper, go to MB search
+        // 2. Check shared enrichment cache (disk-backed, 90-day TTL)
+        mbidEnrichment.getCachedArtistMbid(artistName)?.let { mbid ->
+            mbidCache[key] = mbid
+            return MbidResolution(mbid, usedMbSearch = false)
         }
 
-        // 3. Try MBID Mapper using a library track by this artist
+        // 3. Try MBID Mapper via enrichment service using a library track
         val trackByArtist = libraryTracks.firstOrNull { it.artist.lowercase().trim() == key }
         if (trackByArtist != null) {
-            try {
-                val result = listenBrainzApi.mbidMapperLookup(
-                    artistName = trackByArtist.artist,
-                    recordingName = trackByArtist.title,
-                )
-                if (result?.artistMbid != null) {
-                    cacheMbid(key, result.artistMbid)
-                    Log.d(TAG, "MBID Mapper resolved '$artistName' → ${result.artistMbid}")
-                    return MbidResolution(result.artistMbid, usedMbSearch = false)
-                }
-            } catch (e: Exception) {
-                Log.w(TAG, "MBID Mapper failed for '$artistName', falling back to MB search", e)
+            val mbid = mbidEnrichment.getArtistMbid(trackByArtist.artist, trackByArtist.title)
+            if (mbid != null) {
+                mbidCache[key] = mbid
+                Log.d(TAG, "MBID Mapper enriched '$artistName' → $mbid")
+                return MbidResolution(mbid, usedMbSearch = false)
             }
         }
 
@@ -228,12 +174,10 @@ class FreshDropsRepository @Inject constructor(
             val results = musicBrainzApi.searchArtists(artistName, limit = 1)
             val artist = results.artists.firstOrNull()
             if (artist != null) {
-                cacheMbid(key, artist.id)
+                mbidCache[key] = artist.id
                 Log.d(TAG, "MB search resolved '$artistName' → ${artist.id}")
                 return MbidResolution(artist.id, usedMbSearch = true)
             }
-            // Cache the miss
-            cacheMbid(key, "")
         } catch (e: Exception) {
             Log.w(TAG, "MB search failed for '$artistName'", e)
         }
@@ -328,11 +272,8 @@ class FreshDropsRepository @Inject constructor(
                 }
             }
 
-            // Persist rotation + MBID cache state
-            withContext(Dispatchers.IO) {
-                saveRotation()
-                saveMbidDiskCache()
-            }
+            // Persist rotation state so next refresh picks up where we left off
+            withContext(Dispatchers.IO) { saveRotation() }
 
             // 3. Final merge: new results + prior cache, deduplicated and sorted
             val finalReleases = mergeAndDedupe(allReleases, priorCachedReleases)
@@ -528,13 +469,6 @@ private data class ArtistSource(
 private data class MbidResolution(
     val mbid: String?,
     val usedMbSearch: Boolean,
-)
-
-/** Persistent MBID cache entry with timestamp for TTL. */
-@Serializable
-private data class MbidCacheEntry(
-    val mbid: String, // empty string = cached miss
-    val cachedAt: Long,
 )
 
 /** Disk cache wrapper for JSON serialization. */
