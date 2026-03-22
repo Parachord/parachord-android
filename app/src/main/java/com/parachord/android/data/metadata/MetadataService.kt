@@ -4,6 +4,11 @@ import com.parachord.android.data.store.SettingsStore
 import kotlinx.coroutines.async
 import kotlinx.coroutines.awaitAll
 import kotlinx.coroutines.coroutineScope
+import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.flow.channelFlow
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.sync.Mutex
+import kotlinx.coroutines.sync.withLock
 import javax.inject.Inject
 import javax.inject.Singleton
 
@@ -187,6 +192,62 @@ class MetadataService @Inject constructor(
             year = base.year ?: others.firstNotNullOfOrNull { it.year },
             releaseType = base.releaseType ?: others.firstNotNullOfOrNull { it.releaseType },
             provider = results.joinToString("+") { it.provider },
+        )
+    }
+
+    /**
+     * Progressive version of [getAlbumTracks] — emits an updated [AlbumDetail] as each
+     * provider completes, so the UI can show the tracklist from the fastest provider
+     * immediately and enrich it (artwork, Spotify IDs) as slower providers respond.
+     */
+    fun getAlbumTracksProgressively(albumTitle: String, artistName: String): Flow<AlbumDetail> = channelFlow {
+        val mutex = Mutex()
+        var merged: AlbumDetail? = null
+        val active = availableProviders()
+        for (provider in active) {
+            launch {
+                try {
+                    val result = provider.getAlbumTracks(albumTitle, artistName) ?: return@launch
+                    mutex.withLock {
+                        merged = merged?.let { mergeAlbumDetails(it, result) } ?: result
+                        send(merged!!)
+                    }
+                } catch (_: Exception) { /* skip failed provider */ }
+            }
+        }
+    }
+
+    /**
+     * Merge two [AlbumDetail] results: keep the richer tracklist as base,
+     * fill missing metadata from the other.
+     */
+    private fun mergeAlbumDetails(existing: AlbumDetail, incoming: AlbumDetail): AlbumDetail {
+        // Use whichever has more tracks as the tracklist base
+        val (base, other) = if (existing.tracks.size >= incoming.tracks.size) {
+            existing to incoming
+        } else {
+            incoming to existing
+        }
+
+        val otherTracksByTitle = other.tracks.associateBy { it.title.lowercase().trim() }
+        val enrichedTracks = base.tracks.map { track ->
+            val match = otherTracksByTitle[track.title.lowercase().trim()]
+            if (match != null) track.mergeWith(match) else track
+        }
+
+        val mergedArtwork = base.artworkUrl ?: other.artworkUrl
+        val tracksWithArt = if (mergedArtwork != null) {
+            enrichedTracks.map { t -> t.copy(artworkUrl = t.artworkUrl ?: mergedArtwork) }
+        } else enrichedTracks
+
+        return base.copy(
+            tracks = tracksWithArt,
+            artworkUrl = mergedArtwork,
+            year = base.year ?: other.year,
+            releaseType = base.releaseType ?: other.releaseType,
+            provider = listOf(existing.provider, incoming.provider)
+                .filter { it.isNotBlank() }
+                .joinToString("+"),
         )
     }
 
