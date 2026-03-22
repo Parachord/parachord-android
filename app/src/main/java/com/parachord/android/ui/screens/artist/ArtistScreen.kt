@@ -79,6 +79,7 @@ import com.parachord.android.ui.components.AlbumArtCard
 import com.parachord.android.ui.components.AlbumArtCardFill
 import com.parachord.android.ui.components.FaceAwareImage
 import com.parachord.android.ui.components.SectionHeader
+import com.parachord.android.ui.components.ShimmerDiscographyCard
 import com.parachord.android.ui.components.ShimmerTrackRow
 import com.parachord.android.ui.components.shimmerBrush
 import com.parachord.android.ui.components.SwipeableTabLayout
@@ -293,6 +294,7 @@ fun ArtistScreen(
                         "Discography" -> DiscographyTab(
                             albums = albums,
                             topTracks = topTracks,
+                            isLoading = isLoading,
                             onNavigateToAlbum = onNavigateToAlbum,
                             onPlayTrack = viewModel::playTrack,
                             trackResolvers = trackResolvers,
@@ -358,6 +360,7 @@ private fun releaseTypeBadgeColor(type: String?): Color = when (type?.lowercase(
 private fun DiscographyTab(
     albums: List<AlbumSearchResult>,
     topTracks: List<TrackSearchResult>,
+    isLoading: Boolean = false,
     onNavigateToAlbum: (albumTitle: String, artistName: String) -> Unit,
     onPlayTrack: (TrackSearchResult) -> Unit = {},
     trackResolvers: Map<String, List<String>> = emptyMap(),
@@ -384,6 +387,10 @@ private fun DiscographyTab(
 
     val cardBg = MaterialTheme.colorScheme.surfaceVariant
 
+    // Show shimmer skeletons while albums + tracks are still loading
+    val showAlbumSkeletons = albums.isEmpty() && isLoading
+    val showTrackSkeletons = topTracks.isEmpty() && isLoading
+
     LazyColumn(modifier = Modifier.fillMaxSize()) {
         // Filter chips row (only show if we have more than one filter available)
         if (availableFilters.size > 1) {
@@ -408,6 +415,29 @@ private fun DiscographyTab(
                                 selectedLabelColor = chipColor,
                             ),
                         )
+                    }
+                }
+            }
+        }
+
+        // Skeleton album cards while loading
+        if (showAlbumSkeletons) {
+            item {
+                Column(
+                    modifier = Modifier.padding(horizontal = 12.dp),
+                    verticalArrangement = Arrangement.spacedBy(10.dp),
+                ) {
+                    repeat(3) {
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.spacedBy(10.dp),
+                        ) {
+                            repeat(2) {
+                                Box(modifier = Modifier.weight(1f)) {
+                                    ShimmerDiscographyCard()
+                                }
+                            }
+                        }
                     }
                 }
             }
@@ -506,7 +536,17 @@ private fun DiscographyTab(
             }
         }
 
-        if (filteredAlbums.isEmpty() && (topTracks.isEmpty() || selectedFilter != "all")) {
+        // Skeleton top tracks while loading
+        if (showTrackSkeletons && selectedFilter == "all") {
+            item {
+                if (filteredAlbums.isNotEmpty() || showAlbumSkeletons) HorizontalDivider()
+                SectionHeader("TOP TRACKS")
+            }
+            items(5) { ShimmerTrackRow() }
+        }
+
+        // Only show "no discography" when loading is done and there's truly nothing
+        if (!isLoading && filteredAlbums.isEmpty() && (topTracks.isEmpty() || selectedFilter != "all")) {
             item {
                 Box(
                     modifier = Modifier.fillMaxWidth().padding(32.dp),

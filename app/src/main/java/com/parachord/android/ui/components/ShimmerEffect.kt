@@ -7,10 +7,12 @@ import androidx.compose.animation.core.infiniteRepeatable
 import androidx.compose.animation.core.rememberInfiniteTransition
 import androidx.compose.animation.core.tween
 import androidx.compose.foundation.background
+import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.aspectRatio
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
@@ -102,6 +104,7 @@ fun ShimmerTrackRow(modifier: Modifier = Modifier) {
 
 /**
  * Shimmer placeholder for an album card (square image + text below).
+ * Fixed 120dp width — used in horizontal carousels.
  */
 @Composable
 fun ShimmerAlbumCard(modifier: Modifier = Modifier) {
@@ -130,5 +133,59 @@ fun ShimmerAlbumCard(modifier: Modifier = Modifier) {
                 .clip(RoundedCornerShape(4.dp))
                 .background(brush),
         )
+    }
+}
+
+/**
+ * Shimmer placeholder for a discography album card (fill-width variant).
+ * Matches the 2-column grid layout in the artist discography tab:
+ * square artwork + title line + type badge/year row, inside a rounded card.
+ */
+@Composable
+fun ShimmerDiscographyCard(modifier: Modifier = Modifier) {
+    val brush = shimmerBrush()
+
+    Column(
+        modifier = modifier
+            .fillMaxWidth()
+            .clip(RoundedCornerShape(10.dp))
+            .background(MaterialTheme.colorScheme.surfaceVariant)
+            .padding(10.dp),
+    ) {
+        // Square artwork placeholder
+        Box(
+            modifier = Modifier
+                .fillMaxWidth()
+                .aspectRatio(1f)
+                .clip(RoundedCornerShape(6.dp))
+                .background(brush),
+        )
+        Spacer(modifier = Modifier.height(10.dp))
+        // Title
+        Box(
+            modifier = Modifier
+                .fillMaxWidth(0.75f)
+                .height(13.dp)
+                .clip(RoundedCornerShape(4.dp))
+                .background(brush),
+        )
+        Spacer(modifier = Modifier.height(6.dp))
+        // Type badge + year
+        Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+            Box(
+                modifier = Modifier
+                    .width(48.dp)
+                    .height(18.dp)
+                    .clip(RoundedCornerShape(4.dp))
+                    .background(brush),
+            )
+            Box(
+                modifier = Modifier
+                    .width(32.dp)
+                    .height(18.dp)
+                    .clip(RoundedCornerShape(4.dp))
+                    .background(brush),
+            )
+        }
     }
 }
