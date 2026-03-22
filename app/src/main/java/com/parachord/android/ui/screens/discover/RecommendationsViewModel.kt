@@ -192,7 +192,11 @@ class RecommendationsViewModel @Inject constructor(
                 if (track.resolvers.isNotEmpty()) continue // already resolved
                 try {
                     val query = "${track.title} ${track.artist}"
-                    val sources = resolverManager.resolve(query)
+                    val sources = resolverManager.resolve(
+                        query,
+                        targetTitle = track.title,
+                        targetArtist = track.artist,
+                    )
                     if (sources.isNotEmpty()) {
                         val resolverNames = sources.map { it.resolver }.distinct()
                         mutableTracks[index] = track.copy(resolvers = resolverNames)

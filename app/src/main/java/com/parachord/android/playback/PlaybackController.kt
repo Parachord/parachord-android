@@ -958,7 +958,11 @@ class PlaybackController @Inject constructor(
                     val artistName = similar.artist?.name ?: continue
                     val query = "${similar.name} ${artistName}"
                     try {
-                        val sources = resolverManager.resolve(query)
+                        val sources = resolverManager.resolve(
+                            query,
+                            targetTitle = similar.name,
+                            targetArtist = artistName,
+                        )
                         val best = resolverScoring.selectBest(sources) ?: continue
 
                         resolvedTracks.add(

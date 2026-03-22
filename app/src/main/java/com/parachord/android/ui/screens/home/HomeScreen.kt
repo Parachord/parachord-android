@@ -342,10 +342,6 @@ fun HomeScreen(
                             exploration = weeklyExploration,
                             covers = weeklyCovers,
                             trackCounts = weeklyTrackCounts,
-                            onPlayPlaylist = { entry, contextType ->
-                                viewModel.playWeeklyPlaylist(entry, contextType)
-                                onNavigateToNowPlaying()
-                            },
                             onOpenPlaylist = { entry, contextType ->
                                 onNavigateToWeeklyPlaylist(entry.id, contextType)
                             },
@@ -698,7 +694,6 @@ private fun WeeklyPlaylistsSection(
     exploration: List<WeeklyPlaylistEntry>?,
     covers: Map<String, List<String>>,
     trackCounts: Map<String, Int>,
-    onPlayPlaylist: (WeeklyPlaylistEntry, String) -> Unit,
     onOpenPlaylist: (WeeklyPlaylistEntry, String) -> Unit,
 ) {
     Column(verticalArrangement = Arrangement.spacedBy(16.dp)) {
@@ -709,7 +704,6 @@ private fun WeeklyPlaylistsSection(
                 contextType = "weekly-jam",
                 covers = covers,
                 trackCounts = trackCounts,
-                onPlay = onPlayPlaylist,
                 onOpen = onOpenPlaylist,
             )
         }
@@ -720,7 +714,6 @@ private fun WeeklyPlaylistsSection(
                 contextType = "weekly-exploration",
                 covers = covers,
                 trackCounts = trackCounts,
-                onPlay = onPlayPlaylist,
                 onOpen = onOpenPlaylist,
             )
         }
@@ -734,7 +727,6 @@ private fun WeeklyCarouselRow(
     contextType: String,
     covers: Map<String, List<String>>,
     trackCounts: Map<String, Int>,
-    onPlay: (WeeklyPlaylistEntry, String) -> Unit,
     onOpen: (WeeklyPlaylistEntry, String) -> Unit,
 ) {
     Column {
@@ -774,7 +766,6 @@ private fun WeeklyCarouselRow(
                     covers = covers[entry.id].orEmpty(),
                     trackCount = trackCounts[entry.id],
                     contextType = contextType,
-                    onPlay = onPlay,
                     onClick = { onOpen(entry, contextType) },
                     modifier = Modifier.width(140.dp),
                 )
@@ -789,7 +780,6 @@ private fun WeeklyPlaylistCard(
     covers: List<String>,
     trackCount: Int?,
     contextType: String,
-    onPlay: (WeeklyPlaylistEntry, String) -> Unit,
     onClick: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
@@ -847,23 +837,6 @@ private fun WeeklyPlaylistCard(
                 }
             }
 
-            // Play button at bottom-right
-            Box(
-                modifier = Modifier
-                    .align(Alignment.BottomEnd)
-                    .padding(8.dp)
-                    .size(36.dp)
-                    .background(Color(0xFF7C3AED), CircleShape)
-                    .hapticClickable(onClick = { onPlay(entry, contextType) }),
-                contentAlignment = Alignment.Center,
-            ) {
-                Icon(
-                    imageVector = Icons.Filled.PlayArrow,
-                    contentDescription = "Play ${entry.weekLabel}",
-                    tint = Color.White,
-                    modifier = Modifier.size(20.dp),
-                )
-            }
         }
 
         // Label area below the mosaic

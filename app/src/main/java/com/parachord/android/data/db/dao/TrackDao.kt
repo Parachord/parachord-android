@@ -66,6 +66,10 @@ interface TrackDao {
     @Query("SELECT COUNT(*) > 0 FROM tracks WHERE LOWER(title) = LOWER(:title) AND LOWER(artist) = LOWER(:artist)")
     fun existsByTitleAndArtist(title: String, artist: String): Flow<Boolean>
 
+    /** Find local file tracks matching title and artist (for local file resolver). */
+    @Query("SELECT * FROM tracks WHERE resolver = 'localfiles' AND LOWER(title) = LOWER(:title) AND LOWER(artist) = LOWER(:artist) LIMIT 1")
+    suspend fun findLocalFile(title: String, artist: String): TrackEntity?
+
     /** Remove synced tracks that have no corresponding sync_source entry (orphaned duplicates). */
     @Query("DELETE FROM tracks WHERE id LIKE 'spotify-%' AND id NOT IN (SELECT itemId FROM sync_sources WHERE itemType = 'track')")
     suspend fun deleteOrphanedSyncedTracks(): Int

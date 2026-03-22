@@ -3,6 +3,7 @@ package com.parachord.android.resolver
 import android.util.Log
 import com.parachord.android.auth.OAuthManager
 import com.parachord.android.data.api.SpotifyApi
+import com.parachord.android.data.db.dao.TrackDao
 import com.parachord.android.data.store.SettingsStore
 import com.parachord.android.playback.handlers.MusicKitWebBridge
 import kotlinx.coroutines.Dispatchers
@@ -36,6 +37,7 @@ class ResolverManager @Inject constructor(
     private val okHttpClient: OkHttpClient,
     private val json: Json,
     private val musicKitBridge: MusicKitWebBridge,
+    private val trackDao: TrackDao,
 ) {
     companion object {
         private const val TAG = "ResolverManager"
@@ -52,6 +54,7 @@ class ResolverManager @Inject constructor(
             ResolverInfo(id = "spotify", name = "Spotify", enabled = true),
             ResolverInfo(id = "applemusic", name = "Apple Music", enabled = true),
             ResolverInfo(id = "soundcloud", name = "SoundCloud", enabled = true),
+            ResolverInfo(id = "localfiles", name = "Local Files", enabled = true),
         )
     )
     val resolvers: StateFlow<List<ResolverInfo>> = _resolvers.asStateFlow()
@@ -115,6 +118,9 @@ class ResolverManager @Inject constructor(
             }
             if (activeResolvers.isEmpty() || "soundcloud" in activeResolvers) {
                 add(async { resolveSoundCloud(query) })
+            }
+            if (activeResolvers.isEmpty() || "localfiles" in activeResolvers) {
+                add(async { resolveLocalFile(targetTitle, targetArtist) })
             }
         }
 
@@ -351,6 +357,36 @@ class ResolverManager @Inject constructor(
                 null
             }
         }
+
+    // ── Local File Resolver ──────────────────────────────────────────────
+
+    /**
+     * Search the local library for a matching track.
+     * Requires both title and artist to be known for a reliable match.
+     */
+    private suspend fun resolveLocalFile(
+        targetTitle: String?,
+        targetArtist: String?,
+    ): ResolvedSource? {
+        if (targetTitle.isNullOrBlank() || targetArtist.isNullOrBlank()) return null
+        return try {
+            val track = trackDao.findLocalFile(targetTitle, targetArtist) ?: return null
+            val sourceUrl = track.sourceUrl ?: return null
+            Log.d(TAG, "Local file matched '${track.title}' by ${track.artist}")
+            ResolvedSource(
+                url = sourceUrl,
+                sourceType = "local",
+                resolver = "localfiles",
+                confidence = 0.95, // High confidence — exact title+artist match in local library
+                matchedTitle = track.title,
+                matchedArtist = track.artist,
+                matchedDurationMs = track.duration,
+            )
+        } catch (e: Exception) {
+            Log.w(TAG, "Local file resolve failed: ${e.message}")
+            null
+        }
+    }
 
     // ── SoundCloud Resolver ─────────────────────────────────────────────
 

@@ -104,6 +104,14 @@ class SearchViewModel @Inject constructor(
                 }
             }
         }
+        // Pre-resolve local search results so resolver badges appear and playback is instant
+        viewModelScope.launch {
+            localTrackResults.collect { tracks ->
+                if (tracks.isNotEmpty()) {
+                    trackResolverCache.resolveInBackground(tracks)
+                }
+            }
+        }
     }
 
     fun onQueryChange(newQuery: String) {

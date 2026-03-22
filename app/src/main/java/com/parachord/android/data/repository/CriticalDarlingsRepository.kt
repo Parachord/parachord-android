@@ -54,6 +54,8 @@ class CriticalDarlingsRepository @Inject constructor(
     private var cachedAlbums: List<CriticsPickAlbum>? = null
     private var lastFetchedAt: Long = 0L
     private val STALE_THRESHOLD = 4 * 60 * 60 * 1000L // 4 hours (matching desktop)
+    /** Short interval to prevent re-fetching when navigating back and forth quickly. */
+    private val MIN_REFETCH_INTERVAL = 5 * 60 * 1000L // 5 minutes
     private var diskCacheLoaded = false
 
     /** Synchronous access to cached albums (for ViewModel initial state). */
@@ -95,38 +97,51 @@ class CriticalDarlingsRepository @Inject constructor(
         if (!diskCacheLoaded) loadDiskCache()
         try {
             val now = System.currentTimeMillis()
-            val isStale = now - lastFetchedAt > STALE_THRESHOLD
+            val recentlyFetched = now - lastFetchedAt < MIN_REFETCH_INTERVAL
 
-            // Return cache if fresh
-            if (!forceRefresh && !isStale && cachedAlbums != null) {
-                emit(Resource.Success(cachedAlbums!!))
-                return@flow
-            }
-
-            // Show stale cache immediately while refreshing (stale-while-revalidate)
+            // Show cache immediately (stale-while-revalidate)
             if (cachedAlbums != null) {
                 emit(Resource.Success(cachedAlbums!!))
             } else {
                 emit(Resource.Loading)
             }
 
-            val albums = withContext(Dispatchers.IO) { fetchAndParseRSS() }
-
-            if (albums.isEmpty()) {
-                emit(Resource.Error("No critics' picks available"))
+            // Skip re-fetch if we fetched very recently (prevents hammering on quick nav)
+            if (!forceRefresh && recentlyFetched && cachedAlbums != null) {
                 return@flow
             }
 
-            // Emit immediately without art
-            cachedAlbums = albums
-            lastFetchedAt = now
-            saveDiskCache(albums, now)
-            emit(Resource.Success(albums))
+            val albums = withContext(Dispatchers.IO) { fetchAndParseRSS() }
 
-            // Progressively fetch album art (matching desktop's fetchCriticsPicksAlbumArt)
-            val mutableAlbums = albums.toMutableList()
-            for ((index, album) in albums.withIndex()) {
-                if (album.albumArt != null) continue
+            if (albums.isEmpty()) {
+                // Keep showing cached data if available, only error on truly empty
+                if (cachedAlbums == null) {
+                    emit(Resource.Error("No critics' picks available"))
+                }
+                return@flow
+            }
+
+            // Carry over album art from cached albums so we don't re-fetch everything
+            val oldArtByKey = cachedAlbums?.associateBy(
+                { "${it.title.lowercase()}|${it.artist.lowercase()}" },
+                { it.albumArt },
+            ) ?: emptyMap()
+            val mergedAlbums = albums.map { album ->
+                val cachedArt = oldArtByKey["${album.title.lowercase()}|${album.artist.lowercase()}"]
+                if (cachedArt != null) album.copy(albumArt = cachedArt) else album
+            }
+
+            cachedAlbums = mergedAlbums
+            lastFetchedAt = now
+            saveDiskCache(mergedAlbums, now)
+            emit(Resource.Success(mergedAlbums))
+
+            // Progressively fetch album art only for albums that still need it
+            val mutableAlbums = mergedAlbums.toMutableList()
+            val toEnrich = mutableAlbums.withIndex().filter { it.value.albumArt == null }
+            if (toEnrich.isEmpty()) return@flow
+
+            for ((index, album) in toEnrich) {
                 try {
                     val artUrl = withContext(Dispatchers.IO) {
                         fetchAlbumArt(album.title, album.artist)
