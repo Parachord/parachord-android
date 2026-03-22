@@ -39,6 +39,9 @@ mlkit-face = "16.1.7"
 
 # Testing
 junit = "4.13.2"
+mockk = "1.13.13"
+kotlinx-coroutines-test = "1.8.1"
+turbine = "1.2.0"
 androidx-test-ext = "1.2.1"
 espresso = "3.6.1"
 
@@ -111,6 +114,9 @@ mlkit-face-detection = { group = "com.google.mlkit", name = "face-detection", ve
 
 # Testing
 junit = { group = "junit", name = "junit", version.ref = "junit" }
+mockk = { group = "io.mockk", name = "mockk", version.ref = "mockk" }
+kotlinx-coroutines-test = { group = "org.jetbrains.kotlinx", name = "kotlinx-coroutines-test", version.ref = "kotlinx-coroutines-test" }
+turbine = { group = "app.cash.turbine", name = "turbine", version.ref = "turbine" }
 androidx-test-ext = { group = "androidx.test.ext", name = "junit", version.ref = "androidx-test-ext" }
 androidx-espresso-core = { group = "androidx.test.espresso", name = "espresso-core", version.ref = "espresso" }
 androidx-compose-ui-test-junit4 = { group = "androidx.compose.ui", name = "ui-test-junit4" }
