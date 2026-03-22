@@ -8,13 +8,16 @@ import javax.inject.Singleton
 /**
  * Ports the desktop app's resolver priority + confidence scoring logic.
  *
- * Source selection uses a two-tier sort:
- * 1. Resolver priority — user-configured ordering (lower index = higher priority)
- * 2. Confidence score — match quality tiebreaker within the same priority tier
+ * Source selection uses three stages:
+ * 1. Minimum confidence filter — discard sources below [MIN_CONFIDENCE_THRESHOLD]
+ *    (filters out "no match" results where neither title nor artist matched)
+ * 2. Resolver priority — user-configured ordering (lower index = higher priority)
+ * 3. Confidence score — match quality tiebreaker within the same priority tier
  *
- * A Spotify result at 50% confidence beats a SoundCloud result at 95%
- * when the user ranks Spotify higher. But if two resolvers share the same
- * priority level, the higher-confidence match wins.
+ * A Spotify result at 70% confidence beats a SoundCloud result at 95%
+ * when the user ranks Spotify higher. But a Spotify result at 50%
+ * confidence (no match) is filtered out, allowing the correct local
+ * file or lower-priority result to win.
  */
 @Singleton
 class ResolverScoring @Inject constructor(
@@ -29,6 +32,19 @@ class ResolverScoring @Inject constructor(
         val CANONICAL_RESOLVER_ORDER = listOf(
             "spotify", "applemusic", "bandcamp", "soundcloud", "localfiles", "youtube"
         )
+
+        /**
+         * Minimum confidence threshold for a source to be considered in selection.
+         * Sources below this are filtered out before priority sorting.
+         *
+         * scoreConfidence() returns 0.50 for "no match" (neither title nor artist
+         * matched). Without this threshold, a wrong-song Spotify result at 0.50
+         * would beat a correct local file at 0.95 due to priority ordering.
+         *
+         * The desktop app handles this via noMatch:true sentinel filtering;
+         * we use an equivalent confidence floor.
+         */
+        const val MIN_CONFIDENCE_THRESHOLD = 0.60
     }
 
     /**
@@ -40,13 +56,17 @@ class ResolverScoring @Inject constructor(
         preferredResolver: String? = null,
     ): ResolvedSource? {
         if (sources.isEmpty()) return null
-        if (sources.size == 1) return sources.first()
+        if (sources.size == 1) {
+            val only = sources.first()
+            return if ((only.confidence ?: 0.0) >= MIN_CONFIDENCE_THRESHOLD) only else null
+        }
 
         val resolverOrder = settingsStore.getResolverOrder()
         val activeResolvers = settingsStore.getActiveResolvers()
 
         return sources
             .filter { activeResolvers.isEmpty() || it.resolver in activeResolvers }
+            .filter { (it.confidence ?: 0.0) >= MIN_CONFIDENCE_THRESHOLD }
             .map { source ->
                 ScoredSource(
                     source = source,
