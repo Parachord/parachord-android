@@ -25,6 +25,7 @@ import javax.inject.Singleton
 @Singleton
 class WikipediaProvider @Inject constructor(
     private val musicBrainzApi: MusicBrainzApi,
+    private val musicBrainzProvider: MusicBrainzProvider,
     private val okHttpClient: OkHttpClient,
 ) : MetadataProvider {
 
@@ -46,9 +47,10 @@ class WikipediaProvider @Inject constructor(
      */
     override suspend fun getArtistInfo(artistName: String): ArtistInfo? = withContext(Dispatchers.IO) {
         try {
-            // Step 1: Resolve artist MBID
-            val mbArtist = musicBrainzApi.searchArtists(artistName, limit = 1)
-                .artists.firstOrNull() ?: return@withContext null
+            // Step 1: Resolve artist MBID (uses MusicBrainzProvider's cached search
+            // to avoid duplicate API calls — MB rate limits at 1 req/s)
+            val mbArtist = musicBrainzProvider.resolveArtist(artistName)
+                ?: return@withContext null
             val mbid = mbArtist.id
 
             // Step 2: Get artist relations to find Wikidata link
