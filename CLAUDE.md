@@ -282,6 +282,7 @@ static let darkAccentPurple = Color(hex: "#a78bfa")
 2. **Don't use `sources.firstOrNull()` / `sources.first`.** Always use `ResolverScoring.selectBest()` (or its iOS equivalent) for source selection.
 3. **Don't skip the resolver pipeline.** Even if you have a direct URL, route through `ResolverManager` → `ResolverScoring` → `PlaybackRouter` to maintain consistent behavior.
 4. **Don't use blue as the accent color.** The brand accent is purple (`#7c3aed` light / `#a78bfa` dark).
+5. **Don't return or select sources below the confidence floor.** `ResolverScoring.selectBest()` filters out sources with confidence < `MIN_CONFIDENCE_THRESHOLD` (0.60). `scoreConfidence()` returns 0.50 for "no match" (neither title nor artist matched) — these are wrong-song results and must not be played, even from a high-priority resolver. The desktop handles this via `noMatch:true` sentinel filtering; we use an equivalent confidence floor. If porting to iOS, replicate this filter.
 
 ### Android-Specific
 
