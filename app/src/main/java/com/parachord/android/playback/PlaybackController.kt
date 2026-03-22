@@ -1131,6 +1131,35 @@ class PlaybackController @Inject constructor(
     }
 
     /**
+     * Switch the currently playing track to a different resolver source.
+     * Called when the user manually selects a different source from the Now Playing
+     * resolver dropdown (matching the desktop's source switcher behavior).
+     * Restarts playback from 0:00 using the chosen resolver.
+     */
+    fun switchSource(resolver: String) {
+        val track = stateHolder.state.value.currentTrack ?: return
+        scope.launch(Dispatchers.Main) {
+            val key = trackKey(track.title, track.artist)
+            val cachedSources = trackResolverCache.trackSources.value[key]
+            if (cachedSources.isNullOrEmpty()) return@launch
+
+            val source = cachedSources.firstOrNull { it.resolver == resolver } ?: return@launch
+
+            Log.d(TAG, "Manual source switch for '${track.title}': ${track.resolver} → $resolver")
+            val switched = track.copy(
+                resolver = source.resolver,
+                sourceType = source.sourceType,
+                sourceUrl = source.url,
+                spotifyUri = source.spotifyUri ?: track.spotifyUri,
+                spotifyId = source.spotifyId ?: track.spotifyId,
+                soundcloudId = source.soundcloudId ?: track.soundcloudId,
+                appleMusicId = source.appleMusicId ?: track.appleMusicId,
+            )
+            playTrackInternal(switched)
+        }
+    }
+
+    /**
      * Resolve an unresolved track on-the-fly at play time.
      * Used for ephemeral tracks (weekly playlists, recommendations) that haven't
      * been through the resolver pipeline yet. Caches the result in TrackResolverCache

@@ -47,6 +47,10 @@ class NowPlayingViewModel @Inject constructor(
     val trackResolvers: StateFlow<Map<String, List<String>>> = trackResolverCache.trackResolvers
     val trackResolverConfidences: StateFlow<Map<String, Map<String, Float>>> = trackResolverCache.trackResolverConfidences
 
+    /** All resolved sources for the current track, for the source switcher dropdown. */
+    val trackSources: StateFlow<Map<String, List<com.parachord.android.resolver.ResolvedSource>>> =
+        trackResolverCache.trackSources
+
     /** Whether the currently playing artist is on tour. */
     private val _isOnTour = MutableStateFlow(false)
     val isOnTour: StateFlow<Boolean> = _isOnTour.asStateFlow()
@@ -145,5 +149,10 @@ class NowPlayingViewModel @Inject constructor(
     // Spinoff
     fun toggleSpinoff() {
         playbackController.toggleSpinoff()
+    }
+
+    /** Switch the current track to a different resolver source (restarts from 0:00). */
+    fun switchSource(resolver: String) {
+        playbackController.switchSource(resolver)
     }
 }
