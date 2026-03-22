@@ -11,6 +11,7 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.launch
 import kotlinx.serialization.Serializable
+import kotlinx.serialization.encodeToString
 import kotlinx.serialization.json.Json
 import java.io.File
 import java.util.concurrent.ConcurrentHashMap
@@ -230,7 +231,8 @@ class MbidEnrichmentService @Inject constructor(
     internal fun saveDiskCache() {
         try {
             val file = File(context.filesDir, CACHE_FILE)
-            file.writeText(diskJson.encodeToString<Map<String, MbidCacheEntry>>(diskCache.toMap()))
+            val data: Map<String, MbidCacheEntry> = diskCache.toMap()
+            file.writeText(diskJson.encodeToString(data))
         } catch (e: Exception) {
             Log.w(TAG, "Failed to save MBID disk cache", e)
         }
