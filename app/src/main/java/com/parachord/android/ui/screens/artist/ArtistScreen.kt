@@ -172,23 +172,13 @@ fun ArtistScreen(
     Column(modifier = modifier.fillMaxSize()) {
         TopAppBar(
             title = {
-                if (isLoading && artistInfo == null) {
-                    Box(
-                        modifier = Modifier
-                            .width(140.dp)
-                            .height(20.dp)
-                            .clip(RoundedCornerShape(4.dp))
-                            .background(shimmerBrush()),
-                    )
-                } else {
-                    Text(
-                        text = (artistInfo?.name ?: "").uppercase(),
-                        style = MaterialTheme.typography.titleLarge.copy(
-                            fontWeight = FontWeight.Light,
-                            letterSpacing = 0.2.em,
-                        ),
-                    )
-                }
+                Text(
+                    text = (artistInfo?.name ?: viewModel.artistName).uppercase(),
+                    style = MaterialTheme.typography.titleLarge.copy(
+                        fontWeight = FontWeight.Light,
+                        letterSpacing = 0.2.em,
+                    ),
+                )
             },
             navigationIcon = {
                 IconButton(onClick = onBack) {

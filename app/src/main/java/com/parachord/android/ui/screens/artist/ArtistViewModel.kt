@@ -49,7 +49,7 @@ class ArtistViewModel @Inject constructor(
     private val concertsRepository: ConcertsRepository,
 ) : ViewModel() {
 
-    private val artistName: String = savedStateHandle.get<String>("artistName") ?: ""
+    val artistName: String = savedStateHandle.get<String>("artistName") ?: ""
 
     private val _artistInfo = MutableStateFlow<ArtistInfo?>(null)
     val artistInfo: StateFlow<ArtistInfo?> = _artistInfo.asStateFlow()
@@ -108,47 +108,56 @@ class ArtistViewModel @Inject constructor(
     }
 
     private fun loadArtist() {
+        _isLoading.value = true
+
+        // Fire each section independently — the page renders progressively
+        // as each completes, instead of blocking on the slowest provider chain
+        // (Wikipedia's 4-call chain + MusicBrainz rate limiting = 10-15s).
+
+        // Artist info (bio, image, tags, similar artists)
         viewModelScope.launch {
-            _isLoading.value = true
             try {
-                // Load all three in parallel to reduce MusicBrainz rate-limiting
-                // (sequential calls would hit MB 3 times in quick succession)
-                val infoDeferred = async { metadataService.getArtistInfo(artistName) }
-                val tracksDeferred = async { metadataService.getArtistTopTracks(artistName, limit = 10) }
-                val albumsDeferred = async { metadataService.getArtistAlbums(artistName) }
-
-                val info = infoDeferred.await()
+                val info = metadataService.getArtistInfo(artistName)
                 _artistInfo.value = info
-
-                val tracks = tracksDeferred.await()
-                _topTracks.value = tracks
-
-                val albums = albumsDeferred.await()
-                    .sortedByDescending { it.year ?: 0 }
-                _albums.value = albums
-
-                resolveTracksInBackground(tracks)
-
-                // Load tour dates in background
-                loadTourDates()
-
-                // Progressively enrich similar artist images that are missing
+                _isLoading.value = false
                 if (info != null) {
                     enrichSimilarArtistImages(info)
                 }
+            } catch (e: Exception) {
+                Log.e("ArtistVM", "Failed loading artist info for '$artistName'", e)
+                _isLoading.value = false
+            }
+        }
 
-                // If discography came back without years/release types (MusicBrainz
-                // was likely rate-limited), retry after a short delay so the user
-                // sees full metadata once it loads.
+        // Top tracks
+        viewModelScope.launch {
+            try {
+                val tracks = metadataService.getArtistTopTracks(artistName, limit = 10)
+                _topTracks.value = tracks
+                _isLoading.value = false
+                resolveTracksInBackground(tracks)
+            } catch (e: Exception) {
+                Log.e("ArtistVM", "Failed loading top tracks for '$artistName'", e)
+            }
+        }
+
+        // Discography
+        viewModelScope.launch {
+            try {
+                val albums = metadataService.getArtistAlbums(artistName)
+                    .sortedByDescending { it.year ?: 0 }
+                _albums.value = albums
+                _isLoading.value = false
                 if (albums.isNotEmpty() && albums.none { it.year != null }) {
                     retryDiscography()
                 }
             } catch (e: Exception) {
-                Log.e("ArtistVM", "Failed loading artist '$artistName'", e)
-            } finally {
-                _isLoading.value = false
+                Log.e("ArtistVM", "Failed loading albums for '$artistName'", e)
             }
         }
+
+        // Tour dates
+        loadTourDates()
     }
 
     /**

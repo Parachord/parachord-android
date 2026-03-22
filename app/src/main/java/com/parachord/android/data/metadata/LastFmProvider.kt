@@ -3,6 +3,8 @@ package com.parachord.android.data.metadata
 import com.parachord.android.BuildConfig
 import com.parachord.android.data.api.LastFmApi
 import com.parachord.android.data.api.bestImageUrl
+import kotlinx.coroutines.async
+import kotlinx.coroutines.coroutineScope
 import javax.inject.Inject
 import javax.inject.Singleton
 
@@ -136,44 +138,44 @@ class LastFmProvider @Inject constructor(
             emptyList()
         }
 
-    override suspend fun getArtistInfo(artistName: String): ArtistInfo? =
+    override suspend fun getArtistInfo(artistName: String): ArtistInfo? = coroutineScope {
         try {
-            val detail = api.getArtistInfo(artist = artistName, apiKey = apiKey).artist
-            detail?.let { d ->
-                val bioText = (d.bio?.content ?: d.bio?.summary)?.stripHtmlTags()?.stripLastFmSuffix()
-
-                // Use the dedicated similar artists endpoint for more results (20)
-                // with images, instead of the limited set from artist.getinfo (~5, no images)
-                val similarArtists = try {
+            // Fire both calls in parallel — saves 1-2s vs sequential
+            val detailDeferred = async { api.getArtistInfo(artist = artistName, apiKey = apiKey) }
+            val similarDeferred = async {
+                try {
                     api.getSimilarArtists(artist = artistName, apiKey = apiKey, limit = 20)
-                        .similarartists?.artist?.map { a ->
-                            SimilarArtist(
-                                name = a.name,
-                                imageUrl = a.image.bestImageUrl(),
-                            )
-                        } ?: emptyList()
-                } catch (_: Exception) {
-                    // Fall back to the limited set from artist.getinfo
-                    d.similar?.artist?.map { a ->
-                        SimilarArtist(name = a.name, imageUrl = a.image.bestImageUrl())
-                    } ?: emptyList()
-                }
-
-                ArtistInfo(
-                    name = d.name,
-                    mbid = d.mbid?.takeIf { it.isNotBlank() },
-                    imageUrl = d.image.bestImageUrl(),
-                    bio = bioText,
-                    bioSource = if (bioText != null) "lastfm" else null,
-                    bioUrl = d.url?.takeIf { bioText != null },
-                    tags = d.tags?.tag?.map { it.name } ?: emptyList(),
-                    similarArtists = similarArtists,
-                    provider = name,
-                )
+                } catch (_: Exception) { null }
             }
+
+            val detail = detailDeferred.await().artist ?: return@coroutineScope null
+            val bioText = (detail.bio?.content ?: detail.bio?.summary)?.stripHtmlTags()?.stripLastFmSuffix()
+
+            val similarArtists = similarDeferred.await()
+                ?.similarartists?.artist?.map { a ->
+                    SimilarArtist(
+                        name = a.name,
+                        imageUrl = a.image.bestImageUrl(),
+                    )
+                } ?: detail.similar?.artist?.map { a ->
+                    SimilarArtist(name = a.name, imageUrl = a.image.bestImageUrl())
+                } ?: emptyList()
+
+            ArtistInfo(
+                name = detail.name,
+                mbid = detail.mbid?.takeIf { it.isNotBlank() },
+                imageUrl = detail.image.bestImageUrl(),
+                bio = bioText,
+                bioSource = if (bioText != null) "lastfm" else null,
+                bioUrl = detail.url?.takeIf { bioText != null },
+                tags = detail.tags?.tag?.map { it.name } ?: emptyList(),
+                similarArtists = similarArtists,
+                provider = name,
+            )
         } catch (_: Exception) {
             null
         }
+    }
 }
 
 private fun String.stripHtmlTags(): String =

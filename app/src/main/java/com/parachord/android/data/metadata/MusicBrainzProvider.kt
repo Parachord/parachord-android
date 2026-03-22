@@ -1,8 +1,11 @@
 package com.parachord.android.data.metadata
 
+import com.parachord.android.data.api.MbArtist
 import com.parachord.android.data.api.MbReleaseGroup
 import com.parachord.android.data.api.MbReleaseGroupEntry
 import com.parachord.android.data.api.MusicBrainzApi
+import kotlinx.coroutines.CompletableDeferred
+import java.util.concurrent.ConcurrentHashMap
 import javax.inject.Inject
 import javax.inject.Singleton
 
@@ -15,6 +18,39 @@ import javax.inject.Singleton
 class MusicBrainzProvider @Inject constructor(
     private val api: MusicBrainzApi,
 ) : MetadataProvider {
+
+    /**
+     * In-memory artist search cache with in-flight deduplication.
+     * Prevents duplicate `searchArtists()` calls when multiple providers
+     * (MusicBrainzProvider, WikipediaProvider) resolve the same artist
+     * concurrently. MusicBrainz rate limits at 1 req/s, so deduplicating
+     * saves seconds on artist page loads.
+     */
+    private val artistSearchCache = ConcurrentHashMap<String, CompletableDeferred<MbArtist?>>()
+
+    /**
+     * Resolve an artist name to their MusicBrainz artist record, with caching.
+     * Safe to call concurrently — duplicate in-flight requests are coalesced.
+     * Used by WikipediaProvider to avoid redundant MusicBrainz API calls.
+     */
+    suspend fun resolveArtist(artistName: String): MbArtist? {
+        val key = artistName.lowercase().trim()
+        val existing = artistSearchCache[key]
+        if (existing != null) return existing.await()
+
+        val deferred = CompletableDeferred<MbArtist?>()
+        val winner = artistSearchCache.putIfAbsent(key, deferred)
+        if (winner != null) return winner.await()
+
+        return try {
+            val result = api.searchArtists(artistName, limit = 1).artists.firstOrNull()
+            deferred.complete(result)
+            result
+        } catch (e: Exception) {
+            deferred.complete(null)
+            null
+        }
+    }
 
     override val name = "musicbrainz"
     override val priority = 0
@@ -71,15 +107,13 @@ class MusicBrainzProvider @Inject constructor(
 
     override suspend fun getArtistInfo(artistName: String): ArtistInfo? =
         try {
-            val results = api.searchArtists(artistName, limit = 1)
-            results.artists.firstOrNull()?.let { a ->
-                ArtistInfo(
-                    name = a.name,
-                    mbid = a.id,
-                    tags = a.tags.sortedByDescending { it.count }.take(5).map { it.name },
-                    provider = name,
-                )
-            }
+            val a = resolveArtist(artistName) ?: return null
+            ArtistInfo(
+                name = a.name,
+                mbid = a.id,
+                tags = a.tags.sortedByDescending { it.count }.take(5).map { it.name },
+                provider = name,
+            )
         } catch (_: Exception) {
             null
         }
@@ -164,13 +198,9 @@ class MusicBrainzProvider @Inject constructor(
             emptyList()
         }
 
-    /** Resolve an artist name to their MusicBrainz MBID. */
+    /** Resolve an artist name to their MusicBrainz MBID (uses cached search). */
     private suspend fun resolveArtistMbid(artistName: String): String? =
-        try {
-            api.searchArtists(artistName, limit = 1).artists.firstOrNull()?.id
-        } catch (_: Exception) {
-            null
-        }
+        resolveArtist(artistName)?.id
 
     companion object {
         /** Cover Art Archive front cover URL for a release. */
