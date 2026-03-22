@@ -393,7 +393,7 @@ class PlaybackController @Inject constructor(
         controller?.seekTo(positionMs)
     }
 
-    private suspend fun playTrackInternal(track: TrackEntity) {
+    private suspend fun playTrackInternal(track: TrackEntity, skipReselect: Boolean = false) {
         // Cancel any idle timeout — we're actively playing now
         cancelIdleTimeout()
 
@@ -402,7 +402,8 @@ class PlaybackController @Inject constructor(
         // added (e.g. "spotify"), but the user may now prioritize a different resolver
         // (e.g. "applemusic"). The TrackResolverCache has live resolution results
         // sorted by the user's current priority order, so we pick the best one.
-        var routedTrack = reselectBestSource(track)
+        // Skipped when the user manually picks a source via the resolver dropdown.
+        var routedTrack = if (skipReselect) track else reselectBestSource(track)
 
         // If the track has no resolver and no source URL, try resolving on-the-fly.
         // This handles ephemeral tracks (e.g. weekly playlists, recommendations)
@@ -1146,16 +1147,21 @@ class PlaybackController @Inject constructor(
             val source = cachedSources.firstOrNull { it.resolver == resolver } ?: return@launch
 
             Log.d(TAG, "Manual source switch for '${track.title}': ${track.resolver} → $resolver")
+            // Clear all resolver-specific fields, then set only the chosen resolver's.
+            // Without this, leftover spotifyUri/spotifyId from a previous resolver causes
+            // the router to match SpotifyPlaybackHandler even when switching to localfiles.
             val switched = track.copy(
                 resolver = source.resolver,
                 sourceType = source.sourceType,
                 sourceUrl = source.url,
-                spotifyUri = source.spotifyUri ?: track.spotifyUri,
-                spotifyId = source.spotifyId ?: track.spotifyId,
-                soundcloudId = source.soundcloudId ?: track.soundcloudId,
-                appleMusicId = source.appleMusicId ?: track.appleMusicId,
+                spotifyUri = source.spotifyUri,
+                spotifyId = source.spotifyId,
+                soundcloudId = source.soundcloudId,
+                appleMusicId = source.appleMusicId,
             )
-            playTrackInternal(switched)
+            // skipReselect=true: the user explicitly chose this source — don't let
+            // reselectBestSource() override it back to the auto-selected best.
+            playTrackInternal(switched, skipReselect = true)
         }
     }
 
