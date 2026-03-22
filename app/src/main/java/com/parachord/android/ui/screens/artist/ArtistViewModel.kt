@@ -24,6 +24,7 @@ import com.parachord.android.resolver.TrackResolverCache
 import com.parachord.android.resolver.trackKey
 import dagger.hilt.android.lifecycle.HiltViewModel
 import kotlinx.coroutines.async
+import kotlinx.coroutines.awaitAll
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
@@ -307,29 +308,32 @@ class ArtistViewModel @Inject constructor(
 
     private fun resolveTracksInBackground(tracks: List<TrackSearchResult>) {
         viewModelScope.launch {
-            for (track in tracks) {
-                val key = trackKey(track.title, track.artist)
-                if (_trackSources.value.containsKey(key)) continue
-                // Check shared cache first (cross-context dedup)
-                val cached = trackResolverCache.getSources(track.title, track.artist)
-                if (cached != null) {
-                    _trackSources.value = _trackSources.value + (key to cached)
-                    trackResolverCache.putSources(track.title, track.artist, cached)
-                    continue
-                }
-                try {
-                    val sources = resolverManager.resolveWithHints(
-                        query = "${track.title} ${track.artist}",
-                        spotifyId = track.spotifyId,
-                        targetTitle = track.title,
-                        targetArtist = track.artist,
-                    )
-                    if (sources.isNotEmpty()) {
-                        _trackSources.value = _trackSources.value + (key to sources)
-                        trackResolverCache.putSources(track.title, track.artist, sources)
+            // Resolve all tracks in parallel instead of sequentially
+            tracks.map { track ->
+                async {
+                    val key = trackKey(track.title, track.artist)
+                    if (_trackSources.value.containsKey(key)) return@async
+                    // Check shared cache first (cross-context dedup)
+                    val cached = trackResolverCache.getSources(track.title, track.artist)
+                    if (cached != null) {
+                        _trackSources.value = _trackSources.value + (key to cached)
+                        trackResolverCache.putSources(track.title, track.artist, cached)
+                        return@async
                     }
-                } catch (_: Exception) { /* skip */ }
-            }
+                    try {
+                        val sources = resolverManager.resolveWithHints(
+                            query = "${track.title} ${track.artist}",
+                            spotifyId = track.spotifyId,
+                            targetTitle = track.title,
+                            targetArtist = track.artist,
+                        )
+                        if (sources.isNotEmpty()) {
+                            _trackSources.value = _trackSources.value + (key to sources)
+                            trackResolverCache.putSources(track.title, track.artist, sources)
+                        }
+                    } catch (_: Exception) { /* skip */ }
+                }
+            }.awaitAll()
         }
     }
 }

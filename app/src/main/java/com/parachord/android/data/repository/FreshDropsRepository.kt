@@ -434,8 +434,18 @@ class FreshDropsRepository @Inject constructor(
             .filter { rg ->
                 // Must have a release date
                 val date = rg.firstReleaseDate ?: return@filter false
+                // MusicBrainz returns dates as "YYYY-MM-DD", "YYYY-MM", or "YYYY".
+                // Pad partial dates to full precision for comparison — use the
+                // earliest possible day so we INCLUDE releases whose partial date
+                // *could* be after the cutoff (e.g. "2025" → "2025-01-01" keeps
+                // any 2025 release if the cutoff year is 2025).
+                val comparable = when (date.length) {
+                    4 -> "$date-01-01"     // "2025" → "2025-01-01"
+                    7 -> "$date-01"        // "2025-09" → "2025-09-01"
+                    else -> date           // "2025-09-22" already full
+                }
                 // Must be after cutoff (last 6 months)
-                date >= cutoffStr
+                comparable >= cutoffStr
                     // Exclude broadcast as primary type
                     && rg.primaryType?.lowercase() != "broadcast"
                     // Exclude compilations, broadcasts, live, DJ-mix, remix, etc.
