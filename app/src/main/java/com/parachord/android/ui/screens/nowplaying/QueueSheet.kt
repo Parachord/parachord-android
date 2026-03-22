@@ -256,7 +256,7 @@ private fun QueueTrackRow(
             }
 
             // Resolver badges
-            val resolvers = trackResolvers["${track.title.lowercase().trim()}|${track.artist.lowercase().trim()}"]?.ifEmpty { null }
+            val resolvers = trackResolvers["${track.title.lowercase().trim()}|${track.artist.lowercase().trim()}"]
                 ?: track.availableResolvers(resolverOrder)
             if (resolvers.isNotEmpty()) {
                 Spacer(modifier = Modifier.width(8.dp))

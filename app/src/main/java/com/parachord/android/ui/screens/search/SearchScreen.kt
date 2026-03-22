@@ -136,7 +136,7 @@ fun SearchScreen(
                             title = track.title,
                             artist = track.artist,
                             artworkUrl = track.artworkUrl,
-                            resolvers = trackResolvers["${track.title.lowercase().trim()}|${track.artist.lowercase().trim()}"]?.ifEmpty { null }
+                            resolvers = trackResolvers["${track.title.lowercase().trim()}|${track.artist.lowercase().trim()}"]
                                 ?: track.availableResolvers(resolverOrder),
                             resolverConfidences = trackResolverConfidences["${track.title.lowercase().trim()}|${track.artist.lowercase().trim()}"],
                             duration = track.duration,

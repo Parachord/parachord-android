@@ -195,7 +195,7 @@ class TrackResolverCache @Inject constructor(
     /** Get cached resolvers for a track, or null if not yet resolved. */
     fun getResolvers(title: String, artist: String): List<String>? {
         val key = trackKey(title, artist)
-        return trackResolvers.value[key]?.ifEmpty { null }
+        return trackResolvers.value[key]
     }
 
     /** Get cached sources for a track, or null if not yet resolved. */
@@ -217,10 +217,16 @@ class TrackResolverCache @Inject constructor(
 
     /** Persist any newly-discovered resolver IDs back to the database. */
     private suspend fun backfillResolverIds(track: TrackEntity, sources: List<ResolvedSource>) {
-        val spotifyId = sources.firstOrNull { it.resolver == "spotify" }?.spotifyId
-        val spotifyUri = sources.firstOrNull { it.resolver == "spotify" }?.spotifyUri
-        val appleMusicId = sources.firstOrNull { it.resolver == "applemusic" }?.appleMusicId
-        val soundcloudId = sources.firstOrNull { it.resolver == "soundcloud" }?.soundcloudId
+        // Only backfill IDs from sources above the confidence threshold.
+        // Wrong-song results (0.50 confidence) must not pollute the DB,
+        // otherwise availableResolvers() will show badges for wrong matches.
+        val validSources = sources.filter {
+            (it.confidence ?: 0.0) >= ResolverScoring.MIN_CONFIDENCE_THRESHOLD
+        }
+        val spotifyId = validSources.firstOrNull { it.resolver == "spotify" }?.spotifyId
+        val spotifyUri = validSources.firstOrNull { it.resolver == "spotify" }?.spotifyUri
+        val appleMusicId = validSources.firstOrNull { it.resolver == "applemusic" }?.appleMusicId
+        val soundcloudId = validSources.firstOrNull { it.resolver == "soundcloud" }?.soundcloudId
         // Only call DB if there's something new to fill in
         if ((spotifyId != null && track.spotifyId.isNullOrBlank()) ||
             (spotifyUri != null && track.spotifyUri.isNullOrBlank()) ||
