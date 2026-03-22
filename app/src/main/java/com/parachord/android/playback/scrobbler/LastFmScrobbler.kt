@@ -45,6 +45,7 @@ class LastFmScrobbler @Inject constructor(
                 put("sk", sessionKey)
                 track.album?.let { put("album", it) }
                 track.duration?.let { put("duration", (it / 1000).toString()) }
+                track.recordingMbid?.let { put("mbid", it) }
             }
 
             val success = postSigned(params, API_URL, BuildConfig.LASTFM_SHARED_SECRET)
@@ -68,6 +69,7 @@ class LastFmScrobbler @Inject constructor(
                 put("sk", sessionKey)
                 track.album?.let { put("album[0]", it) }
                 track.duration?.let { put("duration[0]", (it / 1000).toString()) }
+                track.recordingMbid?.let { put("mbid[0]", it) }
             }
 
             val success = postSigned(params, API_URL, BuildConfig.LASTFM_SHARED_SECRET)

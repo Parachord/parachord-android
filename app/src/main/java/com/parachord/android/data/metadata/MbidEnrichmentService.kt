@@ -121,6 +121,19 @@ class MbidEnrichmentService @Inject constructor(
             ?.value?.artistMbid
     }
 
+    /**
+     * Get canonical (MusicBrainz-corrected) names for a track from the disk cache.
+     * Returns a pair of (canonicalArtist, canonicalRecording), or null if not cached.
+     * Used by ScrobbleManager for canonical name fallback on scrobble payloads.
+     */
+    fun getCanonicalNames(artist: String, title: String): Pair<String, String>? {
+        val key = cacheKey(artist, title)
+        val entry = getCachedEntry(key) ?: return null
+        val canonicalArtist = entry.canonicalArtistName ?: return null
+        val canonicalRecording = entry.canonicalRecordingName ?: return null
+        return Pair(canonicalArtist, canonicalRecording)
+    }
+
     // --- Internal ---
 
     private suspend fun enrichTrack(trackId: String, artist: String, title: String) {
@@ -143,6 +156,8 @@ class MbidEnrichmentService @Inject constructor(
                 recordingMbid = result.recordingMbid,
                 artistMbid = result.artistMbid,
                 releaseMbid = result.releaseMbid,
+                canonicalArtistName = result.artistCreditName,
+                canonicalRecordingName = result.recordingName,
                 cachedAt = System.currentTimeMillis(),
             )
         } else {
@@ -187,6 +202,8 @@ class MbidEnrichmentService @Inject constructor(
             recordingMbid = result.recordingMbid,
             artistMbid = result.artistMbid,
             releaseMbid = result.releaseMbid,
+            canonicalArtistName = result.artistCreditName,
+            canonicalRecordingName = result.recordingName,
             cachedAt = System.currentTimeMillis(),
         ))
     }
@@ -237,6 +254,10 @@ internal data class MbidCacheEntry(
     val recordingMbid: String? = null,
     val artistMbid: String? = null,
     val releaseMbid: String? = null,
+    /** Canonical artist name from MusicBrainz (for scrobble name correction). */
+    val canonicalArtistName: String? = null,
+    /** Canonical recording name from MusicBrainz (for scrobble name correction). */
+    val canonicalRecordingName: String? = null,
     val cachedAt: Long = 0L,
 ) {
     val hasAnyMbid: Boolean get() = !recordingMbid.isNullOrBlank() || !artistMbid.isNullOrBlank() || !releaseMbid.isNullOrBlank()

@@ -48,6 +48,7 @@ class LibreFmScrobbler @Inject constructor(
                 put("sk", sessionKey)
                 track.album?.let { put("album", it) }
                 track.duration?.let { put("duration", (it / 1000).toString()) }
+                track.recordingMbid?.let { put("mbid", it) }
             }
 
             val success = lastFmScrobbler.postSigned(params, API_URL, SHARED_SECRET)
@@ -71,6 +72,7 @@ class LibreFmScrobbler @Inject constructor(
                 put("sk", sessionKey)
                 track.album?.let { put("album[0]", it) }
                 track.duration?.let { put("duration[0]", (it / 1000).toString()) }
+                track.recordingMbid?.let { put("mbid[0]", it) }
             }
 
             val success = lastFmScrobbler.postSigned(params, API_URL, SHARED_SECRET)

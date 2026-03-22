@@ -488,7 +488,9 @@ class ListenBrainzApi @Inject constructor(
             MbidMapperResult(
                 artistMbid = firstArtistMbid,
                 artistCreditName = json.optString("artist_credit_name", "").ifBlank { null },
+                recordingName = json.optString("recording_name", "").ifBlank { null },
                 recordingMbid = json.optString("recording_mbid", "").ifBlank { null },
+                releaseName = json.optString("release_name", "").ifBlank { null },
                 releaseMbid = json.optString("release_mbid", "").ifBlank { null },
                 confidence = json.optDouble("confidence", 0.0),
             )
@@ -593,7 +595,9 @@ data class LbPlaylistTrack(
 data class MbidMapperResult(
     val artistMbid: String?,
     val artistCreditName: String?,
+    val recordingName: String?,
     val recordingMbid: String?,
+    val releaseName: String?,
     val releaseMbid: String?,
     val confidence: Double = 0.0,
 )

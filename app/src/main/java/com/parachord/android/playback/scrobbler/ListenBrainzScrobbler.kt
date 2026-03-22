@@ -101,12 +101,20 @@ class ListenBrainzScrobbler @Inject constructor(
     ): JSONObject {
         val additionalInfo = JSONObject().apply {
             put("media_player", "Parachord")
+            // Include MBIDs when available — improves match accuracy on ListenBrainz
+            track.recordingMbid?.let { put("recording_mbid", it) }
+            track.artistMbid?.let {
+                put("artist_mbids", JSONArray().put(it))
+            }
+            track.releaseMbid?.let { put("release_mbid", it) }
         }
 
         val trackMetadata = JSONObject().apply {
             put("artist_name", track.artist)
             put("track_name", track.title)
             track.album?.let { put("release_name", it) }
+            // Top-level MBIDs per ListenBrainz API spec
+            track.recordingMbid?.let { put("recording_mbid", it) }
             put("additional_info", additionalInfo)
         }
 

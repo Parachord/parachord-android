@@ -187,12 +187,26 @@ class PlaybackController @Inject constructor(
     fun addToQueue(tracks: List<TrackEntity>) {
         queueManager.addToQueue(tracks)
         syncQueueState()
+        // Pre-enrich queued tracks with MBIDs so they're ready for scrobbling
+        enrichQueuedTracks(tracks)
     }
 
     /** Insert tracks at the front of the queue (play next). */
     fun insertNext(tracks: List<TrackEntity>) {
         queueManager.insertNext(tracks)
         syncQueueState()
+        // Pre-enrich queued tracks with MBIDs so they're ready for scrobbling
+        enrichQueuedTracks(tracks)
+    }
+
+    /** Fire MBID mapper lookups for tracks entering the queue. */
+    private fun enrichQueuedTracks(tracks: List<TrackEntity>) {
+        val requests = tracks
+            .filter { it.recordingMbid == null }
+            .map { com.parachord.android.data.metadata.TrackEnrichmentRequest(it.id, it.artist, it.title) }
+        if (requests.isNotEmpty()) {
+            mbidEnrichment.enrichBatchInBackground(requests)
+        }
     }
 
     fun skipNext() {

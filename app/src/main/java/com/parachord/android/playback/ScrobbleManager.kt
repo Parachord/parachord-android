@@ -1,6 +1,8 @@
 package com.parachord.android.playback
 
 import android.util.Log
+import com.parachord.android.data.db.dao.TrackDao
+import com.parachord.android.data.metadata.MbidEnrichmentService
 import com.parachord.android.data.store.SettingsStore
 import com.parachord.android.playback.scrobbler.Scrobbler
 import kotlinx.coroutines.CoroutineScope
@@ -29,6 +31,8 @@ class ScrobbleManager @Inject constructor(
     private val settingsStore: SettingsStore,
     private val stateHolder: PlaybackStateHolder,
     private val scrobblers: Set<@JvmSuppressWildcards Scrobbler>,
+    private val trackDao: TrackDao,
+    private val mbidEnrichment: MbidEnrichmentService,
 ) {
     companion object {
         private const val TAG = "ScrobbleManager"
@@ -105,14 +109,37 @@ class ScrobbleManager @Inject constructor(
         return maxOf(minListenTime, minOf(halfDuration, fourMinutes))
     }
 
+    /**
+     * Re-read the track from Room to pick up MBIDs that were enriched in the background,
+     * then apply canonical name fallback from the MBID mapper cache.
+     * Falls back to the original track if it's ephemeral (not in Room).
+     */
+    private suspend fun refreshTrackMbids(
+        track: com.parachord.android.data.db.entity.TrackEntity,
+    ): com.parachord.android.data.db.entity.TrackEntity {
+        // Re-read from Room to get backfilled MBIDs
+        val dbTrack = if (track.recordingMbid != null) track else {
+            try { trackDao.getById(track.id) ?: track } catch (_: Exception) { track }
+        }
+        // Apply canonical name fallback from the mapper cache (fixes misspelled artist/track names)
+        val canonical = mbidEnrichment.getCanonicalNames(dbTrack.artist, dbTrack.title)
+        return if (canonical != null) {
+            dbTrack.copy(artist = canonical.first, title = canonical.second)
+        } else {
+            dbTrack
+        }
+    }
+
     /** Dispatch "now playing" to all enabled scrobblers. */
     private suspend fun dispatchNowPlaying(track: com.parachord.android.data.db.entity.TrackEntity) {
         nowPlayingSent = true
+        // Re-read from Room — MBIDs may have been backfilled since playback started
+        val enrichedTrack = refreshTrackMbids(track)
         for (scrobbler in scrobblers) {
             scope.launch {
                 try {
                     if (scrobbler.isEnabled()) {
-                        scrobbler.sendNowPlaying(track)
+                        scrobbler.sendNowPlaying(enrichedTrack)
                     }
                 } catch (e: Exception) {
                     Log.e(TAG, "${scrobbler.displayName}: now playing failed", e)
@@ -127,11 +154,13 @@ class ScrobbleManager @Inject constructor(
         timestamp: Long,
     ) {
         scrobbleSubmitted = true
+        // Re-read from Room — by scrobble time (30s+), MBIDs should be backfilled
+        val enrichedTrack = refreshTrackMbids(track)
         for (scrobbler in scrobblers) {
             scope.launch {
                 try {
                     if (scrobbler.isEnabled()) {
-                        scrobbler.submitScrobble(track, timestamp)
+                        scrobbler.submitScrobble(enrichedTrack, timestamp)
                     }
                 } catch (e: Exception) {
                     Log.e(TAG, "${scrobbler.displayName}: scrobble failed", e)
