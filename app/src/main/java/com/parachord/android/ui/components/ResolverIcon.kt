@@ -469,12 +469,15 @@ fun ResolverIconRow(
 ) {
     if (resolvers.isEmpty()) return
     val resolverOrder = LocalResolverOrder.current
+    // Sort by priority first, then confidence descending (matching desktop).
+    // This ensures the highest-scoring resolver (the one that will actually play)
+    // appears first when priority is the same.
     val sorted = if (resolverOrder.isNotEmpty()) {
-        resolvers.sortedBy { r ->
+        resolvers.sortedWith(compareBy<String> { r ->
             resolverOrder.indexOf(r).let { if (it == -1) resolverOrder.size else it }
-        }
+        }.thenByDescending { r -> confidences?.get(r) ?: 1f })
     } else {
-        resolvers
+        resolvers.sortedByDescending { r -> confidences?.get(r) ?: 1f }
     }
     Row(
         modifier = modifier,

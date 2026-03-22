@@ -66,7 +66,12 @@ class TrackResolverCache @Inject constructor(
             settingsStore.getResolverOrderFlow(),
         ) { sources, resolverOrder ->
             sources.mapValues { (_, v) ->
-                val resolvers = v.map { it.resolver }.distinct()
+                // Filter out noMatch sources (below confidence threshold) from UI display,
+                // matching desktop's noMatch sentinel filtering.
+                val aboveThreshold = v.filter {
+                    (it.confidence ?: 0.0) >= ResolverScoring.MIN_CONFIDENCE_THRESHOLD
+                }
+                val resolvers = aboveThreshold.map { it.resolver }.distinct()
                 if (resolverOrder.isEmpty()) resolvers
                 else resolvers.sortedBy { r ->
                     val idx = resolverOrder.indexOf(r)

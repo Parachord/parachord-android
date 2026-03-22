@@ -93,6 +93,20 @@ Results are cached in `TrackResolverCache.putSources()` so subsequent plays of t
 - `HistoryViewModel`, `FriendDetailViewModel`, `ArtistViewModel`, `AlbumViewModel`, `PopOfTheTopsViewModel` — via their own `resolveTracksInBackground()` methods
 - `RecommendationsViewModel` — via `resolveTracksProgressively()`
 
+### Resolver Badge Display — Confidence-Aware Icons
+
+Resolver badges in the UI must reflect match confidence, matching the desktop's approach:
+
+1. **Filter noMatch from display.** Sources with confidence < `MIN_CONFIDENCE_THRESHOLD` (0.60) are excluded from the resolver icon list entirely. A wrong-song Spotify result (0.50 confidence) must not show a Spotify badge — otherwise the user sees a Spotify icon but tapping plays a local file (or nothing), which is confusing.
+
+2. **Dim low-confidence icons.** Sources with confidence ≤ 0.80 render at 60% opacity (`alpha 0.6`). Full-confidence matches (> 0.80) render at full opacity. This gives users a visual signal about match quality.
+
+3. **Sort by priority, then confidence.** `ResolverIconRow` sorts icons by user-configured resolver priority first (left-to-right), then by confidence descending within the same priority tier. The icon that appears first is the one that will actually play.
+
+4. **Pass confidences through the full chain.** Every path from resolution to UI must carry confidence scores: `ResolvedSource.confidence` → `RecommendedTrack.resolverConfidences` (or `TrackResolverCache.trackResolverConfidences`) → `TrackRow(resolverConfidences=...)` → `ResolverIconRow(confidences=...)` → `ResolverIconSquare(confidence=...)`.
+
+**Example:** "Clover" by Tundra 212 — streaming resolvers return wrong-song results (0.50 confidence, filtered out). Local files has an exact match (0.95 confidence, shown at full opacity). The user sees only the local files icon and tapping plays the correct local file.
+
 ### MBID Enrichment Pipeline
 
 The **ListenBrainz MBID Mapper** (`mapper.listenbrainz.org/mapping/lookup`) resolves artist+title pairs to MusicBrainz identifiers (recording, artist, release MBIDs) in ~4ms with no strict rate limits. `MbidEnrichmentService` manages this with a 90-day TTL disk cache and in-flight deduplication.
