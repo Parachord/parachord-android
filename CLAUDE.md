@@ -68,6 +68,30 @@ Tracks from external sources (ListenBrainz weekly playlists, AI recommendations,
 
 Results are cached in `TrackResolverCache.putSources()` so subsequent plays of the same track (or queue advancement) reuse the cached sources without re-resolving.
 
+### Resolver Pipeline Rules
+
+**Every tracklist must go through the resolver pipeline.** Any screen or ViewModel that displays a list of playable tracks must call `TrackResolverCache.resolveInBackground(tracks)` when tracks are loaded. This ensures:
+- Resolver badges (Spotify, SoundCloud, local files, etc.) appear in the UI
+- Playback starts instantly when the user taps a track
+- The user's resolver priority preferences are respected
+
+**Every implemented resolver must be in the pipeline.** `ResolverManager.resolve()` must include all resolvers that have working implementations. The `_resolvers` list must match — only list resolvers with actual `resolve*()` methods. Currently implemented: `spotify`, `applemusic`, `soundcloud`, `localfiles`. Planned but not yet implemented: `bandcamp`, `youtube` (these exist in `CANONICAL_RESOLVER_ORDER` and `DEFAULT_RESOLVER_ORDER` for when they're added).
+
+**Only call active resolvers.** `ResolverManager.resolve()` checks `settingsStore.getActiveResolvers()` before calling each resolver. If the active list is empty, all implemented resolvers run. If the user has configured a specific set, only those are called. `ResolverScoring.selectBest()` also filters by active resolvers.
+
+**Always pass `targetTitle` and `targetArtist` to `resolve()`.** The local file resolver requires both fields for exact matching. All call sites should pass these parameters — without them, local file resolution silently skips. For `resolveWithHints()` these parameters are already required by convention.
+
+**Screens that currently call `resolveInBackground()`:**
+- `HomeViewModel` — recent loves / library tracks
+- `LibraryViewModel` — full library track list
+- `PlaylistDetailViewModel` — playlist tracks (via `resolvePlaylistTracksInBackground`)
+- `WeeklyPlaylistViewModel` — ephemeral weekly playlist tracks
+- `NowPlayingViewModel` — queue tracks
+- `PlaybackController` — upcoming queue items
+- `SearchViewModel` — local search results
+- `HistoryViewModel`, `FriendDetailViewModel`, `ArtistViewModel`, `AlbumViewModel`, `PopOfTheTopsViewModel` — via their own `resolveTracksInBackground()` methods
+- `RecommendationsViewModel` — via `resolveTracksProgressively()`
+
 ### MBID Enrichment Pipeline
 
 The **ListenBrainz MBID Mapper** (`mapper.listenbrainz.org/mapping/lookup`) resolves artist+title pairs to MusicBrainz identifiers (recording, artist, release MBIDs) in ~4ms with no strict rate limits. `MbidEnrichmentService` manages this with a 90-day TTL disk cache and in-flight deduplication.
