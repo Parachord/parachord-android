@@ -50,6 +50,11 @@ class CriticalDarlingsViewModel @Inject constructor(
         loadAlbums(forceRefresh = true)
     }
 
+    /** Called on screen resume — reloads if cache is stale. */
+    fun refreshIfStale() {
+        loadAlbums(forceRefresh = false)
+    }
+
     fun setSearchQuery(query: String) {
         _searchQuery.value = query
     }

@@ -2,6 +2,7 @@ package com.parachord.android.ui.screens.discover
 
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
+import androidx.lifecycle.compose.LifecycleResumeEffect
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -99,6 +100,12 @@ fun ConcertsScreen(
     val hasLocation by viewModel.hasLocation.collectAsStateWithLifecycle()
     val isDetectingLocation by viewModel.isDetectingLocation.collectAsStateWithLifecycle()
     var showLocationPicker by remember { mutableStateOf(false) }
+
+    // Auto-refresh when returning to this screen if cache is stale
+    LifecycleResumeEffect(Unit) {
+        viewModel.refreshIfStale()
+        onPauseOrDispose { }
+    }
 
     Column(modifier = modifier.fillMaxSize()) {
         TopAppBar(

@@ -2,6 +2,7 @@ package com.parachord.android.ui.screens.discover
 
 import androidx.compose.animation.animateContentSize
 import androidx.compose.foundation.background
+import androidx.lifecycle.compose.LifecycleResumeEffect
 import com.parachord.android.ui.components.hapticClickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -92,6 +93,12 @@ fun PopOfTheTopsScreen(
     val searchQuery by viewModel.searchQuery.collectAsState()
     val trackResolvers by viewModel.trackResolvers.collectAsState()
     val trackResolverConfidences by viewModel.trackResolverConfidences.collectAsState()
+
+    // Auto-refresh when returning to this screen
+    LifecycleResumeEffect(Unit) {
+        viewModel.refreshIfStale()
+        onPauseOrDispose { }
+    }
 
     Column(modifier = modifier.fillMaxSize()) {
         TopAppBar(

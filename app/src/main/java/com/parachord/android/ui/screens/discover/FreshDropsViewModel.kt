@@ -52,6 +52,11 @@ class FreshDropsViewModel @Inject constructor(
         loadReleases(forceRefresh = true)
     }
 
+    /** Called on screen resume — reloads if cache is stale. */
+    fun refreshIfStale() {
+        loadReleases(forceRefresh = false)
+    }
+
     fun setSearchQuery(query: String) {
         _searchQuery.value = query
     }

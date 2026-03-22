@@ -146,6 +146,13 @@ class ConcertsViewModel @Inject constructor(
         loadEvents(forceRefresh = true)
     }
 
+    /** Called on screen resume — reloads if cache is stale. */
+    fun refreshIfStale() {
+        if (_hasLocation.value) {
+            loadEvents(forceRefresh = false)
+        }
+    }
+
     /**
      * Load personalized events: gather artists from collection + history,
      * then search for their concerts (matching desktop's gatherConcertsArtists + fetchConcerts).

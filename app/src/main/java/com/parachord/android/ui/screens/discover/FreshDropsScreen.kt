@@ -2,6 +2,7 @@ package com.parachord.android.ui.screens.discover
 
 import androidx.compose.animation.animateContentSize
 import androidx.compose.foundation.background
+import androidx.lifecycle.compose.LifecycleResumeEffect
 import com.parachord.android.ui.components.hapticClickable
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
@@ -85,6 +86,12 @@ fun FreshDropsScreen(
     val filterType by viewModel.filterType.collectAsState()
     val isRefreshing by viewModel.isRefreshing.collectAsState()
     var searchOpen by remember { mutableStateOf(false) }
+
+    // Auto-refresh when returning to this screen if cache is stale
+    LifecycleResumeEffect(Unit) {
+        viewModel.refreshIfStale()
+        onPauseOrDispose { }
+    }
 
     Column(modifier = modifier.fillMaxSize()) {
         TopAppBar(
