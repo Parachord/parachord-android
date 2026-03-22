@@ -213,47 +213,57 @@ fun ArtistScreen(
                     .fillMaxSize()
                     .nestedScroll(nestedScrollConnection),
             ) {
-                // Hero image — collapsible
+                // Hero image — show skeleton placeholder immediately, then the
+                // real image eases in on top via FaceAwareImage's built-in Coil
+                // crossfade. Visible while waiting for artistInfo OR when we have an image.
                 val imageUrl = artistInfo?.imageUrl
                 val hasImage = !imageUrl.isNullOrBlank()
-                if (hasImage) {
-                    val visibleHeightDp = with(density) {
-                        (imageMaxHeightPx - collapseOffset).coerceAtLeast(0f).toDp()
-                    }
+
+                val visibleHeightDp = with(density) {
+                    (imageMaxHeightPx - collapseOffset).coerceAtLeast(0f).toDp()
+                }
+                if (hasImage || artistInfo == null) {
                     Box(
                         modifier = Modifier
                             .fillMaxWidth()
-                            .height(visibleHeightDp)
+                            .then(
+                                if (imageMaxHeightPx > 0f) Modifier.height(visibleHeightDp)
+                                else Modifier
+                            )
                             .clipToBounds(),
                     ) {
-                        FaceAwareImage(
-                            imageUrl = imageUrl!!,
-                            contentDescription = "Artist image",
+                        // Skeleton shimmer — always behind, covered by the image once loaded
+                        Box(
                             modifier = Modifier
                                 .fillMaxWidth()
                                 .aspectRatio(16f / 9f)
+                                .background(shimmerBrush())
                                 .onSizeChanged { size ->
                                     if (size.height > 0 && imageMaxHeightPx == 0f) {
                                         imageMaxHeightPx = size.height.toFloat()
                                     }
                                 },
-                            loading = {
-                                Box(
-                                    modifier = Modifier
-                                        .fillMaxWidth()
-                                        .aspectRatio(16f / 9f)
-                                        .background(MaterialTheme.colorScheme.surfaceVariant),
-                                )
-                            },
-                            error = {
-                                Box(
-                                    modifier = Modifier
-                                        .fillMaxWidth()
-                                        .aspectRatio(16f / 9f)
-                                        .background(MaterialTheme.colorScheme.surfaceVariant),
-                                )
-                            },
                         )
+                        if (hasImage) {
+                            FaceAwareImage(
+                                imageUrl = imageUrl!!,
+                                contentDescription = "Artist image",
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .aspectRatio(16f / 9f)
+                                    .onSizeChanged { size ->
+                                        if (size.height > 0 && imageMaxHeightPx == 0f) {
+                                            imageMaxHeightPx = size.height.toFloat()
+                                        }
+                                    },
+                                loading = {
+                                    // Skeleton behind shows through
+                                },
+                                error = {
+                                    // Skeleton behind shows through on error too
+                                },
+                            )
+                        }
                     }
                 }
 
