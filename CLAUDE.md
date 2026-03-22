@@ -26,10 +26,11 @@ The desktop uses a cascading provider pattern. Each provider has a specialty:
 
 Source selection uses priority-first, confidence-second sorting:
 
-1. **Resolver priority** — user-configurable ordering (lower index = higher priority)
-2. **Confidence score** — tiebreaker within same priority (0.0–1.0, default 0.9)
+1. **Minimum confidence filter** — sources below `MIN_CONFIDENCE_THRESHOLD` (0.60) are discarded. This filters out "no match" results (0.50 confidence from `scoreConfidence()`) where neither title nor artist matched, preventing wrong-song playback. The desktop handles this via `noMatch:true` sentinel filtering; we use an equivalent confidence floor.
+2. **Resolver priority** — user-configurable ordering (lower index = higher priority)
+3. **Confidence score** — tiebreaker within same priority (0.0–1.0, default 0.9)
 
-A Spotify result at 50% confidence beats a SoundCloud result at 95% when Spotify is ranked higher.
+A Spotify result at 70% confidence beats a SoundCloud result at 95% when Spotify is ranked higher. But a Spotify result at 50% confidence (no match) is filtered out entirely, allowing the higher-confidence SoundCloud or local file result to win.
 
 **Canonical resolver order (default):**
 ```
