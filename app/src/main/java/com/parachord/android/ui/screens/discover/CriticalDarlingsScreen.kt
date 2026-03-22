@@ -2,6 +2,7 @@ package com.parachord.android.ui.screens.discover
 
 import androidx.compose.animation.animateContentSize
 import androidx.compose.foundation.background
+import androidx.lifecycle.compose.LifecycleResumeEffect
 import com.parachord.android.ui.components.hapticClickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -58,6 +59,7 @@ import androidx.hilt.navigation.compose.hiltViewModel
 import com.parachord.android.data.repository.CriticsPickAlbum
 import com.parachord.android.data.repository.Resource
 import com.parachord.android.ui.components.AlbumArtCard
+import com.parachord.android.ui.components.SpinningRefreshIcon
 
 // Desktop gradient: amber → orange → red
 private val HeaderGradient = Brush.horizontalGradient(
@@ -80,8 +82,15 @@ fun CriticalDarlingsScreen(
     val albumsResource by viewModel.albums.collectAsState()
     val searchQuery by viewModel.searchQuery.collectAsState()
     val sortMode by viewModel.sortMode.collectAsState()
+    val isRefreshing by viewModel.isRefreshing.collectAsState()
     var searchOpen by remember { mutableStateOf(false) }
     var sortDropdownOpen by remember { mutableStateOf(false) }
+
+    // Auto-refresh when returning to this screen if cache is stale
+    LifecycleResumeEffect(Unit) {
+        viewModel.refreshIfStale()
+        onPauseOrDispose { }
+    }
 
     Column(modifier = modifier.fillMaxSize()) {
         TopAppBar(
@@ -107,7 +116,7 @@ fun CriticalDarlingsScreen(
             albumCount = (albumsResource as? Resource.Success)?.data?.size ?: 0,
         )
 
-        // Sticky filter bar: search + sort
+        // Sticky filter bar: search + sort + refresh
         CriticsFilterBar(
             searchOpen = searchOpen,
             onToggleSearch = { searchOpen = !searchOpen },
@@ -117,6 +126,8 @@ fun CriticalDarlingsScreen(
             onSortModeChange = viewModel::setSortMode,
             sortDropdownOpen = sortDropdownOpen,
             onSortDropdownToggle = { sortDropdownOpen = it },
+            onRefresh = viewModel::refresh,
+            isRefreshing = isRefreshing,
         )
 
         // Content
@@ -280,13 +291,15 @@ private fun CriticsFilterBar(
     onSortModeChange: (String) -> Unit,
     sortDropdownOpen: Boolean,
     onSortDropdownToggle: (Boolean) -> Unit,
+    onRefresh: () -> Unit = {},
+    isRefreshing: Boolean = false,
 ) {
     Column(
         modifier = Modifier
             .fillMaxWidth()
             .background(MaterialTheme.colorScheme.surface),
     ) {
-        // Icon row: search + sort
+        // Icon row: search + sort + refresh
         Row(
             modifier = Modifier
                 .fillMaxWidth()
@@ -339,6 +352,10 @@ private fun CriticsFilterBar(
                     )
                 }
             }
+            SpinningRefreshIcon(
+                isLoading = isRefreshing,
+                onClick = onRefresh,
+            )
         }
 
         // Expandable search field

@@ -72,6 +72,12 @@ class PopOfTheTopsViewModel @Inject constructor(
         loadSongs()
     }
 
+    /** Called on screen resume — reloads charts data. */
+    fun refreshIfStale() {
+        loadAlbums()
+        loadSongs()
+    }
+
     fun setCountry(code: String) {
         _selectedCountry.value = code
         loadAlbums()

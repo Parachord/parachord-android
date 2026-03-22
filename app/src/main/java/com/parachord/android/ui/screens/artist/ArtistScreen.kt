@@ -79,6 +79,7 @@ import com.parachord.android.ui.components.AlbumArtCard
 import com.parachord.android.ui.components.AlbumArtCardFill
 import com.parachord.android.ui.components.FaceAwareImage
 import com.parachord.android.ui.components.SectionHeader
+import com.parachord.android.ui.components.ShimmerDiscographyCard
 import com.parachord.android.ui.components.ShimmerTrackRow
 import com.parachord.android.ui.components.shimmerBrush
 import com.parachord.android.ui.components.SwipeableTabLayout
@@ -213,47 +214,57 @@ fun ArtistScreen(
                     .fillMaxSize()
                     .nestedScroll(nestedScrollConnection),
             ) {
-                // Hero image — collapsible
+                // Hero image — show skeleton placeholder immediately, then the
+                // real image eases in on top via FaceAwareImage's built-in Coil
+                // crossfade. Visible while waiting for artistInfo OR when we have an image.
                 val imageUrl = artistInfo?.imageUrl
                 val hasImage = !imageUrl.isNullOrBlank()
-                if (hasImage) {
-                    val visibleHeightDp = with(density) {
-                        (imageMaxHeightPx - collapseOffset).coerceAtLeast(0f).toDp()
-                    }
+
+                val visibleHeightDp = with(density) {
+                    (imageMaxHeightPx - collapseOffset).coerceAtLeast(0f).toDp()
+                }
+                if (hasImage || artistInfo == null) {
                     Box(
                         modifier = Modifier
                             .fillMaxWidth()
-                            .height(visibleHeightDp)
+                            .then(
+                                if (imageMaxHeightPx > 0f) Modifier.height(visibleHeightDp)
+                                else Modifier
+                            )
                             .clipToBounds(),
                     ) {
-                        FaceAwareImage(
-                            imageUrl = imageUrl!!,
-                            contentDescription = "Artist image",
+                        // Skeleton shimmer — always behind, covered by the image once loaded
+                        Box(
                             modifier = Modifier
                                 .fillMaxWidth()
                                 .aspectRatio(16f / 9f)
+                                .background(shimmerBrush())
                                 .onSizeChanged { size ->
                                     if (size.height > 0 && imageMaxHeightPx == 0f) {
                                         imageMaxHeightPx = size.height.toFloat()
                                     }
                                 },
-                            loading = {
-                                Box(
-                                    modifier = Modifier
-                                        .fillMaxWidth()
-                                        .aspectRatio(16f / 9f)
-                                        .background(MaterialTheme.colorScheme.surfaceVariant),
-                                )
-                            },
-                            error = {
-                                Box(
-                                    modifier = Modifier
-                                        .fillMaxWidth()
-                                        .aspectRatio(16f / 9f)
-                                        .background(MaterialTheme.colorScheme.surfaceVariant),
-                                )
-                            },
                         )
+                        if (hasImage) {
+                            FaceAwareImage(
+                                imageUrl = imageUrl!!,
+                                contentDescription = "Artist image",
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .aspectRatio(16f / 9f)
+                                    .onSizeChanged { size ->
+                                        if (size.height > 0 && imageMaxHeightPx == 0f) {
+                                            imageMaxHeightPx = size.height.toFloat()
+                                        }
+                                    },
+                                loading = {
+                                    // Skeleton behind shows through
+                                },
+                                error = {
+                                    // Skeleton behind shows through on error too
+                                },
+                            )
+                        }
                     }
                 }
 
@@ -283,6 +294,7 @@ fun ArtistScreen(
                         "Discography" -> DiscographyTab(
                             albums = albums,
                             topTracks = topTracks,
+                            isLoading = isLoading,
                             onNavigateToAlbum = onNavigateToAlbum,
                             onPlayTrack = viewModel::playTrack,
                             trackResolvers = trackResolvers,
@@ -348,6 +360,7 @@ private fun releaseTypeBadgeColor(type: String?): Color = when (type?.lowercase(
 private fun DiscographyTab(
     albums: List<AlbumSearchResult>,
     topTracks: List<TrackSearchResult>,
+    isLoading: Boolean = false,
     onNavigateToAlbum: (albumTitle: String, artistName: String) -> Unit,
     onPlayTrack: (TrackSearchResult) -> Unit = {},
     trackResolvers: Map<String, List<String>> = emptyMap(),
@@ -374,6 +387,10 @@ private fun DiscographyTab(
 
     val cardBg = MaterialTheme.colorScheme.surfaceVariant
 
+    // Show shimmer skeletons while albums + tracks are still loading
+    val showAlbumSkeletons = albums.isEmpty() && isLoading
+    val showTrackSkeletons = topTracks.isEmpty() && isLoading
+
     LazyColumn(modifier = Modifier.fillMaxSize()) {
         // Filter chips row (only show if we have more than one filter available)
         if (availableFilters.size > 1) {
@@ -398,6 +415,29 @@ private fun DiscographyTab(
                                 selectedLabelColor = chipColor,
                             ),
                         )
+                    }
+                }
+            }
+        }
+
+        // Skeleton album cards while loading
+        if (showAlbumSkeletons) {
+            item {
+                Column(
+                    modifier = Modifier.padding(horizontal = 12.dp),
+                    verticalArrangement = Arrangement.spacedBy(10.dp),
+                ) {
+                    repeat(3) {
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.spacedBy(10.dp),
+                        ) {
+                            repeat(2) {
+                                Box(modifier = Modifier.weight(1f)) {
+                                    ShimmerDiscographyCard()
+                                }
+                            }
+                        }
                     }
                 }
             }
@@ -496,7 +536,17 @@ private fun DiscographyTab(
             }
         }
 
-        if (filteredAlbums.isEmpty() && (topTracks.isEmpty() || selectedFilter != "all")) {
+        // Skeleton top tracks while loading
+        if (showTrackSkeletons && selectedFilter == "all") {
+            item {
+                if (filteredAlbums.isNotEmpty() || showAlbumSkeletons) HorizontalDivider()
+                SectionHeader("TOP TRACKS")
+            }
+            items(5) { ShimmerTrackRow() }
+        }
+
+        // Only show "no discography" when loading is done and there's truly nothing
+        if (!isLoading && filteredAlbums.isEmpty() && (topTracks.isEmpty() || selectedFilter != "all")) {
             item {
                 Box(
                     modifier = Modifier.fillMaxWidth().padding(32.dp),

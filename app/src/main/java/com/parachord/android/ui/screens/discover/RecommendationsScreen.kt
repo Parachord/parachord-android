@@ -1,6 +1,7 @@
 package com.parachord.android.ui.screens.discover
 
 import com.parachord.android.ui.components.hapticClickable
+import androidx.lifecycle.compose.LifecycleResumeEffect
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -71,6 +72,12 @@ fun RecommendationsScreen(
     val recommendedTracks by viewModel.recommendedTracks.collectAsState()
     val sourceFilter by viewModel.sourceFilter.collectAsState()
     val sourceCounts by viewModel.sourceCounts.collectAsState()
+
+    // Auto-refresh when returning to this screen
+    LifecycleResumeEffect(Unit) {
+        viewModel.refreshIfStale()
+        onPauseOrDispose { }
+    }
 
     Column(modifier = modifier.fillMaxSize()) {
         TopAppBar(

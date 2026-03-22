@@ -112,6 +112,11 @@ class RecommendationsViewModel @Inject constructor(
         loadRecommendations()
     }
 
+    /** Called on screen resume — reloads recommendations. */
+    fun refreshIfStale() {
+        loadRecommendations()
+    }
+
     /**
      * Resolve a recommended track through the resolver pipeline and play it.
      * Builds a [TrackEntity] from the best resolved source, then hands it to [PlaybackController].
