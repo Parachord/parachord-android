@@ -274,11 +274,14 @@ class CriticalDarlingsRepository @Inject constructor(
      * Returns (albumTitle, artistName) or null if format doesn't match.
      */
     private fun parseTitle(raw: String): Pair<String, String>? {
+        // Normalise whitespace — the RSS feed uses literal newlines between album and "by Artist"
+        // e.g. "ARIRANG\nby BTS" → "ARIRANG by BTS"
+        val normalised = raw.replace(Regex("\\s+"), " ").trim()
         // Desktop uses: title split on " by " — last occurrence to handle "Something by Someone by Artist"
-        val idx = raw.lastIndexOf(" by ")
+        val idx = normalised.lastIndexOf(" by ")
         if (idx <= 0) return null
-        val album = raw.substring(0, idx).trim()
-        val artist = raw.substring(idx + 4).trim()
+        val album = normalised.substring(0, idx).trim()
+        val artist = normalised.substring(idx + 4).trim()
         if (album.isBlank() || artist.isBlank()) return null
         return album to artist
     }
