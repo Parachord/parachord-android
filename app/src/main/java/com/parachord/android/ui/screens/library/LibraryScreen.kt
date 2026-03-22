@@ -2,6 +2,7 @@ package com.parachord.android.ui.screens.library
 
 import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.background
+import androidx.compose.foundation.basicMarquee
 import com.parachord.android.ui.components.hapticClickable
 import com.parachord.android.ui.components.hapticCombinedClickable
 import androidx.compose.foundation.isSystemInDarkTheme
@@ -757,6 +758,7 @@ private fun FriendsTab(
 }
 
 /** Mini playbar pill for on-air friends — only shown when friend is currently playing. */
+@OptIn(ExperimentalFoundationApi::class)
 @Composable
 private fun FriendListMiniPlaybar(
     trackName: String,
@@ -797,7 +799,7 @@ private fun FriendListMiniPlaybar(
             }
         }
 
-        // Track info
+        // Track info — marquee scroll matching sidebar & homepage
         Text(
             text = buildString {
                 append(trackName)
@@ -811,7 +813,12 @@ private fun FriendListMiniPlaybar(
             overflow = TextOverflow.Ellipsis,
             modifier = Modifier
                 .weight(1f)
-                .padding(horizontal = 8.dp),
+                .padding(horizontal = 8.dp)
+                .basicMarquee(
+                    iterations = Int.MAX_VALUE,
+                    initialDelayMillis = 1000,
+                    velocity = 30.dp,
+                ),
         )
 
         // On-air green dot
