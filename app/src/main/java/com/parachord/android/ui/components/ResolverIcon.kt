@@ -1,27 +1,47 @@
 package com.parachord.android.ui.components
 
+import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.Check
+import androidx.compose.material.icons.filled.KeyboardArrowDown
+import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.Icon
+import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.draw.rotate
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.SolidColor
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.graphics.vector.path
 import androidx.compose.ui.res.painterResource
+import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
 import com.parachord.android.R
+import com.parachord.android.resolver.ResolverScoring
 import com.parachord.android.ui.theme.LocalResolverOrder
 
 /**
@@ -490,6 +510,160 @@ fun ResolverIconRow(
                 size = size,
                 confidence = confidences?.get(resolver) ?: 1f,
             )
+        }
+    }
+}
+
+/** Human-readable display names for resolvers. */
+private fun resolverDisplayName(resolver: String): String = when (resolver.lowercase()) {
+    "spotify" -> "Spotify"
+    "applemusic" -> "Apple Music"
+    "soundcloud" -> "SoundCloud"
+    "localfiles" -> "Local Files"
+    "youtube" -> "YouTube"
+    "bandcamp" -> "Bandcamp"
+    "qobuz" -> "Qobuz"
+    else -> resolver.replaceFirstChar { it.uppercase() }
+}
+
+/**
+ * Resolver source dropdown for the Now Playing screen.
+ * Shows the currently active resolver icon + chevron. Tapping opens a dropdown
+ * listing all available sources, matching the desktop's "Play from" menu.
+ *
+ * Only shows the chevron affordance when multiple sources are available.
+ * Sources below the confidence threshold (noMatch) are filtered out.
+ *
+ * @param currentResolver The resolver currently playing this track
+ * @param availableSources All resolved sources for this track (from TrackResolverCache)
+ * @param onSwitchSource Called with the resolver ID when the user picks a different source
+ */
+@Composable
+fun ResolverSourceDropdown(
+    currentResolver: String,
+    availableSources: List<com.parachord.android.resolver.ResolvedSource>,
+    onSwitchSource: (String) -> Unit,
+    modifier: Modifier = Modifier,
+) {
+    val resolverOrder = LocalResolverOrder.current
+    // Filter out noMatch sources (below confidence threshold)
+    val validSources = remember(availableSources) {
+        availableSources.filter {
+            (it.confidence ?: 0.0) >= ResolverScoring.MIN_CONFIDENCE_THRESHOLD
+        }
+    }
+    val hasMultipleSources = validSources.size > 1
+
+    var expanded by remember { mutableStateOf(false) }
+    val chevronRotation by animateFloatAsState(
+        targetValue = if (expanded) 180f else 0f,
+        label = "chevron",
+    )
+
+    Box(modifier = modifier) {
+        // Trigger button: resolver icon + optional chevron
+        Row(
+            verticalAlignment = Alignment.CenterVertically,
+            modifier = Modifier
+                .clip(RoundedCornerShape(8.dp))
+                .then(
+                    if (hasMultipleSources) {
+                        Modifier
+                            .clickable { expanded = !expanded }
+                            .background(Color.White.copy(alpha = 0.08f))
+                            .padding(horizontal = 8.dp, vertical = 4.dp)
+                    } else {
+                        Modifier.padding(horizontal = 8.dp, vertical = 4.dp)
+                    }
+                ),
+        ) {
+            ResolverIconSquare(resolver = currentResolver, size = 24.dp)
+            if (hasMultipleSources) {
+                Spacer(modifier = Modifier.width(4.dp))
+                Icon(
+                    imageVector = Icons.Default.KeyboardArrowDown,
+                    contentDescription = "Switch source",
+                    tint = Color.White.copy(alpha = 0.6f),
+                    modifier = Modifier
+                        .size(16.dp)
+                        .rotate(chevronRotation),
+                )
+            }
+        }
+
+        // Dropdown menu — dark glassmorphic style matching desktop
+        DropdownMenu(
+            expanded = expanded,
+            onDismissRequest = { expanded = false },
+            modifier = Modifier
+                .background(Color(0xFA1E1E23))
+                .widthIn(min = 160.dp),
+        ) {
+            // "Play from" header
+            Text(
+                text = "PLAY FROM",
+                color = Color.White.copy(alpha = 0.4f),
+                fontSize = 10.sp,
+                fontWeight = FontWeight.SemiBold,
+                letterSpacing = 1.sp,
+                modifier = Modifier.padding(horizontal = 12.dp, vertical = 6.dp),
+            )
+
+            // Sort sources: by user resolver order first, then confidence descending
+            val sorted = remember(validSources, resolverOrder) {
+                if (resolverOrder.isNotEmpty()) {
+                    validSources.sortedWith(compareBy<com.parachord.android.resolver.ResolvedSource> { s ->
+                        resolverOrder.indexOf(s.resolver).let { if (it == -1) resolverOrder.size else it }
+                    }.thenByDescending { s -> s.confidence ?: 0.9 })
+                } else {
+                    validSources.sortedByDescending { s -> s.confidence ?: 0.9 }
+                }
+            }
+            // Deduplicate by resolver (keep first/best per resolver)
+            val deduped = remember(sorted) {
+                sorted.distinctBy { it.resolver }
+            }
+
+            deduped.forEach { source ->
+                val isActive = source.resolver == currentResolver
+                val iconColor = ResolverIconColors.forResolver(source.resolver)
+
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    modifier = Modifier
+                        .clickable {
+                            if (!isActive) {
+                                onSwitchSource(source.resolver)
+                            }
+                            expanded = false
+                        }
+                        .padding(horizontal = 12.dp, vertical = 8.dp)
+                        .widthIn(min = 140.dp),
+                ) {
+                    ResolverIconSquare(
+                        resolver = source.resolver,
+                        size = 16.dp,
+                        confidence = source.confidence?.toFloat() ?: 1f,
+                    )
+                    Spacer(modifier = Modifier.width(8.dp))
+                    Text(
+                        text = resolverDisplayName(source.resolver),
+                        color = iconColor ?: Color.White,
+                        fontSize = 13.sp,
+                        fontWeight = if (isActive) FontWeight.Medium else FontWeight.Normal,
+                        modifier = Modifier.weight(1f),
+                    )
+                    if (isActive) {
+                        Spacer(modifier = Modifier.width(8.dp))
+                        Icon(
+                            imageVector = Icons.Default.Check,
+                            contentDescription = "Active",
+                            tint = Color.White.copy(alpha = 0.7f),
+                            modifier = Modifier.size(14.dp),
+                        )
+                    }
+                }
+            }
         }
     }
 }

@@ -60,8 +60,9 @@ import com.parachord.android.data.db.entity.FriendEntity
 import com.parachord.android.playback.effectiveTrack
 import com.parachord.android.ui.components.hapticClickable
 import com.parachord.android.ui.components.rememberHapticClick
+import com.parachord.android.resolver.trackKey
 import com.parachord.android.ui.components.AlbumArtCardFill
-import com.parachord.android.ui.components.ResolverIconSquare
+import com.parachord.android.ui.components.ResolverSourceDropdown
 import com.parachord.android.ui.components.TrackContextInfo
 import com.parachord.android.ui.components.TrackContextMenuHost
 import com.parachord.android.ui.components.rememberTrackContextMenuState
@@ -93,6 +94,7 @@ fun NowPlayingScreen(
     val resolverOrder by viewModel.resolverOrder.collectAsStateWithLifecycle()
     val trackResolvers by viewModel.trackResolvers.collectAsStateWithLifecycle()
     val trackResolverConfidences by viewModel.trackResolverConfidences.collectAsStateWithLifecycle()
+    val trackSources by viewModel.trackSources.collectAsStateWithLifecycle()
     val isOnTour by viewModel.isOnTour.collectAsStateWithLifecycle()
     val track = playbackState.currentTrack
     val upNext = playbackState.upNext
@@ -369,10 +371,16 @@ fun NowPlayingScreen(
                         )
                     }
 
-                    // Resolver icon
+                    // Resolver source dropdown — shows current source with option to switch
                     if (track?.resolver != null) {
                         Spacer(modifier = Modifier.height(16.dp))
-                        ResolverIconSquare(resolver = track.resolver!!, size = 24.dp)
+                        val key = trackKey(track.title, track.artist)
+                        val sources = trackSources[key] ?: emptyList()
+                        ResolverSourceDropdown(
+                            currentResolver = track.resolver!!,
+                            availableSources = sources,
+                            onSwitchSource = { resolver -> viewModel.switchSource(resolver) },
+                        )
                     }
                 }
 
