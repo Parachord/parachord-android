@@ -230,11 +230,7 @@ class MbidEnrichmentService @Inject constructor(
     internal fun saveDiskCache() {
         try {
             val file = File(context.filesDir, CACHE_FILE)
-            val serializer = kotlinx.serialization.builtins.MapSerializer(
-                kotlinx.serialization.builtins.serializer<String>(),
-                MbidCacheEntry.serializer(),
-            )
-            file.writeText(diskJson.encodeToString(serializer, diskCache.toMap()))
+            file.writeText(diskJson.encodeToString<Map<String, MbidCacheEntry>>(diskCache.toMap()))
         } catch (e: Exception) {
             Log.w(TAG, "Failed to save MBID disk cache", e)
         }

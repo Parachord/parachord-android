@@ -68,6 +68,32 @@ Tracks from external sources (ListenBrainz weekly playlists, AI recommendations,
 
 Results are cached in `TrackResolverCache.putSources()` so subsequent plays of the same track (or queue advancement) reuse the cached sources without re-resolving.
 
+### MBID Enrichment Pipeline
+
+The **ListenBrainz MBID Mapper** (`mapper.listenbrainz.org/mapping/lookup`) resolves artist+title pairs to MusicBrainz identifiers (recording, artist, release MBIDs) in ~4ms with no strict rate limits. `MbidEnrichmentService` manages this with a 90-day TTL disk cache and in-flight deduplication.
+
+**MBID enrichment is wired into every track entry point:**
+1. **Library import** — `LibraryRepository.addTrack()`/`addTracks()` calls `enrichBatchInBackground()`
+2. **Local file scan** — `MediaScanner.scan()` → `repository.addTracks()` → same as above
+3. **Background resolution** — `TrackResolverCache.resolveInBackground()` fires MBID enrichment in parallel with resolver resolution
+4. **Queue addition** — `PlaybackController.addToQueue()`/`insertNext()` enriches queued tracks
+5. **Playback start** — `PlaybackController.playTrackInternal()` enriches the current track
+6. **Scrobble dispatch** — `ScrobbleManager` re-reads the track from Room before scrobbling to pick up backfilled MBIDs
+
+**Canonical name fallback:** The mapper returns `artist_credit_name` and `recording_name` — the canonical MusicBrainz names. These are cached in `MbidCacheEntry` and used by `ScrobbleManager` to correct misspelled artist/track names in scrobble payloads (e.g., "Beatles" → "The Beatles").
+
+**Scrobble payloads include MBIDs:** ListenBrainz gets `recording_mbid`, `artist_mbids`, `release_mbid` in both `track_metadata` and `additional_info`. Last.fm and Libre.fm get the `mbid` parameter (recording MBID).
+
+### Local File Artwork Validation
+
+`MediaScanner` assigns `content://media/external/audio/albumart/{albumId}` URIs as artwork, but many local files lack embedded art — the URI string exists but points to nothing.
+
+**Two-layer validation:**
+1. **Scan time** — `MediaScanner.validateContentUri()` opens the content URI; if it has no data, `artworkUrl` is set to `null` so `ImageEnrichmentService` can fetch art from Last.fm/MusicBrainz.
+2. **Playback time** — `PlaybackController.enrichArtworkIfMissing()` revalidates `content://` albumart URIs on the IO thread. If the URI is broken (pre-fix scans or stale data), it falls through to online enrichment.
+
+This means local files without embedded art get artwork pulled from metadata providers, matching how streaming-resolved tracks get their art.
+
 ### ListenBrainz Weekly Playlists
 
 The desktop fetches `GET /1/user/{username}/playlists/createdfor?count=100` (public, no auth token needed), filters by title containing "weekly jams" or "weekly exploration", sorts by date descending, and takes the most recent 4 of each type. Tracks are loaded lazily per playlist via `GET /1/playlist/{playlistId}`.
@@ -214,6 +240,10 @@ static let darkAccentPurple = Color(hex: "#a78bfa")
 | Resolver cache | `resolver/TrackResolverCache.kt` |
 | Playback routing | `playback/PlaybackRouter.kt`, `PlaybackController.kt` |
 | Metadata cascade | `data/metadata/MetadataService.kt`, `*Provider.kt` |
+| MBID enrichment | `data/metadata/MbidEnrichmentService.kt`, `data/api/ListenBrainzApi.kt` (mapper lookup) |
+| Image enrichment | `data/metadata/ImageEnrichmentService.kt` |
+| Scrobbling | `playback/ScrobbleManager.kt`, `playback/scrobbler/ListenBrainzScrobbler.kt`, `LastFmScrobbler.kt`, `LibreFmScrobbler.kt` |
+| Local file scanning | `data/scanner/MediaScanner.kt` |
 | Playback handlers | `playback/handlers/SpotifyPlaybackHandler.kt`, `SoundCloudPlaybackHandler.kt` |
 | Settings/defaults | `data/store/SettingsStore.kt` |
 | Theme | `ui/theme/Theme.kt` |
