@@ -1190,7 +1190,24 @@ class PlaybackController @Inject constructor(
     }
 
     private fun enrichArtworkIfMissing(track: TrackEntity) {
-        if (!track.artworkUrl.isNullOrBlank()) return
+        // Obviously missing — go straight to enrichment
+        if (track.artworkUrl.isNullOrBlank()) {
+            fetchAndApplyArtwork(track)
+            return
+        }
+        // Local albumart content URI — might be broken, validate on IO thread
+        if (track.artworkUrl.startsWith("content://media/external/audio/albumart")) {
+            scope.launch(Dispatchers.IO) {
+                if (isStaleLocalArtwork(track.artworkUrl)) {
+                    fetchAndApplyArtwork(track)
+                }
+            }
+            return
+        }
+        // Has a real URL — nothing to do
+    }
+
+    private fun fetchAndApplyArtwork(track: TrackEntity) {
         scope.launch(Dispatchers.IO) {
             val url = imageEnrichment.enrichTrackArt(
                 trackId = track.id,
@@ -1204,6 +1221,22 @@ class PlaybackController @Inject constructor(
                     copy(currentTrack = currentTrack?.copy(artworkUrl = url))
                 } else this
             }
+        }
+    }
+
+    /**
+     * Check if a local file's album art content URI is broken/empty.
+     * MediaStore albumart URIs can exist as strings but point to no actual image data.
+     * Returns true if the URI looks like a local albumart URI that doesn't resolve.
+     */
+    private fun isStaleLocalArtwork(artworkUrl: String?): Boolean {
+        if (artworkUrl == null) return false
+        if (!artworkUrl.startsWith("content://media/external/audio/albumart")) return false
+        return try {
+            val uri = android.net.Uri.parse(artworkUrl)
+            context.contentResolver.openInputStream(uri)?.use { false } ?: true
+        } catch (_: Exception) {
+            true
         }
     }
 }
