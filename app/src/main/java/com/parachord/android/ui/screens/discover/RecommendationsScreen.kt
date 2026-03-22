@@ -316,6 +316,7 @@ private fun SongsTab(
                             // Show content resolver badges (Spotify, YouTube, etc.) from the
                             // resolver pipeline — NOT metadata source labels (Last.fm, ListenBrainz).
                             resolvers = track.resolvers.ifEmpty { null },
+                            resolverConfidences = track.resolverConfidences.ifEmpty { null },
                             onClick = { onPlayTrack(track) },
                         )
                     }

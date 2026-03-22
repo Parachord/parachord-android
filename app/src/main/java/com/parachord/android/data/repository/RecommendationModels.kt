@@ -23,4 +23,5 @@ data class RecommendedTrack(
     val duration: Long? = null,
     val source: String = "", // metadata source: "lastfm", "listenbrainz" — NOT a content resolver
     val resolvers: List<String> = emptyList(), // content resolvers: "spotify", "youtube", etc.
+    val resolverConfidences: Map<String, Float> = emptyMap(), // resolver → confidence (0.0–1.0)
 )

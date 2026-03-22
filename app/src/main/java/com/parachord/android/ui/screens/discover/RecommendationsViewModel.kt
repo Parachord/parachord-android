@@ -17,6 +17,7 @@ import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.launch
+import com.parachord.android.resolver.ResolverScoring.Companion.MIN_CONFIDENCE_THRESHOLD
 import java.util.UUID
 import javax.inject.Inject
 
@@ -198,8 +199,19 @@ class RecommendationsViewModel @Inject constructor(
                         targetArtist = track.artist,
                     )
                     if (sources.isNotEmpty()) {
-                        val resolverNames = sources.map { it.resolver }.distinct()
-                        mutableTracks[index] = track.copy(resolvers = resolverNames)
+                        // Build confidence map and filter out noMatch sources (< threshold)
+                        // from display, matching desktop's noMatch sentinel filtering.
+                        val confidenceMap = sources.associate {
+                            it.resolver to (it.confidence?.toFloat() ?: 1f)
+                        }
+                        val resolverNames = sources
+                            .filter { (it.confidence ?: 0.0) >= MIN_CONFIDENCE_THRESHOLD }
+                            .map { it.resolver }
+                            .distinct()
+                        mutableTracks[index] = track.copy(
+                            resolvers = resolverNames,
+                            resolverConfidences = confidenceMap,
+                        )
                         pendingUpdates++
                         // Emit in batches to reduce recomposition churn
                         if (pendingUpdates >= RESOLVE_BATCH_SIZE) {
