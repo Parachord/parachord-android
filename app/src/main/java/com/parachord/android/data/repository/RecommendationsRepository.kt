@@ -192,7 +192,12 @@ class RecommendationsRepository @Inject constructor(
                 return@flow
             }
 
-            // Extract unique artists
+            // Extract unique artists, carrying over images from cached data
+            val cachedImagesByName = cachedArtists?.associateBy(
+                { it.name.lowercase().trim() },
+                { it.imageUrl },
+            ) ?: emptyMap()
+
             val seenArtists = mutableSetOf<String>()
             val artists = allTracks.mapNotNull { track ->
                 val key = track.artist.lowercase().trim()
@@ -200,17 +205,16 @@ class RecommendationsRepository @Inject constructor(
                     RecommendedArtist(
                         name = track.artist,
                         source = track.source,
+                        imageUrl = cachedImagesByName[key],
                     )
                 } else null
             }
 
-            // Emit immediately without images so UI shows artist names right away
             cachedArtists = artists
             saveDiskCache()
             emit(Resource.Success(artists))
 
-            // Progressively resolve artist images (matching desktop's sequential approach).
-            // Each image fetch triggers a new emission so artists appear with images one-by-one.
+            // Progressively resolve images only for artists that still need them.
             val mutableArtists = artists.toMutableList()
             val toEnrich = mutableArtists.withIndex()
                 .filter { it.value.imageUrl == null }
