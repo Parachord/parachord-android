@@ -210,7 +210,7 @@ fun PlaylistDetailScreen(
                     title = track.trackTitle,
                     artist = track.trackArtist,
                     artworkUrl = track.trackArtworkUrl,
-                    resolvers = trackResolvers["${track.trackTitle.lowercase().trim()}|${track.trackArtist.lowercase().trim()}"]?.ifEmpty { null }
+                    resolvers = trackResolvers["${track.trackTitle.lowercase().trim()}|${track.trackArtist.lowercase().trim()}"]
                         ?: track.availableResolvers(resolverOrder),
                     resolverConfidences = trackResolverConfidences["${track.trackTitle.lowercase().trim()}|${track.trackArtist.lowercase().trim()}"],
                     duration = track.trackDuration,
