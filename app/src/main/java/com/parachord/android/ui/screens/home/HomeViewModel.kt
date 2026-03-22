@@ -186,11 +186,17 @@ class HomeViewModel @Inject constructor(
         }
     }
 
-    private fun loadAiRecommendations() {
+    private fun loadAiRecommendations(forceRefresh: Boolean = false) {
         viewModelScope.launch {
             // Show cached results immediately (stale-while-revalidate)
             aiRecommendationService.cachedRecommendations?.let { cached ->
                 _aiRecommendations.value = cached
+                // Skip re-fetching if cache exists and this isn't a manual refresh.
+                // AI calls take 30-60s and generate entirely new albums each time,
+                // causing visible artwork loading. Only re-fetch on explicit refresh.
+                if (!forceRefresh) {
+                    return@launch
+                }
             }
             _aiLoading.value = true
             _aiError.value = null
@@ -208,7 +214,7 @@ class HomeViewModel @Inject constructor(
     }
 
     fun refreshAiRecommendations() {
-        loadAiRecommendations()
+        loadAiRecommendations(forceRefresh = true)
     }
 
     private fun loadDiscoverPreviews() {

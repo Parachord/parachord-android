@@ -140,7 +140,11 @@ class DeepLinkViewModel @Inject constructor(
                 // ── Playback ──────────────────────────────────────────────
 
                 is DeepLinkAction.Play -> {
-                    val sources = resolverManager.resolve("${action.artist} ${action.title}")
+                    val sources = resolverManager.resolve(
+                        "${action.artist} ${action.title}",
+                        targetTitle = action.title,
+                        targetArtist = action.artist,
+                    )
                     val source = sources.firstOrNull()
                     if (source != null) {
                         val trackEntity = TrackEntity(
@@ -171,7 +175,11 @@ class DeepLinkViewModel @Inject constructor(
                 }
 
                 is DeepLinkAction.QueueAdd -> {
-                    val sources = resolverManager.resolve("${action.artist} ${action.title}")
+                    val sources = resolverManager.resolve(
+                        "${action.artist} ${action.title}",
+                        targetTitle = action.title,
+                        targetArtist = action.artist,
+                    )
                     val source = sources.firstOrNull()
                     if (source != null) {
                         val trackEntity = TrackEntity(
