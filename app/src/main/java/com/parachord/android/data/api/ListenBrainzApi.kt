@@ -455,6 +455,50 @@ class ListenBrainzApi @Inject constructor(
     }
 
     /**
+     * Look up a recording via the ListenBrainz MBID Mapper.
+     * Returns the artist credit MBIDs in ~4ms (vs 500ms+ for MusicBrainz search).
+     * No auth required. No documented strict rate limits.
+     *
+     * https://mapper.listenbrainz.org/mapping/lookup
+     */
+    suspend fun mbidMapperLookup(
+        artistName: String,
+        recordingName: String,
+    ): MbidMapperResult? = withContext(Dispatchers.IO) {
+        val url = okhttp3.HttpUrl.Builder()
+            .scheme("https")
+            .host("mapper.listenbrainz.org")
+            .addPathSegments("mapping/lookup")
+            .addQueryParameter("artist_credit_name", artistName)
+            .addQueryParameter("recording_name", recordingName)
+            .build()
+        val request = Request.Builder().url(url).get().build()
+        return@withContext try {
+            val response = okHttpClient.newCall(request).execute()
+            val body = response.body?.string()
+            if (!response.isSuccessful || body == null) return@withContext null
+
+            val json = JSONObject(body)
+            // The mapper returns an empty object {} when there's no match
+            if (!json.has("artist_credit_mbids")) return@withContext null
+
+            val artistMbids = json.optJSONArray("artist_credit_mbids")
+            val firstArtistMbid = artistMbids?.optString(0, "")?.ifBlank { null }
+
+            MbidMapperResult(
+                artistMbid = firstArtistMbid,
+                artistCreditName = json.optString("artist_credit_name", "").ifBlank { null },
+                recordingMbid = json.optString("recording_mbid", "").ifBlank { null },
+                releaseMbid = json.optString("release_mbid", "").ifBlank { null },
+                confidence = json.optDouble("confidence", 0.0),
+            )
+        } catch (e: Exception) {
+            Log.w(TAG, "MBID mapper lookup failed for '$artistName' - '$recordingName'", e)
+            null
+        }
+    }
+
+    /**
      * Fetch user's top releases (albums) for a given time range.
      */
     suspend fun getUserTopReleases(
@@ -543,4 +587,13 @@ data class LbPlaylistTrack(
     val albumArt: String? = null,
     val durationMs: Long? = null,
     val mbid: String? = null,
+)
+
+/** Result from the ListenBrainz MBID Mapper lookup. */
+data class MbidMapperResult(
+    val artistMbid: String?,
+    val artistCreditName: String?,
+    val recordingMbid: String?,
+    val releaseMbid: String?,
+    val confidence: Double = 0.0,
 )
