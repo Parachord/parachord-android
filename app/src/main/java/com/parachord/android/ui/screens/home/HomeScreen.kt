@@ -685,9 +685,6 @@ private fun DiscoverCard(
 
 // ── Weekly Playlists Section ─────────────────────────────────────
 
-private val ListenBrainzOrangeBg = Color(0xFFFFF3E0)
-private val ListenBrainzOrangeText = Color(0xFFE65100)
-
 @Composable
 private fun WeeklyPlaylistsSection(
     jams: List<WeeklyPlaylistEntry>?,
@@ -729,6 +726,10 @@ private fun WeeklyCarouselRow(
     trackCounts: Map<String, Int>,
     onOpen: (WeeklyPlaylistEntry, String) -> Unit,
 ) {
+    val isDark = isSystemInDarkTheme()
+    val badgeBg = if (isDark) Color(0xFFE8702A).copy(alpha = 0.20f) else Color(0xFFFFF3E0)
+    val badgeText = if (isDark) Color(0xFFFB923C) else Color(0xFFE65100)
+
     Column {
         // Header with title + ListenBrainz badge
         Row(
@@ -747,10 +748,10 @@ private fun WeeklyCarouselRow(
                 text = "ListenBrainz",
                 fontSize = 10.sp,
                 fontWeight = FontWeight.Medium,
-                color = ListenBrainzOrangeText,
+                color = badgeText,
                 maxLines = 1,
                 modifier = Modifier
-                    .background(ListenBrainzOrangeBg, RoundedCornerShape(4.dp))
+                    .background(badgeBg, RoundedCornerShape(4.dp))
                     .padding(horizontal = 6.dp, vertical = 2.dp),
             )
         }
