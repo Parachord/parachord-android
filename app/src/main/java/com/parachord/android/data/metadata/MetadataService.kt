@@ -104,21 +104,9 @@ class MetadataService @Inject constructor(
             )
         }
 
-        // Enrich similar artists with Spotify images (prefer Spotify over Last.fm which is often wrong)
-        val disabled = settingsStore.getDisabledMetaProviders()
-        if (merged.similarArtists.isNotEmpty() && spotify.isAvailable() && "spotify" !in disabled) {
-            val enriched = merged.similarArtists.map { similar ->
-                async {
-                    try {
-                        val spotifyArtist = spotify.searchArtists(similar.name, limit = 1).firstOrNull()
-                        similar.copy(imageUrl = spotifyArtist?.imageUrl ?: similar.imageUrl)
-                    } catch (_: Exception) {
-                        similar
-                    }
-                }
-            }.awaitAll()
-            merged = merged.copy(similarArtists = enriched)
-        }
+        // Similar artist image enrichment is handled progressively by the
+        // ViewModel (ArtistViewModel.enrichSimilarArtistImages) so it doesn't
+        // block the initial artist info load.
 
         merged
     }
