@@ -9,15 +9,20 @@ import android.content.pm.ServiceInfo
 import android.graphics.Bitmap
 import android.graphics.BitmapFactory
 import android.os.Build
+import android.os.Bundle
 import android.util.Log
 import androidx.core.app.NotificationCompat
 import androidx.core.app.ServiceCompat
 import androidx.media3.common.AudioAttributes
 import androidx.media3.common.C
+import androidx.media3.common.MediaMetadata
+import androidx.media3.common.Player
 import androidx.media3.exoplayer.ExoPlayer
-import androidx.media3.session.DefaultMediaNotificationProvider
+import androidx.media3.session.CommandButton
+import androidx.media3.session.MediaNotification
 import androidx.media3.session.MediaSession
 import androidx.media3.session.MediaSessionService
+import com.google.common.collect.ImmutableList
 import com.parachord.android.R
 import com.parachord.android.playback.handlers.SpotifyPlaybackHandler
 import dagger.hilt.android.AndroidEntryPoint
@@ -39,11 +44,14 @@ import javax.inject.Inject
  * Also manages the Spotify App Remote connection lifecycle — connecting when
  * the service starts and disconnecting on destroy.
  *
- * During external playback (Spotify Connect, Apple Music), ExoPlayer isn't
- * actively playing so MediaSessionService won't automatically keep the
- * foreground notification. We handle this by explicitly calling
- * [startForeground] with a persistent notification when external playback
- * is active, preventing Android from killing the process when the screen is off.
+ * Uses a unified notification style for both ExoPlayer (local/SoundCloud) and
+ * external (Spotify/Apple Music) playback so the notification tray always looks
+ * the same regardless of playback source.
+ *
+ * During external playback, ExoPlayer isn't actively playing so
+ * MediaSessionService won't automatically keep the foreground notification.
+ * We handle this by explicitly calling [startForeground] with a persistent
+ * notification, preventing Android from killing the process.
  */
 @AndroidEntryPoint
 class PlaybackService : MediaSessionService() {
@@ -65,8 +73,8 @@ class PlaybackService : MediaSessionService() {
 
     companion object {
         private const val TAG = "PlaybackService"
-        private const val EXTERNAL_NOTIFICATION_ID = 9999
-        private const val CHANNEL_ID = "parachord_external_playback"
+        private const val NOTIFICATION_ID = 1337
+        private const val CHANNEL_ID = "parachord_playback"
         private const val ARTWORK_SIZE = 256
 
         /** Intent actions sent by PlaybackController to manage foreground state. */
@@ -87,17 +95,6 @@ class PlaybackService : MediaSessionService() {
 
         createNotificationChannel()
 
-        // Use the Parachord logo for the media notification instead of
-        // Media3's default ExoPlayer icon.
-        setMediaNotificationProvider(
-            DefaultMediaNotificationProvider.Builder(this)
-                .setNotificationId(1337)
-                .setChannelId(CHANNEL_ID)
-                .setChannelName(R.string.app_name)
-                .build()
-                .apply { setSmallIcon(R.drawable.ic_notification) }
-        )
-
         val audioAttributes = AudioAttributes.Builder()
             .setUsage(C.USAGE_MEDIA)
             .setContentType(C.AUDIO_CONTENT_TYPE_MUSIC)
@@ -111,6 +108,9 @@ class PlaybackService : MediaSessionService() {
 
         mediaSession = MediaSession.Builder(this, exoPlayer)
             .build()
+
+        // Unified notification provider — same look for ExoPlayer and external playback.
+        setMediaNotificationProvider(UnifiedMediaNotificationProvider())
 
         startStateObserver()
     }
@@ -194,7 +194,7 @@ class PlaybackService : MediaSessionService() {
 
                 val nm = getSystemService(NotificationManager::class.java)
                 nm?.notify(
-                    EXTERNAL_NOTIFICATION_ID,
+                    NOTIFICATION_ID,
                     buildNotification(title, artist, state.isPlaying, currentArtworkBitmap),
                 )
             }
@@ -211,7 +211,7 @@ class PlaybackService : MediaSessionService() {
             // Just update the notification — state observer will handle ongoing updates
             val nm = getSystemService(NotificationManager::class.java)
             nm?.notify(
-                EXTERNAL_NOTIFICATION_ID,
+                NOTIFICATION_ID,
                 buildNotification(title, artist, true, currentArtworkBitmap),
             )
             // Kick off artwork load if needed
@@ -226,7 +226,7 @@ class PlaybackService : MediaSessionService() {
         try {
             ServiceCompat.startForeground(
                 this,
-                EXTERNAL_NOTIFICATION_ID,
+                NOTIFICATION_ID,
                 notification,
                 if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q)
                     ServiceInfo.FOREGROUND_SERVICE_TYPE_MEDIA_PLAYBACK
@@ -256,7 +256,7 @@ class PlaybackService : MediaSessionService() {
                 if (isExternalForeground) {
                     val nm = getSystemService(NotificationManager::class.java)
                     nm?.notify(
-                        EXTERNAL_NOTIFICATION_ID,
+                        NOTIFICATION_ID,
                         buildNotification(title, artist, stateHolder.state.value.isPlaying, bitmap),
                     )
                 }
@@ -271,7 +271,11 @@ class PlaybackService : MediaSessionService() {
         ServiceCompat.stopForeground(this, ServiceCompat.STOP_FOREGROUND_REMOVE)
     }
 
-    private fun buildNotification(
+    /**
+     * Build a media notification with consistent styling used for both
+     * ExoPlayer and external (Spotify/Apple Music) playback.
+     */
+    internal fun buildNotification(
         title: String,
         artist: String,
         isPlaying: Boolean = true,
@@ -319,9 +323,7 @@ class PlaybackService : MediaSessionService() {
             .setStyle(
                 androidx.media.app.NotificationCompat.MediaStyle()
                     .setShowActionsInCompactView(0, 1, 2)
-                    .setMediaSession(
-                        mediaSession?.sessionCompatToken
-                    )
+                    .setMediaSession(mediaSession?.sessionCompatToken)
             )
 
         if (artwork != null) {
@@ -358,10 +360,63 @@ class PlaybackService : MediaSessionService() {
             "Now Playing",
             NotificationManager.IMPORTANCE_LOW,
         ).apply {
-            description = "Shows current track during external playback"
+            description = "Shows the current track and playback controls"
             setShowBadge(false)
         }
         val nm = getSystemService(NotificationManager::class.java)
         nm?.createNotificationChannel(channel)
+    }
+
+    /**
+     * Custom [MediaNotification.Provider] that builds notifications using our
+     * unified [buildNotification] style. This ensures ExoPlayer playback
+     * (local files, SoundCloud) and external playback (Spotify, Apple Music)
+     * show identical notifications in the tray.
+     *
+     * Media3's [DefaultMediaNotificationProvider] is replaced by this so
+     * there's no visual difference between playback sources.
+     */
+    private inner class UnifiedMediaNotificationProvider : MediaNotification.Provider {
+
+        override fun createNotification(
+            mediaSession: MediaSession,
+            customLayout: ImmutableList<CommandButton>,
+            actionFactory: MediaNotification.ActionFactory,
+            onNotificationChangedCallback: MediaNotification.Provider.Callback,
+        ): MediaNotification {
+            val player = mediaSession.player
+            val metadata = player.mediaMetadata
+            val title = metadata.title?.toString() ?: ""
+            val artist = metadata.artist?.toString() ?: ""
+            val isPlaying = player.isPlaying
+
+            // Load artwork from the MediaMetadata artworkUri if we don't have it cached
+            val artworkUri = metadata.artworkUri
+            val artworkUrl = artworkUri?.toString()
+            if (artworkUrl != null && artworkUrl != currentArtworkUrl) {
+                currentArtworkUrl = artworkUrl
+                currentArtworkBitmap = null
+                // Fetch async and re-post via callback
+                serviceScope.launch {
+                    val bitmap = fetchArtworkBitmap(artworkUrl)
+                    if (currentArtworkUrl == artworkUrl) {
+                        currentArtworkBitmap = bitmap
+                        val updated = buildNotification(title, artist, isPlaying, bitmap)
+                        onNotificationChangedCallback.onNotificationChanged(
+                            MediaNotification(NOTIFICATION_ID, updated)
+                        )
+                    }
+                }
+            }
+
+            val notification = buildNotification(title, artist, isPlaying, currentArtworkBitmap)
+            return MediaNotification(NOTIFICATION_ID, notification)
+        }
+
+        override fun handleCustomCommand(
+            session: MediaSession,
+            action: String,
+            extras: Bundle,
+        ): Boolean = false
     }
 }
