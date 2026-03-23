@@ -449,7 +449,7 @@ private fun ParachordAppContent(mainViewModel: MainViewModel) {
                                     .height(0.5.dp)
                                     .background(MaterialTheme.colorScheme.outlineVariant),
                             )
-                            val navBarBg = if (isSystemInDarkTheme()) Color(0xFF262626) else Color(0xFF1F2937)
+                            val navBarBg = if (ParachordTheme.isDark) Color(0xFF262626) else Color(0xFF1F2937)
                             val selectedTabBg = Color.White.copy(alpha = 0.12f)
                             Row(
                                 modifier = Modifier

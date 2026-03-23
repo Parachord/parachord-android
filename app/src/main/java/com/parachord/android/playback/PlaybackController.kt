@@ -818,14 +818,20 @@ class PlaybackController @Inject constructor(
                     // ── Next-track prefetch ──────────────────────────────────
                     // When within 30s of the end, preload the next Apple Music
                     // track's catalog data so setQueue() is near-instant.
+                    // Fire-and-forget: the preload awaits a network request to
+                    // Apple Music's catalog API which can take seconds. Running
+                    // it inline was freezing the polling loop, blocking both the
+                    // safety-net track completion check and position updates.
                     if (!nextTrackPreloaded && duration > 0 && duration - position in 1..30_000) {
                         val nextTrack = queueManager.snapshot.value.upNext.firstOrNull()
-                        val nextAmId = nextTrack?.let { reselectBestSource(it) }?.appleMusicId
-                        if (nextAmId != null) {
+                        if (nextTrack != null) {
                             nextTrackPreloaded = true
-                            Log.d(TAG, "Preloading next Apple Music track: $nextAmId")
-                            withContext(Dispatchers.Main) {
-                                handler.musicKitBridge.preload(nextAmId)
+                            scope.launch(Dispatchers.Main) {
+                                val nextAmId = reselectBestSource(nextTrack).appleMusicId
+                                if (nextAmId != null) {
+                                    Log.d(TAG, "Preloading next Apple Music track: $nextAmId")
+                                    handler.musicKitBridge.preload(nextAmId)
+                                }
                             }
                         }
                     }

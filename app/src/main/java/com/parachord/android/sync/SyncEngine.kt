@@ -483,12 +483,15 @@ class SyncEngine @Inject constructor(
         // Group owned remote playlists by name — if there are multiple with the
         // same name, keep the one we're already tracking locally (or the oldest)
         // and delete the rest from Spotify.
+        val deletedSpotifyIds = mutableSetOf<String>()
+        // Re-read local sources so we include sync sources added during the loop above.
+        val currentLocalSources = syncSourceDao.getByProvider(providerId, "playlist")
         val ownedByName = remotePlaylists.filter { it.isOwned }
             .groupBy { it.entity.name.lowercase() }
         for ((_, dupes) in ownedByName) {
             if (dupes.size <= 1) continue
             // Prefer the one we already have a sync source for
-            val trackedIds = localSources.mapNotNull { it.externalId }.toSet()
+            val trackedIds = currentLocalSources.mapNotNull { it.externalId }.toSet()
             val tracked = dupes.filter { it.spotifyId in trackedIds }
             val keep = tracked.firstOrNull() ?: dupes.first()
             for (dupe in dupes) {
@@ -496,6 +499,12 @@ class SyncEngine @Inject constructor(
                 try {
                     Log.d(TAG, "Removing duplicate Spotify playlist: ${dupe.entity.name} (${dupe.spotifyId})")
                     spotifyProvider.deletePlaylist(dupe.spotifyId)
+                    deletedSpotifyIds.add(dupe.spotifyId)
+                    // Clean up any sync source pointing at the deleted playlist
+                    val orphanSource = currentLocalSources.find { it.externalId == dupe.spotifyId }
+                    if (orphanSource != null) {
+                        syncSourceDao.deleteByKey(orphanSource.itemId, "playlist", providerId)
+                    }
                     removed++
                 } catch (e: Exception) {
                     Log.e(TAG, "Failed to remove duplicate playlist ${dupe.spotifyId}", e)
@@ -507,8 +516,9 @@ class SyncEngine @Inject constructor(
         if (settings.pushLocalPlaylists) {
             val allPlaylists = playlistDao.getAllSync()
             val localOnly = allPlaylists.filter { it.spotifyId == null }
-            // Build a lookup of owned remote playlists by name for reuse
-            val ownedRemoteByName = remotePlaylists.filter { it.isOwned }
+            // Build a lookup of owned remote playlists by name for reuse,
+            // excluding playlists we just deleted during dedup above.
+            val ownedRemoteByName = remotePlaylists.filter { it.isOwned && it.spotifyId !in deletedSpotifyIds }
                 .associateBy { it.entity.name.lowercase() }
 
             for (playlist in localOnly) {

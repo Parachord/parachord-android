@@ -16,7 +16,7 @@ import androidx.compose.foundation.background
 import androidx.compose.foundation.basicMarquee
 import com.parachord.android.ui.components.hapticClickable
 import androidx.compose.foundation.combinedClickable
-import androidx.compose.foundation.isSystemInDarkTheme
+import com.parachord.android.ui.theme.ParachordTheme
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -685,9 +685,6 @@ private fun DiscoverCard(
 
 // ── Weekly Playlists Section ─────────────────────────────────────
 
-private val ListenBrainzOrangeBg = Color(0xFFFFF3E0)
-private val ListenBrainzOrangeText = Color(0xFFE65100)
-
 @Composable
 private fun WeeklyPlaylistsSection(
     jams: List<WeeklyPlaylistEntry>?,
@@ -729,6 +726,10 @@ private fun WeeklyCarouselRow(
     trackCounts: Map<String, Int>,
     onOpen: (WeeklyPlaylistEntry, String) -> Unit,
 ) {
+    val isDark = ParachordTheme.isDark
+    val badgeBg = if (isDark) Color(0xFFE8702A).copy(alpha = 0.20f) else Color(0xFFFFF3E0)
+    val badgeText = if (isDark) Color(0xFFFB923C) else Color(0xFFE65100)
+
     Column {
         // Header with title + ListenBrainz badge
         Row(
@@ -747,10 +748,10 @@ private fun WeeklyCarouselRow(
                 text = "ListenBrainz",
                 fontSize = 10.sp,
                 fontWeight = FontWeight.Medium,
-                color = ListenBrainzOrangeText,
+                color = badgeText,
                 maxLines = 1,
                 modifier = Modifier
-                    .background(ListenBrainzOrangeBg, RoundedCornerShape(4.dp))
+                    .background(badgeBg, RoundedCornerShape(4.dp))
                     .padding(horizontal = 6.dp, vertical = 2.dp),
             )
         }
@@ -783,7 +784,7 @@ private fun WeeklyPlaylistCard(
     onClick: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
-    val isDark = isSystemInDarkTheme()
+    val isDark = ParachordTheme.isDark
     val cardBg = if (isDark) Color(0xFF1E1E1E) else Color(0xFFF3F4F6)
 
     Column(
@@ -1221,7 +1222,7 @@ private fun ContinueListeningCard(
     onClick: () -> Unit,
 ) {
     val track = playbackState.currentTrack ?: return
-    val isDark = isSystemInDarkTheme()
+    val isDark = ParachordTheme.isDark
 
     Column {
         SectionHeader("Continue Listening")
@@ -1874,7 +1875,7 @@ private fun SplashScreen() {
         )
     }
 
-    val isDark = isSystemInDarkTheme()
+    val isDark = ParachordTheme.isDark
     val bg = if (isDark) Color(0xFF161616) else Color(0xFFFFFFFF)
     val textColor = if (isDark) Color(0xFFF3F4F6) else Color(0xFF111827)
     val dotColor = if (isDark) Color(0xFF9CA3AF) else Color(0xFF6B7280)

@@ -9,7 +9,7 @@ import androidx.compose.animation.core.tween
 import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.background
 import androidx.compose.foundation.basicMarquee
-import androidx.compose.foundation.isSystemInDarkTheme
+import com.parachord.android.ui.theme.ParachordTheme
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -470,7 +470,7 @@ private fun FriendMiniPlaybar(
     artworkUrl: String?,
     isOnAir: Boolean,
 ) {
-    val isDark = isSystemInDarkTheme()
+    val isDark = ParachordTheme.isDark
     val pillBg = if (isDark) MiniPlaybarBgDark else MiniPlaybarBgLight
     val pillShape = RoundedCornerShape(3.dp)
     val trackTextColor = Color(0xFFFFFFFF) // white for track name

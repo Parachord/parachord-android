@@ -55,6 +55,19 @@ Each resolver type routes to a specific playback mechanism:
 
 The desktop plays SoundCloud natively via HTML5 Audio (not externally). The Android equivalent is ExoPlayer.
 
+### Apple Music State Polling & Auto-Advance
+
+Apple Music playback runs in a hidden WebView via `MusicKitWebBridge`. The `startAppleMusicStatePolling()` loop polls at 500ms intervals on `Dispatchers.Default` for position/duration updates and uses two auto-advance detection paths:
+
+1. **JS callback (primary):** MusicKit JS fires `playbackStateDidChange` → "ended" state → `onTrackEnded` callback → `skipNextInternal()`
+2. **Polling safety net:** `isOurTrackDone()` checks `!isPlaying && position > 0 && duration - position < 1500`
+
+An `AtomicBoolean(trackEndHandled)` prevents both paths from double-firing.
+
+**Critical rule: never suspend the polling loop on network calls.** The `MusicKitWebBridge.evaluate()` function awaits JS async results via `CompletableDeferred`. If a slow operation (like `preload()` which fetches catalog metadata from Apple Music's API) runs inline in the polling loop, the entire loop freezes — no position updates, no safety-net checks, no stall recovery. Even though JS callbacks can fire independently, they may be delayed or suppressed when MusicKit is handling concurrent API requests in the same WebView context. Always use `scope.launch` (fire-and-forget) for non-essential async work within the polling loop.
+
+**Pre-fetching next track:** The polling loop preloads the next Apple Music track's catalog data 30s before the current track ends (so `setQueue()` is near-instant). This runs as a fire-and-forget `scope.launch(Dispatchers.Main)` — NOT inline.
+
 ### .axe Resolver Format
 
 Desktop resolvers are JSON-based plugin manifests with embedded JS. The Android app has a JS bridge architecture for running these, but native Kotlin resolvers are preferred for performance. The `ResolverManager` currently uses native API calls (Spotify Web API search) rather than the JS bridge.
@@ -189,6 +202,10 @@ On Android, use the system default (Roboto) — this naturally matches.
 
 The desktop supports dark/light mode toggle. Android should follow system theme by default, matching Material 3 conventions but using the desktop's color palette — not Material You dynamic colors.
 
+**Theme toggle:** The app supports manual dark/light/system selection via settings (`MainViewModel.themeMode`). The resolved `darkTheme` boolean is passed to `ParachordTheme(darkTheme = darkTheme)` in `MainActivity`. This means `isSystemInDarkTheme()` does NOT reflect the app's actual theme — it only checks the Android system setting.
+
+**Always use `ParachordTheme.isDark` instead of `isSystemInDarkTheme()`.** `ParachordTheme` provides `LocalIsDarkTheme` via `CompositionLocalProvider`, accessible as `ParachordTheme.isDark`. This respects the user's in-app toggle. The only places that should call `isSystemInDarkTheme()` are `Theme.kt` (default parameter) and `MainActivity` (system fallback for "auto" mode).
+
 ## Tech Stack (Android)
 
 - **Language:** Kotlin
@@ -283,7 +300,8 @@ static let darkAccentPurple = Color(hex: "#a78bfa")
 | Image enrichment | `data/metadata/ImageEnrichmentService.kt` |
 | Scrobbling | `playback/ScrobbleManager.kt`, `playback/scrobbler/ListenBrainzScrobbler.kt`, `LastFmScrobbler.kt`, `LibreFmScrobbler.kt` |
 | Local file scanning | `data/scanner/MediaScanner.kt` |
-| Playback handlers | `playback/handlers/SpotifyPlaybackHandler.kt`, `SoundCloudPlaybackHandler.kt` |
+| Playback handlers | `playback/handlers/SpotifyPlaybackHandler.kt`, `AppleMusicPlaybackHandler.kt`, `SoundCloudPlaybackHandler.kt` |
+| Apple Music bridge | `playback/handlers/MusicKitWebBridge.kt`, `assets/js/musickit-bridge.html` |
 | Settings/defaults | `data/store/SettingsStore.kt` |
 | Theme | `ui/theme/Theme.kt` |
 | Weekly playlists | `data/repository/WeeklyPlaylistsRepository.kt`, `ui/screens/playlists/WeeklyPlaylistScreen.kt`, `WeeklyPlaylistViewModel.kt` |
@@ -304,6 +322,8 @@ static let darkAccentPurple = Color(hex: "#a78bfa")
 6. **Don't play unresolved tracks without on-the-fly resolution.** Ephemeral tracks (weekly playlists, recommendations, DJ chat results) have no `resolver`, `sourceUrl`, or streaming IDs when first created — they're just metadata (title/artist/album). `PlaybackController.playTrackInternal` will resolve them on-the-fly if needed, but for best UX call `TrackResolverCache.resolveInBackground()` when tracks are loaded so resolver badges appear and playback starts faster.
 7. **Don't use grids for horizontally-scrollable content on mobile.** Desktop's multi-column grids don't work on narrow screens — use `LazyRow` carousels with fixed-width cards instead. The home screen's Weekly Jams/Exploration sections use this pattern.
 8. **Ephemeral playlists need their own screen and ViewModel.** Weekly playlists from ListenBrainz are not stored in Room — they use `WeeklyPlaylistScreen`/`WeeklyPlaylistViewModel` with a "Save" button (matching desktop's ephemeral playlist pattern). Don't try to reuse `PlaylistDetailScreen` which expects a Room-backed `PlaylistEntity`.
+9. **Don't use `isSystemInDarkTheme()` in composables.** The app has a manual dark/light/system toggle. `isSystemInDarkTheme()` only checks the Android system setting, not the app preference. Use `ParachordTheme.isDark` instead, which reads from `LocalIsDarkTheme` provided by `ParachordTheme`. See the Dark Mode section above.
+10. **Don't block the Apple Music polling loop.** Never call `withContext` on a suspend function that awaits a network response (like `MusicKitWebBridge.evaluate()` / `preload()`) inline in `startAppleMusicStatePolling()`. This freezes position updates and the safety-net auto-advance check. Use `scope.launch` (fire-and-forget) for any async work that doesn't need its result in the same loop iteration.
 
 ### iOS-Specific
 

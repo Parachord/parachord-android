@@ -97,6 +97,15 @@ private val DarkExtendedColors = ParachordExtendedColors(
 
 val LocalParachordColors = staticCompositionLocalOf { LightExtendedColors }
 
+/**
+ * Whether the app is currently using a dark theme.
+ *
+ * Use this instead of [isSystemInDarkTheme] — the app supports a manual
+ * dark/light toggle in settings, so the system setting may not reflect
+ * the actual theme. [ParachordTheme] provides the correct value.
+ */
+val LocalIsDarkTheme = staticCompositionLocalOf { false }
+
 /** User-configured resolver priority order, provided at the app root. */
 val LocalResolverOrder = staticCompositionLocalOf { emptyList<String>() }
 
@@ -105,6 +114,9 @@ val LocalResolverOrder = staticCompositionLocalOf { emptyList<String>() }
 object ParachordTheme {
     val colors: ParachordExtendedColors
         @Composable get() = LocalParachordColors.current
+
+    val isDark: Boolean
+        @Composable get() = LocalIsDarkTheme.current
 }
 
 // ── Theme Composable ─────────────────────────────────────────────────
@@ -117,7 +129,10 @@ fun ParachordTheme(
     val colorScheme = if (darkTheme) DarkColorScheme else LightColorScheme
     val extendedColors = if (darkTheme) DarkExtendedColors else LightExtendedColors
 
-    CompositionLocalProvider(LocalParachordColors provides extendedColors) {
+    CompositionLocalProvider(
+        LocalParachordColors provides extendedColors,
+        LocalIsDarkTheme provides darkTheme,
+    ) {
         MaterialTheme(
             colorScheme = colorScheme,
             typography = ParachordTypography,
