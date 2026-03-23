@@ -5,7 +5,7 @@ import androidx.compose.foundation.background
 import androidx.compose.foundation.basicMarquee
 import com.parachord.android.ui.components.hapticClickable
 import com.parachord.android.ui.components.hapticCombinedClickable
-import androidx.compose.foundation.isSystemInDarkTheme
+import com.parachord.android.ui.theme.ParachordTheme
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
@@ -765,7 +765,7 @@ private fun FriendListMiniPlaybar(
     artistName: String?,
     artworkUrl: String?,
 ) {
-    val isDark = isSystemInDarkTheme()
+    val isDark = ParachordTheme.isDark
     val pillBg = if (isDark) MiniPlaybarBgDark else MiniPlaybarBgLight
     val pillShape = RoundedCornerShape(4.dp)
     val artistTextColor = Color(0xFFD1D5DB)
