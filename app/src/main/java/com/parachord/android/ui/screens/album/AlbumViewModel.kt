@@ -4,6 +4,7 @@ import android.util.Log
 import androidx.lifecycle.SavedStateHandle
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
+import com.parachord.android.data.db.entity.AlbumEntity
 import com.parachord.android.data.db.entity.TrackEntity
 import com.parachord.android.data.metadata.AlbumDetail
 import com.parachord.android.data.metadata.MetadataService
@@ -68,6 +69,10 @@ class AlbumViewModel @Inject constructor(
      */
     val trackResolvers: StateFlow<Map<String, List<String>>> = trackResolverCache.trackResolvers
     val trackResolverConfidences: StateFlow<Map<String, Map<String, Float>>> = trackResolverCache.trackResolverConfidences
+
+    /** Whether this album is saved in the user's collection. */
+    val isAlbumInCollection: StateFlow<Boolean> = libraryRepository.isAlbumInCollection(albumTitle, artistName)
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), false)
 
     init {
         if (albumTitle.isNotBlank()) {
@@ -253,6 +258,31 @@ class AlbumViewModel @Inject constructor(
     fun addToCollection(track: TrackEntity) {
         viewModelScope.launch {
             libraryRepository.addTrack(track)
+        }
+    }
+
+    fun addAlbumToCollection() {
+        val detail = _albumDetail.value ?: return
+        viewModelScope.launch {
+            val album = AlbumEntity(
+                id = "album-${detail.title.hashCode()}-${detail.artist.hashCode()}",
+                title = detail.title,
+                artist = detail.artist,
+                artworkUrl = detail.artworkUrl,
+                year = detail.year,
+                trackCount = detail.tracks.size,
+            )
+            libraryRepository.addAlbum(album)
+        }
+    }
+
+    fun removeAlbumFromCollection() {
+        val detail = _albumDetail.value ?: return
+        viewModelScope.launch {
+            val existing = libraryRepository.getAlbumByTitleAndArtist(detail.title, detail.artist)
+            if (existing != null) {
+                libraryRepository.deleteAlbum(existing)
+            }
         }
     }
 

@@ -360,10 +360,11 @@ fun CollectionScreen(
                                     }
 
                                     if (showMenu) {
-                                        AlbumContextMenu(
+                                        com.parachord.android.ui.components.AlbumContextMenu(
                                             albumTitle = album.title,
                                             artistName = album.artist,
                                             artworkUrl = album.artworkUrl,
+                                            isInCollection = true,
                                             onDismiss = { showMenu = false },
                                             onPlayAlbum = {
                                                 showMenu = false
@@ -381,7 +382,7 @@ fun CollectionScreen(
                                                 showMenu = false
                                                 onNavigateToArtist(album.artist)
                                             },
-                                            onRemoveFromCollection = {
+                                            onToggleCollection = {
                                                 showMenu = false
                                                 viewModel.removeAlbumFromCollection(album)
                                             },
@@ -1014,107 +1015,4 @@ private fun ArtistContextMenu(
     }
 }
 
-// ── Album context menu ────────────────────────────────────────────
-
-@OptIn(ExperimentalMaterial3Api::class)
-@Composable
-private fun AlbumContextMenu(
-    albumTitle: String,
-    artistName: String,
-    artworkUrl: String?,
-    onDismiss: () -> Unit,
-    onPlayAlbum: () -> Unit,
-    onQueueAlbum: () -> Unit,
-    onGoToAlbum: () -> Unit,
-    onGoToArtist: () -> Unit,
-    onRemoveFromCollection: () -> Unit,
-) {
-    ModalBottomSheet(
-        onDismissRequest = onDismiss,
-        sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true),
-        containerColor = ModalBg,
-        scrimColor = Color.Black.copy(alpha = 0.4f),
-        dragHandle = {
-            Box(
-                modifier = Modifier
-                    .padding(vertical = 10.dp)
-                    .size(width = 32.dp, height = 4.dp)
-                    .background(
-                        color = Color.White.copy(alpha = 0.2f),
-                        shape = RoundedCornerShape(2.dp),
-                    ),
-            )
-        },
-    ) {
-        Column(
-            modifier = Modifier
-                .background(Brush.verticalGradient(listOf(ModalBg, ModalBgDarker)))
-                .padding(bottom = 32.dp),
-        ) {
-            // Header
-            Row(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .padding(horizontal = 20.dp, vertical = 8.dp),
-                verticalAlignment = Alignment.CenterVertically,
-            ) {
-                AlbumArtCard(
-                    artworkUrl = artworkUrl,
-                    size = 48.dp,
-                    cornerRadius = 4.dp,
-                    elevation = 1.dp,
-                    placeholderName = artistName,
-                )
-                Spacer(modifier = Modifier.width(12.dp))
-                Column(modifier = Modifier.weight(1f)) {
-                    Text(
-                        text = albumTitle,
-                        fontSize = 15.sp,
-                        fontWeight = FontWeight.Medium,
-                        color = ModalTextActive,
-                        maxLines = 1,
-                        overflow = TextOverflow.Ellipsis,
-                    )
-                    Text(
-                        text = artistName,
-                        fontSize = 13.sp,
-                        color = ModalTextPrimary,
-                        maxLines = 1,
-                        overflow = TextOverflow.Ellipsis,
-                    )
-                }
-            }
-
-            HorizontalDivider(color = ModalDivider, modifier = Modifier.padding(vertical = 8.dp))
-
-            ContextMenuItem(
-                icon = Icons.Filled.PlayArrow,
-                label = "Play Album",
-                onClick = onPlayAlbum,
-            )
-            ContextMenuItem(
-                icon = Icons.AutoMirrored.Filled.QueueMusic,
-                label = "Queue Album",
-                onClick = onQueueAlbum,
-            )
-            ContextMenuItem(
-                icon = Icons.Filled.Album,
-                label = "Go to Album",
-                onClick = onGoToAlbum,
-            )
-            ContextMenuItem(
-                icon = Icons.Filled.Person,
-                label = "Go to Artist",
-                onClick = onGoToArtist,
-            )
-
-            HorizontalDivider(color = ModalDivider, modifier = Modifier.padding(vertical = 4.dp))
-
-            ContextMenuItem(
-                icon = Icons.Filled.Favorite,
-                label = "Remove from Collection",
-                onClick = onRemoveFromCollection,
-            )
-        }
-    }
-}
+// Album context menu is now the shared AlbumContextMenu from ui.components

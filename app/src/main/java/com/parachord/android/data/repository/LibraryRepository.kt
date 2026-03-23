@@ -68,6 +68,10 @@ class LibraryRepository @Inject constructor(
     fun isTrackInCollection(title: String, artist: String): Flow<Boolean> =
         trackDao.existsByTitleAndArtist(title, artist)
 
+    /** Reactive check whether an album exists in collection by title+artist. */
+    fun isAlbumInCollection(title: String, artist: String): Flow<Boolean> =
+        albumDao.existsByTitleAndArtist(title, artist)
+
     suspend fun deleteTrack(track: TrackEntity) = trackDao.delete(track)
     suspend fun deleteAlbum(album: AlbumEntity) = albumDao.delete(album)
     suspend fun deletePlaylist(playlist: PlaylistEntity) = playlistDao.delete(playlist)

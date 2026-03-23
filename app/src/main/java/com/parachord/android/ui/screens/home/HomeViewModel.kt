@@ -369,4 +369,27 @@ class HomeViewModel @Inject constructor(
             friendsRepository.pinFriend(friend.id, !friend.pinnedToSidebar)
         }
     }
+
+    // ── Album actions ────────────────────────────────────────────────
+
+    fun addAlbumToCollection(title: String, artist: String, artworkUrl: String?) {
+        viewModelScope.launch {
+            val album = AlbumEntity(
+                id = "album-${title.hashCode()}-${artist.hashCode()}",
+                title = title,
+                artist = artist,
+                artworkUrl = artworkUrl,
+            )
+            repository.addAlbum(album)
+        }
+    }
+
+    fun removeAlbumFromCollection(title: String, artist: String) {
+        viewModelScope.launch {
+            val existing = repository.getAlbumByTitleAndArtist(title, artist)
+            if (existing != null) {
+                repository.deleteAlbumWithSync(existing)
+            }
+        }
+    }
 }
