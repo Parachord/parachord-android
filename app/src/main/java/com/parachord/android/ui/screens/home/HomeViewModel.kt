@@ -4,6 +4,7 @@ import android.util.Log
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.parachord.android.data.db.entity.AlbumEntity
+import com.parachord.android.data.db.entity.ArtistEntity
 import com.parachord.android.data.db.entity.FriendEntity
 import com.parachord.android.data.db.entity.PlaylistEntity
 import com.parachord.android.data.db.entity.TrackEntity
@@ -22,6 +23,7 @@ import com.parachord.android.data.repository.WeeklyPlaylistsRepository
 import com.parachord.android.data.scanner.MediaScanner
 import com.parachord.android.data.scanner.ScanProgress
 import com.parachord.android.data.store.SettingsStore
+import com.parachord.android.playback.PlaybackContext
 import com.parachord.android.playback.PlaybackController
 import com.parachord.android.playback.PlaybackStateHolder
 import com.parachord.android.resolver.ResolverManager
@@ -374,6 +376,85 @@ class HomeViewModel @Inject constructor(
     fun togglePin(friend: FriendEntity) {
         viewModelScope.launch {
             friendsRepository.pinFriend(friend.id, !friend.pinnedToSidebar)
+        }
+    }
+
+    // ── Artist actions ─────────────────────────────────────────────
+
+    fun playArtistTopSongs(artistName: String) {
+        viewModelScope.launch {
+            try {
+                val topTracks = metadataService.getArtistTopTracks(artistName, limit = 10)
+                if (topTracks.isEmpty()) return@launch
+                val entities = topTracks.mapNotNull { track ->
+                    val sources = resolverManager.resolveWithHints(
+                        query = "${track.artist} - ${track.title}",
+                        spotifyId = track.spotifyId,
+                        targetTitle = track.title,
+                        targetArtist = track.artist,
+                    )
+                    val best = resolverScoring.selectBest(sources) ?: return@mapNotNull null
+                    TrackEntity(
+                        id = "top-${track.title.hashCode()}-${track.artist.hashCode()}",
+                        title = track.title, artist = track.artist, album = track.album,
+                        duration = track.duration, artworkUrl = track.artworkUrl,
+                        sourceType = best.sourceType, sourceUrl = best.url, resolver = best.resolver,
+                        spotifyUri = best.spotifyUri, soundcloudId = best.soundcloudId, appleMusicId = best.appleMusicId,
+                    )
+                }
+                if (entities.isNotEmpty()) {
+                    playbackController.playQueue(
+                        entities, startIndex = 0,
+                        context = PlaybackContext(type = "artist", name = artistName),
+                    )
+                }
+            } catch (e: Exception) {
+                Log.e("HomeVM", "Failed to play top songs for '$artistName'", e)
+            }
+        }
+    }
+
+    fun queueArtistTopSongs(artistName: String) {
+        viewModelScope.launch {
+            try {
+                val topTracks = metadataService.getArtistTopTracks(artistName, limit = 10)
+                if (topTracks.isEmpty()) return@launch
+                val entities = topTracks.mapNotNull { track ->
+                    val sources = resolverManager.resolveWithHints(
+                        query = "${track.artist} - ${track.title}",
+                        spotifyId = track.spotifyId,
+                        targetTitle = track.title,
+                        targetArtist = track.artist,
+                    )
+                    val best = resolverScoring.selectBest(sources) ?: return@mapNotNull null
+                    TrackEntity(
+                        id = "top-${track.title.hashCode()}-${track.artist.hashCode()}",
+                        title = track.title, artist = track.artist, album = track.album,
+                        duration = track.duration, artworkUrl = track.artworkUrl,
+                        sourceType = best.sourceType, sourceUrl = best.url, resolver = best.resolver,
+                        spotifyUri = best.spotifyUri, soundcloudId = best.soundcloudId, appleMusicId = best.appleMusicId,
+                    )
+                }
+                if (entities.isNotEmpty()) playbackController.addToQueue(entities)
+            } catch (e: Exception) {
+                Log.e("HomeVM", "Failed to queue top songs for '$artistName'", e)
+            }
+        }
+    }
+
+    fun toggleArtistCollection(artistName: String, imageUrl: String?, isInCollection: Boolean) {
+        viewModelScope.launch {
+            if (isInCollection) {
+                repository.deleteArtistByName(artistName)
+            } else {
+                repository.addArtist(
+                    ArtistEntity(
+                        id = "manual-${java.util.UUID.randomUUID()}",
+                        name = artistName,
+                        imageUrl = imageUrl,
+                    )
+                )
+            }
         }
     }
 
