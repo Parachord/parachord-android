@@ -350,7 +350,7 @@ private data class ReleaseFilter(val key: String, val label: String)
 
 private val RELEASE_FILTERS = listOf(
     ReleaseFilter("all", "All"),
-    ReleaseFilter("album", "Albums"),
+    ReleaseFilter("album", "Studio Albums"),
     ReleaseFilter("single", "Singles"),
     ReleaseFilter("ep", "EPs"),
     ReleaseFilter("live", "Live"),
@@ -383,20 +383,21 @@ private fun DiscographyTab(
 ) {
     var selectedFilter by remember { mutableStateOf("all") }
 
-    // Calculate counts per type — normalize null releaseType to "album"
+    // Calculate counts per type — only count albums with an explicit releaseType
     val typeCounts = remember(albums) {
-        albums.groupBy { (it.releaseType?.lowercase()) ?: "album" }
+        albums.filter { it.releaseType != null }
+            .groupBy { it.releaseType!!.lowercase() }
             .mapValues { it.value.size }
     }
 
     val availableFilters = remember(albums, typeCounts) {
-        val types = albums.map { (it.releaseType?.lowercase()) ?: "album" }.toSet()
+        val types = typeCounts.keys
         RELEASE_FILTERS.filter { it.key == "all" || it.key in types }
     }
 
     val filteredAlbums = remember(albums, selectedFilter) {
         if (selectedFilter == "all") albums
-        else albums.filter { ((it.releaseType?.lowercase()) ?: "album") == selectedFilter }
+        else albums.filter { it.releaseType?.lowercase() == selectedFilter }
     }
 
     val cardBg = MaterialTheme.colorScheme.surfaceVariant
