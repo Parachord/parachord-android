@@ -304,6 +304,10 @@ fun HomeScreen(
                                         artworkUrl = album.artworkUrl,
                                         isInCollection = true,
                                         onDismiss = { showAlbumMenu = false },
+                                        onQueueAlbum = {
+                                            showAlbumMenu = false
+                                            viewModel.queueAlbumByName(album.title, album.artist)
+                                        },
                                         onGoToAlbum = {
                                             showAlbumMenu = false
                                             onNavigateToAlbum(album.title, album.artist)
@@ -407,6 +411,9 @@ fun HomeScreen(
                                 onArtistClick = onNavigateToArtist,
                                 onAddAlbumToCollection = { title, artist, artworkUrl ->
                                     viewModel.addAlbumToCollection(title, artist, artworkUrl)
+                                },
+                                onQueueAlbum = { title, artist ->
+                                    viewModel.queueAlbumByName(title, artist)
                                 },
                                 onGoToArtist = onNavigateToArtist,
                                 modifier = Modifier.padding(horizontal = 16.dp),
@@ -1449,6 +1456,7 @@ private fun AiSuggestionsSection(
     onAlbumClick: (albumTitle: String, artistName: String) -> Unit,
     onArtistClick: (String) -> Unit,
     onAddAlbumToCollection: (title: String, artist: String, artworkUrl: String?) -> Unit = { _, _, _ -> },
+    onQueueAlbum: (title: String, artist: String) -> Unit = { _, _ -> },
     onGoToArtist: (String) -> Unit = {},
     modifier: Modifier = Modifier,
 ) {
@@ -1527,6 +1535,10 @@ private fun AiSuggestionsSection(
                                 artworkUrl = album.artworkUrl,
                                 isInCollection = false,
                                 onDismiss = { showAlbumMenu = false },
+                                onQueueAlbum = {
+                                    showAlbumMenu = false
+                                    onQueueAlbum(album.title, album.artist)
+                                },
                                 onGoToAlbum = {
                                     showAlbumMenu = false
                                     onAlbumClick(album.title, album.artist)

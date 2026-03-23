@@ -1,5 +1,6 @@
 package com.parachord.android.ui.screens.home
 
+import android.util.Log
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.parachord.android.data.db.entity.AlbumEntity
@@ -8,6 +9,7 @@ import com.parachord.android.data.db.entity.PlaylistEntity
 import com.parachord.android.data.db.entity.TrackEntity
 import com.parachord.android.ai.AiRecommendationService
 import com.parachord.android.ai.AiRecommendations
+import com.parachord.android.data.metadata.MetadataService
 import com.parachord.android.data.repository.ChartsRepository
 import com.parachord.android.data.repository.CriticalDarlingsRepository
 import com.parachord.android.data.repository.FreshDropsRepository
@@ -22,6 +24,8 @@ import com.parachord.android.data.scanner.ScanProgress
 import com.parachord.android.data.store.SettingsStore
 import com.parachord.android.playback.PlaybackController
 import com.parachord.android.playback.PlaybackStateHolder
+import com.parachord.android.resolver.ResolverManager
+import com.parachord.android.resolver.ResolverScoring
 import com.parachord.android.resolver.TrackResolverCache
 import dagger.hilt.android.lifecycle.HiltViewModel
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -64,6 +68,9 @@ class HomeViewModel @Inject constructor(
     private val weeklyPlaylistsRepository: WeeklyPlaylistsRepository,
     private val settingsStore: SettingsStore,
     private val trackResolverCache: TrackResolverCache,
+    private val metadataService: MetadataService,
+    private val resolverManager: ResolverManager,
+    private val resolverScoring: ResolverScoring,
 ) : ViewModel() {
 
     /** User-configured resolver priority order, used to sort resolver icons on track rows. */
@@ -389,6 +396,47 @@ class HomeViewModel @Inject constructor(
             val existing = repository.getAlbumByTitleAndArtist(title, artist)
             if (existing != null) {
                 repository.deleteAlbumWithSync(existing)
+            }
+        }
+    }
+
+    /** Fetch an album's tracklist from metadata providers, resolve each track, and queue. */
+    fun queueAlbumByName(albumTitle: String, artistName: String) {
+        viewModelScope.launch {
+            try {
+                val detail = metadataService.getAlbumTracks(albumTitle, artistName)
+                if (detail == null || detail.tracks.isEmpty()) {
+                    Log.w("HomeVM", "No tracks found for album '$albumTitle' by '$artistName'")
+                    return@launch
+                }
+                val entities = detail.tracks.mapNotNull { track ->
+                    val sources = resolverManager.resolveWithHints(
+                        query = "${track.artist} - ${track.title}",
+                        spotifyId = track.spotifyId,
+                        targetTitle = track.title,
+                        targetArtist = track.artist,
+                    )
+                    val best = resolverScoring.selectBest(sources) ?: return@mapNotNull null
+                    TrackEntity(
+                        id = "resolved-${track.title.hashCode()}-${track.artist.hashCode()}-${albumTitle.hashCode()}",
+                        title = track.title,
+                        artist = track.artist,
+                        album = albumTitle,
+                        duration = track.duration,
+                        artworkUrl = track.artworkUrl ?: detail.artworkUrl,
+                        sourceType = best.sourceType,
+                        sourceUrl = best.url,
+                        resolver = best.resolver,
+                        spotifyUri = best.spotifyUri,
+                        soundcloudId = best.soundcloudId,
+                        appleMusicId = best.appleMusicId,
+                    )
+                }
+                if (entities.isNotEmpty()) {
+                    playbackController.addToQueue(entities)
+                }
+            } catch (e: Exception) {
+                Log.e("HomeVM", "Failed to queue album '$albumTitle'", e)
             }
         }
     }
