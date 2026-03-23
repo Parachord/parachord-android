@@ -952,6 +952,7 @@ class PlaybackController @Inject constructor(
             action = PlaybackService.ACTION_EXTERNAL_PLAYBACK_START
             putExtra(PlaybackService.EXTRA_TRACK_TITLE, track.title)
             putExtra(PlaybackService.EXTRA_TRACK_ARTIST, track.artist)
+            putExtra(PlaybackService.EXTRA_TRACK_ARTWORK_URL, track.artworkUrl)
         }
         context.startService(intent)
     }
