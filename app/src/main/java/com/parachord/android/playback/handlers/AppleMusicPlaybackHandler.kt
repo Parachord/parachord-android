@@ -102,9 +102,16 @@ class AppleMusicPlaybackHandler @Inject constructor(
      * Simpler than Spotify's detection since MusicKit JS reports state directly.
      */
     fun isOurTrackDone(): Boolean {
+        val playing = isPlaying()
+        val state = musicKitBridge.playbackStateName
+
+        // MusicKit transitions to "ended"/"completed" when a track finishes.
+        // Position may reset to 0, so we can't rely solely on position math.
+        if (!playing && (state == "ended" || state == "completed")) return true
+
         val duration = getDuration()
         val position = getPosition()
         if (duration <= 0) return false
-        return !isPlaying() && position > 0 && duration - position < 1500
+        return !playing && position > 0 && duration - position < 1500
     }
 }

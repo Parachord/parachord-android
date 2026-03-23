@@ -682,16 +682,11 @@ class MusicKitWebBridge @Inject constructor(
         @JavascriptInterface
         fun onTrackEnded(jsonStr: String) {
             Log.d(TAG, "Track ended: $jsonStr")
-            // Cross-check position vs duration — on spotty networks MusicKit
-            // can fire "ended" when buffering fails mid-song.
-            val pos = _position.value
-            val dur = _duration.value
-            val nearEnd = dur <= 0 || dur - pos < 15_000
-            if (nearEnd) {
-                onTrackEnded?.invoke()
-            } else {
-                Log.w(TAG, "Ignoring JS onTrackEnded mid-song (pos=$pos dur=$dur)")
-            }
+            // The JS side already validates near-end before calling this.
+            // Don't re-check with _position/_duration from StateFlows — polling
+            // may have updated them (position resets to 0 at track end, making
+            // stale duration comparisons fail and blocking the signal).
+            onTrackEnded?.invoke()
         }
 
         @JavascriptInterface

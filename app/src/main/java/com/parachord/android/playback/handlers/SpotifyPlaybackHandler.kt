@@ -235,6 +235,9 @@ class SpotifyPlaybackHandler @Inject constructor(
             } ?: localDevices.firstOrNull { it.type == "Smartphone" }
             if (resolved == null) {
                 Log.w(TAG, "Could not find local Smartphone device after waking Spotify")
+                // Clear the local-device preference so the next retry shows a fresh
+                // picker instead of looping back to the same failed wake path.
+                settingsStore.clearPreferredSpotifyDeviceId()
                 return false
             }
             hasWokenSpotify = true
@@ -485,7 +488,13 @@ class SpotifyPlaybackHandler @Inject constructor(
         // Inactive preferred devices (phantom speakers, TVs on other networks)
         // should not be auto-targeted; show the picker so the user can choose.
         val preferredId = settingsStore.getPreferredSpotifyDeviceId()
-        if (preferredId != null && preferredId != LOCAL_DEVICE_ID) {
+        if (preferredId == LOCAL_DEVICE_ID) {
+            // User previously chose "This device" — honour that choice and return
+            // the synthetic local entry so attemptPlay() can wake Spotify locally.
+            Log.d(TAG, "Preferred device is local — returning local placeholder")
+            return withLocal.firstOrNull { isLocalPlaceholder(it) } ?: localDeviceEntry()
+        }
+        if (preferredId != null) {
             val preferred = withLocal.firstOrNull { it.id == preferredId }
             if (preferred != null && preferred.isActive) {
                 Log.d(TAG, "Using preferred device (active): '${preferred.name}'")

@@ -718,15 +718,20 @@ class PlaybackController @Inject constructor(
         handler.musicKitBridge.onTrackEnded = {
             val position = handler.getPosition()
             val duration = handler.getDuration()
+            val playing = handler.isPlaying()
             val knownDuration = stateHolder.state.value.currentTrack?.duration
             val effectiveDuration = when {
                 knownDuration != null && knownDuration > 0 -> knownDuration
                 duration > 0 -> duration
                 else -> null
             }
-            val nearEnd = effectiveDuration == null || effectiveDuration - position < 15_000
+            // MusicKit resets position to 0 when a track genuinely ends.
+            // A position-reset with !isPlaying is a real end, not a mid-song stall
+            // (stalls leave position > 0 mid-song).
+            val positionReset = position == 0L && !playing
+            val nearEnd = positionReset || effectiveDuration == null || effectiveDuration - position < 15_000
             if (nearEnd && trackEndHandled.compareAndSet(false, true)) {
-                Log.d(TAG, "Apple Music track ended (JS callback, pos=$position dur=$effectiveDuration)")
+                Log.d(TAG, "Apple Music track ended (JS callback, pos=$position dur=$effectiveDuration playing=$playing)")
                 scope.launch(Dispatchers.Main) { skipNextInternal(userInitiated = false) }
             } else if (!nearEnd) {
                 Log.w(TAG, "Ignoring spurious track-ended signal (pos=$position dur=$effectiveDuration) — likely network stall")
