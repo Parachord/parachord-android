@@ -77,7 +77,9 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.unit.sp
 import com.parachord.android.ui.components.AlbumArtCard
 import com.parachord.android.ui.components.AlbumArtCardFill
+import com.parachord.android.ui.components.AlbumContextMenu
 import com.parachord.android.ui.components.FaceAwareImage
+import com.parachord.android.ui.components.hapticCombinedClickable
 import com.parachord.android.ui.components.SectionHeader
 import com.parachord.android.ui.components.ShimmerDiscographyCard
 import com.parachord.android.ui.components.ShimmerTrackRow
@@ -296,9 +298,17 @@ fun ArtistScreen(
                             topTracks = topTracks,
                             isLoading = isLoading,
                             onNavigateToAlbum = onNavigateToAlbum,
+                            onNavigateToArtist = onNavigateToArtist,
                             onPlayTrack = viewModel::playTrack,
                             trackResolvers = trackResolvers,
                             trackResolverConfidences = trackResolverConfidences,
+                            onQueueAlbum = { title, artist -> viewModel.queueAlbumByName(title, artist) },
+                            onAddAlbumToCollection = { title, artist, artworkUrl, year ->
+                                viewModel.addAlbumToCollection(title, artist, artworkUrl, year)
+                            },
+                            onRemoveAlbumFromCollection = { title, artist ->
+                                viewModel.removeAlbumFromCollection(title, artist)
+                            },
                             onTrackLongClick = { track ->
                                 val entity = viewModel.trackSearchResultToEntity(track)
                                 contextMenuState.show(
@@ -362,27 +372,31 @@ private fun DiscographyTab(
     topTracks: List<TrackSearchResult>,
     isLoading: Boolean = false,
     onNavigateToAlbum: (albumTitle: String, artistName: String) -> Unit,
+    onNavigateToArtist: (String) -> Unit = {},
     onPlayTrack: (TrackSearchResult) -> Unit = {},
     trackResolvers: Map<String, List<String>> = emptyMap(),
     trackResolverConfidences: Map<String, Map<String, Float>> = emptyMap(),
     onTrackLongClick: (TrackSearchResult) -> Unit = {},
+    onQueueAlbum: (title: String, artist: String) -> Unit = { _, _ -> },
+    onAddAlbumToCollection: (title: String, artist: String, artworkUrl: String?, year: Int?) -> Unit = { _, _, _, _ -> },
+    onRemoveAlbumFromCollection: (title: String, artist: String) -> Unit = { _, _ -> },
 ) {
     var selectedFilter by remember { mutableStateOf("all") }
 
-    // Calculate counts per type
+    // Calculate counts per type — normalize null releaseType to "album"
     val typeCounts = remember(albums) {
-        albums.groupBy { it.releaseType?.lowercase() ?: "album" }
+        albums.groupBy { (it.releaseType?.lowercase()) ?: "album" }
             .mapValues { it.value.size }
     }
 
     val availableFilters = remember(albums, typeCounts) {
-        val types = albums.mapNotNull { it.releaseType?.lowercase() }.toSet()
+        val types = albums.map { (it.releaseType?.lowercase()) ?: "album" }.toSet()
         RELEASE_FILTERS.filter { it.key == "all" || it.key in types }
     }
 
     val filteredAlbums = remember(albums, selectedFilter) {
         if (selectedFilter == "all") albums
-        else albums.filter { it.releaseType?.lowercase() == selectedFilter }
+        else albums.filter { ((it.releaseType?.lowercase()) ?: "album") == selectedFilter }
     }
 
     val cardBg = MaterialTheme.colorScheme.surfaceVariant
@@ -456,12 +470,16 @@ private fun DiscographyTab(
                         ) {
                             rowAlbums.forEach { album ->
                                 Box(modifier = Modifier.weight(1f)) {
+                                    var showAlbumMenu by remember { mutableStateOf(false) }
                                     Column(
                                         modifier = Modifier
                                             .fillMaxWidth()
                                             .clip(RoundedCornerShape(10.dp))
                                             .background(cardBg)
-                                            .clickable { onNavigateToAlbum(album.title, album.artist) }
+                                            .hapticCombinedClickable(
+                                                onClick = { onNavigateToAlbum(album.title, album.artist) },
+                                                onLongClick = { showAlbumMenu = true },
+                                            )
                                             .padding(10.dp),
                                     ) {
                                         AlbumArtCardFill(
@@ -505,6 +523,31 @@ private fun DiscographyTab(
                                                 )
                                             }
                                         }
+                                    }
+                                    if (showAlbumMenu) {
+                                        AlbumContextMenu(
+                                            albumTitle = album.title,
+                                            artistName = album.artist,
+                                            artworkUrl = album.artworkUrl,
+                                            isInCollection = false,
+                                            onDismiss = { showAlbumMenu = false },
+                                            onQueueAlbum = {
+                                                showAlbumMenu = false
+                                                onQueueAlbum(album.title, album.artist)
+                                            },
+                                            onGoToAlbum = {
+                                                showAlbumMenu = false
+                                                onNavigateToAlbum(album.title, album.artist)
+                                            },
+                                            onGoToArtist = {
+                                                showAlbumMenu = false
+                                                onNavigateToArtist(album.artist)
+                                            },
+                                            onToggleCollection = {
+                                                showAlbumMenu = false
+                                                onAddAlbumToCollection(album.title, album.artist, album.artworkUrl, album.year)
+                                            },
+                                        )
                                     }
                                 }
                             }

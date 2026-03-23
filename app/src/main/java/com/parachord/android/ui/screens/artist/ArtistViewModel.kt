@@ -5,6 +5,7 @@ import androidx.lifecycle.SavedStateHandle
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.parachord.android.data.db.dao.ArtistDao
+import com.parachord.android.data.db.entity.AlbumEntity
 import com.parachord.android.data.db.entity.ArtistEntity
 import com.parachord.android.data.db.entity.PlaylistEntity
 import com.parachord.android.data.db.entity.TrackEntity
@@ -270,6 +271,69 @@ class ArtistViewModel @Inject constructor(
     fun addToCollection(track: TrackEntity) {
         viewModelScope.launch {
             libraryRepository.addTrack(track)
+        }
+    }
+
+    fun addAlbumToCollection(title: String, artist: String, artworkUrl: String?, year: Int?) {
+        viewModelScope.launch {
+            val album = AlbumEntity(
+                id = "album-${title.hashCode()}-${artist.hashCode()}",
+                title = title,
+                artist = artist,
+                artworkUrl = artworkUrl,
+                year = year,
+            )
+            libraryRepository.addAlbum(album)
+        }
+    }
+
+    fun removeAlbumFromCollection(title: String, artist: String) {
+        viewModelScope.launch {
+            val existing = libraryRepository.getAlbumByTitleAndArtist(title, artist)
+            if (existing != null) {
+                libraryRepository.deleteAlbum(existing)
+            }
+        }
+    }
+
+    /** Fetch album tracklist, resolve each track, and add to playback queue. */
+    fun queueAlbumByName(albumTitle: String, albumArtist: String) {
+        viewModelScope.launch {
+            try {
+                val detail = metadataService.getAlbumTracks(albumTitle, albumArtist)
+                if (detail == null || detail.tracks.isEmpty()) {
+                    Log.w("ArtistVM", "No tracks found for album '$albumTitle'")
+                    return@launch
+                }
+                val entities = detail.tracks.mapNotNull { track ->
+                    val sources = resolverManager.resolveWithHints(
+                        query = "${track.artist} - ${track.title}",
+                        spotifyId = track.spotifyId,
+                        targetTitle = track.title,
+                        targetArtist = track.artist,
+                    )
+                    val best = resolverScoring.selectBest(sources) ?: return@mapNotNull null
+                    TrackEntity(
+                        id = "resolved-${track.title.hashCode()}-${track.artist.hashCode()}-${albumTitle.hashCode()}",
+                        title = track.title,
+                        artist = track.artist,
+                        album = albumTitle,
+                        duration = track.duration,
+                        artworkUrl = track.artworkUrl ?: detail.artworkUrl,
+                        sourceType = best.sourceType,
+                        sourceUrl = best.url,
+                        resolver = best.resolver,
+                        spotifyUri = best.spotifyUri,
+                        soundcloudId = best.soundcloudId,
+                        appleMusicId = best.appleMusicId,
+                    )
+                }
+                if (entities.isNotEmpty()) {
+                    playbackController.addToQueue(entities)
+                }
+            } catch (e: Exception) {
+                Log.e("ArtistVM", "Failed to queue album '$albumTitle'", e)
+            }
         }
     }
 

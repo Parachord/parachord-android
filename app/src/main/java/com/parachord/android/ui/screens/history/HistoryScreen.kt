@@ -1,7 +1,9 @@
 package com.parachord.android.ui.screens.history
 
 import androidx.compose.foundation.background
+import com.parachord.android.ui.components.AlbumContextMenu
 import com.parachord.android.ui.components.hapticClickable
+import com.parachord.android.ui.components.hapticCombinedClickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -136,6 +138,9 @@ fun HistoryScreen(
                     selectedPeriod = selectedPeriod,
                     onPeriodChanged = viewModel::setPeriod,
                     onAlbumClick = onNavigateToAlbum,
+                    onNavigateToArtist = onNavigateToArtist,
+                    onQueueAlbum = { title, artist -> viewModel.queueAlbumByName(title, artist) },
+                    onAddAlbumToCollection = { title, artist, artworkUrl -> viewModel.addAlbumToCollection(title, artist, artworkUrl) },
                 )
                 2 -> TopArtistsTab(
                     artists = topArtists,
@@ -237,6 +242,9 @@ private fun TopAlbumsTab(
     selectedPeriod: String,
     onPeriodChanged: (String) -> Unit,
     onAlbumClick: (albumTitle: String, artistName: String) -> Unit = { _, _ -> },
+    onNavigateToArtist: (String) -> Unit = {},
+    onQueueAlbum: (title: String, artist: String) -> Unit = { _, _ -> },
+    onAddAlbumToCollection: (title: String, artist: String, artworkUrl: String?) -> Unit = { _, _, _ -> },
 ) {
     Column(modifier = Modifier.fillMaxSize()) {
         PeriodFilter(selectedPeriod = selectedPeriod, onPeriodChanged = onPeriodChanged)
@@ -259,10 +267,37 @@ private fun TopAlbumsTab(
                     ) {
                         items(albums.data.size, key = { "${albums.data[it].rank}-${albums.data[it].name}-${albums.data[it].artist}" }) { index ->
                             val album = albums.data[index]
+                            var showMenu by remember { mutableStateOf(false) }
                             AlbumGridItem(
                                 album = album,
                                 onClick = { onAlbumClick(album.name, album.artist) },
+                                onLongClick = { showMenu = true },
                             )
+                            if (showMenu) {
+                                AlbumContextMenu(
+                                    albumTitle = album.name,
+                                    artistName = album.artist,
+                                    artworkUrl = album.artworkUrl,
+                                    isInCollection = false,
+                                    onDismiss = { showMenu = false },
+                                    onQueueAlbum = {
+                                        showMenu = false
+                                        onQueueAlbum(album.name, album.artist)
+                                    },
+                                    onGoToAlbum = {
+                                        showMenu = false
+                                        onAlbumClick(album.name, album.artist)
+                                    },
+                                    onGoToArtist = {
+                                        showMenu = false
+                                        onNavigateToArtist(album.artist)
+                                    },
+                                    onToggleCollection = {
+                                        showMenu = false
+                                        onAddAlbumToCollection(album.name, album.artist, album.artworkUrl)
+                                    },
+                                )
+                            }
                         }
                     }
                 }
@@ -272,11 +307,11 @@ private fun TopAlbumsTab(
 }
 
 @Composable
-private fun AlbumGridItem(album: HistoryAlbum, onClick: () -> Unit = {}) {
+private fun AlbumGridItem(album: HistoryAlbum, onClick: () -> Unit = {}, onLongClick: () -> Unit = {}) {
     Column(
         modifier = Modifier
             .clip(RoundedCornerShape(8.dp))
-            .hapticClickable(onClick = onClick),
+            .hapticCombinedClickable(onClick = onClick, onLongClick = onLongClick),
     ) {
         Box {
             AlbumArtCard(

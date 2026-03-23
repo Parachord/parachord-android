@@ -1,7 +1,9 @@
 package com.parachord.android.ui.screens.friends
 
 import androidx.compose.foundation.background
+import com.parachord.android.ui.components.AlbumContextMenu
 import com.parachord.android.ui.components.hapticClickable
+import com.parachord.android.ui.components.hapticCombinedClickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -39,6 +41,9 @@ import androidx.compose.material3.TopAppBar
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -191,6 +196,9 @@ fun FriendDetailScreen(
                     selectedPeriod = selectedPeriod,
                     onPeriodChanged = viewModel::setPeriod,
                     onAlbumClick = onNavigateToAlbum,
+                    onNavigateToArtist = onNavigateToArtist,
+                    onQueueAlbum = viewModel::queueAlbumByName,
+                    onAddAlbumToCollection = viewModel::addAlbumToCollection,
                 )
                 3 -> FriendTopArtistsTab(
                     artists = topArtists,
@@ -372,6 +380,9 @@ private fun FriendTopAlbumsTab(
     selectedPeriod: String,
     onPeriodChanged: (String) -> Unit,
     onAlbumClick: (albumTitle: String, artistName: String) -> Unit = { _, _ -> },
+    onNavigateToArtist: (String) -> Unit = {},
+    onQueueAlbum: (albumTitle: String, albumArtist: String) -> Unit = { _, _ -> },
+    onAddAlbumToCollection: (title: String, artist: String, artworkUrl: String?) -> Unit = { _, _, _ -> },
 ) {
     Column(modifier = Modifier.fillMaxSize()) {
         PeriodFilter(selectedPeriod = selectedPeriod, onPeriodChanged = onPeriodChanged)
@@ -394,10 +405,27 @@ private fun FriendTopAlbumsTab(
                     ) {
                         items(albums.data.size, key = { "${albums.data[it].rank}-${albums.data[it].name}" }) { index ->
                             val album = albums.data[index]
+                            var showMenu by remember { mutableStateOf(false) }
                             AlbumGridItem(
                                 album = album,
                                 onClick = { onAlbumClick(album.name, album.artist) },
+                                onLongClick = { showMenu = true },
                             )
+                            if (showMenu) {
+                                AlbumContextMenu(
+                                    albumTitle = album.name,
+                                    artistName = album.artist,
+                                    artworkUrl = album.artworkUrl,
+                                    isInCollection = false,
+                                    onDismiss = { showMenu = false },
+                                    onQueueAlbum = { onQueueAlbum(album.name, album.artist) },
+                                    onGoToAlbum = { onAlbumClick(album.name, album.artist) },
+                                    onGoToArtist = { onNavigateToArtist(album.artist) },
+                                    onToggleCollection = {
+                                        onAddAlbumToCollection(album.name, album.artist, album.artworkUrl)
+                                    },
+                                )
+                            }
                         }
                     }
                 }
@@ -407,11 +435,11 @@ private fun FriendTopAlbumsTab(
 }
 
 @Composable
-private fun AlbumGridItem(album: HistoryAlbum, onClick: () -> Unit = {}) {
+private fun AlbumGridItem(album: HistoryAlbum, onClick: () -> Unit = {}, onLongClick: () -> Unit = {}) {
     Column(
         modifier = Modifier
             .clip(RoundedCornerShape(8.dp))
-            .hapticClickable(onClick = onClick),
+            .hapticCombinedClickable(onClick = onClick, onLongClick = onLongClick),
     ) {
         Box {
             AlbumArtCard(
