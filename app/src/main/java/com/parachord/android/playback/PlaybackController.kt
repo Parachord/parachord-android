@@ -76,6 +76,10 @@ class PlaybackController @Inject constructor(
     private var spotifyStateJob: Job? = null
     private var appleMusicPollingJob: Job? = null
     private var idleTimeoutJob: Job? = null
+    /** Tracks an in-flight track advance (auto or manual skip).
+     *  Prevents concurrent advances from double-skipping and lets
+     *  togglePlayPause() know a transition is still in progress. */
+    private var advanceJob: Job? = null
 
     /** Whether playback is currently managed externally (e.g. Spotify Connect). */
     private var isExternalPlayback = false
@@ -214,18 +218,28 @@ class PlaybackController @Inject constructor(
     }
 
     private fun skipNextInternal(userInitiated: Boolean) {
+        // If a previous advance is still in-flight (resolver/routing not finished),
+        // ignore non-user auto-advance signals to prevent double-skipping.
+        if (!userInitiated && advanceJob?.isActive == true) {
+            Log.d(TAG, "skipNext: ignoring auto-advance — previous advance still in-flight")
+            return
+        }
+
         if (userInitiated) {
             onUserPlaybackActionListener?.invoke()
         } else {
             onTrackEndedListener?.invoke()
         }
 
+        // Cancel any in-flight advance — user skip takes priority
+        advanceJob?.cancel()
+
         // Spinoff mode: pull from separate pool, bypass queue entirely (desktop behavior)
         if (stateHolder.state.value.spinoffMode) {
             if (spinoffPool.isNotEmpty()) {
                 val next = spinoffPool.removeAt(0)
                 Log.d(TAG, "Spinoff: playing next '${next.title}' by ${next.artist} (${spinoffPool.size} remaining)")
-                scope.launch {
+                advanceJob = scope.launch {
                     if (isExternalPlayback) router.stopExternalPlayback()
                     playTrackInternal(next)
                 }
@@ -252,7 +266,7 @@ class PlaybackController @Inject constructor(
             return
         }
         Log.d(TAG, "skipNext: advancing to '${next.title}' by ${next.artist}")
-        scope.launch {
+        advanceJob = scope.launch {
             if (isExternalPlayback) router.stopExternalPlayback()
             playTrackInternal(next)
         }
@@ -279,7 +293,8 @@ class PlaybackController @Inject constructor(
 
         val currentTrack = stateHolder.state.value.currentTrack
         val prev = queueManager.skipPrevious(currentTrack) ?: return
-        scope.launch {
+        advanceJob?.cancel()
+        advanceJob = scope.launch {
             if (isExternalPlayback) router.stopExternalPlayback()
             playTrackInternal(prev)
         }
@@ -289,7 +304,8 @@ class PlaybackController @Inject constructor(
     fun playFromQueue(index: Int) {
         val currentTrack = stateHolder.state.value.currentTrack
         val track = queueManager.playFromQueue(index, currentTrack) ?: return
-        scope.launch {
+        advanceJob?.cancel()
+        advanceJob = scope.launch {
             if (isExternalPlayback) router.stopExternalPlayback()
             playTrackInternal(track)
         }
@@ -316,6 +332,24 @@ class PlaybackController @Inject constructor(
     fun togglePlayPause() {
         if (isExternalPlayback) {
             scope.launch {
+                // If an advance is in-flight (auto-advance resolver/routing still running),
+                // wait for it to complete rather than resuming the stale previous handler.
+                val pendingAdvance = advanceJob
+                if (pendingAdvance?.isActive == true) {
+                    Log.d(TAG, "togglePlayPause: advance in-flight, waiting for it to complete")
+                    pendingAdvance.join()
+                    // After the advance completes, playback should already be started.
+                    // If it's not playing (advance failed), fall through to re-play.
+                    val handler = router.activeExternalHandler
+                    val playing = when (handler) {
+                        is AppleMusicPlaybackHandler -> handler.isPlaying()
+                        null -> false
+                        else -> router.getSpotifyHandler().isPlaying()
+                    }
+                    if (playing) return@launch
+                    // Advance completed but playback didn't start — fall through to re-play
+                }
+
                 val handler = router.activeExternalHandler
                 if (handler == null) {
                     // No active handler — external playback stalled. Re-play the current track.
