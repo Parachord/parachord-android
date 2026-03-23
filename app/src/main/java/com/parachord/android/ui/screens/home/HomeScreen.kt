@@ -98,6 +98,7 @@ import com.parachord.android.data.db.entity.FriendEntity
 import com.parachord.android.data.db.entity.PlaylistEntity
 import com.parachord.android.ui.components.AlbumArtCard
 import com.parachord.android.ui.components.AlbumContextMenu
+import com.parachord.android.ui.components.ArtistContextMenu
 import com.parachord.android.ui.components.ContextMenuItem
 import com.parachord.android.ui.components.hapticCombinedClickable
 import com.parachord.android.ui.components.ModalBg
@@ -416,6 +417,8 @@ fun HomeScreen(
                                     viewModel.queueAlbumByName(title, artist)
                                 },
                                 onGoToArtist = onNavigateToArtist,
+                                onPlayArtistTopSongs = viewModel::playArtistTopSongs,
+                                onQueueArtistTopSongs = viewModel::queueArtistTopSongs,
                                 modifier = Modifier.padding(horizontal = 16.dp),
                             )
                             Spacer(modifier = Modifier.height(8.dp))
@@ -1458,8 +1461,33 @@ private fun AiSuggestionsSection(
     onAddAlbumToCollection: (title: String, artist: String, artworkUrl: String?) -> Unit = { _, _, _ -> },
     onQueueAlbum: (title: String, artist: String) -> Unit = { _, _ -> },
     onGoToArtist: (String) -> Unit = {},
+    onPlayArtistTopSongs: (String) -> Unit = {},
+    onQueueArtistTopSongs: (String) -> Unit = {},
     modifier: Modifier = Modifier,
 ) {
+    var menuArtistName by remember { mutableStateOf<String?>(null) }
+    var menuArtistImage by remember { mutableStateOf<String?>(null) }
+
+    menuArtistName?.let { name ->
+        ArtistContextMenu(
+            artistName = name,
+            artworkUrl = menuArtistImage,
+            onDismiss = { menuArtistName = null },
+            onPlayTopTracks = {
+                onPlayArtistTopSongs(name)
+                menuArtistName = null
+            },
+            onQueueTopTracks = {
+                onQueueArtistTopSongs(name)
+                menuArtistName = null
+            },
+            onGoToArtist = {
+                onArtistClick(name)
+                menuArtistName = null
+            },
+        )
+    }
+
     Column(modifier = modifier) {
         if (isLoading && recommendations == null) {
             // Loading shimmer
@@ -1590,9 +1618,14 @@ private fun AiSuggestionsSection(
                     horizontalArrangement = Arrangement.spacedBy(12.dp),
                 ) {
                     items(recommendations.artists.size) { index ->
+                        val artist = recommendations.artists[index]
                         AiArtistCard(
-                            artist = recommendations.artists[index],
-                            onClick = { onArtistClick(recommendations.artists[index].name) },
+                            artist = artist,
+                            onClick = { onArtistClick(artist.name) },
+                            onLongClick = {
+                                menuArtistName = artist.name
+                                menuArtistImage = artist.imageUrl
+                            },
                         )
                     }
                 }
@@ -1669,11 +1702,12 @@ private fun AiAlbumCard(
 private fun AiArtistCard(
     artist: AiArtistSuggestion,
     onClick: () -> Unit,
+    onLongClick: (() -> Unit)? = null,
 ) {
     Column(
         modifier = Modifier
             .width(100.dp)
-            .hapticClickable(onClick = onClick),
+            .hapticCombinedClickable(onClick = onClick, onLongClick = onLongClick),
         horizontalAlignment = Alignment.CenterHorizontally,
     ) {
         AlbumArtCard(

@@ -2,6 +2,7 @@ package com.parachord.android.ui.screens.friends
 
 import androidx.compose.foundation.background
 import com.parachord.android.ui.components.AlbumContextMenu
+import com.parachord.android.ui.components.ArtistContextMenu
 import com.parachord.android.ui.components.hapticClickable
 import com.parachord.android.ui.components.hapticCombinedClickable
 import androidx.compose.foundation.layout.Arrangement
@@ -205,6 +206,8 @@ fun FriendDetailScreen(
                     selectedPeriod = selectedPeriod,
                     onPeriodChanged = viewModel::setPeriod,
                     onArtistClick = onNavigateToArtist,
+                    onPlayArtistTopSongs = viewModel::playArtistTopSongs,
+                    onQueueArtistTopSongs = viewModel::queueArtistTopSongs,
                 )
             }
         }
@@ -511,7 +514,31 @@ private fun FriendTopArtistsTab(
     selectedPeriod: String,
     onPeriodChanged: (String) -> Unit,
     onArtistClick: (String) -> Unit = {},
+    onPlayArtistTopSongs: (String) -> Unit = {},
+    onQueueArtistTopSongs: (String) -> Unit = {},
 ) {
+    var menuArtist by remember { mutableStateOf<HistoryArtist?>(null) }
+
+    menuArtist?.let { artist ->
+        ArtistContextMenu(
+            artistName = artist.name,
+            artworkUrl = artist.imageUrl,
+            onDismiss = { menuArtist = null },
+            onPlayTopTracks = {
+                onPlayArtistTopSongs(artist.name)
+                menuArtist = null
+            },
+            onQueueTopTracks = {
+                onQueueArtistTopSongs(artist.name)
+                menuArtist = null
+            },
+            onGoToArtist = {
+                onArtistClick(artist.name)
+                menuArtist = null
+            },
+        )
+    }
+
     Column(modifier = Modifier.fillMaxSize()) {
         PeriodFilter(selectedPeriod = selectedPeriod, onPeriodChanged = onPeriodChanged)
         when (artists) {
@@ -542,6 +569,7 @@ private fun FriendTopArtistsTab(
                             ArtistGridItem(
                                 artist = artist,
                                 onClick = { onArtistClick(artist.name) },
+                                onLongClick = { menuArtist = artist },
                             )
                         }
                     }
@@ -552,12 +580,16 @@ private fun FriendTopArtistsTab(
 }
 
 @Composable
-private fun ArtistGridItem(artist: HistoryArtist, onClick: () -> Unit = {}) {
+private fun ArtistGridItem(
+    artist: HistoryArtist,
+    onClick: () -> Unit = {},
+    onLongClick: (() -> Unit)? = null,
+) {
     Column(
         horizontalAlignment = Alignment.CenterHorizontally,
         modifier = Modifier
             .fillMaxWidth()
-            .hapticClickable(onClick = onClick),
+            .hapticCombinedClickable(onClick = onClick, onLongClick = onLongClick),
     ) {
         AlbumArtCard(
             artworkUrl = artist.imageUrl,

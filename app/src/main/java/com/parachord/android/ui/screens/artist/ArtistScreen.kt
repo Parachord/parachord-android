@@ -78,6 +78,7 @@ import androidx.compose.ui.unit.sp
 import com.parachord.android.ui.components.AlbumArtCard
 import com.parachord.android.ui.components.AlbumArtCardFill
 import com.parachord.android.ui.components.AlbumContextMenu
+import com.parachord.android.ui.components.ArtistContextMenu
 import com.parachord.android.ui.components.FaceAwareImage
 import com.parachord.android.ui.components.hapticCombinedClickable
 import com.parachord.android.ui.components.SectionHeader
@@ -334,6 +335,8 @@ fun ArtistScreen(
                         "Related Artists" -> RelatedArtistsTab(
                             similarArtists = artistInfo?.similarArtists ?: emptyList(),
                             onNavigateToArtist = onNavigateToArtist,
+                            onPlayArtistTopSongs = viewModel::playArtistTopSongs,
+                            onQueueArtistTopSongs = viewModel::queueArtistTopSongs,
                         )
                     }
                 }
@@ -716,7 +719,31 @@ private fun BiographyTab(
 private fun RelatedArtistsTab(
     similarArtists: List<SimilarArtist>,
     onNavigateToArtist: (String) -> Unit,
+    onPlayArtistTopSongs: (String) -> Unit = {},
+    onQueueArtistTopSongs: (String) -> Unit = {},
 ) {
+    var menuArtist by remember { mutableStateOf<SimilarArtist?>(null) }
+
+    menuArtist?.let { artist ->
+        ArtistContextMenu(
+            artistName = artist.name,
+            artworkUrl = artist.imageUrl,
+            onDismiss = { menuArtist = null },
+            onPlayTopTracks = {
+                onPlayArtistTopSongs(artist.name)
+                menuArtist = null
+            },
+            onQueueTopTracks = {
+                onQueueArtistTopSongs(artist.name)
+                menuArtist = null
+            },
+            onGoToArtist = {
+                onNavigateToArtist(artist.name)
+                menuArtist = null
+            },
+        )
+    }
+
     if (similarArtists.isEmpty()) {
         Box(
             modifier = Modifier
@@ -746,7 +773,10 @@ private fun RelatedArtistsTab(
                 Column(
                     modifier = Modifier
                         .fillMaxWidth()
-                        .clickable { onNavigateToArtist(artist.name) },
+                        .hapticCombinedClickable(
+                            onClick = { onNavigateToArtist(artist.name) },
+                            onLongClick = { menuArtist = artist },
+                        ),
                     horizontalAlignment = Alignment.CenterHorizontally,
                 ) {
                     Box(
