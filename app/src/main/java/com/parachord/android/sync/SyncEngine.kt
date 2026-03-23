@@ -518,10 +518,14 @@ class SyncEngine @Inject constructor(
             settingsStore.setSyncDataVersion(SYNC_DATA_VERSION)
         }
 
-        // Push local-only playlists to Spotify
+        // Push local-only playlists to Spotify.
+        // Only push playlists the user explicitly created in the app (id starts
+        // with "local-"). Playlists from other sources (ListenBrainz weekly,
+        // DJ chat, imports) should not be auto-pushed — they'd create unwanted
+        // duplicates and potentially empty-named playlists on Spotify.
         if (settings.pushLocalPlaylists) {
             val allPlaylists = playlistDao.getAllSync()
-            val localOnly = allPlaylists.filter { it.spotifyId == null }
+            val localOnly = allPlaylists.filter { it.spotifyId == null && it.id.startsWith("local-") && it.name.isNotBlank() }
             // Build a lookup of owned remote playlists by name for reuse,
             // excluding playlists we just deleted during dedup above.
             val ownedRemoteByName = remotePlaylists.filter { it.isOwned && it.spotifyId !in deletedSpotifyIds }
