@@ -97,7 +97,9 @@ import com.parachord.android.data.db.entity.AlbumEntity
 import com.parachord.android.data.db.entity.FriendEntity
 import com.parachord.android.data.db.entity.PlaylistEntity
 import com.parachord.android.ui.components.AlbumArtCard
+import com.parachord.android.ui.components.AlbumContextMenu
 import com.parachord.android.ui.components.ContextMenuItem
+import com.parachord.android.ui.components.hapticCombinedClickable
 import com.parachord.android.ui.components.ModalBg
 import com.parachord.android.ui.components.ModalBgDarker
 import com.parachord.android.ui.components.ModalDivider
@@ -289,10 +291,37 @@ fun HomeScreen(
                             horizontalArrangement = Arrangement.spacedBy(12.dp),
                         ) {
                             items(recentAlbums, key = { it.id }) { album ->
+                                var showAlbumMenu by remember { mutableStateOf(false) }
                                 RecentAlbumCard(
                                     album = album,
                                     onClick = { onNavigateToAlbum(album.title, album.artist) },
+                                    onLongClick = { showAlbumMenu = true },
                                 )
+                                if (showAlbumMenu) {
+                                    AlbumContextMenu(
+                                        albumTitle = album.title,
+                                        artistName = album.artist,
+                                        artworkUrl = album.artworkUrl,
+                                        isInCollection = true,
+                                        onDismiss = { showAlbumMenu = false },
+                                        onQueueAlbum = {
+                                            showAlbumMenu = false
+                                            viewModel.queueAlbumByName(album.title, album.artist)
+                                        },
+                                        onGoToAlbum = {
+                                            showAlbumMenu = false
+                                            onNavigateToAlbum(album.title, album.artist)
+                                        },
+                                        onGoToArtist = {
+                                            showAlbumMenu = false
+                                            onNavigateToArtist(album.artist)
+                                        },
+                                        onToggleCollection = {
+                                            showAlbumMenu = false
+                                            viewModel.removeAlbumFromCollection(album.title, album.artist)
+                                        },
+                                    )
+                                }
                             }
                         }
                         Spacer(modifier = Modifier.height(8.dp))
@@ -380,6 +409,13 @@ fun HomeScreen(
                                 onRefresh = { viewModel.refreshAiRecommendations() },
                                 onAlbumClick = onNavigateToAlbum,
                                 onArtistClick = onNavigateToArtist,
+                                onAddAlbumToCollection = { title, artist, artworkUrl ->
+                                    viewModel.addAlbumToCollection(title, artist, artworkUrl)
+                                },
+                                onQueueAlbum = { title, artist ->
+                                    viewModel.queueAlbumByName(title, artist)
+                                },
+                                onGoToArtist = onNavigateToArtist,
                                 modifier = Modifier.padding(horizontal = 16.dp),
                             )
                             Spacer(modifier = Modifier.height(8.dp))
@@ -451,11 +487,12 @@ fun HomeScreen(
 private fun RecentAlbumCard(
     album: AlbumEntity,
     onClick: () -> Unit,
+    onLongClick: () -> Unit = {},
 ) {
     Column(
         modifier = Modifier
             .width(140.dp)
-            .hapticClickable(onClick = onClick),
+            .hapticCombinedClickable(onClick = onClick, onLongClick = onLongClick),
     ) {
         AlbumArtCard(
             artworkUrl = album.artworkUrl,
@@ -1418,6 +1455,9 @@ private fun AiSuggestionsSection(
     onRefresh: () -> Unit,
     onAlbumClick: (albumTitle: String, artistName: String) -> Unit,
     onArtistClick: (String) -> Unit,
+    onAddAlbumToCollection: (title: String, artist: String, artworkUrl: String?) -> Unit = { _, _, _ -> },
+    onQueueAlbum: (title: String, artist: String) -> Unit = { _, _ -> },
+    onGoToArtist: (String) -> Unit = {},
     modifier: Modifier = Modifier,
 ) {
     Column(modifier = modifier) {
@@ -1481,10 +1521,38 @@ private fun AiSuggestionsSection(
                     horizontalArrangement = Arrangement.spacedBy(12.dp),
                 ) {
                     items(recommendations.albums.size) { index ->
+                        val album = recommendations.albums[index]
+                        var showAlbumMenu by remember { mutableStateOf(false) }
                         AiAlbumCard(
-                            album = recommendations.albums[index],
-                            onClick = { onAlbumClick(recommendations.albums[index].title, recommendations.albums[index].artist) },
+                            album = album,
+                            onClick = { onAlbumClick(album.title, album.artist) },
+                            onLongClick = { showAlbumMenu = true },
                         )
+                        if (showAlbumMenu) {
+                            AlbumContextMenu(
+                                albumTitle = album.title,
+                                artistName = album.artist,
+                                artworkUrl = album.artworkUrl,
+                                isInCollection = false,
+                                onDismiss = { showAlbumMenu = false },
+                                onQueueAlbum = {
+                                    showAlbumMenu = false
+                                    onQueueAlbum(album.title, album.artist)
+                                },
+                                onGoToAlbum = {
+                                    showAlbumMenu = false
+                                    onAlbumClick(album.title, album.artist)
+                                },
+                                onGoToArtist = {
+                                    showAlbumMenu = false
+                                    onGoToArtist(album.artist)
+                                },
+                                onToggleCollection = {
+                                    showAlbumMenu = false
+                                    onAddAlbumToCollection(album.title, album.artist, album.artworkUrl)
+                                },
+                            )
+                        }
                     }
                 }
 
@@ -1565,11 +1633,12 @@ private fun ShuffleupagusBadge() {
 private fun AiAlbumCard(
     album: AiAlbumSuggestion,
     onClick: () -> Unit,
+    onLongClick: () -> Unit = {},
 ) {
     Column(
         modifier = Modifier
             .width(120.dp)
-            .hapticClickable(onClick = onClick),
+            .hapticCombinedClickable(onClick = onClick, onLongClick = onLongClick),
     ) {
         AlbumArtCard(
             artworkUrl = album.artworkUrl,

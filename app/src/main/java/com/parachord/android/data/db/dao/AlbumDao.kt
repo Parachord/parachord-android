@@ -31,6 +31,9 @@ interface AlbumDao {
     @Query("SELECT * FROM albums WHERE title = :title AND artist = :artist LIMIT 1")
     suspend fun getByTitleAndArtist(title: String, artist: String): AlbumEntity?
 
+    @Query("SELECT EXISTS(SELECT 1 FROM albums WHERE title = :title AND artist = :artist)")
+    fun existsByTitleAndArtist(title: String, artist: String): Flow<Boolean>
+
     @Query("UPDATE albums SET artworkUrl = :artworkUrl WHERE title = :title AND artist = :artist AND (artworkUrl IS NULL OR artworkUrl = '')")
     suspend fun updateArtworkByTitleAndArtist(title: String, artist: String, artworkUrl: String)
 }

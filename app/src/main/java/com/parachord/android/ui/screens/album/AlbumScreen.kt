@@ -22,6 +22,8 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.automirrored.filled.QueueMusic
 import androidx.compose.material.icons.filled.Album
+import androidx.compose.material.icons.filled.Favorite
+import androidx.compose.material.icons.filled.HeartBroken
 import androidx.compose.material.icons.filled.MoreVert
 import androidx.compose.material.icons.filled.Person
 import androidx.compose.material.icons.filled.PlayArrow
@@ -84,6 +86,7 @@ fun AlbumScreen(
     val trackResolverConfidences by viewModel.trackResolverConfidences.collectAsStateWithLifecycle()
     val playlists by viewModel.playlists.collectAsStateWithLifecycle()
     val nowPlayingTitle by viewModel.nowPlayingTitle.collectAsStateWithLifecycle()
+    val isAlbumInCollection by viewModel.isAlbumInCollection.collectAsStateWithLifecycle()
     val contextMenuState = rememberTrackContextMenuState()
     var showAlbumMenu by remember { mutableStateOf(false) }
 
@@ -356,6 +359,7 @@ fun AlbumScreen(
                     albumTitle = detail.title,
                     artistName = detail.artist,
                     artworkUrl = detail.artworkUrl,
+                    isInCollection = isAlbumInCollection,
                     onDismiss = { showAlbumMenu = false },
                     onQueueAlbum = {
                         showAlbumMenu = false
@@ -364,6 +368,11 @@ fun AlbumScreen(
                     onGoToArtist = {
                         showAlbumMenu = false
                         onNavigateToArtist(detail.artist)
+                    },
+                    onToggleCollection = {
+                        showAlbumMenu = false
+                        if (isAlbumInCollection) viewModel.removeAlbumFromCollection()
+                        else viewModel.addAlbumToCollection()
                     },
                 )
             }
@@ -377,9 +386,11 @@ private fun AlbumOptionsSheet(
     albumTitle: String,
     artistName: String,
     artworkUrl: String?,
+    isInCollection: Boolean,
     onDismiss: () -> Unit,
     onQueueAlbum: () -> Unit,
     onGoToArtist: () -> Unit,
+    onToggleCollection: () -> Unit,
 ) {
     ModalBottomSheet(
         onDismissRequest = onDismiss,
@@ -448,6 +459,14 @@ private fun AlbumOptionsSheet(
                 icon = Icons.Filled.Person,
                 label = "Go to Artist",
                 onClick = onGoToArtist,
+            )
+
+            HorizontalDivider(color = ModalDivider, modifier = Modifier.padding(vertical = 4.dp))
+
+            ContextMenuItem(
+                icon = if (isInCollection) Icons.Filled.HeartBroken else Icons.Filled.Favorite,
+                label = if (isInCollection) "Remove from Collection" else "Add to Collection",
+                onClick = onToggleCollection,
             )
         }
     }
