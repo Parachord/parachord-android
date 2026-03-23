@@ -64,6 +64,10 @@ class WeeklyPlaylistViewModel @Inject constructor(
     /** Resolver badge names for UI display. */
     val trackResolvers: StateFlow<Map<String, List<String>>> = trackResolverCache.trackResolvers
 
+    /** All playlists for the playlist picker. */
+    val allPlaylists: StateFlow<List<PlaylistEntity>> = libraryRepository.getAllPlaylists()
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), emptyList())
+
     init {
         loadPlaylist()
     }
@@ -147,6 +151,16 @@ class WeeklyPlaylistViewModel @Inject constructor(
     fun addToCollection(track: TrackEntity) {
         viewModelScope.launch {
             libraryRepository.addTrack(track)
+        }
+    }
+
+    fun toggleCollection(track: TrackEntity, isInCollection: Boolean) {
+        viewModelScope.launch {
+            if (isInCollection) {
+                libraryRepository.deleteTrack(track)
+            } else {
+                libraryRepository.addTrack(track)
+            }
         }
     }
 

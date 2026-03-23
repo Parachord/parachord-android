@@ -3,7 +3,10 @@ package com.parachord.android.ui.screens.discover
 import android.util.Log
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
+import com.parachord.android.data.db.entity.ArtistEntity
 import com.parachord.android.data.db.entity.TrackEntity
+import com.parachord.android.data.metadata.MetadataService
+import com.parachord.android.data.repository.LibraryRepository
 import com.parachord.android.data.repository.RecommendationsRepository
 import com.parachord.android.data.repository.RecommendedArtist
 import com.parachord.android.data.repository.RecommendedTrack
@@ -17,6 +20,7 @@ import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.launch
+import com.parachord.android.playback.PlaybackContext
 import com.parachord.android.resolver.ResolverScoring.Companion.MIN_CONFIDENCE_THRESHOLD
 import java.util.UUID
 import javax.inject.Inject
@@ -33,6 +37,8 @@ class RecommendationsViewModel @Inject constructor(
     private val resolverManager: ResolverManager,
     private val resolverScoring: ResolverScoring,
     private val playbackController: PlaybackController,
+    private val metadataService: MetadataService,
+    private val libraryRepository: LibraryRepository,
 ) : ViewModel() {
 
     companion object {
@@ -155,6 +161,85 @@ class RecommendationsViewModel @Inject constructor(
                 playbackController.playTrack(entity)
             } catch (e: Exception) {
                 Log.e(TAG, "Failed to resolve and play '${track.title}'", e)
+            }
+        }
+    }
+
+    // ── Artist actions ─────────────────────────────────────────────
+
+    fun playArtistTopSongs(artistName: String) {
+        viewModelScope.launch {
+            try {
+                val topTracks = metadataService.getArtistTopTracks(artistName, limit = 10)
+                if (topTracks.isEmpty()) return@launch
+                val entities = topTracks.mapNotNull { track ->
+                    val sources = resolverManager.resolveWithHints(
+                        query = "${track.artist} - ${track.title}",
+                        spotifyId = track.spotifyId,
+                        targetTitle = track.title,
+                        targetArtist = track.artist,
+                    )
+                    val best = resolverScoring.selectBest(sources) ?: return@mapNotNull null
+                    TrackEntity(
+                        id = "top-${track.title.hashCode()}-${track.artist.hashCode()}",
+                        title = track.title, artist = track.artist, album = track.album,
+                        duration = track.duration, artworkUrl = track.artworkUrl,
+                        sourceType = best.sourceType, sourceUrl = best.url, resolver = best.resolver,
+                        spotifyUri = best.spotifyUri, soundcloudId = best.soundcloudId, appleMusicId = best.appleMusicId,
+                    )
+                }
+                if (entities.isNotEmpty()) {
+                    playbackController.playQueue(
+                        entities, startIndex = 0,
+                        context = PlaybackContext(type = "artist", name = artistName),
+                    )
+                }
+            } catch (e: Exception) {
+                Log.e(TAG, "Failed to play top songs for '$artistName'", e)
+            }
+        }
+    }
+
+    fun queueArtistTopSongs(artistName: String) {
+        viewModelScope.launch {
+            try {
+                val topTracks = metadataService.getArtistTopTracks(artistName, limit = 10)
+                if (topTracks.isEmpty()) return@launch
+                val entities = topTracks.mapNotNull { track ->
+                    val sources = resolverManager.resolveWithHints(
+                        query = "${track.artist} - ${track.title}",
+                        spotifyId = track.spotifyId,
+                        targetTitle = track.title,
+                        targetArtist = track.artist,
+                    )
+                    val best = resolverScoring.selectBest(sources) ?: return@mapNotNull null
+                    TrackEntity(
+                        id = "top-${track.title.hashCode()}-${track.artist.hashCode()}",
+                        title = track.title, artist = track.artist, album = track.album,
+                        duration = track.duration, artworkUrl = track.artworkUrl,
+                        sourceType = best.sourceType, sourceUrl = best.url, resolver = best.resolver,
+                        spotifyUri = best.spotifyUri, soundcloudId = best.soundcloudId, appleMusicId = best.appleMusicId,
+                    )
+                }
+                if (entities.isNotEmpty()) playbackController.addToQueue(entities)
+            } catch (e: Exception) {
+                Log.e(TAG, "Failed to queue top songs for '$artistName'", e)
+            }
+        }
+    }
+
+    fun toggleArtistCollection(artistName: String, imageUrl: String?, isInCollection: Boolean) {
+        viewModelScope.launch {
+            if (isInCollection) {
+                libraryRepository.deleteArtistByName(artistName)
+            } else {
+                libraryRepository.addArtist(
+                    ArtistEntity(
+                        id = "manual-${UUID.randomUUID()}",
+                        name = artistName,
+                        imageUrl = imageUrl,
+                    )
+                )
             }
         }
     }

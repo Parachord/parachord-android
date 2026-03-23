@@ -416,6 +416,11 @@ fun HomeScreen(
                                     viewModel.queueAlbumByName(title, artist)
                                 },
                                 onGoToArtist = onNavigateToArtist,
+                                onPlayArtistTopSongs = { viewModel.playArtistTopSongs(it) },
+                                onQueueArtistTopSongs = { viewModel.queueArtistTopSongs(it) },
+                                onToggleArtistCollection = { name, imageUrl, inCol ->
+                                    viewModel.toggleArtistCollection(name, imageUrl, inCol)
+                                },
                                 modifier = Modifier.padding(horizontal = 16.dp),
                             )
                             Spacer(modifier = Modifier.height(8.dp))
@@ -1458,6 +1463,9 @@ private fun AiSuggestionsSection(
     onAddAlbumToCollection: (title: String, artist: String, artworkUrl: String?) -> Unit = { _, _, _ -> },
     onQueueAlbum: (title: String, artist: String) -> Unit = { _, _ -> },
     onGoToArtist: (String) -> Unit = {},
+    onPlayArtistTopSongs: (String) -> Unit = {},
+    onQueueArtistTopSongs: (String) -> Unit = {},
+    onToggleArtistCollection: (name: String, imageUrl: String?, isInCollection: Boolean) -> Unit = { _, _, _ -> },
     modifier: Modifier = Modifier,
 ) {
     Column(modifier = modifier) {
@@ -1590,9 +1598,14 @@ private fun AiSuggestionsSection(
                     horizontalArrangement = Arrangement.spacedBy(12.dp),
                 ) {
                     items(recommendations.artists.size) { index ->
+                        val artist = recommendations.artists[index]
                         AiArtistCard(
-                            artist = recommendations.artists[index],
-                            onClick = { onArtistClick(recommendations.artists[index].name) },
+                            artist = artist,
+                            onClick = { onArtistClick(artist.name) },
+                            onPlayTopSongs = { onPlayArtistTopSongs(artist.name) },
+                            onQueueTopSongs = { onQueueArtistTopSongs(artist.name) },
+                            onGoToArtist = { onArtistClick(artist.name) },
+                            onToggleCollection = { onToggleArtistCollection(artist.name, artist.imageUrl, false) },
                         )
                     }
                 }
@@ -1669,11 +1682,20 @@ private fun AiAlbumCard(
 private fun AiArtistCard(
     artist: AiArtistSuggestion,
     onClick: () -> Unit,
+    onPlayTopSongs: () -> Unit = {},
+    onQueueTopSongs: () -> Unit = {},
+    onGoToArtist: () -> Unit = {},
+    onToggleCollection: () -> Unit = {},
 ) {
+    var showMenu by remember { mutableStateOf(false) }
+
     Column(
         modifier = Modifier
             .width(100.dp)
-            .hapticClickable(onClick = onClick),
+            .hapticCombinedClickable(
+                onClick = onClick,
+                onLongClick = { showMenu = true },
+            ),
         horizontalAlignment = Alignment.CenterHorizontally,
     ) {
         AlbumArtCard(
@@ -1691,6 +1713,19 @@ private fun AiArtistCard(
             maxLines = 1,
             overflow = TextOverflow.Ellipsis,
             textAlign = TextAlign.Center,
+        )
+    }
+
+    if (showMenu) {
+        com.parachord.android.ui.components.ArtistContextMenu(
+            artistName = artist.name,
+            imageUrl = artist.imageUrl,
+            isInCollection = false,
+            onDismiss = { showMenu = false },
+            onPlayTopSongs = onPlayTopSongs,
+            onQueueTopSongs = onQueueTopSongs,
+            onGoToArtist = onGoToArtist,
+            onToggleCollection = onToggleCollection,
         )
     }
 }

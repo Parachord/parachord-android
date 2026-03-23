@@ -150,6 +150,11 @@ fun HistoryScreen(
                     selectedPeriod = selectedPeriod,
                     onPeriodChanged = viewModel::setPeriod,
                     onArtistClick = onNavigateToArtist,
+                    onPlayTopSongs = { viewModel.playArtistTopSongs(it) },
+                    onQueueTopSongs = { viewModel.queueArtistTopSongs(it) },
+                    onToggleArtistCollection = { name, imageUrl, inCol ->
+                        viewModel.toggleArtistCollection(name, imageUrl, inCol)
+                    },
                 )
                 3 -> RecentlyPlayedTab(
                     recentTracks = filteredRecentTracks,
@@ -386,6 +391,9 @@ private fun TopArtistsTab(
     selectedPeriod: String,
     onPeriodChanged: (String) -> Unit,
     onArtistClick: (String) -> Unit = {},
+    onPlayTopSongs: (String) -> Unit = {},
+    onQueueTopSongs: (String) -> Unit = {},
+    onToggleArtistCollection: (name: String, imageUrl: String?, isInCollection: Boolean) -> Unit = { _, _, _ -> },
 ) {
     Column(modifier = Modifier.fillMaxSize()) {
         PeriodFilter(selectedPeriod = selectedPeriod, onPeriodChanged = onPeriodChanged)
@@ -418,6 +426,10 @@ private fun TopArtistsTab(
                             ArtistGridItem(
                                 artist = artist,
                                 onClick = { onArtistClick(artist.name) },
+                                onPlayTopSongs = { onPlayTopSongs(artist.name) },
+                                onQueueTopSongs = { onQueueTopSongs(artist.name) },
+                                onGoToArtist = { onArtistClick(artist.name) },
+                                onToggleCollection = { onToggleArtistCollection(artist.name, artist.imageUrl, false) },
                             )
                         }
                     }
@@ -428,12 +440,24 @@ private fun TopArtistsTab(
 }
 
 @Composable
-private fun ArtistGridItem(artist: HistoryArtist, onClick: () -> Unit = {}) {
+private fun ArtistGridItem(
+    artist: HistoryArtist,
+    onClick: () -> Unit = {},
+    onPlayTopSongs: () -> Unit = {},
+    onQueueTopSongs: () -> Unit = {},
+    onGoToArtist: () -> Unit = {},
+    onToggleCollection: () -> Unit = {},
+) {
+    var showMenu by remember { mutableStateOf(false) }
+
     Column(
         horizontalAlignment = Alignment.CenterHorizontally,
         modifier = Modifier
             .fillMaxWidth()
-            .hapticClickable(onClick = onClick),
+            .hapticCombinedClickable(
+                onClick = onClick,
+                onLongClick = { showMenu = true },
+            ),
     ) {
         AlbumArtCard(
             artworkUrl = artist.imageUrl,
@@ -456,6 +480,19 @@ private fun ArtistGridItem(artist: HistoryArtist, onClick: () -> Unit = {}) {
             style = MaterialTheme.typography.labelSmall,
             color = MaterialTheme.colorScheme.onSurfaceVariant,
             textAlign = TextAlign.Center,
+        )
+    }
+
+    if (showMenu) {
+        com.parachord.android.ui.components.ArtistContextMenu(
+            artistName = artist.name,
+            imageUrl = artist.imageUrl,
+            isInCollection = false,
+            onDismiss = { showMenu = false },
+            onPlayTopSongs = onPlayTopSongs,
+            onQueueTopSongs = onQueueTopSongs,
+            onGoToArtist = onGoToArtist,
+            onToggleCollection = onToggleCollection,
         )
     }
 }

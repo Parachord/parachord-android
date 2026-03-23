@@ -152,6 +152,8 @@ The desktop fetches `GET /1/user/{username}/playlists/createdfor?count=100` (pub
 
 On Android, `WeeklyPlaylistsRepository` mirrors this pattern. The home screen shows both sections as horizontal carousels (`LazyRow`). Tapping a card navigates to `WeeklyPlaylistScreen` (ephemeral view with a Save button). The play button on each card triggers immediate playback via `HomeViewModel.playWeeklyPlaylist()`.
 
+`WeeklyPlaylistScreen` supports standard track context menus (long-press) via `TrackContextMenuHost` — Play Next, Add to Queue, Add to Playlist, Go to Artist/Album, and collection toggle.
+
 Ephemeral playlists use the ID format `listenbrainz-{playlistMbid}` when saved to Room.
 
 ### Album Context Menus
@@ -174,6 +176,28 @@ Every album card across the app supports long-press context menus via the shared
 Pass `null` for any action that isn't applicable in a given context (the menu item is hidden).
 
 **Screens with album context menus:** LibraryScreen, HomeScreen (recent albums, AI suggestions), ArtistScreen (discography), HistoryScreen (top albums), FriendDetailScreen (top albums), PopOfTheTopsScreen (chart albums).
+
+### Artist Context Menus
+
+Every artist card grid across the app supports long-press context menus via the shared `ArtistContextMenu` component (`ui/components/ArtistContextMenu.kt`). This is an always-dark `ModalBottomSheet` matching the album context menu styling.
+
+**Pattern for adding artist context menus to a screen:**
+1. Import `ArtistContextMenu` and `hapticCombinedClickable`
+2. Change the artist card's modifier from `hapticClickable` to `hapticCombinedClickable(onClick = ..., onLongClick = ...)`
+3. Add `var showMenu by remember { mutableStateOf(false) }` state per item
+4. Show `ArtistContextMenu` when `showMenu` is true
+
+**ArtistContextMenu callbacks** — all optional except `onToggleCollection`:
+- `onPlayTopSongs` — fetch and play the artist's top tracks via `metadataService.getArtistTopTracks()`
+- `onQueueTopSongs` — fetch and queue the artist's top tracks
+- `onGoToArtist` — navigate to the artist screen
+- `onToggleCollection` — add/remove artist from collection (required)
+
+Pass `null` for any action that isn't applicable in a given context (the menu item is hidden).
+
+**Screens with artist context menus:** LibraryScreen (artist grid), ArtistScreen (related artists), HistoryScreen (top artists), FriendDetailScreen (top artists), RecommendationsScreen (recommended artists), HomeScreen (AI artist suggestions).
+
+**ViewModel requirements:** Each ViewModel that supports artist context menus needs `playArtistTopSongs(artistName)`, `queueArtistTopSongs(artistName)`, and `toggleArtistCollection(artistName, imageUrl, isInCollection)` methods. These require `MetadataService`, `ResolverManager`, `ResolverScoring`, and `PlaybackController` as dependencies. Currently implemented in: LibraryViewModel, ArtistViewModel, HistoryViewModel, FriendDetailViewModel, RecommendationsViewModel, HomeViewModel.
 
 ### Queue Album by Name Pattern
 
@@ -365,7 +389,7 @@ static let darkAccentPurple = Color(hex: "#a78bfa")
 | Apple Music bridge | `playback/handlers/MusicKitWebBridge.kt`, `assets/js/musickit-bridge.html` |
 | Settings/defaults | `data/store/SettingsStore.kt` |
 | Theme | `ui/theme/Theme.kt` |
-| Shared UI components | `ui/components/AlbumContextMenu.kt`, `ui/components/TrackRow.kt`, `ui/components/ResolverIconRow.kt` |
+| Shared UI components | `ui/components/AlbumContextMenu.kt`, `ui/components/ArtistContextMenu.kt`, `ui/components/TrackContextMenu.kt`, `ui/components/TrackRow.kt`, `ui/components/ResolverIconRow.kt` |
 | Weekly playlists | `data/repository/WeeklyPlaylistsRepository.kt`, `ui/screens/playlists/WeeklyPlaylistScreen.kt`, `WeeklyPlaylistViewModel.kt` |
 
 ## Common Mistakes to Avoid

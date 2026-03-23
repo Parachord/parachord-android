@@ -46,7 +46,10 @@ import androidx.compose.ui.unit.sp
 import coil.compose.AsyncImage
 import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import com.parachord.android.ui.components.TrackContextInfo
+import com.parachord.android.ui.components.TrackContextMenuHost
 import com.parachord.android.ui.components.TrackRow
+import com.parachord.android.ui.components.rememberTrackContextMenuState
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -66,6 +69,8 @@ fun WeeklyPlaylistScreen(
     val saved by viewModel.saved.collectAsStateWithLifecycle()
     val nowPlayingTitle by viewModel.nowPlayingTitle.collectAsStateWithLifecycle()
     val trackResolvers by viewModel.trackResolvers.collectAsStateWithLifecycle()
+    val allPlaylists by viewModel.allPlaylists.collectAsStateWithLifecycle()
+    val contextMenuState = rememberTrackContextMenuState()
 
     Column(modifier = modifier.fillMaxSize()) {
         TopAppBar(
@@ -199,11 +204,36 @@ fun WeeklyPlaylistScreen(
                         trackNumber = index + 1,
                         isPlaying = nowPlayingTitle == track.title,
                         onClick = { viewModel.playTrack(index) },
+                        onLongClick = {
+                            contextMenuState.show(
+                                TrackContextInfo(
+                                    title = track.title,
+                                    artist = track.artist,
+                                    album = track.album,
+                                    artworkUrl = track.artworkUrl,
+                                    duration = track.duration,
+                                ),
+                                track,
+                            )
+                        },
                     )
                 }
             }
         }
     }
+
+    TrackContextMenuHost(
+        state = contextMenuState,
+        playlists = allPlaylists,
+        onPlayNext = { viewModel.playNext(it) },
+        onAddToQueue = { viewModel.addToQueue(it) },
+        onAddToPlaylist = { playlist, track -> viewModel.addToPlaylist(playlist, track) },
+        onNavigateToArtist = onNavigateToArtist,
+        onNavigateToAlbum = onNavigateToAlbum,
+        onToggleCollection = { track, isInCollection ->
+            viewModel.toggleCollection(track, isInCollection)
+        },
+    )
 }
 
 @Composable

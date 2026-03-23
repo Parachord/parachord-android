@@ -1,6 +1,7 @@
 package com.parachord.android.ui.screens.discover
 
 import com.parachord.android.ui.components.hapticClickable
+import com.parachord.android.ui.components.hapticCombinedClickable
 import androidx.lifecycle.compose.LifecycleResumeEffect
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -34,6 +35,9 @@ import androidx.compose.material3.TopAppBar
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -111,6 +115,11 @@ fun RecommendationsScreen(
                     artists = recommendedArtists,
                     onRefresh = viewModel::refresh,
                     onArtistClick = onNavigateToArtist,
+                    onPlayTopSongs = { viewModel.playArtistTopSongs(it) },
+                    onQueueTopSongs = { viewModel.queueArtistTopSongs(it) },
+                    onToggleArtistCollection = { name, imageUrl, inCol ->
+                        viewModel.toggleArtistCollection(name, imageUrl, inCol)
+                    },
                 )
                 1 -> SongsTab(
                     tracks = recommendedTracks,
@@ -196,6 +205,9 @@ private fun ArtistsTab(
     artists: Resource<List<RecommendedArtist>>,
     onRefresh: () -> Unit,
     onArtistClick: (String) -> Unit = {},
+    onPlayTopSongs: (String) -> Unit = {},
+    onQueueTopSongs: (String) -> Unit = {},
+    onToggleArtistCollection: (name: String, imageUrl: String?, isInCollection: Boolean) -> Unit = { _, _, _ -> },
 ) {
     when (artists) {
         is Resource.Loading -> {
@@ -248,6 +260,10 @@ private fun ArtistsTab(
                             RecommendedArtistItem(
                                 artist = artist,
                                 onClick = { onArtistClick(artist.name) },
+                                onPlayTopSongs = { onPlayTopSongs(artist.name) },
+                                onQueueTopSongs = { onQueueTopSongs(artist.name) },
+                                onGoToArtist = { onArtistClick(artist.name) },
+                                onToggleCollection = { onToggleArtistCollection(artist.name, artist.imageUrl, false) },
                             )
                         }
                     }
@@ -258,12 +274,24 @@ private fun ArtistsTab(
 }
 
 @Composable
-private fun RecommendedArtistItem(artist: RecommendedArtist, onClick: () -> Unit = {}) {
+private fun RecommendedArtistItem(
+    artist: RecommendedArtist,
+    onClick: () -> Unit = {},
+    onPlayTopSongs: () -> Unit = {},
+    onQueueTopSongs: () -> Unit = {},
+    onGoToArtist: () -> Unit = {},
+    onToggleCollection: () -> Unit = {},
+) {
+    var showMenu by remember { mutableStateOf(false) }
+
     Column(
         horizontalAlignment = Alignment.CenterHorizontally,
         modifier = Modifier
             .fillMaxWidth()
-            .hapticClickable(onClick = onClick),
+            .hapticCombinedClickable(
+                onClick = onClick,
+                onLongClick = { showMenu = true },
+            ),
     ) {
         AlbumArtCard(
             artworkUrl = artist.imageUrl,
@@ -291,6 +319,19 @@ private fun RecommendedArtistItem(artist: RecommendedArtist, onClick: () -> Unit
                 modifier = Modifier.fillMaxWidth(),
             )
         }
+    }
+
+    if (showMenu) {
+        com.parachord.android.ui.components.ArtistContextMenu(
+            artistName = artist.name,
+            imageUrl = artist.imageUrl,
+            isInCollection = false,
+            onDismiss = { showMenu = false },
+            onPlayTopSongs = onPlayTopSongs,
+            onQueueTopSongs = onQueueTopSongs,
+            onGoToArtist = onGoToArtist,
+            onToggleCollection = onToggleCollection,
+        )
     }
 }
 
