@@ -275,11 +275,21 @@ class ConcertsRepository @Inject constructor(
     }
 
     /**
-     * Lightweight check for "On Tour" — just checks if there are upcoming events.
+     * Lightweight check for "On Tour" — checks if there are upcoming events
+     * near the user's selected concert area. If no location is provided,
+     * returns false (no area selected = don't show the indicator).
      * Uses cache when available, fetches if not.
      */
-    suspend fun checkOnTour(artistName: String): Boolean {
-        // Check cache first
+    suspend fun checkOnTour(
+        artistName: String,
+        lat: Double? = null,
+        lon: Double? = null,
+        radiusMiles: Int = 50,
+    ): Boolean {
+        // No location configured — can't determine "near me"
+        if (lat == null || lon == null) return false
+
+        // Check cache first — but only if the cached results were location-filtered
         val cacheKey = artistName.lowercase()
         val cached = artistEventsCache[cacheKey]
         if (cached != null && System.currentTimeMillis() - cached.first < STALE_THRESHOLD * 2) {
@@ -287,7 +297,9 @@ class ConcertsRepository @Inject constructor(
         }
 
         return try {
-            val events = withContext(Dispatchers.IO) { fetchArtistEvents(artistName) }
+            val events = withContext(Dispatchers.IO) {
+                fetchArtistEvents(artistName, lat, lon, radiusMiles)
+            }
             artistEventsCache[cacheKey] = System.currentTimeMillis() to events
             events.isNotEmpty()
         } catch (e: Exception) {
