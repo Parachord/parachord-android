@@ -488,8 +488,14 @@ class PlaybackController @Inject constructor(
             is PlaybackAction.ExternalPlayback -> {
                 isExternalPlayback = true
                 stopPositionUpdates()
-                stopSpotifyStatePolling()
-                stopAppleMusicStatePolling()
+                // Cancel old polling jobs WITHOUT releasing the wake lock — we need
+                // continuous CPU wakefulness across the track transition. The new
+                // startPolling() call below will take over wake lock ownership.
+                // Releasing here would create a gap during handler.play() (a suspend
+                // call) where Android can suspend the process.
+                spotifyStateJob?.cancel()
+                appleMusicPollingJob?.cancel()
+                router.getAppleMusicHandler().musicKitBridge.onTrackEnded = null
 
                 // Don't stop ExoPlayer entirely — set track metadata so the
                 // MediaSession stays active and the foreground notification persists.
@@ -679,50 +685,48 @@ class PlaybackController @Inject constructor(
         // Run on Dispatchers.Default so Doze mode doesn't throttle the polling
         // loop — Dispatchers.Main gets deferred when the screen is off.
         spotifyStateJob = scope.launch(Dispatchers.Default) {
-            try {
-                val spotify = router.getSpotifyHandler()
-                // Small initial delay to let the track start
-                delay(1000)
-                while (isActive && isExternalPlayback) {
-                    val playing = spotify.isPlaying()
-                    val position = spotify.getPosition()
-                    val duration = spotify.getDuration()
+            val spotify = router.getSpotifyHandler()
+            // Small initial delay to let the track start
+            delay(1000)
+            while (isActive && isExternalPlayback) {
+                val playing = spotify.isPlaying()
+                val position = spotify.getPosition()
+                val duration = spotify.getDuration()
 
-                    // Build streaming metadata from what Spotify reports is actually playing
-                    val streamingMeta = buildStreamingMetadata(
-                        queuedTrack = stateHolder.state.value.currentTrack,
-                        actualTitle = spotify.actualTitle,
-                        actualArtist = spotify.actualArtist,
-                        actualAlbum = spotify.actualAlbum,
-                        actualArtworkUrl = spotify.actualArtworkUrl,
+                // Build streaming metadata from what Spotify reports is actually playing
+                val streamingMeta = buildStreamingMetadata(
+                    queuedTrack = stateHolder.state.value.currentTrack,
+                    actualTitle = spotify.actualTitle,
+                    actualArtist = spotify.actualArtist,
+                    actualAlbum = spotify.actualAlbum,
+                    actualArtworkUrl = spotify.actualArtworkUrl,
+                )
+
+                stateHolder.update {
+                    copy(
+                        isPlaying = playing,
+                        isBuffering = spotify.isConnectionStalled,
+                        position = position,
+                        duration = duration,
+                        streamingMetadata = streamingMeta,
                     )
-
-                    stateHolder.update {
-                        copy(
-                            isPlaying = playing,
-                            isBuffering = spotify.isConnectionStalled,
-                            position = position,
-                            duration = duration,
-                            streamingMetadata = streamingMeta,
-                        )
-                    }
-
-                    // Auto-advance: detect when our track is done via multiple signals
-                    // (natural end, Spotify autoplay to different track, or item cleared)
-                    if (spotify.isOurTrackDone()) {
-                        withContext(Dispatchers.Main) {
-                            skipNextInternal(userInitiated = false)
-                        }
-                        break
-                    }
-
-                    delay(500)
                 }
-            } finally {
-                // Release wake lock when the loop exits for any reason
-                // (isExternalPlayback became false, track ended, etc.)
-                releaseExternalPlaybackWakeLock()
+
+                // Auto-advance: detect when our track is done via multiple signals
+                // (natural end, Spotify autoplay to different track, or item cleared)
+                if (spotify.isOurTrackDone()) {
+                    withContext(Dispatchers.Main) {
+                        skipNextInternal(userInitiated = false)
+                    }
+                    break
+                }
+
+                delay(500)
             }
+            // Wake lock is NOT released here — it's managed by stopSpotifyStatePolling()
+            // (explicit stop) or by playTrackInternal() when switching to ExoPlayer.
+            // Releasing in the polling loop creates a gap during track transitions where
+            // Android can suspend the process before the next polling loop starts.
         }
     }
 
@@ -887,9 +891,11 @@ class PlaybackController @Inject constructor(
                     delay(500)
                 }
             } finally {
-                // Release wake lock when the loop exits for any reason
-                // (isExternalPlayback became false, track ended, etc.)
-                releaseExternalPlaybackWakeLock()
+                // Wake lock is NOT released here — it's managed by
+                // stopAppleMusicStatePolling() (explicit stop) or by
+                // playTrackInternal() when switching to ExoPlayer.
+                // Releasing in the polling loop creates a gap during track
+                // transitions where Android can suspend the process.
             }
         }
     }
