@@ -70,7 +70,7 @@ class NowPlayingViewModel @Inject constructor(
             }
         }
 
-        // Check if current artist is on tour when track changes
+        // Check if current artist is on tour near the user's selected area
         viewModelScope.launch {
             playbackState
                 .map { it.currentTrack?.artist }
@@ -80,7 +80,13 @@ class NowPlayingViewModel @Inject constructor(
                     lastCheckedArtist = artist
                     _isOnTour.value = false // Reset while checking
                     try {
-                        _isOnTour.value = concertsRepository.checkOnTour(artist)
+                        val loc = settingsStore.getConcertLocation()
+                        _isOnTour.value = concertsRepository.checkOnTour(
+                            artistName = artist,
+                            lat = loc.latitude,
+                            lon = loc.longitude,
+                            radiusMiles = loc.radiusMiles,
+                        )
                     } catch (e: Exception) {
                         Log.w("NowPlayingVM", "On-tour check failed for '$artist'", e)
                     }

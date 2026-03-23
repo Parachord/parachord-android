@@ -51,7 +51,7 @@ class MainViewModel @Inject constructor(
     private val resolverScoring: ResolverScoring,
     private val musicKitBridge: MusicKitWebBridge,
     private val spotifyPlaybackHandler: SpotifyPlaybackHandler,
-    settingsStore: SettingsStore,
+    private val settingsStore: SettingsStore,
     private val playlistImportManager: PlaylistImportManager,
     private val concertsRepository: ConcertsRepository,
 ) : ViewModel() {
@@ -121,7 +121,8 @@ class MainViewModel @Inject constructor(
                 }
             }
         }
-        // Check if current artist is on tour when track changes (for mini player dot)
+        // Check if current artist is on tour near the user's selected area
+        // (for mini player dot). Only shows if a concert location is configured.
         viewModelScope.launch {
             playbackState
                 .map { it.currentTrack?.artist }
@@ -131,7 +132,13 @@ class MainViewModel @Inject constructor(
                     lastCheckedArtist = artist
                     _isOnTour.value = false
                     try {
-                        _isOnTour.value = concertsRepository.checkOnTour(artist)
+                        val loc = settingsStore.getConcertLocation()
+                        _isOnTour.value = concertsRepository.checkOnTour(
+                            artistName = artist,
+                            lat = loc.latitude,
+                            lon = loc.longitude,
+                            radiusMiles = loc.radiusMiles,
+                        )
                     } catch (e: Exception) {
                         Log.w(TAG, "On-tour check failed for '$artist'", e)
                     }

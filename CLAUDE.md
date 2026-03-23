@@ -239,6 +239,23 @@ To reactively check if an album is in the user's collection (for toggle UI in co
 - For data that changes frequently (weekly playlists, charts), prefer `forceRefresh = true` from the ViewModel `init` since API calls are cheap.
 - For expensive data (AI recommendations), use stale-while-revalidate: show cached data immediately, refresh in background.
 
+### On Tour Indicator — Location-Filtered
+
+The "On Tour" teal dot (`#10C9B4`) appears next to the artist name in the mini player and Now Playing screen when the currently playing artist has upcoming concerts near the user's configured concert area.
+
+**Desktop behavior (source of truth):**
+1. Check if the artist matches any event (primary artist or in lineup).
+2. If the user has set a concert location (`concertsLocationCoords`), filter events by haversine distance ≤ `concertsLocationRadius` (default 50mi). Falls back to city-name text matching when venue has no coordinates.
+3. If **no location is configured**, any upcoming event counts — the dot shows for any touring artist (desktop: `if (!concertsLocationCoords) return true`).
+4. The dot is clickable — navigates to the artist page with the "On Tour" tab selected.
+
+**Android implementation:**
+- `ConcertsRepository.checkOnTour(artistName, lat, lon, radiusMiles)` queries Ticketmaster + SeatGeek with location params. When `lat`/`lon` are null (no location configured), queries without location filtering (any event counts).
+- `MainViewModel` and `NowPlayingViewModel` read `settingsStore.getConcertLocation()` and pass it to `checkOnTour()`.
+- The **ArtistScreen's On Tour tab** is intentionally unfiltered by location — it shows the full tour schedule for browsing all dates.
+
+**Key files:** `ConcertsRepository.kt`, `MainViewModel.kt`, `NowPlayingViewModel.kt`, `MiniPlayer.kt`, `NowPlayingScreen.kt`
+
 ## Design System & Theming
 
 ### Brand Colors
@@ -391,6 +408,7 @@ static let darkAccentPurple = Color(hex: "#a78bfa")
 | Theme | `ui/theme/Theme.kt` |
 | Shared UI components | `ui/components/AlbumContextMenu.kt`, `ui/components/ArtistContextMenu.kt`, `ui/components/TrackContextMenu.kt`, `ui/components/TrackRow.kt`, `ui/components/ResolverIconRow.kt` |
 | Weekly playlists | `data/repository/WeeklyPlaylistsRepository.kt`, `ui/screens/playlists/WeeklyPlaylistScreen.kt`, `WeeklyPlaylistViewModel.kt` |
+| Concerts / On Tour | `data/repository/ConcertsRepository.kt`, `data/api/TicketmasterApi.kt`, `data/api/SeatGeekApi.kt`, `ui/screens/discover/ConcertsScreen.kt` |
 
 ## Common Mistakes to Avoid
 
