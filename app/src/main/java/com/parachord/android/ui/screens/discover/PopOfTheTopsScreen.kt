@@ -3,7 +3,9 @@ package com.parachord.android.ui.screens.discover
 import androidx.compose.animation.animateContentSize
 import androidx.compose.foundation.background
 import androidx.lifecycle.compose.LifecycleResumeEffect
+import com.parachord.android.ui.components.AlbumContextMenu
 import com.parachord.android.ui.components.hapticClickable
+import com.parachord.android.ui.components.hapticCombinedClickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -135,6 +137,9 @@ fun PopOfTheTopsScreen(
                     onCountryChange = viewModel::setCountry,
                     onSearchQueryChange = viewModel::setSearchQuery,
                     onAlbumClick = { album -> onNavigateToAlbum(album.title, album.artist) },
+                    onNavigateToArtist = onNavigateToArtist,
+                    onQueueAlbum = viewModel::queueAlbumByName,
+                    onAddAlbumToCollection = viewModel::addAlbumToCollection,
                 )
                 1 -> SongsTab(
                     songs = viewModel.filterSongs(songs),
@@ -410,6 +415,9 @@ private fun AlbumsTab(
     onCountryChange: (String) -> Unit,
     onSearchQueryChange: (String) -> Unit,
     onAlbumClick: (ChartAlbum) -> Unit,
+    onNavigateToArtist: (String) -> Unit = {},
+    onQueueAlbum: (albumTitle: String, albumArtist: String) -> Unit = { _, _ -> },
+    onAddAlbumToCollection: (title: String, artist: String, artworkUrl: String?) -> Unit = { _, _, _ -> },
 ) {
     Column(modifier = Modifier.fillMaxSize()) {
         ChartsFilterBar(
@@ -440,7 +448,27 @@ private fun AlbumsTab(
                 verticalArrangement = Arrangement.spacedBy(12.dp),
             ) {
                 items(albums, key = { it.id }) { album ->
-                    AlbumGridItem(album = album, onClick = { onAlbumClick(album) })
+                    var showMenu by remember { mutableStateOf(false) }
+                    AlbumGridItem(
+                        album = album,
+                        onClick = { onAlbumClick(album) },
+                        onLongClick = { showMenu = true },
+                    )
+                    if (showMenu) {
+                        AlbumContextMenu(
+                            albumTitle = album.title,
+                            artistName = album.artist,
+                            artworkUrl = album.artworkUrl,
+                            isInCollection = false,
+                            onDismiss = { showMenu = false },
+                            onQueueAlbum = { onQueueAlbum(album.title, album.artist) },
+                            onGoToAlbum = { onAlbumClick(album) },
+                            onGoToArtist = { onNavigateToArtist(album.artist) },
+                            onToggleCollection = {
+                                onAddAlbumToCollection(album.title, album.artist, album.artworkUrl)
+                            },
+                        )
+                    }
                 }
             }
         }
@@ -448,11 +476,11 @@ private fun AlbumsTab(
 }
 
 @Composable
-private fun AlbumGridItem(album: ChartAlbum, onClick: () -> Unit) {
+private fun AlbumGridItem(album: ChartAlbum, onClick: () -> Unit, onLongClick: () -> Unit = {}) {
     Column(
         modifier = Modifier
             .clip(RoundedCornerShape(8.dp))
-            .hapticClickable(onClick = onClick),
+            .hapticCombinedClickable(onClick = onClick, onLongClick = onLongClick),
     ) {
         Box {
             AlbumArtCard(

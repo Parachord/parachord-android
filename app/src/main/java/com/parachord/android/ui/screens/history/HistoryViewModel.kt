@@ -3,12 +3,15 @@ package com.parachord.android.ui.screens.history
 import android.util.Log
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
+import com.parachord.android.data.db.entity.AlbumEntity
 import com.parachord.android.data.db.entity.TrackEntity
+import com.parachord.android.data.metadata.MetadataService
 import com.parachord.android.data.repository.HistoryAlbum
 import com.parachord.android.data.repository.HistoryArtist
 import com.parachord.android.data.repository.HistoryRepository
 import com.parachord.android.data.repository.HistoryTrack
 import com.parachord.android.data.repository.RecentTrack
+import com.parachord.android.data.repository.LibraryRepository
 import com.parachord.android.data.repository.Resource
 import com.parachord.android.playback.PlaybackContext
 import com.parachord.android.playback.PlaybackController
@@ -38,6 +41,8 @@ class HistoryViewModel @Inject constructor(
     private val resolverScoring: ResolverScoring,
     private val playbackController: PlaybackController,
     private val trackResolverCache: TrackResolverCache,
+    private val metadataService: MetadataService,
+    private val libraryRepository: LibraryRepository,
 ) : ViewModel() {
 
     companion object {
@@ -325,6 +330,48 @@ class HistoryViewModel @Inject constructor(
             historyRepository.getRecentTracks().collect {
                 _recentTracks.value = it
                 if (it is Resource.Success) resolveRecentTracksInBackground(it.data)
+            }
+        }
+    }
+
+    // ── Album actions ────────────────────────────────────────────────
+
+    fun addAlbumToCollection(title: String, artist: String, artworkUrl: String?) {
+        viewModelScope.launch {
+            libraryRepository.addAlbum(AlbumEntity(
+                id = "album-${title.hashCode()}-${artist.hashCode()}",
+                title = title,
+                artist = artist,
+                artworkUrl = artworkUrl,
+            ))
+        }
+    }
+
+    fun queueAlbumByName(albumTitle: String, albumArtist: String) {
+        viewModelScope.launch {
+            try {
+                val detail = metadataService.getAlbumTracks(albumTitle, albumArtist)
+                if (detail == null || detail.tracks.isEmpty()) return@launch
+                val entities = detail.tracks.mapNotNull { track ->
+                    val sources = resolverManager.resolveWithHints(
+                        query = "${track.artist} - ${track.title}",
+                        spotifyId = track.spotifyId,
+                        targetTitle = track.title,
+                        targetArtist = track.artist,
+                    )
+                    val best = resolverScoring.selectBest(sources) ?: return@mapNotNull null
+                    TrackEntity(
+                        id = "resolved-${track.title.hashCode()}-${track.artist.hashCode()}-${albumTitle.hashCode()}",
+                        title = track.title, artist = track.artist, album = albumTitle,
+                        duration = track.duration,
+                        artworkUrl = track.artworkUrl ?: detail.artworkUrl,
+                        sourceType = best.sourceType, sourceUrl = best.url, resolver = best.resolver,
+                        spotifyUri = best.spotifyUri, soundcloudId = best.soundcloudId, appleMusicId = best.appleMusicId,
+                    )
+                }
+                if (entities.isNotEmpty()) playbackController.addToQueue(entities)
+            } catch (e: Exception) {
+                Log.e(TAG, "Failed to queue album '$albumTitle'", e)
             }
         }
     }

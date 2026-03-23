@@ -288,7 +288,7 @@ class HomeViewModel @Inject constructor(
 
     private fun loadWeeklyPlaylists() {
         viewModelScope.launch {
-            val result = weeklyPlaylistsRepository.loadWeeklyPlaylists() ?: return@launch
+            val result = weeklyPlaylistsRepository.loadWeeklyPlaylists(forceRefresh = true) ?: return@launch
             _weeklyJams.value = result.jams
             _weeklyExploration.value = result.exploration
 

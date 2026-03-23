@@ -25,17 +25,21 @@ class WeeklyPlaylistsRepository @Inject constructor(
     companion object {
         private const val TAG = "WeeklyPlaylistsRepo"
         private const val MAX_WEEKS = 4
+        private const val CACHE_TTL_MS = 60 * 60 * 1000L // 1 hour
     }
 
     @Volatile
     private var cachedResult: WeeklyPlaylistsResult? = null
+    @Volatile
+    private var cacheTimestamp: Long = 0L
 
     /**
      * Load Weekly Jams and Weekly Exploration playlists from ListenBrainz.
      * Returns null if ListenBrainz username is not configured.
      */
     suspend fun loadWeeklyPlaylists(forceRefresh: Boolean = false): WeeklyPlaylistsResult? {
-        if (!forceRefresh) cachedResult?.let { return it }
+        val cacheAge = System.currentTimeMillis() - cacheTimestamp
+        if (!forceRefresh && cacheAge < CACHE_TTL_MS) cachedResult?.let { return it }
 
         val username = settingsStore.getListenBrainzUsername() ?: return null
 
@@ -75,6 +79,7 @@ class WeeklyPlaylistsRepository @Inject constructor(
                 exploration = exploration.ifEmpty { null },
             )
             cachedResult = result
+            cacheTimestamp = System.currentTimeMillis()
             result
         } catch (e: Exception) {
             Log.e(TAG, "Failed to load weekly playlists", e)
@@ -118,6 +123,7 @@ class WeeklyPlaylistsRepository @Inject constructor(
 
     fun clearCache() {
         cachedResult = null
+        cacheTimestamp = 0L
     }
 }
 

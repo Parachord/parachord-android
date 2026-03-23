@@ -154,6 +154,67 @@ On Android, `WeeklyPlaylistsRepository` mirrors this pattern. The home screen sh
 
 Ephemeral playlists use the ID format `listenbrainz-{playlistMbid}` when saved to Room.
 
+### Album Context Menus
+
+Every album card across the app supports long-press context menus via the shared `AlbumContextMenu` component (`ui/components/AlbumContextMenu.kt`). This is an always-dark `ModalBottomSheet` with consistent styling.
+
+**Pattern for adding album context menus to a screen:**
+1. Import `AlbumContextMenu` and `hapticCombinedClickable`
+2. Change the album card's modifier from `hapticClickable` to `hapticCombinedClickable(onClick = ..., onLongClick = ...)`
+3. Add `var showMenu by remember { mutableStateOf(false) }` state per item
+4. Show `AlbumContextMenu` when `showMenu` is true
+
+**AlbumContextMenu callbacks** — all optional except `onToggleCollection`:
+- `onPlayAlbum` — play the album immediately
+- `onQueueAlbum` — add album tracks to the playback queue
+- `onGoToAlbum` — navigate to the album detail screen
+- `onGoToArtist` — navigate to the artist screen
+- `onToggleCollection` — add/remove from collection (required)
+
+Pass `null` for any action that isn't applicable in a given context (the menu item is hidden).
+
+**Screens with album context menus:** LibraryScreen, HomeScreen (recent albums, AI suggestions), ArtistScreen (discography), HistoryScreen (top albums), FriendDetailScreen (top albums), PopOfTheTopsScreen (chart albums).
+
+### Queue Album by Name Pattern
+
+To queue an album that isn't in the local library (e.g., from charts, friend history, discography), use the `queueAlbumByName` pattern present in most ViewModels:
+
+```kotlin
+fun queueAlbumByName(albumTitle: String, albumArtist: String) {
+    viewModelScope.launch {
+        val detail = metadataService.getAlbumTracks(albumTitle, albumArtist)
+        if (detail == null || detail.tracks.isEmpty()) return@launch
+        val entities = detail.tracks.mapNotNull { track ->
+            val sources = resolverManager.resolveWithHints(...)
+            val best = resolverScoring.selectBest(sources) ?: return@mapNotNull null
+            TrackEntity(...)
+        }
+        if (entities.isNotEmpty()) playbackController.addToQueue(entities)
+    }
+}
+```
+
+This requires `MetadataService`, `ResolverManager`, `ResolverScoring`, and `PlaybackController` as ViewModel dependencies.
+
+### Album Collection Reactive Checks
+
+To reactively check if an album is in the user's collection (for toggle UI in context menus):
+
+1. **DAO:** `AlbumDao.existsByTitleAndArtist(title, artist): Flow<Boolean>`
+2. **Repository:** `LibraryRepository.isAlbumInCollection(title, artist): Flow<Boolean>`
+3. **ViewModel:** Collect as `StateFlow` via `.stateIn(viewModelScope, ...)`
+
+**AlbumEntity ID format:** `"album-${title.hashCode()}-${artist.hashCode()}"`
+
+### Singleton Repository Caching
+
+`@Singleton` repositories persist across ViewModel lifecycles. If a repository caches API results in memory (like `WeeklyPlaylistsRepository`), the cache outlives individual screens and can become stale.
+
+**Rules for singleton caches:**
+- Always add a TTL or force-refresh mechanism. A `@Volatile var cacheTimestamp` with a TTL check prevents serving stale data indefinitely.
+- For data that changes frequently (weekly playlists, charts), prefer `forceRefresh = true` from the ViewModel `init` since API calls are cheap.
+- For expensive data (AI recommendations), use stale-while-revalidate: show cached data immediately, refresh in background.
+
 ## Design System & Theming
 
 ### Brand Colors
@@ -304,6 +365,7 @@ static let darkAccentPurple = Color(hex: "#a78bfa")
 | Apple Music bridge | `playback/handlers/MusicKitWebBridge.kt`, `assets/js/musickit-bridge.html` |
 | Settings/defaults | `data/store/SettingsStore.kt` |
 | Theme | `ui/theme/Theme.kt` |
+| Shared UI components | `ui/components/AlbumContextMenu.kt`, `ui/components/TrackRow.kt`, `ui/components/ResolverIconRow.kt` |
 | Weekly playlists | `data/repository/WeeklyPlaylistsRepository.kt`, `ui/screens/playlists/WeeklyPlaylistScreen.kt`, `WeeklyPlaylistViewModel.kt` |
 
 ## Common Mistakes to Avoid
@@ -324,6 +386,7 @@ static let darkAccentPurple = Color(hex: "#a78bfa")
 8. **Ephemeral playlists need their own screen and ViewModel.** Weekly playlists from ListenBrainz are not stored in Room — they use `WeeklyPlaylistScreen`/`WeeklyPlaylistViewModel` with a "Save" button (matching desktop's ephemeral playlist pattern). Don't try to reuse `PlaylistDetailScreen` which expects a Room-backed `PlaylistEntity`.
 9. **Don't use `isSystemInDarkTheme()` in composables.** The app has a manual dark/light/system toggle. `isSystemInDarkTheme()` only checks the Android system setting, not the app preference. Use `ParachordTheme.isDark` instead, which reads from `LocalIsDarkTheme` provided by `ParachordTheme`. See the Dark Mode section above.
 10. **Don't block the Apple Music polling loop.** Never call `withContext` on a suspend function that awaits a network response (like `MusicKitWebBridge.evaluate()` / `preload()`) inline in `startAppleMusicStatePolling()`. This freezes position updates and the safety-net auto-advance check. Use `scope.launch` (fire-and-forget) for any async work that doesn't need its result in the same loop iteration.
+11. **Don't use inconsistent null defaults in filter/count pairs.** When counting items by a nullable field and filtering by it, both operations must normalize nulls the same way. E.g., `groupBy { it.type?.lowercase() ?: "album" }` counts null as "album", but `filter { it.type?.lowercase() == "album" }` excludes null. Use `((it.type?.lowercase()) ?: "album")` in both places.
 
 ### iOS-Specific
 
