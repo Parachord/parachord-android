@@ -54,7 +54,7 @@ class SpotifyPlaybackHandler @Inject constructor(
         private const val MAX_STALE_POSITION = 8
         private const val SPOTIFY_PACKAGE = "com.spotify.music"
         /** Max time to wait for Spotify to register as a Connect device after launching. */
-        private const val WAKE_TIMEOUT_MS = 8000L
+        private const val WAKE_TIMEOUT_MS = 15000L
         /** Interval between device-list polls while waiting for Spotify to wake. */
         private const val WAKE_POLL_INTERVAL_MS = 1000L
         /** Sentinel ID for the synthetic "This device" entry in the picker. */
@@ -240,9 +240,10 @@ class SpotifyPlaybackHandler @Inject constructor(
             } ?: localDevices.firstOrNull { it.type == "Smartphone" }
             if (resolved == null) {
                 Log.w(TAG, "Could not find local Smartphone device after waking Spotify. All devices: ${localDevices.map { "'${it.name}'(type=${it.type})" }}")
-                // Clear the local-device preference so the next retry shows a fresh
-                // picker instead of looping back to the same failed wake path.
-                settingsStore.clearPreferredSpotifyDeviceId()
+                // Keep the LOCAL_DEVICE_ID preference — the next retry will go
+                // straight back to wakeLocalSpotifyApp() without re-showing the
+                // picker. The prior nudge is likely still waking Spotify, so the
+                // retry has a good chance of finding the device.
                 return false
             }
             hasWokenSpotify = true
@@ -270,29 +271,44 @@ class SpotifyPlaybackHandler @Inject constructor(
             } catch (e: Exception) {
                 Log.w(TAG, "Transfer failed (non-fatal): ${e.message}")
             }
-            // Desktop waits 1000ms — give Spotify time to activate the device
-            delay(1000)
+            // Give Spotify time to activate the device. 2s is safer than 1s — the
+            // device just woke up and needs time to register with Spotify's servers.
+            delay(2000)
         }
 
         // Force device_id in the play call (desktop pattern) — ensures playback
-        // goes to the right device even if transfer hasn't fully settled
-        Log.d(TAG, "Calling startPlayback: uri=$uri, deviceId=${targetDevice.id}")
-        val response = spotifyApi.startPlayback(
-            auth,
-            SpPlaybackRequest(uris = listOf(uri)),
-            deviceId = targetDevice.id,
-        )
+        // goes to the right device even if transfer hasn't fully settled.
+        // Retry on 502 (device not ready) with increasing delays — Spotify returns
+        // 502 when the device hasn't fully registered after a transfer/wake.
+        for (playRetry in 1..3) {
+            Log.d(TAG, "Calling startPlayback (try $playRetry): uri=$uri, deviceId=${targetDevice.id}")
+            val response = spotifyApi.startPlayback(
+                auth,
+                SpPlaybackRequest(uris = listOf(uri)),
+                deviceId = targetDevice.id,
+            )
 
-        return if (response.isSuccessful || response.code() == 204) {
-            Log.d(TAG, "Playback started on '${targetDevice.name}' for $uri")
-            true
-        } else {
+            if (response.isSuccessful || response.code() == 204) {
+                Log.d(TAG, "Playback started on '${targetDevice.name}' for $uri")
+                return true
+            }
+
             val errorBody = response.errorBody()?.string()
             Log.w(TAG, "Start playback failed on '${targetDevice.name}': ${response.code()} body=$errorBody")
-            // Clear stale device preference so the picker shows on next retry
+
+            // 502 = device not ready yet. Retry with increasing delay.
+            if (response.code() == 502 && playRetry < 3) {
+                val waitMs = playRetry * 2000L
+                Log.d(TAG, "Device not ready (502), waiting ${waitMs}ms before retry...")
+                delay(waitMs)
+                continue
+            }
+
+            // Non-502 failure or final 502 — give up
             settingsStore.clearPreferredSpotifyDeviceId()
-            false
+            return false
         }
+        return false
     }
 
     override suspend fun pause() {

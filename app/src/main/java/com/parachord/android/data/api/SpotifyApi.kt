@@ -352,7 +352,7 @@ data class SpDevice(
 @Serializable
 data class SpTransferRequest(
     @SerialName("device_ids") val deviceIds: List<String>,
-    val play: Boolean = true,
+    val play: Boolean = false,
 )
 
 @Serializable
