@@ -78,16 +78,18 @@ class SpotifySyncProvider @Inject constructor(
             } catch (e: retrofit2.HttpException) {
                 when (e.code()) {
                     401 -> {
-                        if (retries > 0) throw e
+                        if (retries > 0) throw IllegalStateException("Spotify session expired. Reconnect Spotify in Settings.")
                         Log.d(TAG, "Token expired, refreshing...")
-                        if (!oAuthManager.refreshSpotifyToken()) throw e
+                        if (!oAuthManager.refreshSpotifyToken()) {
+                            throw IllegalStateException("Spotify session expired. Reconnect Spotify in Settings.")
+                        }
                         retries++
                     }
                     403 -> {
                         // Permission denied — likely stale scopes from an older auth.
                         // Re-authenticating with updated scopes should fix this.
                         Log.w(TAG, "403 Forbidden — reconnect Spotify to grant updated permissions")
-                        throw e
+                        throw IllegalStateException("Spotify access denied. Reconnect Spotify in Settings to grant updated permissions.")
                     }
                     429 -> {
                         val retryAfter = e.response()?.headers()?.get("Retry-After")?.toLongOrNull() ?: 1
