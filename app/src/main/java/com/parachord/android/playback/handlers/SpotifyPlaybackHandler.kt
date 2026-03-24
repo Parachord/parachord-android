@@ -562,6 +562,8 @@ class SpotifyPlaybackHandler @Inject constructor(
 
         // 4. Multiple devices — show picker dialog and wait for user choice
         Log.d(TAG, "Multiple devices available, showing picker dialog")
+        // Cancel any in-flight picker from a concurrent play call
+        _devicePickerRequest.value?.deferred?.complete(null)
         val deferred = CompletableDeferred<SpDevice?>()
         _devicePickerRequest.value = DevicePickerRequest(withLocal, deferred)
 
@@ -592,6 +594,13 @@ class SpotifyPlaybackHandler @Inject constructor(
     fun isOurTrackDone(): Boolean {
         val expected = expectedTrackId ?: return false
         val current = currentItemId
+
+        // Grace period: don't trigger auto-advance within 5s of starting playback.
+        // Spotify's API can return stale/empty state for a few seconds after play(),
+        // especially after device transfers. This prevents false positives from
+        // scenarios #2-#5 firing on transient API state.
+        val elapsed = System.currentTimeMillis() - playStartedAt
+        if (elapsed < 5000) return false
 
         // 1. Near-end: advance EARLY while still playing (preempt Spotify autoplay)
         val isNearEnd = cachedDuration > 0 && cachedPosition >= cachedDuration - 2000
