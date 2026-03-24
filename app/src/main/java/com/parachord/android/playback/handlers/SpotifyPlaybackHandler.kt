@@ -513,10 +513,18 @@ class SpotifyPlaybackHandler @Inject constructor(
         // Always ensure the local device appears in the list. If Spotify
         // hasn't registered this phone yet, inject a synthetic entry so the
         // user can pick "This device" and we'll wake Spotify on demand.
+        // Check both model name and manufacturer — Spotify device names vary
+        // (users can rename them, and the API may return "Phone", the model
+        // number, or a custom name). A Smartphone-type device is enough to
+        // confirm the local phone is already registered.
         val localModel = Build.MODEL.lowercase()
-        val hasLocalDevice = available.any {
-            it.type == "Smartphone" && it.name.lowercase().contains(localModel)
-        }
+        val localManufacturer = Build.MANUFACTURER.lowercase()
+        val hasLocalDevice = available.any { device ->
+            if (device.type != "Smartphone") return@any false
+            val name = device.name.lowercase()
+            // Match by model name, manufacturer, or if there's only one smartphone
+            name.contains(localModel) || name.contains(localManufacturer)
+        } || available.count { it.type == "Smartphone" } == 1
         val withLocal = if (hasLocalDevice) available else available + localDeviceEntry()
 
         Log.d(TAG, "pickDevice: devices=${withLocal.map { "'${it.name}'(type=${it.type}, active=${it.isActive})" }}")
