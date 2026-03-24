@@ -33,6 +33,8 @@ import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.sync.Mutex
+import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withContext
 import javax.inject.Inject
 import javax.inject.Singleton
@@ -80,6 +82,11 @@ class PlaybackController @Inject constructor(
      *  Prevents concurrent advances from double-skipping and lets
      *  togglePlayPause() know a transition is still in progress. */
     private var advanceJob: Job? = null
+
+    /** Serializes all calls to [playTrackInternal] so only one play request
+     *  runs at a time. Without this, concurrent launches (e.g. playQueue +
+     *  auto-advance) race through device picker and polling setup. */
+    private val playMutex = Mutex()
 
     /** Whether playback is currently managed externally (e.g. Spotify Connect). */
     private var isExternalPlayback = false
@@ -427,7 +434,7 @@ class PlaybackController @Inject constructor(
         controller?.seekTo(positionMs)
     }
 
-    private suspend fun playTrackInternal(track: TrackEntity, skipReselect: Boolean = false) {
+    private suspend fun playTrackInternal(track: TrackEntity, skipReselect: Boolean = false) = playMutex.withLock {
         // Cancel any idle timeout — we're actively playing now
         cancelIdleTimeout()
 
