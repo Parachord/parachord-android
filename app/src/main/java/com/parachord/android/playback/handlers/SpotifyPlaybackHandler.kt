@@ -181,8 +181,12 @@ class SpotifyPlaybackHandler @Inject constructor(
                 val result = withAuth { auth -> attemptPlay(auth, uri) }
                 if (result == true) return true
 
+                if (result == null) {
+                    Log.w(TAG, "Play attempt $attempt: withAuth returned null (no token or auth error)")
+                }
+
                 if (attempt < 3) {
-                    Log.d(TAG, "Play attempt $attempt failed, retrying in ${attempt}s...")
+                    Log.d(TAG, "Play attempt $attempt failed (result=$result), retrying in ${attempt}s...")
                     delay(attempt * 1000L)
                 }
             } catch (e: Exception) {
@@ -230,11 +234,12 @@ class SpotifyPlaybackHandler @Inject constructor(
             // short-circuits on already-available remote devices (e.g. "bedroom TV").
             val localDevices = wakeLocalSpotifyApp(auth)
             val localModel = Build.MODEL.lowercase()
+            Log.d(TAG, "Resolving local device: model='$localModel', candidates=${localDevices.map { "'${it.name}'(type=${it.type}, id=${it.id})" }}")
             val resolved = localDevices.firstOrNull {
                 it.type == "Smartphone" && it.name.lowercase().contains(localModel)
             } ?: localDevices.firstOrNull { it.type == "Smartphone" }
             if (resolved == null) {
-                Log.w(TAG, "Could not find local Smartphone device after waking Spotify")
+                Log.w(TAG, "Could not find local Smartphone device after waking Spotify. All devices: ${localDevices.map { "'${it.name}'(type=${it.type})" }}")
                 // Clear the local-device preference so the next retry shows a fresh
                 // picker instead of looping back to the same failed wake path.
                 settingsStore.clearPreferredSpotifyDeviceId()
@@ -253,9 +258,15 @@ class SpotifyPlaybackHandler @Inject constructor(
 
         // Transfer playback to the target device if it's not already active
         if (!targetDevice.isActive) {
-            Log.d(TAG, "Transferring playback to '${targetDevice.name}'")
+            Log.d(TAG, "Transferring playback to '${targetDevice.name}' id=${targetDevice.id}")
             try {
-                spotifyApi.transferPlayback(auth, SpTransferRequest(deviceIds = listOf(targetDevice.id)))
+                val transferResp = spotifyApi.transferPlayback(auth, SpTransferRequest(deviceIds = listOf(targetDevice.id)))
+                if (!transferResp.isSuccessful) {
+                    val body = transferResp.errorBody()?.string()
+                    Log.w(TAG, "Transfer returned ${transferResp.code()}: $body")
+                } else {
+                    Log.d(TAG, "Transfer accepted (${transferResp.code()})")
+                }
             } catch (e: Exception) {
                 Log.w(TAG, "Transfer failed (non-fatal): ${e.message}")
             }
@@ -265,6 +276,7 @@ class SpotifyPlaybackHandler @Inject constructor(
 
         // Force device_id in the play call (desktop pattern) — ensures playback
         // goes to the right device even if transfer hasn't fully settled
+        Log.d(TAG, "Calling startPlayback: uri=$uri, deviceId=${targetDevice.id}")
         val response = spotifyApi.startPlayback(
             auth,
             SpPlaybackRequest(uris = listOf(uri)),
@@ -275,7 +287,8 @@ class SpotifyPlaybackHandler @Inject constructor(
             Log.d(TAG, "Playback started on '${targetDevice.name}' for $uri")
             true
         } else {
-            Log.w(TAG, "Start playback failed on '${targetDevice.name}': ${response.code()}")
+            val errorBody = response.errorBody()?.string()
+            Log.w(TAG, "Start playback failed on '${targetDevice.name}': ${response.code()} body=$errorBody")
             // Clear stale device preference so the picker shows on next retry
             settingsStore.clearPreferredSpotifyDeviceId()
             false
@@ -376,11 +389,15 @@ class SpotifyPlaybackHandler @Inject constructor(
 
         // Poll until we see a Smartphone device (the local phone)
         val localModel = Build.MODEL.lowercase()
+        Log.d(TAG, "wakeLocalSpotifyApp: looking for Smartphone matching model='$localModel' (Build.MODEL=${Build.MODEL}, Build.MANUFACTURER=${Build.MANUFACTURER})")
         val deadline = System.currentTimeMillis() + WAKE_TIMEOUT_MS
+        var pollCount = 0
         while (System.currentTimeMillis() < deadline) {
             delay(WAKE_POLL_INTERVAL_MS)
+            pollCount++
             try {
                 val devices = spotifyApi.getDevices(auth).devices
+                Log.d(TAG, "wakeLocal poll #$pollCount: ${devices.map { "'${it.name}'(type=${it.type}, id=${it.id}, active=${it.isActive})" }}")
                 val hasLocal = devices.any {
                     it.type == "Smartphone" && it.name.lowercase().contains(localModel)
                 } || devices.any { it.type == "Smartphone" }
@@ -394,8 +411,11 @@ class SpotifyPlaybackHandler @Inject constructor(
         }
 
         // Last resort — return whatever devices exist even if no smartphone found
+        Log.w(TAG, "wakeLocalSpotifyApp: timed out after ${pollCount} polls, no Smartphone found for model='$localModel'")
         return try {
-            spotifyApi.getDevices(auth).devices
+            val devices = spotifyApi.getDevices(auth).devices
+            Log.d(TAG, "wakeLocal last-resort devices: ${devices.map { "'${it.name}'(type=${it.type}, id=${it.id})" }}")
+            devices
         } catch (e: Exception) {
             emptyList()
         }
@@ -472,6 +492,7 @@ class SpotifyPlaybackHandler @Inject constructor(
     private suspend fun pickDevice(devices: List<SpDevice>): SpDevice? {
         val controllable = devices.filter { !it.isRestricted }
         val available = controllable.ifEmpty { devices }
+        Log.d(TAG, "pickDevice: ${devices.size} total, ${controllable.size} controllable, ${devices.size - controllable.size} restricted")
 
         // Always ensure the local device appears in the list. If Spotify
         // hasn't registered this phone yet, inject a synthetic entry so the
@@ -683,7 +704,11 @@ class SpotifyPlaybackHandler @Inject constructor(
      * On 401, refreshes the token and retries once.
      */
     private suspend fun <T> withAuth(block: suspend (auth: String) -> T): T? {
-        val token = settingsStore.getSpotifyAccessToken() ?: return null
+        val token = settingsStore.getSpotifyAccessToken()
+        if (token == null) {
+            Log.w(TAG, "withAuth: no Spotify access token stored — skipping API call")
+            return null
+        }
         return try {
             block("Bearer $token")
         } catch (e: HttpException) {
