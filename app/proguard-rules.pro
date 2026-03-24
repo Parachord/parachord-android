@@ -18,3 +18,32 @@
 -keepclassmembers class kotlinx.serialization.json.** {
     *** Companion;
 }
+
+# Keep all @Serializable data classes and their generated serializers.
+# R8 can obfuscate field names, breaking JSON (de)serialization for API
+# responses, queue persistence, and disk caches.
+-keep @kotlinx.serialization.Serializable class ** { *; }
+-keepclassmembers @kotlinx.serialization.Serializable class ** {
+    *** Companion;
+    kotlinx.serialization.KSerializer serializer(...);
+}
+
+# Keep custom serializers (used by Last.fm API, Critical Darlings, etc.)
+-keep class **$$serializer { *; }
+
+# Retrofit service interfaces — R8 may strip method signatures needed
+# for dynamic proxy generation
+-keep,allowobfuscation interface * {
+    @retrofit2.http.* <methods>;
+}
+-dontwarn retrofit2.**
+
+# OkHttp
+-dontwarn okhttp3.**
+-dontwarn okio.**
+
+# Enum classes used in serialization
+-keepclassmembers enum * {
+    public static **[] values();
+    public static ** valueOf(java.lang.String);
+}
