@@ -66,6 +66,7 @@ import com.parachord.android.deeplink.DeepLinkViewModel
 import com.parachord.android.data.store.SettingsStore
 import com.parachord.android.playback.handlers.MusicKitWebBridge
 import com.parachord.android.ui.components.ActionOverlay
+import com.parachord.android.ui.components.NetworkBanner
 import com.parachord.android.ui.components.CreatePlaylistDialog
 import com.parachord.android.ui.components.DeepLinkConfirmationDialog
 import com.parachord.android.ui.components.ImportPlaylistDialog
@@ -179,6 +180,7 @@ private fun ParachordAppContent(mainViewModel: MainViewModel) {
     val currentTrack = playbackState.currentTrack
     val isCurrentTrackFavorited by mainViewModel.isCurrentTrackFavorited.collectAsStateWithLifecycle()
     val isCurrentArtistOnTour by mainViewModel.isOnTour.collectAsStateWithLifecycle()
+    val isOnline by mainViewModel.isOnline.collectAsStateWithLifecycle()
     val friends by mainViewModel.friends.collectAsStateWithLifecycle()
     val listenAlongFriend by mainViewModel.listenAlongFriend.collectAsStateWithLifecycle()
 
@@ -507,11 +509,15 @@ private fun ParachordAppContent(mainViewModel: MainViewModel) {
                     }
                 },
             ) { innerPadding ->
-                Box(
+                Column(
                     modifier = Modifier
                         .padding(innerPadding)
                         .nestedScroll(overscrollConnection),
                 ) {
+                    // Network connectivity banner — slides in when offline
+                    NetworkBanner(isOnline = isOnline)
+
+                    Box(modifier = Modifier.weight(1f)) {
                     ParachordNavHost(
                         navController = navController,
                         onOpenDrawer = onOpenDrawer,
@@ -548,6 +554,7 @@ private fun ParachordAppContent(mainViewModel: MainViewModel) {
                                     )
                                 },
                         )
+                    }
                     }
                 }
             }
