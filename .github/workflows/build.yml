@@ -1,4 +1,4 @@
-name: Build APK
+name: Build Release
 
 on:
   push:
@@ -40,12 +40,19 @@ jobs:
           echo "${{ secrets.CI_KEYSTORE_BASE64 }}" | base64 -d > $RUNNER_TEMP/ci-release.keystore
           echo "CI_KEYSTORE_PATH=$RUNNER_TEMP/ci-release.keystore" >> $GITHUB_ENV
 
-      - name: Build release APK
-        run: ./gradlew assembleRelease
+      - name: Build release APK and AAB
+        run: ./gradlew assembleRelease bundleRelease
 
       - name: Upload APK artifact
         uses: actions/upload-artifact@v4
         with:
-          name: parachord-release
+          name: parachord-release-apk
           path: app/build/outputs/apk/release/*.apk
+          retention-days: 14
+
+      - name: Upload AAB artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: parachord-release-aab
+          path: app/build/outputs/bundle/release/*.aab
           retention-days: 14
