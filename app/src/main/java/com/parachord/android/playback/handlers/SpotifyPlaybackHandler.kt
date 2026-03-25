@@ -423,12 +423,24 @@ class SpotifyPlaybackHandler @Inject constructor(
         // Poll until Spotify registers as a Connect device
         Log.d(TAG, "Polling for devices for up to ${WAKE_TIMEOUT_MS}ms...")
         val deadline = System.currentTimeMillis() + WAKE_TIMEOUT_MS
+        var pauseSent = false
         while (System.currentTimeMillis() < deadline) {
             delay(WAKE_POLL_INTERVAL_MS)
             try {
                 val devices = spotifyApi.getDevices(auth).devices
                 if (devices.isNotEmpty()) {
                     Log.d(TAG, "Spotify woke up — found ${devices.size} device(s)")
+                    // Immediately pause — the nudge resumed Spotify's last track,
+                    // and we don't want the user hearing it before our track starts.
+                    if (!pauseSent) {
+                        pauseSent = true
+                        try {
+                            spotifyApi.pausePlayback(auth)
+                            Log.d(TAG, "Paused Spotify after wake to silence stale playback")
+                        } catch (e: Exception) {
+                            Log.d(TAG, "Pause after wake failed (non-fatal): ${e.message}")
+                        }
+                    }
                     return devices
                 }
             } catch (e: Exception) {
@@ -454,12 +466,24 @@ class SpotifyPlaybackHandler @Inject constructor(
         Log.d(TAG, "wakeLocalSpotifyApp: looking for Smartphone matching model='$localModel' (Build.MODEL=${Build.MODEL}, Build.MANUFACTURER=${Build.MANUFACTURER})")
         val deadline = System.currentTimeMillis() + WAKE_TIMEOUT_MS
         var pollCount = 0
+        var pauseSent = false
         while (System.currentTimeMillis() < deadline) {
             delay(WAKE_POLL_INTERVAL_MS)
             pollCount++
             try {
                 val devices = spotifyApi.getDevices(auth).devices
                 Log.d(TAG, "wakeLocal poll #$pollCount: ${devices.map { "'${it.name}'(type=${it.type}, id=${it.id}, active=${it.isActive})" }}")
+                // Pause as soon as we see any device — the nudge resumed the
+                // last song and we don't want the user hearing it.
+                if (devices.isNotEmpty() && !pauseSent) {
+                    pauseSent = true
+                    try {
+                        spotifyApi.pausePlayback(auth)
+                        Log.d(TAG, "Paused Spotify after local wake to silence stale playback")
+                    } catch (e: Exception) {
+                        Log.d(TAG, "Pause after local wake failed (non-fatal): ${e.message}")
+                    }
+                }
                 val hasLocal = devices.any {
                     it.type == "Smartphone" && it.name.lowercase().contains(localModel)
                 } || devices.any { it.type == "Smartphone" }
