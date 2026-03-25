@@ -247,8 +247,13 @@ class PlaybackController @Inject constructor(
                 val next = spinoffPool.removeAt(0)
                 Log.d(TAG, "Spinoff: playing next '${next.title}' by ${next.artist} (${spinoffPool.size} remaining)")
                 advanceJob = scope.launch {
-                    if (isExternalPlayback) router.stopExternalPlayback()
-                    playTrackInternal(next)
+                    try {
+                        if (isExternalPlayback) router.stopExternalPlayback()
+                        playTrackInternal(next)
+                    } catch (e: Exception) {
+                        if (e is kotlinx.coroutines.CancellationException) throw e
+                        Log.e(TAG, "Spinoff advance to '${next.title}' failed: ${e.message}", e)
+                    }
                 }
                 return
             } else {
@@ -274,8 +279,13 @@ class PlaybackController @Inject constructor(
         }
         Log.d(TAG, "skipNext: advancing to '${next.title}' by ${next.artist}")
         advanceJob = scope.launch {
-            if (isExternalPlayback) router.stopExternalPlayback()
-            playTrackInternal(next)
+            try {
+                if (isExternalPlayback) router.stopExternalPlayback()
+                playTrackInternal(next)
+            } catch (e: Exception) {
+                if (e is kotlinx.coroutines.CancellationException) throw e
+                Log.e(TAG, "Advance to '${next.title}' failed: ${e.message}", e)
+            }
         }
     }
 
@@ -302,8 +312,13 @@ class PlaybackController @Inject constructor(
         val prev = queueManager.skipPrevious(currentTrack) ?: return
         advanceJob?.cancel()
         advanceJob = scope.launch {
-            if (isExternalPlayback) router.stopExternalPlayback()
-            playTrackInternal(prev)
+            try {
+                if (isExternalPlayback) router.stopExternalPlayback()
+                playTrackInternal(prev)
+            } catch (e: Exception) {
+                if (e is kotlinx.coroutines.CancellationException) throw e
+                Log.e(TAG, "Skip previous to '${prev.title}' failed: ${e.message}", e)
+            }
         }
     }
 
@@ -313,8 +328,13 @@ class PlaybackController @Inject constructor(
         val track = queueManager.playFromQueue(index, currentTrack) ?: return
         advanceJob?.cancel()
         advanceJob = scope.launch {
-            if (isExternalPlayback) router.stopExternalPlayback()
-            playTrackInternal(track)
+            try {
+                if (isExternalPlayback) router.stopExternalPlayback()
+                playTrackInternal(track)
+            } catch (e: Exception) {
+                if (e is kotlinx.coroutines.CancellationException) throw e
+                Log.e(TAG, "Play from queue '${track.title}' failed: ${e.message}", e)
+            }
         }
     }
 
@@ -435,6 +455,19 @@ class PlaybackController @Inject constructor(
     }
 
     private suspend fun playTrackInternal(track: TrackEntity, skipReselect: Boolean = false) = playMutex.withLock {
+        try {
+            playTrackInternalUnsafe(track, skipReselect)
+        } catch (e: kotlinx.coroutines.CancellationException) {
+            throw e // Don't swallow cancellation
+        } catch (e: Exception) {
+            Log.e(TAG, "playTrackInternal failed for '${track.title}': ${e.message}", e)
+            // Leave the app in a usable state — show the track in the mini player
+            // even though playback failed, so the user can tap play to retry.
+            stateHolder.update { copy(currentTrack = track, isPlaying = false) }
+        }
+    }
+
+    private suspend fun playTrackInternalUnsafe(track: TrackEntity, skipReselect: Boolean = false) {
         // Cancel any idle timeout — we're actively playing now
         cancelIdleTimeout()
 

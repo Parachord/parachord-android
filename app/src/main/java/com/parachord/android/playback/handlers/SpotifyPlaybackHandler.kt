@@ -50,8 +50,6 @@ class SpotifyPlaybackHandler @Inject constructor(
     companion object {
         private const val TAG = "SpotifyPlayback"
         private const val MAX_POLL_FAILURES = 10
-        /** ~8 seconds of stale position (8 polls at 1s interval). */
-        private const val MAX_STALE_POSITION = 8
         private const val SPOTIFY_PACKAGE = "com.spotify.music"
         /** Max time to wait for Spotify to register as a Connect device after launching. */
         private const val WAKE_TIMEOUT_MS = 15000L
@@ -117,12 +115,14 @@ class SpotifyPlaybackHandler @Inject constructor(
 
     /** Consecutive state-polling failures — used for watchdog auto-advance. */
     private var consecutivePollFailures = 0
-    /** Consecutive polls where position didn't change while "playing". */
-    private var stalePositionCount = 0
+    /** Timestamp when cachedPosition last changed — used for time-based stale detection. */
+    private var lastPositionChangeTime = 0L
 
     /** True when the connection to Spotify is experiencing sustained issues (not transient blips). */
     val isConnectionStalled: Boolean
-        get() = consecutivePollFailures >= 3 || stalePositionCount >= 4
+        get() = consecutivePollFailures >= 3 ||
+                (cachedIsPlaying && lastPositionChangeTime > 0 &&
+                    System.currentTimeMillis() - lastPositionChangeTime > 8000)
 
     override val isConnected: Boolean get() = _isConnected
 
@@ -164,7 +164,7 @@ class SpotifyPlaybackHandler @Inject constructor(
             lastProgressMs = 0L
             lastPercentComplete = 0f
             consecutivePollFailures = 0
-            stalePositionCount = 0
+            lastPositionChangeTime = System.currentTimeMillis()
             startStatePolling()
         } else {
             Log.e(TAG, "Failed to play '${track.title}' after retries")
@@ -423,12 +423,24 @@ class SpotifyPlaybackHandler @Inject constructor(
         // Poll until Spotify registers as a Connect device
         Log.d(TAG, "Polling for devices for up to ${WAKE_TIMEOUT_MS}ms...")
         val deadline = System.currentTimeMillis() + WAKE_TIMEOUT_MS
+        var pauseSent = false
         while (System.currentTimeMillis() < deadline) {
             delay(WAKE_POLL_INTERVAL_MS)
             try {
                 val devices = spotifyApi.getDevices(auth).devices
                 if (devices.isNotEmpty()) {
                     Log.d(TAG, "Spotify woke up — found ${devices.size} device(s)")
+                    // Immediately pause — the nudge resumed Spotify's last track,
+                    // and we don't want the user hearing it before our track starts.
+                    if (!pauseSent) {
+                        pauseSent = true
+                        try {
+                            spotifyApi.pausePlayback(auth)
+                            Log.d(TAG, "Paused Spotify after wake to silence stale playback")
+                        } catch (e: Exception) {
+                            Log.d(TAG, "Pause after wake failed (non-fatal): ${e.message}")
+                        }
+                    }
                     return devices
                 }
             } catch (e: Exception) {
@@ -454,12 +466,24 @@ class SpotifyPlaybackHandler @Inject constructor(
         Log.d(TAG, "wakeLocalSpotifyApp: looking for Smartphone matching model='$localModel' (Build.MODEL=${Build.MODEL}, Build.MANUFACTURER=${Build.MANUFACTURER})")
         val deadline = System.currentTimeMillis() + WAKE_TIMEOUT_MS
         var pollCount = 0
+        var pauseSent = false
         while (System.currentTimeMillis() < deadline) {
             delay(WAKE_POLL_INTERVAL_MS)
             pollCount++
             try {
                 val devices = spotifyApi.getDevices(auth).devices
                 Log.d(TAG, "wakeLocal poll #$pollCount: ${devices.map { "'${it.name}'(type=${it.type}, id=${it.id}, active=${it.isActive})" }}")
+                // Pause as soon as we see any device — the nudge resumed the
+                // last song and we don't want the user hearing it.
+                if (devices.isNotEmpty() && !pauseSent) {
+                    pauseSent = true
+                    try {
+                        spotifyApi.pausePlayback(auth)
+                        Log.d(TAG, "Paused Spotify after local wake to silence stale playback")
+                    } catch (e: Exception) {
+                        Log.d(TAG, "Pause after local wake failed (non-fatal): ${e.message}")
+                    }
+                }
                 val hasLocal = devices.any {
                     it.type == "Smartphone" && it.name.lowercase().contains(localModel)
                 } || devices.any { it.type == "Smartphone" }
@@ -696,16 +720,17 @@ class SpotifyPlaybackHandler @Inject constructor(
             return true
         }
 
-        // 7. Stale-position watchdog: if position hasn't changed across multiple
-        // polls while supposedly playing, the track is stuck or ended silently.
-        if (cachedIsPlaying && cachedPosition > 0 && cachedPosition == lastProgressMs) {
-            stalePositionCount++
-            if (stalePositionCount >= MAX_STALE_POSITION) {
-                Log.w(TAG, "Watchdog: position stale at ${cachedPosition}ms for $stalePositionCount polls, treating as done")
+        // 7. Stale-position watchdog: if position hasn't changed for 15+ seconds
+        // while supposedly playing, the track is stuck or ended silently.
+        // Uses wall-clock time instead of poll count — the controller polls at
+        // 500ms but the handler updates cached state at ~1s + API latency, so
+        // count-based detection false-positives when the API is slow.
+        if (cachedIsPlaying && cachedPosition > 0 && lastPositionChangeTime > 0) {
+            val staleDuration = System.currentTimeMillis() - lastPositionChangeTime
+            if (staleDuration >= 15000) {
+                Log.w(TAG, "Watchdog: position stale at ${cachedPosition}ms for ${staleDuration}ms, treating as done")
                 return true
             }
-        } else {
-            stalePositionCount = 0
         }
 
         // Update last-known progress for reset-after-end detection
@@ -736,9 +761,25 @@ class SpotifyPlaybackHandler @Inject constructor(
                         if (isStale) {
                             Log.d(TAG, "Ignoring stale API state: item=$apiItemId (expected=$expectedTrackId, ${elapsed}ms since play)")
                         } else {
+                            val prevPosition = cachedPosition
                             cachedIsPlaying = state.isPlaying
                             cachedPosition = state.progressMs ?: 0L
                             currentItemId = apiItemId
+
+                            // Track when position last changed (for stale detection)
+                            if (cachedPosition != prevPosition) {
+                                lastPositionChangeTime = System.currentTimeMillis()
+                            }
+
+                            // Handle Spotify track relinking: when Spotify substitutes
+                            // a different version of the same track (different market,
+                            // album edition, etc.), the track ID changes. Lock in the
+                            // actual ID once Spotify confirms it's playing, so scenario
+                            // #4 (track-changed) doesn't false-positive.
+                            if (state.isPlaying && apiItemId != null && apiItemId != expectedTrackId && elapsed < 15000) {
+                                Log.d(TAG, "Track relinked: expected=$expectedTrackId, actual=$apiItemId — locking in actual ID")
+                                expectedTrackId = apiItemId
+                            }
 
                             // Preserve duration when item becomes null (track just ended)
                             if (state.item?.durationMs != null) {
