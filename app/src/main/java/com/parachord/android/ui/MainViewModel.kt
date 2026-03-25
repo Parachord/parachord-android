@@ -8,6 +8,7 @@ import androidx.lifecycle.viewModelScope
 import com.parachord.android.data.db.entity.FriendEntity
 import com.parachord.android.data.db.entity.PlaylistEntity
 import com.parachord.android.data.db.entity.TrackEntity
+import com.parachord.android.data.network.NetworkMonitor
 import com.parachord.android.data.repository.FriendsRepository
 import com.parachord.android.data.repository.ConcertsRepository
 import com.parachord.android.data.repository.LibraryRepository
@@ -54,6 +55,7 @@ class MainViewModel @Inject constructor(
     private val settingsStore: SettingsStore,
     private val playlistImportManager: PlaylistImportManager,
     private val concertsRepository: ConcertsRepository,
+    private val networkMonitor: NetworkMonitor,
 ) : ViewModel() {
 
     companion object {
@@ -65,6 +67,9 @@ class MainViewModel @Inject constructor(
     }
 
     val playbackState: StateFlow<PlaybackState> = playbackStateHolder.state
+
+    /** Whether the device has an active internet connection. */
+    val isOnline: StateFlow<Boolean> = networkMonitor.isOnline
 
     /** Whether the currently playing track is in the user's collection.
      *  Uses [effectiveTrack] so it reflects the actual streaming metadata. */
