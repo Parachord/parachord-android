@@ -289,7 +289,26 @@ class SpotifyPlaybackHandler @Inject constructor(
             )
 
             if (response.isSuccessful || response.code() == 204) {
-                Log.d(TAG, "Playback started on '${targetDevice.name}' for $uri")
+                Log.d(TAG, "Playback accepted on '${targetDevice.name}' for $uri (try $playRetry)")
+
+                // Verify playback actually started. On a freshly-woken device,
+                // Spotify accepts the command (204) but may not start playing.
+                // Poll the state briefly to confirm — if not playing, retry.
+                val verified = verifyPlaybackStarted(auth, playRetry)
+                if (verified) {
+                    Log.d(TAG, "Playback verified on '${targetDevice.name}'")
+                    return true
+                }
+
+                // Not playing yet — retry the play command
+                if (playRetry < 3) {
+                    Log.w(TAG, "Playback not verified after try $playRetry, retrying...")
+                    delay(1000L * playRetry)
+                    continue
+                }
+
+                // Final attempt — accept even if unverified, polling will catch up
+                Log.w(TAG, "Playback not verified after final try, proceeding optimistically")
                 return true
             }
 
@@ -307,6 +326,33 @@ class SpotifyPlaybackHandler @Inject constructor(
             // Non-502 failure or final 502 — give up
             settingsStore.clearPreferredSpotifyDeviceId()
             return false
+        }
+        return false
+    }
+
+    /**
+     * After startPlayback returns 204, poll briefly to verify Spotify is
+     * actually playing our track. On freshly-woken devices, the 204 may be
+     * accepted but playback doesn't start until the device finishes waking.
+     *
+     * Returns true if we see isPlaying=true within a few polls.
+     */
+    private suspend fun verifyPlaybackStarted(auth: String, attempt: Int): Boolean {
+        // Shorter verification on later attempts since device should be warmer
+        val maxPolls = if (attempt == 1) 5 else 3
+        for (poll in 1..maxPolls) {
+            delay(1000)
+            try {
+                val state = spotifyApi.getPlaybackState(auth)
+                val body = if (state.isSuccessful) state.body() else null
+                if (body != null && body.isPlaying) {
+                    Log.d(TAG, "verifyPlayback: confirmed playing after ${poll}s")
+                    return true
+                }
+                Log.d(TAG, "verifyPlayback poll $poll: isPlaying=${body?.isPlaying}, item=${body?.item?.name}")
+            } catch (e: Exception) {
+                Log.d(TAG, "verifyPlayback poll $poll failed: ${e.message}")
+            }
         }
         return false
     }
