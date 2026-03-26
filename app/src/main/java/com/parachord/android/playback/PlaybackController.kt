@@ -558,13 +558,15 @@ class PlaybackController @Inject constructor(
                     // Don't call ctrl.play() — external handler manages actual playback
                 }
 
-                // Set UI state optimistically — show the track as playing immediately
-                // so the user gets instant feedback. The state polling will correct
-                // this if playback actually fails.
+                // Set UI state optimistically — show the track with a buffering spinner
+                // so the user gets instant feedback while the handler connects to
+                // the external service. The state polling will clear isBuffering
+                // once playback is confirmed.
                 stateHolder.update {
                     copy(
                         currentTrack = routedTrack,
                         isPlaying = true,
+                        isBuffering = true,
                         position = 0L,
                         duration = routedTrack.duration ?: 0L,
                         upNext = snapshot.upNext,
