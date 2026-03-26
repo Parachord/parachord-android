@@ -87,8 +87,8 @@ class SpotifyPlaybackHandler @Inject constructor(
     private var cachedPosition = 0L
     private var cachedDuration = 0L
     private var _isConnected = false
-    /** True after we've successfully woken Spotify and found devices this session. */
-    private var hasWokenSpotify = false
+    /** True after the first successful play this session — device is warm. */
+    private var deviceVerified = false
 
     // Actual track metadata from the Spotify API (what's REALLY playing)
     /** Title of the track Spotify reports as currently playing. */
@@ -106,8 +106,12 @@ class SpotifyPlaybackHandler @Inject constructor(
     private var currentItemId: String? = null
     /** Timestamp when we started playing — used to filter stale API responses during polling. */
     private var playStartedAt: Long = 0L
+    /** The URI we most recently asked Spotify to play — used for retry in polling. */
+    private var lastPlayedUri: String? = null
     /** True when WE initiated a pause (user tapped pause). False means Spotify stopped on its own. */
     private var pausedByUs = false
+    /** True once the polling loop has confirmed playback started for the current track. */
+    private var playbackConfirmed = false
 
     // Track previous poll state for reset-after-end detection (matches desktop pattern)
     private var lastProgressMs = 0L
@@ -154,8 +158,10 @@ class SpotifyPlaybackHandler @Inject constructor(
             cachedDuration = track.duration ?: 0L
             expectedTrackId = uri.substringAfterLast(":")
             currentItemId = expectedTrackId
+            lastPlayedUri = uri
             playStartedAt = System.currentTimeMillis()
             pausedByUs = false
+            playbackConfirmed = false
             // Clear actual metadata until polling confirms what's really playing
             actualTitle = null
             actualArtist = null
@@ -209,9 +215,9 @@ class SpotifyPlaybackHandler @Inject constructor(
         // On the first play of a session, wake the local Spotify app so this
         // phone registers as a Connect device. Subsequent tracks skip the wake
         // since Spotify is already running.
-        val devices = if (!hasWokenSpotify) {
+        val devices = if (!deviceVerified) {
             val result = wakeSpotifyAndAwaitDevice(auth)
-            if (result.isNotEmpty()) hasWokenSpotify = true
+            if (result.isNotEmpty()) deviceVerified = true
             result
         } else {
             spotifyApi.getDevices(auth).devices
@@ -246,7 +252,7 @@ class SpotifyPlaybackHandler @Inject constructor(
                 // retry has a good chance of finding the device.
                 return false
             }
-            hasWokenSpotify = true
+            deviceVerified = true
             // Update the preferred device to the real ID so we skip the picker next time
             settingsStore.setPreferredSpotifyDeviceId(resolved.id)
             Log.d(TAG, "Resolved local device: '${resolved.name}' id=${resolved.id}")
@@ -291,24 +297,31 @@ class SpotifyPlaybackHandler @Inject constructor(
             if (response.isSuccessful || response.code() == 204) {
                 Log.d(TAG, "Playback accepted on '${targetDevice.name}' for $uri (try $playRetry)")
 
-                // Verify playback actually started. On a freshly-woken device,
-                // Spotify accepts the command (204) but may not start playing.
-                // Poll the state briefly to confirm — if not playing, retry.
-                val verified = verifyPlaybackStarted(auth, playRetry)
-                if (verified) {
-                    Log.d(TAG, "Playback verified on '${targetDevice.name}'")
-                    return true
+                // Only verify on the first play of a session when the device
+                // was just woken. Subsequent tracks skip verification — the
+                // device is already warm and startPlayback works immediately.
+                // Without this gate, every track transition added up to 14s of
+                // verification polling, breaking auto-advance.
+                if (!deviceVerified) {
+                    val verified = verifyPlaybackStarted(auth, playRetry)
+                    if (verified) {
+                        Log.d(TAG, "Playback verified on '${targetDevice.name}'")
+                        deviceVerified = true
+                        return true
+                    }
+
+                    // Not playing yet — retry the play command
+                    if (playRetry < 3) {
+                        Log.w(TAG, "Playback not verified after try $playRetry, retrying...")
+                        delay(1000L * playRetry)
+                        continue
+                    }
+
+                    // Final attempt — proceed optimistically, polling will catch up
+                    Log.w(TAG, "Playback not verified after final try, proceeding optimistically")
+                    deviceVerified = true
                 }
 
-                // Not playing yet — retry the play command
-                if (playRetry < 3) {
-                    Log.w(TAG, "Playback not verified after try $playRetry, retrying...")
-                    delay(1000L * playRetry)
-                    continue
-                }
-
-                // Final attempt — accept even if unverified, polling will catch up
-                Log.w(TAG, "Playback not verified after final try, proceeding optimistically")
                 return true
             }
 
@@ -391,7 +404,7 @@ class SpotifyPlaybackHandler @Inject constructor(
     fun disconnect() {
         stopStatePolling()
         _isConnected = false
-        hasWokenSpotify = false
+        deviceVerified = false
     }
 
     /**
@@ -760,11 +773,32 @@ class SpotifyPlaybackHandler @Inject constructor(
 
                         if (isStale) {
                             Log.d(TAG, "Ignoring stale API state: item=$apiItemId (expected=$expectedTrackId, ${elapsed}ms since play)")
+                        } else if (!playbackConfirmed && !state.isPlaying && elapsed in 3000..10000 && !pausedByUs) {
+                            // Spotify accepted our play command but didn't start.
+                            // Re-send the play command once as a lightweight retry.
+                            val uri = lastPlayedUri
+                            Log.w(TAG, "Playback not started ${elapsed}ms after play — retrying startPlayback")
+                            if (uri != null) {
+                                try {
+                                    withAuth { auth ->
+                                        spotifyApi.startPlayback(auth, SpPlaybackRequest(uris = listOf(uri)))
+                                    }
+                                    playStartedAt = System.currentTimeMillis()
+                                } catch (e: Exception) {
+                                    Log.w(TAG, "Retry startPlayback failed: ${e.message}")
+                                }
+                            }
+                            playbackConfirmed = true // Don't retry again
                         } else {
                             val prevPosition = cachedPosition
                             cachedIsPlaying = state.isPlaying
                             cachedPosition = state.progressMs ?: 0L
                             currentItemId = apiItemId
+
+                            // Mark playback confirmed once Spotify reports playing
+                            if (state.isPlaying && !playbackConfirmed) {
+                                playbackConfirmed = true
+                            }
 
                             // Track when position last changed (for stale detection)
                             if (cachedPosition != prevPosition) {
