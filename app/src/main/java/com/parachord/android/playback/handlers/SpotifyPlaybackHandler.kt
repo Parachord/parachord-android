@@ -106,8 +106,12 @@ class SpotifyPlaybackHandler @Inject constructor(
     private var currentItemId: String? = null
     /** Timestamp when we started playing — used to filter stale API responses during polling. */
     private var playStartedAt: Long = 0L
+    /** The URI we most recently asked Spotify to play — used for retry in polling. */
+    private var lastPlayedUri: String? = null
     /** True when WE initiated a pause (user tapped pause). False means Spotify stopped on its own. */
     private var pausedByUs = false
+    /** True once the polling loop has confirmed playback started for the current track. */
+    private var playbackConfirmed = false
 
     // Track previous poll state for reset-after-end detection (matches desktop pattern)
     private var lastProgressMs = 0L
@@ -154,8 +158,10 @@ class SpotifyPlaybackHandler @Inject constructor(
             cachedDuration = track.duration ?: 0L
             expectedTrackId = uri.substringAfterLast(":")
             currentItemId = expectedTrackId
+            lastPlayedUri = uri
             playStartedAt = System.currentTimeMillis()
             pausedByUs = false
+            playbackConfirmed = false
             // Clear actual metadata until polling confirms what's really playing
             actualTitle = null
             actualArtist = null
@@ -767,11 +773,32 @@ class SpotifyPlaybackHandler @Inject constructor(
 
                         if (isStale) {
                             Log.d(TAG, "Ignoring stale API state: item=$apiItemId (expected=$expectedTrackId, ${elapsed}ms since play)")
+                        } else if (!playbackConfirmed && !state.isPlaying && elapsed in 3000..10000 && !pausedByUs) {
+                            // Spotify accepted our play command but didn't start.
+                            // Re-send the play command once as a lightweight retry.
+                            val uri = lastPlayedUri
+                            Log.w(TAG, "Playback not started ${elapsed}ms after play — retrying startPlayback")
+                            if (uri != null) {
+                                try {
+                                    withAuth { auth ->
+                                        spotifyApi.startPlayback(auth, SpPlaybackRequest(uris = listOf(uri)))
+                                    }
+                                    playStartedAt = System.currentTimeMillis()
+                                } catch (e: Exception) {
+                                    Log.w(TAG, "Retry startPlayback failed: ${e.message}")
+                                }
+                            }
+                            playbackConfirmed = true // Don't retry again
                         } else {
                             val prevPosition = cachedPosition
                             cachedIsPlaying = state.isPlaying
                             cachedPosition = state.progressMs ?: 0L
                             currentItemId = apiItemId
+
+                            // Mark playback confirmed once Spotify reports playing
+                            if (state.isPlaying && !playbackConfirmed) {
+                                playbackConfirmed = true
+                            }
 
                             // Track when position last changed (for stale detection)
                             if (cachedPosition != prevPosition) {
