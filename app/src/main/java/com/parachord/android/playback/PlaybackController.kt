@@ -576,10 +576,13 @@ class PlaybackController @Inject constructor(
                     )
                 }
 
-                action.handler.play(routedTrack)
-
-                // Promote the service to foreground so Android doesn't kill it
+                // Promote (or re-promote) the foreground service BEFORE the
+                // handler.play() call, which can take 5-15 seconds for Spotify
+                // device wake + API calls. Without foreground status during this
+                // gap, Android can kill the process between songs.
                 sendExternalPlaybackStart(routedTrack)
+
+                action.handler.play(routedTrack)
 
                 // Start the appropriate state polling based on the handler type
                 when (action.handler) {
@@ -996,7 +999,15 @@ class PlaybackController @Inject constructor(
             putExtra(PlaybackService.EXTRA_TRACK_ARTIST, track.artist)
             putExtra(PlaybackService.EXTRA_TRACK_ARTWORK_URL, track.artworkUrl)
         }
-        context.startService(intent)
+        // Use startForegroundService to ensure the service stays alive when
+        // the app is backgrounded. Regular startService can throw on Android 8+
+        // if the app is in the background.
+        try {
+            context.startForegroundService(intent)
+        } catch (e: Exception) {
+            Log.w(TAG, "startForegroundService failed, falling back: ${e.message}")
+            try { context.startService(intent) } catch (_: Exception) {}
+        }
     }
 
     /**
