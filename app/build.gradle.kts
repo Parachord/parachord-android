@@ -65,6 +65,9 @@ android {
         release {
             isMinifyEnabled = true
             isShrinkResources = true
+            ndk {
+                debugSymbolLevel = "FULL"
+            }
             signingConfig = signingConfigs.findByName("ciRelease")
                 ?: signingConfigs.getByName("debug")
             proguardFiles(
