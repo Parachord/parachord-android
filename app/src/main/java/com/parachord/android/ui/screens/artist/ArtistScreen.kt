@@ -78,6 +78,7 @@ import androidx.compose.ui.unit.sp
 import com.parachord.android.ui.components.AlbumArtCard
 import com.parachord.android.ui.components.AlbumArtCardFill
 import com.parachord.android.ui.components.AlbumContextMenu
+import com.parachord.android.ui.components.ArtistContextMenu
 import com.parachord.android.ui.components.FaceAwareImage
 import com.parachord.android.ui.components.hapticCombinedClickable
 import com.parachord.android.ui.components.SectionHeader
@@ -725,6 +726,7 @@ private fun RelatedArtistsTab(
     onQueueTopSongs: (String) -> Unit = {},
     onToggleCollection: (name: String, imageUrl: String?, isInCollection: Boolean) -> Unit = { _, _, _ -> },
 ) {
+
     if (similarArtists.isEmpty()) {
         Box(
             modifier = Modifier
