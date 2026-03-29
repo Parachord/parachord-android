@@ -335,8 +335,11 @@ fun ArtistScreen(
                         "Related Artists" -> RelatedArtistsTab(
                             similarArtists = artistInfo?.similarArtists ?: emptyList(),
                             onNavigateToArtist = onNavigateToArtist,
-                            onPlayArtistTopSongs = viewModel::playArtistTopSongs,
-                            onQueueArtistTopSongs = viewModel::queueArtistTopSongs,
+                            onPlayTopSongs = { viewModel.playArtistTopSongs(it) },
+                            onQueueTopSongs = { viewModel.queueArtistTopSongs(it) },
+                            onToggleCollection = { name, imageUrl, inCollection ->
+                                viewModel.toggleArtistCollection(name, imageUrl)
+                            },
                         )
                     }
                 }
@@ -719,30 +722,10 @@ private fun BiographyTab(
 private fun RelatedArtistsTab(
     similarArtists: List<SimilarArtist>,
     onNavigateToArtist: (String) -> Unit,
-    onPlayArtistTopSongs: (String) -> Unit = {},
-    onQueueArtistTopSongs: (String) -> Unit = {},
+    onPlayTopSongs: (String) -> Unit = {},
+    onQueueTopSongs: (String) -> Unit = {},
+    onToggleCollection: (name: String, imageUrl: String?, isInCollection: Boolean) -> Unit = { _, _, _ -> },
 ) {
-    var menuArtist by remember { mutableStateOf<SimilarArtist?>(null) }
-
-    menuArtist?.let { artist ->
-        ArtistContextMenu(
-            artistName = artist.name,
-            artworkUrl = artist.imageUrl,
-            onDismiss = { menuArtist = null },
-            onPlayTopTracks = {
-                onPlayArtistTopSongs(artist.name)
-                menuArtist = null
-            },
-            onQueueTopTracks = {
-                onQueueArtistTopSongs(artist.name)
-                menuArtist = null
-            },
-            onGoToArtist = {
-                onNavigateToArtist(artist.name)
-                menuArtist = null
-            },
-        )
-    }
 
     if (similarArtists.isEmpty()) {
         Box(
@@ -770,12 +753,14 @@ private fun RelatedArtistsTab(
                 key = { idx -> "similar-$idx-${similarArtists[idx].name}" },
             ) { idx ->
                 val artist = similarArtists[idx]
+                var showMenu by remember { mutableStateOf(false) }
+
                 Column(
                     modifier = Modifier
                         .fillMaxWidth()
                         .hapticCombinedClickable(
                             onClick = { onNavigateToArtist(artist.name) },
-                            onLongClick = { menuArtist = artist },
+                            onLongClick = { showMenu = true },
                         ),
                     horizontalAlignment = Alignment.CenterHorizontally,
                 ) {
@@ -810,6 +795,19 @@ private fun RelatedArtistsTab(
                         overflow = TextOverflow.Ellipsis,
                         textAlign = TextAlign.Center,
                         modifier = Modifier.fillMaxWidth(),
+                    )
+                }
+
+                if (showMenu) {
+                    com.parachord.android.ui.components.ArtistContextMenu(
+                        artistName = artist.name,
+                        imageUrl = artist.imageUrl,
+                        isInCollection = false,
+                        onDismiss = { showMenu = false },
+                        onPlayTopSongs = { onPlayTopSongs(artist.name) },
+                        onQueueTopSongs = { onQueueTopSongs(artist.name) },
+                        onGoToArtist = { onNavigateToArtist(artist.name) },
+                        onToggleCollection = { onToggleCollection(artist.name, artist.imageUrl, false) },
                     )
                 }
             }

@@ -255,24 +255,21 @@ fun CollectionScreen(
                                     }
 
                                     if (showMenu) {
-                                        ArtistContextMenu(
+                                        com.parachord.android.ui.components.ArtistContextMenu(
                                             artistName = artist.name,
                                             imageUrl = artist.imageUrl,
+                                            isInCollection = true,
                                             onDismiss = { showMenu = false },
                                             onPlayTopSongs = {
-                                                showMenu = false
                                                 viewModel.playArtistTopSongs(artist.name)
                                             },
                                             onQueueTopSongs = {
-                                                showMenu = false
                                                 viewModel.queueArtistTopSongs(artist.name)
                                             },
                                             onGoToArtist = {
-                                                showMenu = false
                                                 onNavigateToArtist(artist.name)
                                             },
-                                            onRemoveFromCollection = {
-                                                showMenu = false
+                                            onToggleCollection = {
                                                 viewModel.removeArtistFromCollection(artist)
                                             },
                                         )
@@ -927,92 +924,5 @@ private fun EmptyState(
     }
 }
 
-// ── Artist context menu ───────────────────────────────────────────
-
-@OptIn(ExperimentalMaterial3Api::class)
-@Composable
-private fun ArtistContextMenu(
-    artistName: String,
-    imageUrl: String?,
-    onDismiss: () -> Unit,
-    onPlayTopSongs: () -> Unit,
-    onQueueTopSongs: () -> Unit,
-    onGoToArtist: () -> Unit,
-    onRemoveFromCollection: () -> Unit,
-) {
-    ModalBottomSheet(
-        onDismissRequest = onDismiss,
-        sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true),
-        containerColor = ModalBg,
-        scrimColor = Color.Black.copy(alpha = 0.4f),
-        dragHandle = {
-            Box(
-                modifier = Modifier
-                    .padding(vertical = 10.dp)
-                    .size(width = 32.dp, height = 4.dp)
-                    .background(
-                        color = Color.White.copy(alpha = 0.2f),
-                        shape = RoundedCornerShape(2.dp),
-                    ),
-            )
-        },
-    ) {
-        Column(
-            modifier = Modifier
-                .background(Brush.verticalGradient(listOf(ModalBg, ModalBgDarker)))
-                .padding(bottom = 32.dp),
-        ) {
-            // Header
-            Row(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .padding(horizontal = 20.dp, vertical = 8.dp),
-                verticalAlignment = Alignment.CenterVertically,
-            ) {
-                AlbumArtCard(
-                    artworkUrl = imageUrl,
-                    size = 48.dp,
-                    cornerRadius = 24.dp,
-                    placeholderName = artistName,
-                )
-                Spacer(modifier = Modifier.width(12.dp))
-                Text(
-                    text = artistName,
-                    fontSize = 15.sp,
-                    fontWeight = FontWeight.Medium,
-                    color = ModalTextActive,
-                    maxLines = 1,
-                    overflow = TextOverflow.Ellipsis,
-                )
-            }
-
-            HorizontalDivider(color = ModalDivider, modifier = Modifier.padding(vertical = 8.dp))
-
-            ContextMenuItem(
-                icon = Icons.Filled.PlayArrow,
-                label = "Play Top Songs",
-                onClick = onPlayTopSongs,
-            )
-            ContextMenuItem(
-                icon = Icons.AutoMirrored.Filled.QueueMusic,
-                label = "Queue Top Songs",
-                onClick = onQueueTopSongs,
-            )
-            ContextMenuItem(
-                icon = Icons.Filled.Person,
-                label = "Go to Artist",
-                onClick = onGoToArtist,
-            )
-
-            HorizontalDivider(color = ModalDivider, modifier = Modifier.padding(vertical = 4.dp))
-
-            ContextMenuItem(
-                icon = Icons.Filled.Favorite,
-                label = "Remove from Collection",
-                onClick = onRemoveFromCollection,
-            )
-        }
-    }
-}
-
+// Artist context menu is now the shared ArtistContextMenu from ui.components
 // Album context menu is now the shared AlbumContextMenu from ui.components

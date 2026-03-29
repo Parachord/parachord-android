@@ -8,6 +8,7 @@ import androidx.lifecycle.viewModelScope
 import com.parachord.android.data.db.entity.FriendEntity
 import com.parachord.android.data.db.entity.PlaylistEntity
 import com.parachord.android.data.db.entity.TrackEntity
+import com.parachord.android.data.network.NetworkMonitor
 import com.parachord.android.data.repository.FriendsRepository
 import com.parachord.android.data.repository.ConcertsRepository
 import com.parachord.android.data.repository.LibraryRepository
@@ -51,9 +52,10 @@ class MainViewModel @Inject constructor(
     private val resolverScoring: ResolverScoring,
     private val musicKitBridge: MusicKitWebBridge,
     private val spotifyPlaybackHandler: SpotifyPlaybackHandler,
-    settingsStore: SettingsStore,
+    private val settingsStore: SettingsStore,
     private val playlistImportManager: PlaylistImportManager,
     private val concertsRepository: ConcertsRepository,
+    private val networkMonitor: NetworkMonitor,
 ) : ViewModel() {
 
     companion object {
@@ -65,6 +67,9 @@ class MainViewModel @Inject constructor(
     }
 
     val playbackState: StateFlow<PlaybackState> = playbackStateHolder.state
+
+    /** Whether the device has an active internet connection. */
+    val isOnline: StateFlow<Boolean> = networkMonitor.isOnline
 
     /** Whether the currently playing track is in the user's collection.
      *  Uses [effectiveTrack] so it reflects the actual streaming metadata. */
@@ -121,7 +126,8 @@ class MainViewModel @Inject constructor(
                 }
             }
         }
-        // Check if current artist is on tour when track changes (for mini player dot)
+        // Check if current artist is on tour near the user's selected area
+        // (for mini player dot). Only shows if a concert location is configured.
         viewModelScope.launch {
             playbackState
                 .map { it.currentTrack?.artist }
@@ -131,7 +137,13 @@ class MainViewModel @Inject constructor(
                     lastCheckedArtist = artist
                     _isOnTour.value = false
                     try {
-                        _isOnTour.value = concertsRepository.checkOnTour(artist)
+                        val loc = settingsStore.getConcertLocation()
+                        _isOnTour.value = concertsRepository.checkOnTour(
+                            artistName = artist,
+                            lat = loc.latitude,
+                            lon = loc.longitude,
+                            radiusMiles = loc.radiusMiles,
+                        )
                     } catch (e: Exception) {
                         Log.w(TAG, "On-tour check failed for '$artist'", e)
                     }

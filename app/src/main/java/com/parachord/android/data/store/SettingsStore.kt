@@ -84,7 +84,7 @@ class SettingsStore @Inject constructor(
 
     val themeMode: Flow<String> = dataStore.data.map { it[THEME_MODE] ?: "system" }
     val scrobblingEnabled: Flow<Boolean> = dataStore.data.map { it[SCROBBLING_ENABLED] ?: false }
-    val persistQueue: Flow<Boolean> = dataStore.data.map { it[PERSIST_QUEUE] ?: false }
+    val persistQueue: Flow<Boolean> = dataStore.data.map { it[PERSIST_QUEUE] ?: true }
 
     // ── Sort preferences ─────────────────────────────────────────
 
@@ -298,7 +298,7 @@ class SettingsStore @Inject constructor(
     }
 
     suspend fun isPersistQueueEnabled(): Boolean =
-        dataStore.data.first()[PERSIST_QUEUE] ?: false
+        dataStore.data.first()[PERSIST_QUEUE] ?: true
 
     suspend fun getPersistedQueueState(): String? =
         dataStore.data.first()[PERSISTED_QUEUE_STATE]

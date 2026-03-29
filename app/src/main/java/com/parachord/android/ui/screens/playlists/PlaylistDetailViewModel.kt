@@ -1,9 +1,11 @@
 package com.parachord.android.ui.screens.playlists
 
+import android.util.Log
 import androidx.lifecycle.SavedStateHandle
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.parachord.android.data.db.dao.PlaylistDao
+import com.parachord.android.data.db.dao.PlaylistTrackDao
 import com.parachord.android.data.db.entity.PlaylistEntity
 import com.parachord.android.data.db.entity.PlaylistTrackEntity
 import com.parachord.android.data.db.entity.TrackEntity
@@ -13,9 +15,12 @@ import com.parachord.android.playback.PlaybackContext
 import com.parachord.android.playback.PlaybackController
 import com.parachord.android.resolver.PlaylistTrackInfo
 import com.parachord.android.resolver.TrackResolverCache
+import com.parachord.android.sync.SpotifySyncProvider
 import dagger.hilt.android.lifecycle.HiltViewModel
+import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
@@ -25,12 +30,18 @@ import javax.inject.Inject
 class PlaylistDetailViewModel @Inject constructor(
     savedStateHandle: SavedStateHandle,
     private val playlistDao: PlaylistDao,
+    private val playlistTrackDao: PlaylistTrackDao,
     private val libraryRepository: LibraryRepository,
     private val playbackController: PlaybackController,
     private val playbackStateHolder: com.parachord.android.playback.PlaybackStateHolder,
     private val settingsStore: SettingsStore,
     private val trackResolverCache: TrackResolverCache,
+    private val spotifySyncProvider: SpotifySyncProvider,
 ) : ViewModel() {
+
+    companion object {
+        private const val TAG = "PlaylistDetailVM"
+    }
 
     /** User-configured resolver priority order, used to sort resolver icons on track rows. */
     val resolverOrder: StateFlow<List<String>> = settingsStore.getResolverOrderFlow()
@@ -54,6 +65,14 @@ class PlaylistDetailViewModel @Inject constructor(
     val trackResolvers: StateFlow<Map<String, List<String>>> = trackResolverCache.trackResolvers
     val trackResolverConfidences: StateFlow<Map<String, Map<String, Float>>> = trackResolverCache.trackResolverConfidences
 
+    /** True when the remote playlist (Spotify) has changes not yet pulled locally. */
+    private val _hasRemoteUpdate = MutableStateFlow(false)
+    val hasRemoteUpdate: StateFlow<Boolean> = _hasRemoteUpdate.asStateFlow()
+
+    /** True while pulling remote changes. */
+    private val _isPulling = MutableStateFlow(false)
+    val isPulling: StateFlow<Boolean> = _isPulling.asStateFlow()
+
     init {
         // Run full resolver pipeline against playlist tracks in background (concurrent, deduplicated)
         viewModelScope.launch {
@@ -73,6 +92,65 @@ class PlaylistDetailViewModel @Inject constructor(
                 }
             }
         }
+
+        // Check if the remote playlist has been updated since last sync
+        checkForRemoteUpdate()
+    }
+
+    private fun checkForRemoteUpdate() {
+        viewModelScope.launch {
+            val pl = playlistDao.getById(playlistId) ?: return@launch
+            val spotifyId = pl.spotifyId ?: return@launch
+            val localSnapshot = pl.snapshotId ?: return@launch
+
+            try {
+                val remoteSnapshot = spotifySyncProvider.getPlaylistSnapshotId(spotifyId)
+                if (remoteSnapshot != null && remoteSnapshot != localSnapshot) {
+                    Log.d(TAG, "Remote update detected: local=$localSnapshot, remote=$remoteSnapshot")
+                    _hasRemoteUpdate.value = true
+                }
+            } catch (e: Exception) {
+                Log.d(TAG, "Failed to check remote playlist update: ${e.message}")
+            }
+        }
+    }
+
+    /** Pull the latest tracks from the remote source (Spotify). */
+    fun pullRemoteChanges() {
+        viewModelScope.launch {
+            val pl = playlistDao.getById(playlistId) ?: return@launch
+            val spotifyId = pl.spotifyId ?: return@launch
+
+            _isPulling.value = true
+            try {
+                val remoteTracks = spotifySyncProvider.fetchPlaylistTracks(spotifyId)
+                val remoteSnapshot = spotifySyncProvider.getPlaylistSnapshotId(spotifyId)
+
+                playlistTrackDao.deleteByPlaylistId(playlistId)
+                playlistTrackDao.insertAll(remoteTracks)
+
+                val now = System.currentTimeMillis()
+                playlistDao.update(pl.copy(
+                    trackCount = remoteTracks.size,
+                    snapshotId = remoteSnapshot ?: pl.snapshotId,
+                    updatedAt = now,
+                    lastModified = now,
+                    locallyModified = false,
+                ))
+
+                _hasRemoteUpdate.value = false
+                Log.d(TAG, "Pulled ${remoteTracks.size} tracks from Spotify playlist $spotifyId")
+            } catch (e: Exception) {
+                Log.e(TAG, "Failed to pull remote changes: ${e.message}", e)
+            } finally {
+                _isPulling.value = false
+            }
+        }
+    }
+
+    /** Dismiss the remote update banner without pulling. */
+    fun dismissRemoteUpdate() {
+        _hasRemoteUpdate.value = false
     }
 
     /** Play all tracks starting from the given index. */

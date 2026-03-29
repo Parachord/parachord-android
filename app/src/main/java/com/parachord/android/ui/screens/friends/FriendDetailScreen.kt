@@ -2,7 +2,6 @@ package com.parachord.android.ui.screens.friends
 
 import androidx.compose.foundation.background
 import com.parachord.android.ui.components.AlbumContextMenu
-import com.parachord.android.ui.components.ArtistContextMenu
 import com.parachord.android.ui.components.hapticClickable
 import com.parachord.android.ui.components.hapticCombinedClickable
 import androidx.compose.foundation.layout.Arrangement
@@ -206,8 +205,11 @@ fun FriendDetailScreen(
                     selectedPeriod = selectedPeriod,
                     onPeriodChanged = viewModel::setPeriod,
                     onArtistClick = onNavigateToArtist,
-                    onPlayArtistTopSongs = viewModel::playArtistTopSongs,
-                    onQueueArtistTopSongs = viewModel::queueArtistTopSongs,
+                    onPlayTopSongs = { viewModel.playArtistTopSongs(it) },
+                    onQueueTopSongs = { viewModel.queueArtistTopSongs(it) },
+                    onToggleArtistCollection = { name, imageUrl, inCol ->
+                        viewModel.toggleArtistCollection(name, imageUrl, inCol)
+                    },
                 )
             }
         }
@@ -514,31 +516,10 @@ private fun FriendTopArtistsTab(
     selectedPeriod: String,
     onPeriodChanged: (String) -> Unit,
     onArtistClick: (String) -> Unit = {},
-    onPlayArtistTopSongs: (String) -> Unit = {},
-    onQueueArtistTopSongs: (String) -> Unit = {},
+    onPlayTopSongs: (String) -> Unit = {},
+    onQueueTopSongs: (String) -> Unit = {},
+    onToggleArtistCollection: (name: String, imageUrl: String?, isInCollection: Boolean) -> Unit = { _, _, _ -> },
 ) {
-    var menuArtist by remember { mutableStateOf<HistoryArtist?>(null) }
-
-    menuArtist?.let { artist ->
-        ArtistContextMenu(
-            artistName = artist.name,
-            artworkUrl = artist.imageUrl,
-            onDismiss = { menuArtist = null },
-            onPlayTopTracks = {
-                onPlayArtistTopSongs(artist.name)
-                menuArtist = null
-            },
-            onQueueTopTracks = {
-                onQueueArtistTopSongs(artist.name)
-                menuArtist = null
-            },
-            onGoToArtist = {
-                onArtistClick(artist.name)
-                menuArtist = null
-            },
-        )
-    }
-
     Column(modifier = Modifier.fillMaxSize()) {
         PeriodFilter(selectedPeriod = selectedPeriod, onPeriodChanged = onPeriodChanged)
         when (artists) {
@@ -569,7 +550,10 @@ private fun FriendTopArtistsTab(
                             ArtistGridItem(
                                 artist = artist,
                                 onClick = { onArtistClick(artist.name) },
-                                onLongClick = { menuArtist = artist },
+                                onPlayTopSongs = { onPlayTopSongs(artist.name) },
+                                onQueueTopSongs = { onQueueTopSongs(artist.name) },
+                                onGoToArtist = { onArtistClick(artist.name) },
+                                onToggleCollection = { onToggleArtistCollection(artist.name, artist.imageUrl, false) },
                             )
                         }
                     }
@@ -583,13 +567,21 @@ private fun FriendTopArtistsTab(
 private fun ArtistGridItem(
     artist: HistoryArtist,
     onClick: () -> Unit = {},
-    onLongClick: (() -> Unit)? = null,
+    onPlayTopSongs: () -> Unit = {},
+    onQueueTopSongs: () -> Unit = {},
+    onGoToArtist: () -> Unit = {},
+    onToggleCollection: () -> Unit = {},
 ) {
+    var showMenu by remember { mutableStateOf(false) }
+
     Column(
         horizontalAlignment = Alignment.CenterHorizontally,
         modifier = Modifier
             .fillMaxWidth()
-            .hapticCombinedClickable(onClick = onClick, onLongClick = onLongClick),
+            .hapticCombinedClickable(
+                onClick = onClick,
+                onLongClick = { showMenu = true },
+            ),
     ) {
         AlbumArtCard(
             artworkUrl = artist.imageUrl,
@@ -612,6 +604,19 @@ private fun ArtistGridItem(
             style = MaterialTheme.typography.labelSmall,
             color = MaterialTheme.colorScheme.onSurfaceVariant,
             textAlign = TextAlign.Center,
+        )
+    }
+
+    if (showMenu) {
+        com.parachord.android.ui.components.ArtistContextMenu(
+            artistName = artist.name,
+            imageUrl = artist.imageUrl,
+            isInCollection = false,
+            onDismiss = { showMenu = false },
+            onPlayTopSongs = onPlayTopSongs,
+            onQueueTopSongs = onQueueTopSongs,
+            onGoToArtist = onGoToArtist,
+            onToggleCollection = onToggleCollection,
         )
     }
 }

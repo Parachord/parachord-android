@@ -33,9 +33,6 @@ import androidx.compose.material3.Text
 import androidx.compose.material3.TopAppBar
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
-import androidx.compose.runtime.mutableStateOf
-import androidx.compose.runtime.remember
-import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -73,19 +70,7 @@ fun WeeklyPlaylistScreen(
     val nowPlayingTitle by viewModel.nowPlayingTitle.collectAsStateWithLifecycle()
     val trackResolvers by viewModel.trackResolvers.collectAsStateWithLifecycle()
     val allPlaylists by viewModel.allPlaylists.collectAsStateWithLifecycle()
-
     val contextMenuState = rememberTrackContextMenuState()
-
-    TrackContextMenuHost(
-        state = contextMenuState,
-        playlists = allPlaylists,
-        onPlayNext = { viewModel.playNext(it) },
-        onAddToQueue = { viewModel.addToQueue(it) },
-        onAddToPlaylist = { playlist, track -> viewModel.addToPlaylist(playlist, track) },
-        onNavigateToArtist = onNavigateToArtist,
-        onNavigateToAlbum = onNavigateToAlbum,
-        onToggleCollection = { track, _ -> viewModel.addToCollection(track) },
-    )
 
     Column(modifier = modifier.fillMaxSize()) {
         TopAppBar(
@@ -236,6 +221,19 @@ fun WeeklyPlaylistScreen(
             }
         }
     }
+
+    TrackContextMenuHost(
+        state = contextMenuState,
+        playlists = allPlaylists,
+        onPlayNext = { viewModel.playNext(it) },
+        onAddToQueue = { viewModel.addToQueue(it) },
+        onAddToPlaylist = { playlist, track -> viewModel.addToPlaylist(playlist, track) },
+        onNavigateToArtist = onNavigateToArtist,
+        onNavigateToAlbum = onNavigateToAlbum,
+        onToggleCollection = { track, isInCollection ->
+            viewModel.toggleCollection(track, isInCollection)
+        },
+    )
 }
 
 @Composable

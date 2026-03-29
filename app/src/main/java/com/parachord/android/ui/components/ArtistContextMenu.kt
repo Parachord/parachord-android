@@ -13,6 +13,8 @@ import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.QueueMusic
+import androidx.compose.material.icons.filled.Favorite
+import androidx.compose.material.icons.filled.FavoriteBorder
 import androidx.compose.material.icons.filled.Person
 import androidx.compose.material.icons.filled.PlayArrow
 import androidx.compose.material3.ExperimentalMaterial3Api
@@ -35,11 +37,13 @@ import androidx.compose.ui.unit.sp
 @Composable
 fun ArtistContextMenu(
     artistName: String,
-    artworkUrl: String?,
+    imageUrl: String?,
+    isInCollection: Boolean,
     onDismiss: () -> Unit,
-    onPlayTopTracks: (() -> Unit)? = null,
-    onQueueTopTracks: (() -> Unit)? = null,
+    onPlayTopSongs: (() -> Unit)? = null,
+    onQueueTopSongs: (() -> Unit)? = null,
     onGoToArtist: (() -> Unit)? = null,
+    onToggleCollection: () -> Unit,
 ) {
     ModalBottomSheet(
         onDismissRequest = onDismiss,
@@ -71,7 +75,7 @@ fun ArtistContextMenu(
                 verticalAlignment = Alignment.CenterVertically,
             ) {
                 AlbumArtCard(
-                    artworkUrl = artworkUrl,
+                    artworkUrl = imageUrl,
                     size = 48.dp,
                     cornerRadius = 24.dp,
                     elevation = 1.dp,
@@ -91,27 +95,35 @@ fun ArtistContextMenu(
 
             HorizontalDivider(color = ModalDivider, modifier = Modifier.padding(vertical = 8.dp))
 
-            if (onPlayTopTracks != null) {
+            if (onPlayTopSongs != null) {
                 ContextMenuItem(
                     icon = Icons.Filled.PlayArrow,
-                    label = "Play Top Tracks",
-                    onClick = onPlayTopTracks,
+                    label = "Play Top Songs",
+                    onClick = { onPlayTopSongs(); onDismiss() },
                 )
             }
-            if (onQueueTopTracks != null) {
+            if (onQueueTopSongs != null) {
                 ContextMenuItem(
                     icon = Icons.AutoMirrored.Filled.QueueMusic,
-                    label = "Queue Top Tracks",
-                    onClick = onQueueTopTracks,
+                    label = "Queue Top Songs",
+                    onClick = { onQueueTopSongs(); onDismiss() },
                 )
             }
             if (onGoToArtist != null) {
                 ContextMenuItem(
                     icon = Icons.Filled.Person,
                     label = "Go to Artist",
-                    onClick = onGoToArtist,
+                    onClick = { onGoToArtist(); onDismiss() },
                 )
             }
+
+            HorizontalDivider(color = ModalDivider, modifier = Modifier.padding(vertical = 4.dp))
+
+            ContextMenuItem(
+                icon = if (isInCollection) Icons.Filled.Favorite else Icons.Filled.FavoriteBorder,
+                label = if (isInCollection) "Remove from Collection" else "Add to Collection",
+                onClick = { onToggleCollection(); onDismiss() },
+            )
         }
     }
 }

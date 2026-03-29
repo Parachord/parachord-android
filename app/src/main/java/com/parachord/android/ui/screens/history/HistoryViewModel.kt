@@ -334,6 +334,85 @@ class HistoryViewModel @Inject constructor(
         }
     }
 
+    // ── Artist actions ─────────────────────────────────────────────
+
+    fun playArtistTopSongs(artistName: String) {
+        viewModelScope.launch {
+            try {
+                val topTracks = metadataService.getArtistTopTracks(artistName, limit = 10)
+                if (topTracks.isEmpty()) return@launch
+                val entities = topTracks.mapNotNull { track ->
+                    val sources = resolverManager.resolveWithHints(
+                        query = "${track.artist} - ${track.title}",
+                        spotifyId = track.spotifyId,
+                        targetTitle = track.title,
+                        targetArtist = track.artist,
+                    )
+                    val best = resolverScoring.selectBest(sources) ?: return@mapNotNull null
+                    TrackEntity(
+                        id = "top-${track.title.hashCode()}-${track.artist.hashCode()}",
+                        title = track.title, artist = track.artist, album = track.album,
+                        duration = track.duration, artworkUrl = track.artworkUrl,
+                        sourceType = best.sourceType, sourceUrl = best.url, resolver = best.resolver,
+                        spotifyUri = best.spotifyUri, soundcloudId = best.soundcloudId, appleMusicId = best.appleMusicId,
+                    )
+                }
+                if (entities.isNotEmpty()) {
+                    playbackController.playQueue(
+                        entities, startIndex = 0,
+                        context = PlaybackContext(type = "artist", name = artistName),
+                    )
+                }
+            } catch (e: Exception) {
+                Log.e(TAG, "Failed to play top songs for '$artistName'", e)
+            }
+        }
+    }
+
+    fun queueArtistTopSongs(artistName: String) {
+        viewModelScope.launch {
+            try {
+                val topTracks = metadataService.getArtistTopTracks(artistName, limit = 10)
+                if (topTracks.isEmpty()) return@launch
+                val entities = topTracks.mapNotNull { track ->
+                    val sources = resolverManager.resolveWithHints(
+                        query = "${track.artist} - ${track.title}",
+                        spotifyId = track.spotifyId,
+                        targetTitle = track.title,
+                        targetArtist = track.artist,
+                    )
+                    val best = resolverScoring.selectBest(sources) ?: return@mapNotNull null
+                    TrackEntity(
+                        id = "top-${track.title.hashCode()}-${track.artist.hashCode()}",
+                        title = track.title, artist = track.artist, album = track.album,
+                        duration = track.duration, artworkUrl = track.artworkUrl,
+                        sourceType = best.sourceType, sourceUrl = best.url, resolver = best.resolver,
+                        spotifyUri = best.spotifyUri, soundcloudId = best.soundcloudId, appleMusicId = best.appleMusicId,
+                    )
+                }
+                if (entities.isNotEmpty()) playbackController.addToQueue(entities)
+            } catch (e: Exception) {
+                Log.e(TAG, "Failed to queue top songs for '$artistName'", e)
+            }
+        }
+    }
+
+    fun toggleArtistCollection(artistName: String, imageUrl: String?, isInCollection: Boolean) {
+        viewModelScope.launch {
+            if (isInCollection) {
+                libraryRepository.deleteArtistByName(artistName)
+            } else {
+                libraryRepository.addArtist(
+                    com.parachord.android.data.db.entity.ArtistEntity(
+                        id = "manual-${java.util.UUID.randomUUID()}",
+                        name = artistName,
+                        imageUrl = imageUrl,
+                    )
+                )
+            }
+        }
+    }
+
     // ── Album actions ────────────────────────────────────────────────
 
     fun addAlbumToCollection(title: String, artist: String, artworkUrl: String?) {

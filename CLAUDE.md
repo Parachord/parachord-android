@@ -152,6 +152,8 @@ The desktop fetches `GET /1/user/{username}/playlists/createdfor?count=100` (pub
 
 On Android, `WeeklyPlaylistsRepository` mirrors this pattern. The home screen shows both sections as horizontal carousels (`LazyRow`). Tapping a card navigates to `WeeklyPlaylistScreen` (ephemeral view with a Save button). The play button on each card triggers immediate playback via `HomeViewModel.playWeeklyPlaylist()`.
 
+`WeeklyPlaylistScreen` supports standard track context menus (long-press) via `TrackContextMenuHost` — Play Next, Add to Queue, Add to Playlist, Go to Artist/Album, and collection toggle.
+
 Ephemeral playlists use the ID format `listenbrainz-{playlistMbid}` when saved to Room.
 
 ### Album Context Menus
@@ -174,6 +176,28 @@ Every album card across the app supports long-press context menus via the shared
 Pass `null` for any action that isn't applicable in a given context (the menu item is hidden).
 
 **Screens with album context menus:** LibraryScreen, HomeScreen (recent albums, AI suggestions), ArtistScreen (discography), HistoryScreen (top albums), FriendDetailScreen (top albums), PopOfTheTopsScreen (chart albums).
+
+### Artist Context Menus
+
+Every artist card grid across the app supports long-press context menus via the shared `ArtistContextMenu` component (`ui/components/ArtistContextMenu.kt`). This is an always-dark `ModalBottomSheet` matching the album context menu styling.
+
+**Pattern for adding artist context menus to a screen:**
+1. Import `ArtistContextMenu` and `hapticCombinedClickable`
+2. Change the artist card's modifier from `hapticClickable` to `hapticCombinedClickable(onClick = ..., onLongClick = ...)`
+3. Add `var showMenu by remember { mutableStateOf(false) }` state per item
+4. Show `ArtistContextMenu` when `showMenu` is true
+
+**ArtistContextMenu callbacks** — all optional except `onToggleCollection`:
+- `onPlayTopSongs` — fetch and play the artist's top tracks via `metadataService.getArtistTopTracks()`
+- `onQueueTopSongs` — fetch and queue the artist's top tracks
+- `onGoToArtist` — navigate to the artist screen
+- `onToggleCollection` — add/remove artist from collection (required)
+
+Pass `null` for any action that isn't applicable in a given context (the menu item is hidden).
+
+**Screens with artist context menus:** LibraryScreen (artist grid), ArtistScreen (related artists), HistoryScreen (top artists), FriendDetailScreen (top artists), RecommendationsScreen (recommended artists), HomeScreen (AI artist suggestions).
+
+**ViewModel requirements:** Each ViewModel that supports artist context menus needs `playArtistTopSongs(artistName)`, `queueArtistTopSongs(artistName)`, and `toggleArtistCollection(artistName, imageUrl, isInCollection)` methods. These require `MetadataService`, `ResolverManager`, `ResolverScoring`, and `PlaybackController` as dependencies. Currently implemented in: LibraryViewModel, ArtistViewModel, HistoryViewModel, FriendDetailViewModel, RecommendationsViewModel, HomeViewModel.
 
 ### Queue Album by Name Pattern
 
@@ -214,6 +238,23 @@ To reactively check if an album is in the user's collection (for toggle UI in co
 - Always add a TTL or force-refresh mechanism. A `@Volatile var cacheTimestamp` with a TTL check prevents serving stale data indefinitely.
 - For data that changes frequently (weekly playlists, charts), prefer `forceRefresh = true` from the ViewModel `init` since API calls are cheap.
 - For expensive data (AI recommendations), use stale-while-revalidate: show cached data immediately, refresh in background.
+
+### On Tour Indicator — Location-Filtered
+
+The "On Tour" teal dot (`#10C9B4`) appears next to the artist name in the mini player and Now Playing screen when the currently playing artist has upcoming concerts near the user's configured concert area.
+
+**Desktop behavior (source of truth):**
+1. Check if the artist matches any event (primary artist or in lineup).
+2. If the user has set a concert location (`concertsLocationCoords`), filter events by haversine distance ≤ `concertsLocationRadius` (default 50mi). Falls back to city-name text matching when venue has no coordinates.
+3. If **no location is configured**, any upcoming event counts — the dot shows for any touring artist (desktop: `if (!concertsLocationCoords) return true`).
+4. The dot is clickable — navigates to the artist page with the "On Tour" tab selected.
+
+**Android implementation:**
+- `ConcertsRepository.checkOnTour(artistName, lat, lon, radiusMiles)` queries Ticketmaster + SeatGeek with location params. When `lat`/`lon` are null (no location configured), queries without location filtering (any event counts).
+- `MainViewModel` and `NowPlayingViewModel` read `settingsStore.getConcertLocation()` and pass it to `checkOnTour()`.
+- The **ArtistScreen's On Tour tab** is intentionally unfiltered by location — it shows the full tour schedule for browsing all dates.
+
+**Key files:** `ConcertsRepository.kt`, `MainViewModel.kt`, `NowPlayingViewModel.kt`, `MiniPlayer.kt`, `NowPlayingScreen.kt`
 
 ## Design System & Theming
 
@@ -365,8 +406,9 @@ static let darkAccentPurple = Color(hex: "#a78bfa")
 | Apple Music bridge | `playback/handlers/MusicKitWebBridge.kt`, `assets/js/musickit-bridge.html` |
 | Settings/defaults | `data/store/SettingsStore.kt` |
 | Theme | `ui/theme/Theme.kt` |
-| Shared UI components | `ui/components/AlbumContextMenu.kt`, `ui/components/TrackRow.kt`, `ui/components/ResolverIconRow.kt` |
+| Shared UI components | `ui/components/AlbumContextMenu.kt`, `ui/components/ArtistContextMenu.kt`, `ui/components/TrackContextMenu.kt`, `ui/components/TrackRow.kt`, `ui/components/ResolverIconRow.kt` |
 | Weekly playlists | `data/repository/WeeklyPlaylistsRepository.kt`, `ui/screens/playlists/WeeklyPlaylistScreen.kt`, `WeeklyPlaylistViewModel.kt` |
+| Concerts / On Tour | `data/repository/ConcertsRepository.kt`, `data/api/TicketmasterApi.kt`, `data/api/SeatGeekApi.kt`, `ui/screens/discover/ConcertsScreen.kt` |
 
 ## Common Mistakes to Avoid
 
