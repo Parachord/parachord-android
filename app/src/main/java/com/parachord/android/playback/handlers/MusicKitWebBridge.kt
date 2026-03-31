@@ -693,6 +693,22 @@ class MusicKitWebBridge @Inject constructor(
         fun onEvalResult(callId: String, result: String) {
             evalCallbacks.remove(callId)?.complete(result)
         }
+
+        /** Keep-alive ping from the JS setInterval — keeps the WebView JS
+         *  thread scheduled when the screen is off. Also provides a fallback
+         *  position/duration update independent of the polling loop. */
+        @JavascriptInterface
+        fun onKeepAlive(positionDuration: String) {
+            // Parse "posMs/durMs" and update cached state as a side channel
+            // when the polling loop can't reach the Main thread.
+            val parts = positionDuration.split("/")
+            if (parts.size == 2) {
+                val pos = parts[0].toLongOrNull() ?: return
+                val dur = parts[1].toLongOrNull() ?: return
+                _position.value = pos
+                if (dur > 0) _duration.value = dur
+            }
+        }
     }
 
     // ── Private Helpers ───────────────────────────────────────────
