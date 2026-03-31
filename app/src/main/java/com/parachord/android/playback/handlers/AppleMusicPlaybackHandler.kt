@@ -42,8 +42,12 @@ class AppleMusicPlaybackHandler @Inject constructor(
 
     override suspend fun createMediaItem(track: TrackEntity) = null // External playback
 
+    /** Timestamp when play() was called — used for grace period in isOurTrackDone(). */
+    private var playStartedAt: Long = 0L
+
     override suspend fun play(track: TrackEntity) {
         val songId = track.appleMusicId ?: return
+        playStartedAt = System.currentTimeMillis()
         // Ensure configured — configure() also restores saved MUT if available
         if (!musicKitBridge.configured.value) {
             if (!musicKitBridge.configure()) {
@@ -102,6 +106,12 @@ class AppleMusicPlaybackHandler @Inject constructor(
      * Simpler than Spotify's detection since MusicKit JS reports state directly.
      */
     fun isOurTrackDone(): Boolean {
+        // Grace period: don't trigger auto-advance within 5s of starting playback.
+        // MusicKit can report transient !isPlaying states during initial buffering,
+        // DRM negotiation, or WebView setup — same pattern as Spotify's grace period.
+        val elapsed = System.currentTimeMillis() - playStartedAt
+        if (elapsed < 5000) return false
+
         val playing = isPlaying()
         val state = musicKitBridge.playbackStateName
 
