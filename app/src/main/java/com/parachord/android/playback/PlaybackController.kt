@@ -841,8 +841,13 @@ class PlaybackController @Inject constructor(
                     // Actively poll JS for fresh position/duration — the
                     // playbackStateDidChange event only fires on state transitions,
                     // not continuously during playback.
-                    withContext(Dispatchers.Main) {
-                        handler.musicKitBridge.pollPlaybackState()
+                    // Use a timeout because Android defers Dispatchers.Main when
+                    // the screen is off — without it, the entire polling loop
+                    // hangs waiting for the Main thread, and the process gets killed.
+                    kotlinx.coroutines.withTimeoutOrNull(3000) {
+                        withContext(Dispatchers.Main) {
+                            handler.musicKitBridge.pollPlaybackState()
+                        }
                     }
 
                     val position = handler.getPosition()
@@ -884,12 +889,14 @@ class PlaybackController @Inject constructor(
                         if (now - lastRecoveryAttempt >= backoffMs) {
                             lastRecoveryAttempt = now
                             Log.d(TAG, "Apple Music stalled (count=$stallCount), attempting recovery at pos=$position")
-                            withContext(Dispatchers.Main) {
-                                try {
-                                    handler.seekTo(position)
-                                    handler.resume()
-                                } catch (e: Exception) {
-                                    Log.w(TAG, "Stall recovery attempt failed", e)
+                            kotlinx.coroutines.withTimeoutOrNull(3000) {
+                                withContext(Dispatchers.Main) {
+                                    try {
+                                        handler.seekTo(position)
+                                        handler.resume()
+                                    } catch (e: Exception) {
+                                        Log.w(TAG, "Stall recovery attempt failed", e)
+                                    }
                                 }
                             }
                         }

@@ -97,7 +97,7 @@ class PlaylistDetailViewModel @Inject constructor(
         checkForRemoteUpdate()
     }
 
-    private fun checkForRemoteUpdate() {
+    fun checkForRemoteUpdate() {
         viewModelScope.launch {
             val pl = playlistDao.getById(playlistId) ?: return@launch
             val spotifyId = pl.spotifyId ?: return@launch

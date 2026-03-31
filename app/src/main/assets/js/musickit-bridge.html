@@ -369,6 +369,19 @@
             }
         });
     }
+
+    // Keep-alive: prevent Android from suspending the WebView JS thread
+    // when the screen is off. A periodic timer keeps the JS engine active
+    // so MusicKit's audio playback and event callbacks continue working.
+    setInterval(function() {
+        if (music && music.isPlaying) {
+            var pos = music.currentPlaybackTime;
+            var dur = music.currentPlaybackDuration;
+            if (window.MusicKitBridge) {
+                MusicKitBridge.onKeepAlive('' + Math.round(pos * 1000) + '/' + Math.round(dur * 1000));
+            }
+        }
+    }, 1000);
 </script>
 </body>
 </html>

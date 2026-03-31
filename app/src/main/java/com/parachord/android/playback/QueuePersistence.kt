@@ -52,7 +52,7 @@ class QueuePersistence @Inject constructor(
             ) { snapshot, playbackState, enabled ->
                 Triple(snapshot, playbackState, enabled)
             }
-                .debounce(2000)
+                .debounce(500)
                 .collectLatest { (snapshot, playbackState, enabled) ->
                     if (!enabled) return@collectLatest
                     save(playbackState.currentTrack, snapshot)
