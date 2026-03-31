@@ -92,6 +92,13 @@ fun PlaylistDetailScreen(
     val resolverOrder by viewModel.resolverOrder.collectAsStateWithLifecycle()
     val trackResolvers by viewModel.trackResolvers.collectAsStateWithLifecycle()
     val trackResolverConfidences by viewModel.trackResolverConfidences.collectAsStateWithLifecycle()
+
+    // Re-check for remote updates every time the screen is displayed,
+    // not just on ViewModel init (which doesn't re-run on back navigation).
+    LaunchedEffect(Unit) {
+        viewModel.checkForRemoteUpdate()
+    }
+
     val hasRemoteUpdate by viewModel.hasRemoteUpdate.collectAsStateWithLifecycle()
     val isPulling by viewModel.isPulling.collectAsStateWithLifecycle()
     val contextMenuState = rememberTrackContextMenuState()
