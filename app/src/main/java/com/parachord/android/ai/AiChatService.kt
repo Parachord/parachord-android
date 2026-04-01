@@ -6,6 +6,9 @@ import com.parachord.android.ai.tools.DjToolExecutor
 import com.parachord.android.data.db.dao.ChatMessageDao
 import com.parachord.android.data.db.entity.ChatMessageEntity
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.withContext
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonElement
@@ -31,6 +34,23 @@ class AiChatService @Inject constructor(
         private const val MAX_TOOL_ITERATIONS = 5
         /** 30 days in milliseconds. */
         private const val RETENTION_MILLIS = 30L * 24 * 60 * 60 * 1000
+    }
+
+    /**
+     * Pending chat prompt set by deep links (parachord://chat?prompt=...).
+     * ChatViewModel observes this and auto-sends the prompt when non-null.
+     */
+    private val _pendingChatPrompt = MutableStateFlow<String?>(null)
+    val pendingChatPrompt: StateFlow<String?> = _pendingChatPrompt.asStateFlow()
+
+    /** Set a prompt to be auto-sent when the chat screen opens. */
+    fun setPendingChatPrompt(prompt: String?) {
+        _pendingChatPrompt.value = prompt
+    }
+
+    /** Consume the pending prompt (returns it and clears it). */
+    fun consumePendingChatPrompt(): String? {
+        return _pendingChatPrompt.getAndSet(null)
     }
 
     /** In-memory cache of per-provider histories, lazily populated from Room. */
