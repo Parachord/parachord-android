@@ -3,6 +3,10 @@ package com.parachord.android.playback
 import android.content.ComponentName
 import android.content.Context
 import android.content.Intent
+import android.net.ConnectivityManager
+import android.net.Network
+import android.net.NetworkCapabilities
+import android.net.NetworkRequest
 import android.net.wifi.WifiManager
 import android.os.PowerManager
 import android.util.Log
@@ -109,6 +113,23 @@ class PlaybackController @Inject constructor(
             .createWifiLock(WifiManager.WIFI_MODE_FULL_HIGH_PERF, "Parachord::ExternalPlayback")
             .apply { setReferenceCounted(false) }
     }
+
+    /**
+     * ConnectivityManager network request to keep the active network (Wi-Fi OR cellular)
+     * alive during external playback. The WiFi lock only helps when on Wi-Fi — on
+     * cellular (5G/LTE), Android can still restrict network access during Doze even
+     * with a foreground service. This explicit network request tells Android to
+     * maintain internet connectivity regardless of transport.
+     */
+    private val connectivityManager: ConnectivityManager by lazy {
+        context.getSystemService(Context.CONNECTIVITY_SERVICE) as ConnectivityManager
+    }
+    private val networkRequest: NetworkRequest by lazy {
+        NetworkRequest.Builder()
+            .addCapability(NetworkCapabilities.NET_CAPABILITY_INTERNET)
+            .build()
+    }
+    private var networkCallback: ConnectivityManager.NetworkCallback? = null
 
     /** Listener called when a track naturally completes (auto-advance, not user skip). */
     var onTrackEndedListener: (() -> Unit)? = null
@@ -905,6 +926,25 @@ class PlaybackController @Inject constructor(
             wifiLock.acquire()
             Log.d(TAG, "Acquired WifiLock for external playback streaming")
         }
+        // Request an active network to keep cellular (5G/LTE) alive during Doze.
+        // The WiFi lock only helps Wi-Fi — this covers all transports.
+        if (networkCallback == null) {
+            val callback = object : ConnectivityManager.NetworkCallback() {
+                override fun onAvailable(network: Network) {
+                    Log.d(TAG, "Network available for external playback: $network")
+                }
+                override fun onLost(network: Network) {
+                    Log.w(TAG, "Network lost during external playback: $network")
+                }
+            }
+            try {
+                connectivityManager.requestNetwork(networkRequest, callback)
+                networkCallback = callback
+                Log.d(TAG, "Requested network keep-alive for external playback")
+            } catch (e: Exception) {
+                Log.w(TAG, "Failed to request network keep-alive", e)
+            }
+        }
     }
 
     private fun releaseExternalPlaybackWakeLock() {
@@ -915,6 +955,15 @@ class PlaybackController @Inject constructor(
         if (wifiLock.isHeld) {
             wifiLock.release()
             Log.d(TAG, "Released WifiLock for external playback streaming")
+        }
+        networkCallback?.let { callback ->
+            try {
+                connectivityManager.unregisterNetworkCallback(callback)
+                Log.d(TAG, "Released network keep-alive for external playback")
+            } catch (e: Exception) {
+                Log.w(TAG, "Failed to unregister network callback", e)
+            }
+            networkCallback = null
         }
     }
 
