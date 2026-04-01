@@ -4,6 +4,7 @@ import android.net.Uri
 import android.util.Log
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
+import com.parachord.android.ai.AiChatService
 import com.parachord.android.data.db.entity.TrackEntity
 import com.parachord.android.playback.PlaybackController
 import com.parachord.android.playback.QueueManager
@@ -61,6 +62,7 @@ class DeepLinkViewModel @Inject constructor(
     private val queueManager: QueueManager,
     private val resolverManager: ResolverManager,
     private val playlistImportManager: PlaylistImportManager,
+    private val chatService: AiChatService,
 ) : ViewModel() {
 
     private val _navEvents = MutableSharedFlow<DeepLinkNavEvent>()
@@ -254,7 +256,12 @@ class DeepLinkViewModel @Inject constructor(
 
                 is DeepLinkAction.NavigateSearch -> _navEvents.emit(DeepLinkNavEvent.Search(action.query))
 
-                is DeepLinkAction.NavigateChat -> _navEvents.emit(DeepLinkNavEvent.Chat(action.prompt))
+                is DeepLinkAction.NavigateChat -> {
+                    if (action.prompt != null) {
+                        chatService.setPendingChatPrompt(action.prompt)
+                    }
+                    _navEvents.emit(DeepLinkNavEvent.Chat(action.prompt))
+                }
 
                 // ── Import ────────────────────────────────────────────────
 

@@ -69,7 +69,14 @@ class ChatViewModel @Inject constructor(
                         providersList.firstOrNull { it.id == saved && it.isConfigured }
                     } else null
                     val provider = target ?: providersList.firstOrNull { it.isConfigured }
-                    provider?.let { selectProvider(it.id) }
+                    provider?.let {
+                        selectProvider(it.id)
+                        // Check for a pending prompt from a deep link (parachord://chat?prompt=...)
+                        val pendingPrompt = chatService.consumePendingChatPrompt()
+                        if (pendingPrompt != null) {
+                            sendMessage(pendingPrompt)
+                        }
+                    }
                 }
             }
         }
