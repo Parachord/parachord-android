@@ -3,6 +3,7 @@ package com.parachord.android.playback
 import android.content.ComponentName
 import android.content.Context
 import android.content.Intent
+import android.net.wifi.WifiManager
 import android.os.PowerManager
 import android.util.Log
 import android.widget.Toast
@@ -105,6 +106,18 @@ class PlaybackController @Inject constructor(
     private val wakeLock: PowerManager.WakeLock by lazy {
         (context.getSystemService(Context.POWER_SERVICE) as PowerManager)
             .newWakeLock(PowerManager.PARTIAL_WAKE_LOCK, "Parachord::ExternalPlayback")
+            .apply { setReferenceCounted(false) }
+    }
+
+    /**
+     * WiFi lock held during external playback to prevent the WiFi radio from
+     * sleeping when the screen is off. ExoPlayer handles this automatically via
+     * WAKE_MODE_NETWORK, but Apple Music streams through a WebView that needs
+     * an explicit WiFi lock to maintain its connection.
+     */
+    private val wifiLock: WifiManager.WifiLock by lazy {
+        (context.applicationContext.getSystemService(Context.WIFI_SERVICE) as WifiManager)
+            .createWifiLock(WifiManager.WIFI_MODE_FULL_HIGH_PERF, "Parachord::ExternalPlayback")
             .apply { setReferenceCounted(false) }
     }
 
@@ -985,12 +998,20 @@ class PlaybackController @Inject constructor(
             wakeLock.acquire(60 * 60 * 1000L)
             Log.d(TAG, "Acquired WakeLock for external playback polling")
         }
+        if (!wifiLock.isHeld) {
+            wifiLock.acquire()
+            Log.d(TAG, "Acquired WifiLock for external playback streaming")
+        }
     }
 
     private fun releaseExternalPlaybackWakeLock() {
         if (wakeLock.isHeld) {
             wakeLock.release()
             Log.d(TAG, "Released WakeLock for external playback polling")
+        }
+        if (wifiLock.isHeld) {
+            wifiLock.release()
+            Log.d(TAG, "Released WifiLock for external playback streaming")
         }
     }
 
