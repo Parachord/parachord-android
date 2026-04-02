@@ -285,11 +285,15 @@ fun NowPlayingScreen(
                 val streamingMeta = playbackState.streamingMetadata
                 val displayArtworkUrl = streamingMeta?.artworkUrl ?: track?.artworkUrl
 
-                // Large album artwork — tap to open album page
+                // Large album artwork — tap to open album page.
+                // Dynamically sized: takes remaining height after fixed elements
+                // (metadata, seek bar, controls, bottom row) are accounted for.
+                // This prevents the play/pause button from being pushed off screen
+                // when the title wraps to 2 lines.
                 AlbumArtCardFill(
                     artworkUrl = displayArtworkUrl,
                     modifier = Modifier
-                        .fillMaxWidth(0.85f)
+                        .weight(1f)
                         .padding(horizontal = 8.dp)
                         .then(
                             if (track?.album != null && track.artist.isNotBlank()) {
@@ -303,7 +307,7 @@ fun NowPlayingScreen(
                     placeholderName = track?.artist ?: track?.title,
                 )
 
-                Spacer(modifier = Modifier.height(32.dp))
+                Spacer(modifier = Modifier.height(16.dp))
 
                 // Display actual streaming metadata when available, fall back to queued track
                 val displayTitle = streamingMeta?.title ?: track?.title ?: "No track playing"
@@ -535,7 +539,7 @@ fun NowPlayingScreen(
                     }
                 }
 
-                Spacer(modifier = Modifier.weight(1f))
+                Spacer(modifier = Modifier.height(16.dp))
 
                 // Bottom row: Queue (left) and Spinoff (right)
                 Row(
