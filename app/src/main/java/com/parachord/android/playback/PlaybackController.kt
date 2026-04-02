@@ -1100,7 +1100,13 @@ class PlaybackController @Inject constructor(
         val intent = Intent(context, PlaybackService::class.java).apply {
             action = PlaybackService.ACTION_EXTERNAL_PLAYBACK_STOP
         }
-        context.startService(intent)
+        try {
+            context.startService(intent)
+        } catch (e: Exception) {
+            // On Android 12+, startService() throws when the app is backgrounded.
+            // The service will demote itself when it next checks isExternalForeground.
+            Log.w(TAG, "sendExternalPlaybackStop: startService failed (app backgrounded): ${e.message}")
+        }
     }
 
     // ── Spinoff public API ────────────────────────────────────────────────

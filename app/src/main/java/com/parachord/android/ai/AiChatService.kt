@@ -50,7 +50,9 @@ class AiChatService @Inject constructor(
 
     /** Consume the pending prompt (returns it and clears it). */
     fun consumePendingChatPrompt(): String? {
-        return _pendingChatPrompt.getAndSet(null)
+        val value = _pendingChatPrompt.value
+        _pendingChatPrompt.value = null
+        return value
     }
 
     /** In-memory cache of per-provider histories, lazily populated from Room. */
