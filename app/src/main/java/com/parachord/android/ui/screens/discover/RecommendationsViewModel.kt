@@ -124,45 +124,35 @@ class RecommendationsViewModel @Inject constructor(
     }
 
     /**
-     * Resolve a recommended track through the resolver pipeline and play it.
-     * Builds a [TrackEntity] from the best resolved source, then hands it to [PlaybackController].
+     * Play a recommended track and populate the queue with the remaining
+     * tracks in the filtered list — same pattern as library, playlists, etc.
+     *
+     * Tracks are added as metadata-only [TrackEntity] objects (no resolver data).
+     * [PlaybackController.playTrackInternal] resolves each track on-the-fly
+     * via the resolver pipeline when it's time to play, and
+     * [TrackResolverCache.resolveInBackground] pre-resolves upcoming tracks
+     * so resolver badges appear and playback starts instantly.
      */
     fun playTrack(track: RecommendedTrack) {
-        viewModelScope.launch {
-            try {
-                val query = "${track.title} ${track.artist}"
-                val sources = resolverManager.resolve(
-                    query,
-                    targetTitle = track.title,
-                    targetArtist = track.artist,
-                )
-                val best = resolverScoring.selectBest(sources)
-                if (best == null) {
-                    Log.w(TAG, "No resolver result for '${track.title}' by ${track.artist}")
-                    return@launch
-                }
+        val allTracks = (recommendedTracks.value as? Resource.Success)?.data ?: return
+        val index = allTracks.indexOf(track).coerceAtLeast(0)
 
-                val entity = TrackEntity(
-                    id = best.spotifyId ?: best.soundcloudId ?: best.appleMusicId
-                        ?: UUID.randomUUID().toString(),
-                    title = track.title,
-                    artist = track.artist,
-                    album = track.album,
-                    duration = track.duration,
-                    artworkUrl = track.artworkUrl,
-                    sourceType = best.sourceType,
-                    sourceUrl = best.url,
-                    resolver = best.resolver,
-                    spotifyUri = best.spotifyUri,
-                    spotifyId = best.spotifyId,
-                    soundcloudId = best.soundcloudId,
-                    appleMusicId = best.appleMusicId,
-                )
-                playbackController.playTrack(entity)
-            } catch (e: Exception) {
-                Log.e(TAG, "Failed to resolve and play '${track.title}'", e)
-            }
+        val entities = allTracks.map { t ->
+            TrackEntity(
+                id = "rec-${t.title.hashCode()}-${t.artist.hashCode()}",
+                title = t.title,
+                artist = t.artist,
+                album = t.album,
+                duration = t.duration,
+                artworkUrl = t.artworkUrl,
+            )
         }
+
+        playbackController.playQueue(
+            entities,
+            startIndex = index,
+            context = PlaybackContext(type = "recommendations", name = "Recommended Songs"),
+        )
     }
 
     // ── Artist actions ─────────────────────────────────────────────
