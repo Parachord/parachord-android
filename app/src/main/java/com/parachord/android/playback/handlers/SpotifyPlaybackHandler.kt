@@ -49,7 +49,11 @@ class SpotifyPlaybackHandler @Inject constructor(
 
     companion object {
         private const val TAG = "SpotifyPlayback"
-        private const val MAX_POLL_FAILURES = 10
+        // Raised from 10 → 30 to tolerate Doze mode network delays.
+        // At ~1s polling interval, 30 failures ≈ 30s of API unreachability.
+        // Doze can delay network for 15+ seconds; the old threshold of 10
+        // caused false track-done signals when the screen was off.
+        private const val MAX_POLL_FAILURES = 30
         private const val SPOTIFY_PACKAGE = "com.spotify.music"
         /** Max time to wait for Spotify to register as a Connect device after launching. */
         private const val WAKE_TIMEOUT_MS = 15000L
@@ -728,6 +732,10 @@ class SpotifyPlaybackHandler @Inject constructor(
 
         // 6. Poll failures watchdog: if we can't reach the API for ~10s,
         // the track likely ended and Spotify went idle.
+        // IMPORTANT: Only trigger this when we have NO recent successful polls.
+        // During Doze mode, network requests can fail transiently — the track
+        // may still be playing fine on the Spotify side. Require failures to
+        // significantly exceed the threshold before treating as done.
         if (consecutivePollFailures >= MAX_POLL_FAILURES) {
             Log.w(TAG, "Watchdog: $consecutivePollFailures consecutive poll failures, treating as done")
             return true
@@ -738,11 +746,22 @@ class SpotifyPlaybackHandler @Inject constructor(
         // Uses wall-clock time instead of poll count — the controller polls at
         // 500ms but the handler updates cached state at ~1s + API latency, so
         // count-based detection false-positives when the API is slow.
-        if (cachedIsPlaying && cachedPosition > 0 && lastPositionChangeTime > 0) {
+        // CRITICAL: Do NOT fire during poll failures — if we can't reach the
+        // API, position won't update, but that doesn't mean the track stopped.
+        // The stale-position watchdog should only trigger when polls ARE
+        // succeeding but position isn't advancing (actual playback stall).
+        if (cachedIsPlaying && cachedPosition > 0 && lastPositionChangeTime > 0 &&
+            consecutivePollFailures == 0
+        ) {
             val staleDuration = System.currentTimeMillis() - lastPositionChangeTime
             if (staleDuration >= 15000) {
-                Log.w(TAG, "Watchdog: position stale at ${cachedPosition}ms for ${staleDuration}ms, treating as done")
+                Log.w(TAG, "Watchdog: position stale at ${cachedPosition}ms for ${staleDuration}ms (polls OK), treating as done")
                 return true
+            }
+        } else if (cachedIsPlaying && consecutivePollFailures > 0 && lastPositionChangeTime > 0) {
+            val staleDuration = System.currentTimeMillis() - lastPositionChangeTime
+            if (staleDuration >= 15000) {
+                Log.w(TAG, "Watchdog: position stale ${staleDuration}ms BUT $consecutivePollFailures poll failures — NOT treating as done (likely Doze)")
             }
         }
 
@@ -833,6 +852,9 @@ class SpotifyPlaybackHandler @Inject constructor(
                         }
                     } else {
                         consecutivePollFailures++
+                        if (consecutivePollFailures == 1 || consecutivePollFailures % 5 == 0) {
+                            Log.w(TAG, "State poll returned null ($consecutivePollFailures consecutive, lastPos=$cachedPosition, playing=$cachedIsPlaying)")
+                        }
                     }
                 } catch (e: Exception) {
                     consecutivePollFailures++

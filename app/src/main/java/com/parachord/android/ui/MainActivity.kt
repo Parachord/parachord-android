@@ -129,6 +129,14 @@ class MainActivity : ComponentActivity() {
         musicKitBridge.setActivity(null)
     }
 
+    // NOTE: We intentionally do NOT override onStop() to call keepAlive().
+    // WebView.onResume()/resumeTimers() can block the main thread when the
+    // Chromium renderer is being suspended, causing a background ANR that
+    // kills the process. The brief WebView stutter on screen-off (~500ms)
+    // recovers on its own and is far less harmful than a process kill.
+    // keepAlive() is called from MusicKitWebBridge.play() instead, which
+    // runs while the app is in the foreground.
+
     override fun onNewIntent(intent: Intent) {
         super.onNewIntent(intent)
         handleDeepLink(intent)

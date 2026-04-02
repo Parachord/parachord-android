@@ -261,7 +261,6 @@ class PlaybackController @Inject constructor(
                 Log.d(TAG, "Spinoff: playing next '${next.title}' by ${next.artist} (${spinoffPool.size} remaining)")
                 advanceJob = scope.launch {
                     try {
-                        if (isExternalPlayback) router.stopExternalPlayback()
                         playTrackInternal(next)
                     } catch (e: Exception) {
                         if (e is kotlinx.coroutines.CancellationException) throw e
@@ -293,8 +292,15 @@ class PlaybackController @Inject constructor(
         Log.d(TAG, "skipNext: advancing to '${next.title}' by ${next.artist}")
         advanceJob = scope.launch {
             try {
-                if (isExternalPlayback) router.stopExternalPlayback()
+                val transitionStart = System.currentTimeMillis()
+                // Don't call router.stopExternalPlayback() here — it sends an
+                // async stop() to MusicKit/Spotify that races with the new play()
+                // call. The stop arrives after the new track starts, pausing it.
+                // playTrackInternal() handles the transition: for external→external,
+                // the new handler.play() replaces the queue directly. For
+                // external→ExoPlayer, the ExoPlayer path sends the stop.
                 playTrackInternal(next)
+                Log.d(TAG, "skipNext: full transition took ${System.currentTimeMillis() - transitionStart}ms")
             } catch (e: Exception) {
                 if (e is kotlinx.coroutines.CancellationException) throw e
                 Log.e(TAG, "Advance to '${next.title}' failed: ${e.message}", e)
@@ -326,7 +332,6 @@ class PlaybackController @Inject constructor(
         advanceJob?.cancel()
         advanceJob = scope.launch {
             try {
-                if (isExternalPlayback) router.stopExternalPlayback()
                 playTrackInternal(prev)
             } catch (e: Exception) {
                 if (e is kotlinx.coroutines.CancellationException) throw e
@@ -342,7 +347,6 @@ class PlaybackController @Inject constructor(
         advanceJob?.cancel()
         advanceJob = scope.launch {
             try {
-                if (isExternalPlayback) router.stopExternalPlayback()
                 playTrackInternal(track)
             } catch (e: Exception) {
                 if (e is kotlinx.coroutines.CancellationException) throw e
@@ -539,6 +543,8 @@ class PlaybackController @Inject constructor(
             }
 
             is PlaybackAction.ExternalPlayback -> {
+                val wasAlreadyExternal = isExternalPlayback
+                val oldHandler = router.activeExternalHandler
                 isExternalPlayback = true
                 stopPositionUpdates()
                 // Cancel old polling jobs WITHOUT releasing the wake lock — we need
@@ -550,12 +556,26 @@ class PlaybackController @Inject constructor(
                 appleMusicPollingJob?.cancel()
                 router.getAppleMusicHandler().musicKitBridge.onTrackEnded = null
 
-                // Don't stop ExoPlayer entirely — set track metadata so the
-                // MediaSession stays active and the foreground notification persists.
-                // Without this, Android kills the process when the screen is off
-                // because there's no foreground service keeping it alive.
+                // If switching between different external handlers (e.g. Apple Music
+                // → Spotify), stop the OLD handler. For same-handler transitions
+                // (Apple Music → Apple Music), DON'T stop — handler.play() replaces
+                // the queue directly, and an async stop() would race with the new
+                // play(), pausing the new track.
+                if (wasAlreadyExternal && oldHandler != null && oldHandler != action.handler) {
+                    oldHandler.stop()
+                }
+
+                // Set ExoPlayer metadata so the MediaSession stays active.
+                // CRITICAL: During external→external transitions (e.g. Apple Music
+                // track advance while screen is off), do NOT call ctrl.stop() —
+                // stopping ExoPlayer triggers MediaSessionService auto-demotion from
+                // foreground, and re-promoting via startForegroundService() fails
+                // when the app is backgrounded (Android 12+ restriction). Instead,
+                // just update the metadata on the already-prepared player.
                 controller?.let { ctrl ->
-                    ctrl.stop()
+                    if (!wasAlreadyExternal) {
+                        ctrl.stop()
+                    }
                     val metadataItem = MediaItem.Builder()
                         .setMediaId(routedTrack.id)
                         .setMediaMetadata(
@@ -567,7 +587,9 @@ class PlaybackController @Inject constructor(
                         )
                         .build()
                     ctrl.setMediaItems(listOf(metadataItem))
-                    ctrl.prepare()
+                    if (!wasAlreadyExternal) {
+                        ctrl.prepare()
+                    }
                     // Don't call ctrl.play() — external handler manages actual playback
                 }
 
@@ -850,6 +872,13 @@ class PlaybackController @Inject constructor(
                 // within 30 seconds of the end of the current track.
                 var nextTrackPreloaded = false
 
+                // Track consecutive poll timeouts — when the Main thread is
+                // deferred (Doze mode, screen off), pollPlaybackState() times out
+                // and cached values in MusicKitWebBridge go stale. We must NOT
+                // run end-of-track detection on stale data, as a stale
+                // isPlaying=false can trigger a false isOurTrackDone().
+                var consecutivePollTimeouts = 0
+
                 while (isActive && isExternalPlayback) {
                     // Actively poll JS for fresh position/duration — the
                     // playbackStateDidChange event only fires on state transitions,
@@ -857,10 +886,21 @@ class PlaybackController @Inject constructor(
                     // Use a timeout because Android defers Dispatchers.Main when
                     // the screen is off — without it, the entire polling loop
                     // hangs waiting for the Main thread, and the process gets killed.
-                    kotlinx.coroutines.withTimeoutOrNull(3000) {
+                    val pollResult = kotlinx.coroutines.withTimeoutOrNull(3000) {
                         withContext(Dispatchers.Main) {
                             handler.musicKitBridge.pollPlaybackState()
                         }
+                        true // poll succeeded
+                    }
+                    val pollSucceeded = pollResult != null
+                    if (!pollSucceeded) {
+                        consecutivePollTimeouts++
+                        Log.w(TAG, "Apple Music poll timeout #$consecutivePollTimeouts — Main thread deferred (screen off / Doze)")
+                    } else {
+                        if (consecutivePollTimeouts > 0) {
+                            Log.d(TAG, "Apple Music poll recovered after $consecutivePollTimeouts timeouts")
+                        }
+                        consecutivePollTimeouts = 0
                     }
 
                     val position = handler.getPosition()
@@ -923,13 +963,16 @@ class PlaybackController @Inject constructor(
                         lastRecoveryAttempt = 0L
                     }
 
-                    // ── Next-track prefetch ──────────────────────────────────
-                    // When within 30s of the end, preload the next Apple Music
-                    // track's catalog data so setQueue() is near-instant.
-                    // Fire-and-forget: the preload awaits a network request to
-                    // Apple Music's catalog API which can take seconds. Running
-                    // it inline was freezing the polling loop, blocking both the
-                    // safety-net track completion check and position updates.
+                    // ── Next-track resolver pre-resolution ───────────────────
+                    // When within 30s of the end, resolve the next track's Apple
+                    // Music ID so it's ready when we need it. We intentionally
+                    // do NOT call musicKitBridge.preload() here — the preload()
+                    // fires a catalog API request through the same MusicKit JS
+                    // instance that's actively streaming, which can disrupt
+                    // playback on some Android WebView versions (observed as
+                    // state flipping to "unknown"/isPlaying:false mid-song).
+                    // The resolver pre-resolution is enough: setQueue() in play()
+                    // is fast when the WebView is already warm.
                     if (!nextTrackPreloaded && duration > 0 && duration - position in 1..30_000) {
                         val nextTrack = queueManager.snapshot.value.upNext.firstOrNull()
                         if (nextTrack != null) {
@@ -937,20 +980,27 @@ class PlaybackController @Inject constructor(
                             scope.launch(Dispatchers.Main) {
                                 val nextAmId = reselectBestSource(nextTrack).appleMusicId
                                 if (nextAmId != null) {
-                                    Log.d(TAG, "Preloading next Apple Music track: $nextAmId")
-                                    handler.musicKitBridge.preload(nextAmId)
+                                    Log.d(TAG, "Pre-resolved next Apple Music track: $nextAmId (skipping preload to avoid playback disruption)")
                                 }
                             }
                         }
                     }
 
-                    // Safety-net track completion detection
-                    if (handler.isOurTrackDone() && trackEndHandled.compareAndSet(false, true)) {
-                        Log.d(TAG, "Apple Music track done (safety net)")
+                    // Safety-net track completion detection.
+                    // CRITICAL: Skip when poll timed out — cached state is stale and
+                    // a stale isPlaying=false would trigger a false track-done signal,
+                    // stopping playback mid-song when the screen is off.
+                    if (pollSucceeded && handler.isOurTrackDone() && trackEndHandled.compareAndSet(false, true)) {
+                        Log.d(TAG, "Apple Music track done (safety net, pos=$position dur=$duration playing=$playing state=$stateName)")
                         withContext(Dispatchers.Main) {
                             skipNextInternal(userInitiated = false)
                         }
                         break
+                    } else if (!pollSucceeded && consecutivePollTimeouts >= 6) {
+                        // 6 consecutive timeouts = 3+ seconds of no fresh data.
+                        // Log but do NOT treat as track-done — the track is likely
+                        // still playing on the Apple Music side.
+                        Log.w(TAG, "Apple Music: $consecutivePollTimeouts poll timeouts, state is stale (pos=$position dur=$duration playing=$playing) — NOT treating as done")
                     }
 
                     delay(500)
@@ -1027,14 +1077,19 @@ class PlaybackController @Inject constructor(
             putExtra(PlaybackService.EXTRA_TRACK_ARTIST, track.artist)
             putExtra(PlaybackService.EXTRA_TRACK_ARTWORK_URL, track.artworkUrl)
         }
-        // Use startForegroundService to ensure the service stays alive when
-        // the app is backgrounded. Regular startService can throw on Android 8+
-        // if the app is in the background.
+        // Prefer startService() when the service is already running — it works
+        // from background (unlike startForegroundService on Android 12+).
+        // Only fall back to startForegroundService for the initial promotion
+        // when the service might not be running yet.
         try {
-            context.startForegroundService(intent)
+            context.startService(intent)
         } catch (e: Exception) {
-            Log.w(TAG, "startForegroundService failed, falling back: ${e.message}")
-            try { context.startService(intent) } catch (_: Exception) {}
+            Log.d(TAG, "startService failed, trying startForegroundService: ${e.message}")
+            try {
+                context.startForegroundService(intent)
+            } catch (e2: Exception) {
+                Log.w(TAG, "startForegroundService also failed: ${e2.message}")
+            }
         }
     }
 

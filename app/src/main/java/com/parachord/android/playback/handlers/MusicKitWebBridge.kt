@@ -124,6 +124,32 @@ class MusicKitWebBridge @Inject constructor(
         activityRef = activity?.let { WeakReference(it) }
     }
 
+    /**
+     * Keep the WebView alive when the Activity goes to background (screen off).
+     * Android automatically pauses WebViews when the hosting Activity pauses,
+     * which stops JS timers, audio playback, and network activity. During Apple
+     * Music playback, we must explicitly counteract this to keep MusicKit streaming.
+     *
+     * Call [keepAlive] from Activity.onPause() when Apple Music is playing, and
+     * [allowSuspend] from Activity.onResume() to return to normal lifecycle.
+     */
+    fun keepAlive() {
+        webView?.let { wv ->
+            wv.onResume()
+            wv.resumeTimers()
+            Log.d(TAG, "WebView kept alive (onResume + resumeTimers) for background playback")
+        }
+    }
+
+    /**
+     * Allow the WebView to follow normal Activity lifecycle (pause when backgrounded).
+     * No-op if called when not kept alive — safe to call unconditionally.
+     */
+    fun allowSuspend() {
+        // Don't explicitly call onPause()/pauseTimers() — let the system manage
+        // the WebView normally. We only need keepAlive() to counteract system pauses.
+    }
+
     /** Emit a sign-in required event for the UI to observe. */
     fun emitSignInRequired() {
         _signInRequired.tryEmit(Unit)
@@ -148,8 +174,15 @@ class MusicKitWebBridge @Inject constructor(
             settings.mediaPlaybackRequiresUserGesture = false
             settings.javaScriptCanOpenWindowsAutomatically = true
             settings.setSupportMultipleWindows(true)
-            // Hardware acceleration is required for Widevine DRM decryption
-            setLayerType(View.LAYER_TYPE_HARDWARE, null)
+            // Use LAYER_TYPE_NONE — this WebView is never added to the view
+            // hierarchy (it runs headlessly for MusicKit JS). LAYER_TYPE_HARDWARE
+            // caused audio stutters on screen-off: Android reclaims GPU resources
+            // from hardware-accelerated views when the screen turns off, which
+            // briefly disrupted the WebView's audio pipeline (visible as
+            // state:"unknown"/isPlaying:false flickers in MusicKit). Widevine DRM
+            // decryption works through MediaDrm/MediaCodec at the platform level,
+            // not the View's rendering layer, so hardware acceleration isn't needed.
+            setLayerType(View.LAYER_TYPE_NONE, null)
             CookieManager.getInstance().setAcceptThirdPartyCookies(this, true)
             addJavascriptInterface(MusicKitJsInterface(), "MusicKitBridge")
             webViewClient = object : WebViewClient() {
@@ -551,6 +584,12 @@ class MusicKitWebBridge @Inject constructor(
     /** Play a song by Apple Music catalog ID. Returns true on success. */
     suspend fun play(songId: String): Boolean {
         musicKitReady.await()
+        // Ensure the WebView is active before playing. When the screen is off,
+        // Android pauses WebViews (JS timers, audio, network). If we try to play
+        // a new track without waking the WebView first, MusicKit starts playback
+        // but the system immediately re-pauses the audio pipeline, causing the
+        // track to pause ~30ms after it reports "playing".
+        keepAlive()
         // Clear actual metadata until MusicKit reports what's really playing
         actualTitle = null
         actualArtist = null
@@ -697,6 +736,11 @@ class MusicKitWebBridge @Inject constructor(
         /** Keep-alive ping from the JS setInterval — keeps the WebView JS
          *  thread scheduled when the screen is off. Also provides a fallback
          *  position/duration update independent of the polling loop. */
+        // Track keep-alive timing for diagnostics — helps determine
+        // whether JS is still running when the screen is off.
+        private var lastKeepAliveTime = 0L
+        private var keepAliveCount = 0L
+
         @JavascriptInterface
         fun onKeepAlive(positionDuration: String) {
             // Parse "posMs/durMs" and update cached state as a side channel
@@ -707,6 +751,17 @@ class MusicKitWebBridge @Inject constructor(
                 val dur = parts[1].toLongOrNull() ?: return
                 _position.value = pos
                 if (dur > 0) _duration.value = dur
+
+                // Diagnostic: detect JS keep-alive gaps (WebView JS thread suspended)
+                val now = System.currentTimeMillis()
+                keepAliveCount++
+                if (lastKeepAliveTime > 0) {
+                    val gap = now - lastKeepAliveTime
+                    if (gap > 5000) {
+                        Log.w(TAG, "JS keep-alive gap: ${gap}ms (screen off? WebView suspended?) pos=$pos dur=$dur count=$keepAliveCount")
+                    }
+                }
+                lastKeepAliveTime = now
             }
         }
     }

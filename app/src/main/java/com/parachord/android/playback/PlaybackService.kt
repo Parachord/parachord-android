@@ -143,6 +143,43 @@ class PlaybackService : MediaSessionService() {
         mediaSession
 
     /**
+     * Override Media3's auto-foreground management. Without this, MediaSessionService
+     * calls stopForeground() when ExoPlayer reports "not playing" — which it always
+     * does during external playback (Spotify/Apple Music) since ExoPlayer just holds
+     * metadata. This caused Android to kill the process with the screen off.
+     *
+     * When [isExternalForeground] is true, we manage foreground ourselves via
+     * [promoteToForeground]/[demoteFromForeground] and skip Media3's auto-management.
+     */
+    override fun onUpdateNotification(session: MediaSession, startInForegroundRequired: Boolean) {
+        if (isExternalForeground) {
+            // We're managing foreground ourselves — don't let Media3 demote us.
+            return
+        }
+        super.onUpdateNotification(session, startInForegroundRequired)
+    }
+
+    // Media3 also calls the single-parameter overload in some code paths.
+    override fun onUpdateNotification(session: MediaSession) {
+        if (isExternalForeground) return
+        super.onUpdateNotification(session)
+    }
+
+    /**
+     * Prevent Media3 from calling stopSelf() when ExoPlayer is idle.
+     * MediaSessionService calls this when it thinks nothing is playing and
+     * the service should shut down. During external playback, music IS playing
+     * (via Spotify/Apple Music) — ExoPlayer just doesn't know about it.
+     */
+    override fun pauseAllPlayersAndStopSelf() {
+        if (isExternalForeground) {
+            Log.d(TAG, "Blocked pauseAllPlayersAndStopSelf — external playback is active")
+            return
+        }
+        super.pauseAllPlayersAndStopSelf()
+    }
+
+    /**
      * Don't stop when the user swipes away the app — keep playing.
      * This is critical for external playback (Spotify/Apple Music) where
      * the user expects music to continue in the background.

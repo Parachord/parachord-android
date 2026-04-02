@@ -117,11 +117,18 @@ class AppleMusicPlaybackHandler @Inject constructor(
 
         // MusicKit transitions to "ended"/"completed" when a track finishes.
         // Position may reset to 0, so we can't rely solely on position math.
-        if (!playing && (state == "ended" || state == "completed")) return true
+        if (!playing && (state == "ended" || state == "completed")) {
+            Log.d(TAG, "isOurTrackDone=true: state=$state, playing=$playing, elapsed=${elapsed}ms")
+            return true
+        }
 
         val duration = getDuration()
         val position = getPosition()
         if (duration <= 0) return false
-        return !playing && position > 0 && duration - position < 1500
+        val nearEnd = !playing && position > 0 && duration - position < 1500
+        if (nearEnd) {
+            Log.d(TAG, "isOurTrackDone=true: near end, pos=$position dur=$duration playing=$playing state=$state")
+        }
+        return nearEnd
     }
 }
