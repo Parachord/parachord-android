@@ -3,11 +3,7 @@ package com.parachord.android.playback
 import android.content.ComponentName
 import android.content.Context
 import android.content.Intent
-import android.media.AudioAttributes
-import android.media.AudioFocusRequest
-import android.media.AudioManager
 import android.net.wifi.WifiManager
-import android.os.Build
 import android.os.PowerManager
 import android.util.Log
 import android.widget.Toast
@@ -125,95 +121,12 @@ class PlaybackController @Inject constructor(
             .apply { setReferenceCounted(false) }
     }
 
-    /**
-     * Audio focus management for external playback (Apple Music / Spotify).
-     *
-     * ExoPlayer handles audio focus internally when it's playing, but during
-     * external playback ExoPlayer is idle (just metadata). Without explicit
-     * audio focus, another app requesting focus (notification sounds, videos,
-     * games) causes the WebView's Chromium engine to pause MusicKit audio.
-     *
-     * We request AUDIOFOCUS_GAIN when external playback starts and abandon
-     * it when playback stops. On transient focus loss, we pause and resume
-     * when focus returns (matching how real music players behave).
-     */
-    private val audioManager by lazy {
-        context.getSystemService(Context.AUDIO_SERVICE) as AudioManager
-    }
-    private var audioFocusHeld = false
-    /** True when we paused external playback due to audio focus loss (not user-initiated). */
-    private var pausedForFocusLoss = false
-
-    private val audioFocusListener = AudioManager.OnAudioFocusChangeListener { focusChange ->
-        when (focusChange) {
-            AudioManager.AUDIOFOCUS_LOSS -> {
-                // Permanent loss — another app took focus. Pause but don't auto-resume.
-                Log.d(TAG, "Audio focus lost (permanent)")
-                if (isExternalPlayback) {
-                    scope.launch { router.activeExternalHandler?.pause() }
-                    stateHolder.update { copy(isPlaying = false) }
-                    pausedForFocusLoss = false // Don't auto-resume on permanent loss
-                }
-            }
-            AudioManager.AUDIOFOCUS_LOSS_TRANSIENT -> {
-                // Transient loss (phone call, notification) — pause and resume later
-                Log.d(TAG, "Audio focus lost (transient)")
-                if (isExternalPlayback && stateHolder.state.value.isPlaying) {
-                    scope.launch { router.activeExternalHandler?.pause() }
-                    stateHolder.update { copy(isPlaying = false) }
-                    pausedForFocusLoss = true
-                }
-            }
-            AudioManager.AUDIOFOCUS_LOSS_TRANSIENT_CAN_DUCK -> {
-                // Could duck volume, but for music playback just pause like transient
-                Log.d(TAG, "Audio focus lost (can duck)")
-                if (isExternalPlayback && stateHolder.state.value.isPlaying) {
-                    scope.launch { router.activeExternalHandler?.pause() }
-                    stateHolder.update { copy(isPlaying = false) }
-                    pausedForFocusLoss = true
-                }
-            }
-            AudioManager.AUDIOFOCUS_GAIN -> {
-                // Focus regained — resume if we paused for focus loss
-                Log.d(TAG, "Audio focus gained")
-                if (isExternalPlayback && pausedForFocusLoss) {
-                    pausedForFocusLoss = false
-                    scope.launch { router.activeExternalHandler?.resume() }
-                    stateHolder.update { copy(isPlaying = true) }
-                }
-            }
-        }
-    }
-
-    private val audioFocusRequest: AudioFocusRequest by lazy {
-        AudioFocusRequest.Builder(AudioManager.AUDIOFOCUS_GAIN)
-            .setAudioAttributes(
-                AudioAttributes.Builder()
-                    .setUsage(AudioAttributes.USAGE_MEDIA)
-                    .setContentType(AudioAttributes.CONTENT_TYPE_MUSIC)
-                    .build()
-            )
-            .setOnAudioFocusChangeListener(audioFocusListener)
-            .setWillPauseWhenDucked(true)
-            .build()
-    }
-
-    private fun requestAudioFocus() {
-        if (!audioFocusHeld) {
-            val result = audioManager.requestAudioFocus(audioFocusRequest)
-            audioFocusHeld = result == AudioManager.AUDIOFOCUS_REQUEST_GRANTED
-            Log.d(TAG, "Requested audio focus: ${if (audioFocusHeld) "granted" else "denied"}")
-        }
-    }
-
-    private fun abandonAudioFocus() {
-        if (audioFocusHeld) {
-            audioManager.abandonAudioFocusRequest(audioFocusRequest)
-            audioFocusHeld = false
-            pausedForFocusLoss = false
-            Log.d(TAG, "Abandoned audio focus")
-        }
-    }
+    // NOTE: We intentionally do NOT manage audio focus for external playback.
+    // Apple Music (WebView): Chromium's internal AudioFocusDelegate handles it.
+    //   Our explicit requestAudioFocus() competed with Chromium's, causing
+    //   AUDIOFOCUS_LOSS → we paused MusicKit → stopped playback mid-song.
+    // Spotify: Manages its own audio focus as a separate app.
+    // ExoPlayer: handleAudioFocus=true handles it when ExoPlayer is playing.
 
     /** Listener called when a track naturally completes (auto-advance, not user skip). */
     var onTrackEndedListener: (() -> Unit)? = null
@@ -640,8 +553,6 @@ class PlaybackController @Inject constructor(
                 val wasAlreadyExternal = isExternalPlayback
                 val oldHandler = router.activeExternalHandler
                 isExternalPlayback = true
-                pausedForFocusLoss = false
-                requestAudioFocus()
                 stopPositionUpdates()
                 // Cancel old polling jobs WITHOUT releasing the wake lock — we need
                 // continuous CPU wakefulness across the track transition. The new
@@ -1193,7 +1104,6 @@ class PlaybackController @Inject constructor(
      * Tell [PlaybackService] to demote from foreground when external playback ends.
      */
     private fun sendExternalPlaybackStop() {
-        abandonAudioFocus()
         val intent = Intent(context, PlaybackService::class.java).apply {
             action = PlaybackService.ACTION_EXTERNAL_PLAYBACK_STOP
         }
