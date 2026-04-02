@@ -48,12 +48,38 @@ soundcloud:  0    bandcamp:   -3    youtube:    -6
 
 Each resolver type routes to a specific playback mechanism:
 
-- **Spotify** → App Remote SDK (external playback, controls Spotify app on-device)
+- **Spotify** → Web API (Spotify Connect, controls Spotify app on-device via HTTP)
 - **SoundCloud** → Fetch stream URL from API, play inline via ExoPlayer (no CORS issues on Android unlike desktop)
 - **Local files** → ExoPlayer with content:// URI
 - **Direct streams** → ExoPlayer with HTTP URL
 
 The desktop plays SoundCloud natively via HTML5 Audio (not externally). The Android equivalent is ExoPlayer.
+
+### Spotify Connect — Device Wake & Playback
+
+Spotify playback uses the **Web API** (not the App Remote SDK). The `SpotifyPlaybackHandler` manages device discovery, wake, and playback via Spotify Connect HTTP endpoints.
+
+**Device wake strategy (two-tier):**
+1. **Media button broadcast (invisible):** Sends `KEYCODE_MEDIA_PLAY` targeted to `com.spotify.music`. Wakes Spotify's `MediaBrowserService` without showing any UI. Works when Spotify is in the background but **does NOT work when Spotify is fully killed** (no process to receive the broadcast).
+2. **Launch intent (fallback after 2s):** Uses `getLaunchIntentForPackage` to start Spotify's activity. This brings Spotify briefly to the foreground (jarring), so immediately after launching, we bring our own app back to front. Only used when the broadcast doesn't wake Spotify within 2 seconds of polling.
+
+**Critical: never use the launch intent as the primary wake strategy.** It opens Spotify visually, which is terrible UX for a music player controlling another music player. Always try the invisible broadcast first.
+
+**Device polling:** 300ms intervals (not 1s — the devices endpoint is lightweight), 8s total timeout, 500ms initial delay before first poll.
+
+**Single-pass play flow (no compounding retries):**
+1. `ensureDevice()` — fast-path check, then wake + poll if needed (0-8s)
+2. `pickDevice()` — accepts inactive preferred devices (transfer will activate), auto-selects single real device
+3. `startPlayback()` with `device_id` — single retry on 502 after 1s
+4. Quick verification on cold devices only (2 polls × 500ms)
+
+**Warm-path optimization:** When `deviceVerified && preferredDeviceId != null`, fires `startPlayback` directly without any device fetch (~200ms).
+
+**"This device" resolution:** When the user picks the synthetic local device, `resolveLocalDevice()` wakes Spotify (broadcast → fallback launch intent) and polls for a Smartphone-type device matching `Build.MODEL` or `Build.MANUFACTURER`. Remote devices (TVs, computers) appear in the API even when local Spotify isn't running — `deviceVerified` being true does NOT mean Spotify is running locally.
+
+**Spotify API device visibility limitations:** `GET /v1/me/player/devices` only returns devices with active Spotify Connect sessions, not all devices on the network. It also returns stale/phantom devices (e.g., a "Bedroom TV" that's been off for days). The desktop app may see more devices via native SDK discovery. Restricted devices (Spotify Free) are filtered from the picker.
+
+**Key files:** `SpotifyPlaybackHandler.kt`, `SpotifyApi.kt`, `SpotifyDevicePickerDialog.kt`
 
 ### Apple Music State Polling & Auto-Advance
 
@@ -464,6 +490,10 @@ static let darkAccentPurple = Color(hex: "#a78bfa")
 16. **Don't call `MusicKitWebBridge.preload()` during active playback.** The catalog API request through the same MusicKit JS instance disrupts the active audio stream. Pre-resolve the Apple Music ID only; skip the actual `preload()` call.
 17. **Don't run end-detection on stale Apple Music poll data.** When `pollPlaybackState()` times out (Main thread deferred in Doze), cached `isPlaying` may be stale. Only check `isOurTrackDone()` when the poll succeeded.
 18. **Don't fire Spotify's stale-position watchdog during poll failures.** If API polls are failing (Doze network delays), position won't update — but that doesn't mean the track stopped. Only trigger the 15s stale-position watchdog when `consecutivePollFailures == 0`.
+19. **Don't use the Spotify launch intent as the primary wake strategy.** It opens Spotify's activity, which is jarring UX. Use the media button broadcast (invisible) first; only fall back to the launch intent after 2s if the broadcast fails (Spotify fully killed). After launching, immediately bring our app back to front.
+20. **Don't assume `deviceVerified` means Spotify is running locally.** Remote devices (TVs, computers) appear in the Spotify API without local Spotify running. `resolveLocalDevice()` must always call `ensureSpotifyRunning()` when the user picks "This device", regardless of `deviceVerified`.
+21. **Don't use compounding retry layers for Spotify playback.** The old `playWithRetry(3) × attemptPlay 502 retries(3) × verification(5 polls)` compounded to 27.5s worst case. Use a single-pass flow: one `attemptPlay()` with a single 502 retry and 2 quick verification polls.
+22. **Don't require preferred Spotify devices to be active.** An inactive but present device just needs a transfer. Only show the device picker when the preferred device is completely absent from the API response (device removed/renamed).
 
 ### iOS-Specific
 

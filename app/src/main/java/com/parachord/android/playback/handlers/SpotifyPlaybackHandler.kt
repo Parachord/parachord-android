@@ -21,6 +21,7 @@ import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
 import dagger.hilt.android.qualifiers.ApplicationContext
@@ -55,10 +56,17 @@ class SpotifyPlaybackHandler @Inject constructor(
         // caused false track-done signals when the screen was off.
         private const val MAX_POLL_FAILURES = 30
         private const val SPOTIFY_PACKAGE = "com.spotify.music"
-        /** Max time to wait for Spotify to register as a Connect device after launching. */
-        private const val WAKE_TIMEOUT_MS = 15000L
-        /** Interval between device-list polls while waiting for Spotify to wake. */
-        private const val WAKE_POLL_INTERVAL_MS = 1000L
+        /** Max time to wait for Spotify to register as a Connect device after launching.
+         *  Reduced from 15s → 8s: launch intent wakes Spotify faster than the old
+         *  media button broadcast, so 8s is generous even for cold starts. */
+        private const val WAKE_TIMEOUT_MS = 8000L
+        /** Interval between device-list polls while waiting for Spotify to wake.
+         *  Reduced from 1s → 300ms: catches the device appearing sooner. The
+         *  GET /v1/me/player/devices call is lightweight (~50-100ms). */
+        private const val WAKE_POLL_INTERVAL_MS = 300L
+        /** Initial delay before first device poll after launching Spotify.
+         *  Gives Spotify 500ms to initialize before we start hammering the API. */
+        private const val WAKE_INITIAL_DELAY_MS = 500L
         /** Sentinel ID for the synthetic "This device" entry in the picker. */
         const val LOCAL_DEVICE_ID = "__local_device__"
     }
@@ -75,6 +83,13 @@ class SpotifyPlaybackHandler @Inject constructor(
     private val _devicePickerRequest = MutableStateFlow<DevicePickerRequest?>(null)
     /** Observed by the UI to show the device picker dialog. Null when no picker is needed. */
     val devicePickerRequest: StateFlow<DevicePickerRequest?> = _devicePickerRequest
+
+    /** Error messages for the UI to display (snackbar/toast). Null when no error. */
+    private val _playbackError = MutableStateFlow<String?>(null)
+    val playbackError: StateFlow<String?> = _playbackError.asStateFlow()
+
+    /** Clear the current playback error (call after displaying it). */
+    fun clearPlaybackError() { _playbackError.value = null }
 
     /** Called by the UI when the user selects a device (or null to cancel). */
     fun onDevicePicked(device: SpDevice?) {
@@ -143,17 +158,14 @@ class SpotifyPlaybackHandler @Inject constructor(
         val uri = track.spotifyUri
         if (uri == null) {
             Log.w(TAG, "No spotifyUri on track '${track.title}'")
+            _playbackError.value = "No Spotify URI for '${track.title}'"
             return
         }
         Log.d(TAG, "play() via Web API for '${track.title}' uri=$uri")
+        _playbackError.value = null // Clear any previous error
+        val flowStart = System.currentTimeMillis()
 
-        // Attempt playback with retry — mirrors the desktop's spotify.axe play() flow:
-        // 1. Get devices
-        // 2. Pick best device (desktop: computer > phone > speaker > any)
-        // 3. Transfer if not active, wait for device to settle
-        // 4. Start playback with device_id
-        // On failure, retry the whole flow (token refresh, device re-check)
-        val success = playWithRetry(track, uri)
+        val success = withAuth { auth -> attemptPlay(auth, uri, flowStart) } == true
 
         if (success) {
             _isConnected = true
@@ -166,7 +178,6 @@ class SpotifyPlaybackHandler @Inject constructor(
             playStartedAt = System.currentTimeMillis()
             pausedByUs = false
             playbackConfirmed = false
-            // Clear actual metadata until polling confirms what's really playing
             actualTitle = null
             actualArtist = null
             actualAlbum = null
@@ -176,197 +187,165 @@ class SpotifyPlaybackHandler @Inject constructor(
             consecutivePollFailures = 0
             lastPositionChangeTime = System.currentTimeMillis()
             startStatePolling()
+            Log.d(TAG, "play() total flow took ${System.currentTimeMillis() - flowStart}ms")
         } else {
-            Log.e(TAG, "Failed to play '${track.title}' after retries")
+            Log.e(TAG, "Failed to play '${track.title}' (${System.currentTimeMillis() - flowStart}ms)")
         }
     }
 
+    // ── Unified play flow (replaces old playWithRetry + attemptPlay) ────
+
     /**
-     * Attempt the full play flow with retries.
-     * Each attempt re-checks devices and token freshness.
+     * Single-pass play flow with no compounding retry layers.
+     *
+     * 1. Ensure a device is available (wake Spotify if needed)
+     * 2. Pick the best device (auto-select or show picker)
+     * 3. Start playback with device_id
+     * 4. On 502: single retry after 1s
+     * 5. On cold device: quick verification (2 polls × 500ms)
+     *
+     * Old flow had 3 layers of retries (playWithRetry × 502 retries × verification)
+     * compounding to 27.5s worst case. This flow is single-pass: ~2-5s cold, ~200ms warm.
      */
-    private suspend fun playWithRetry(track: TrackEntity, uri: String): Boolean {
-        for (attempt in 1..3) {
+    private suspend fun attemptPlay(auth: String, uri: String, flowStart: Long): Boolean {
+
+        // ── Phase 7: Optimistic warm-path ────────────────────────────
+        // When device is already verified and we have a preferred device,
+        // fire startPlayback immediately without any device fetch.
+        val preferredId = settingsStore.getPreferredSpotifyDeviceId()
+        if (deviceVerified && preferredId != null && preferredId != LOCAL_DEVICE_ID) {
+            Log.d(TAG, "Warm path: firing startPlayback directly on preferred=$preferredId")
             try {
-                val result = withAuth { auth -> attemptPlay(auth, uri) }
-                if (result == true) return true
-
-                if (result == null) {
-                    Log.w(TAG, "Play attempt $attempt: withAuth returned null (no token or auth error)")
+                val resp = spotifyApi.startPlayback(auth, SpPlaybackRequest(uris = listOf(uri)), deviceId = preferredId)
+                if (resp.isSuccessful || resp.code() == 204) {
+                    Log.d(TAG, "Warm path succeeded in ${System.currentTimeMillis() - flowStart}ms")
+                    return true
                 }
-
-                if (attempt < 3) {
-                    Log.d(TAG, "Play attempt $attempt failed (result=$result), retrying in ${attempt}s...")
-                    delay(attempt * 1000L)
-                }
+                Log.d(TAG, "Warm path failed (${resp.code()}), falling through to full flow")
             } catch (e: Exception) {
-                Log.w(TAG, "Play attempt $attempt error: ${e.message}")
-                if (attempt < 3) delay(attempt * 1000L)
+                Log.d(TAG, "Warm path error: ${e.message}, falling through to full flow")
             }
+            // Fall through: device may have gone offline, do full flow
         }
-        return false
-    }
 
-    /**
-     * Single attempt to find a device and start playback.
-     * Device selection (mirrors desktop device picker):
-     * 1. Check preferred device — use it if available
-     * 2. Single device — auto-select (no UX regression)
-     * 3. Multiple devices — show picker dialog, save choice as preferred
-     * 4. Preferred device unavailable — show picker again
-     */
-    private suspend fun attemptPlay(auth: String, uri: String): Boolean {
-        // On the first play of a session, wake the local Spotify app so this
-        // phone registers as a Connect device. Subsequent tracks skip the wake
-        // since Spotify is already running.
-        val devices = if (!deviceVerified) {
-            val result = wakeSpotifyAndAwaitDevice(auth)
-            if (result.isNotEmpty()) deviceVerified = true
-            result
-        } else {
-            spotifyApi.getDevices(auth).devices
-        }
+        // ── Phase 1+3: Ensure device ─────────────────────────────────
+        val ensureStart = System.currentTimeMillis()
+        val devices = ensureDevice(auth)
+        Log.d(TAG, "ensureDevice took ${System.currentTimeMillis() - ensureStart}ms, found ${devices.size} device(s)")
         Log.d(TAG, "Devices: ${devices.map { "${it.name}(active=${it.isActive}, type=${it.type})" }}")
 
-        // Even with zero API devices, pickDevice() injects "This device" so
-        // the user can always force-wake Spotify on this phone.
+        // ── Phase 5: Pick device ─────────────────────────────────────
+        val pickStart = System.currentTimeMillis()
         val pickedDevice = pickDevice(devices)
+        Log.d(TAG, "pickDevice took ${System.currentTimeMillis() - pickStart}ms")
         if (pickedDevice == null) {
-            Log.w(TAG, "No suitable device found (user cancelled or no devices)")
+            Log.w(TAG, "No device selected (user cancelled or no devices)")
             return false
         }
 
-        // If the user picked the synthetic "This device" entry, wake Spotify
-        // locally and resolve the real Connect device ID for this phone.
+        // Resolve synthetic "This device" to a real device ID
         val targetDevice = if (isLocalPlaceholder(pickedDevice)) {
-            Log.d(TAG, "Local device selected — waking Spotify to get real device ID")
-            // Force-wake the local Spotify app — don't use the fast path that
-            // short-circuits on already-available remote devices (e.g. "bedroom TV").
-            val localDevices = wakeLocalSpotifyApp(auth)
-            val localModel = Build.MODEL.lowercase()
-            Log.d(TAG, "Resolving local device: model='$localModel', candidates=${localDevices.map { "'${it.name}'(type=${it.type}, id=${it.id})" }}")
-            val resolved = localDevices.firstOrNull {
-                it.type == "Smartphone" && it.name.lowercase().contains(localModel)
-            } ?: localDevices.firstOrNull { it.type == "Smartphone" }
-            if (resolved == null) {
-                Log.w(TAG, "Could not find local Smartphone device after waking Spotify. All devices: ${localDevices.map { "'${it.name}'(type=${it.type})" }}")
-                // Keep the LOCAL_DEVICE_ID preference — the next retry will go
-                // straight back to wakeLocalSpotifyApp() without re-showing the
-                // picker. The prior nudge is likely still waking Spotify, so the
-                // retry has a good chance of finding the device.
-                return false
-            }
-            deviceVerified = true
-            // Update the preferred device to the real ID so we skip the picker next time
-            settingsStore.setPreferredSpotifyDeviceId(resolved.id)
-            Log.d(TAG, "Resolved local device: '${resolved.name}' id=${resolved.id}")
-            resolved
+            resolveLocalDevice(auth)
         } else {
             pickedDevice
         }
+        if (targetDevice == null) {
+            _playbackError.value = "Couldn't find Spotify on this phone. Open Spotify and try again."
+            return false
+        }
+        Log.d(TAG, "Target: '${targetDevice.name}' (type=${targetDevice.type}, active=${targetDevice.isActive})")
 
-        Log.d(TAG, "Target device: '${targetDevice.name}' (type=${targetDevice.type}, active=${targetDevice.isActive})")
-
-        // Transfer playback to the target device if it's not already active
+        // ── Phase 4: Transfer (no hardcoded delay) ───────────────────
         if (!targetDevice.isActive) {
-            Log.d(TAG, "Transferring playback to '${targetDevice.name}' id=${targetDevice.id}")
+            Log.d(TAG, "Transferring playback to '${targetDevice.name}'")
             try {
                 val transferResp = spotifyApi.transferPlayback(auth, SpTransferRequest(deviceIds = listOf(targetDevice.id)))
                 if (!transferResp.isSuccessful) {
-                    val body = transferResp.errorBody()?.string()
-                    Log.w(TAG, "Transfer returned ${transferResp.code()}: $body")
+                    Log.w(TAG, "Transfer returned ${transferResp.code()}: ${transferResp.errorBody()?.string()}")
                 } else {
                     Log.d(TAG, "Transfer accepted (${transferResp.code()})")
                 }
             } catch (e: Exception) {
                 Log.w(TAG, "Transfer failed (non-fatal): ${e.message}")
             }
-            // Give Spotify time to activate the device. 2s is safer than 1s — the
-            // device just woke up and needs time to register with Spotify's servers.
-            delay(2000)
+            // No hardcoded delay — device_id on startPlayback routes correctly.
+            // On 502 (device not ready), we retry once below.
         }
 
-        // Force device_id in the play call (desktop pattern) — ensures playback
-        // goes to the right device even if transfer hasn't fully settled.
-        // Retry on 502 (device not ready) with increasing delays — Spotify returns
-        // 502 when the device hasn't fully registered after a transfer/wake.
-        for (playRetry in 1..3) {
-            Log.d(TAG, "Calling startPlayback (try $playRetry): uri=$uri, deviceId=${targetDevice.id}")
-            val response = spotifyApi.startPlayback(
-                auth,
-                SpPlaybackRequest(uris = listOf(uri)),
-                deviceId = targetDevice.id,
-            )
+        // ── Phase 2: Start playback (single retry on 502) ───────────
+        Log.d(TAG, "startPlayback: uri=$uri, deviceId=${targetDevice.id}")
+        val playStart = System.currentTimeMillis()
+        for (attempt in 1..2) {
+            try {
+                val resp = spotifyApi.startPlayback(auth, SpPlaybackRequest(uris = listOf(uri)), deviceId = targetDevice.id)
 
-            if (response.isSuccessful || response.code() == 204) {
-                Log.d(TAG, "Playback accepted on '${targetDevice.name}' for $uri (try $playRetry)")
+                if (resp.isSuccessful || resp.code() == 204) {
+                    Log.d(TAG, "Playback accepted on '${targetDevice.name}' (attempt $attempt, ${System.currentTimeMillis() - playStart}ms)")
 
-                // Only verify on the first play of a session when the device
-                // was just woken. Subsequent tracks skip verification — the
-                // device is already warm and startPlayback works immediately.
-                // Without this gate, every track transition added up to 14s of
-                // verification polling, breaking auto-advance.
-                if (!deviceVerified) {
-                    val verified = verifyPlaybackStarted(auth, playRetry)
-                    if (verified) {
-                        Log.d(TAG, "Playback verified on '${targetDevice.name}'")
+                    // Quick verification on cold devices only
+                    if (!deviceVerified) {
+                        val verified = verifyPlaybackStarted(auth)
                         deviceVerified = true
-                        return true
+                        if (!verified) {
+                            Log.w(TAG, "Playback not verified but proceeding optimistically")
+                        }
                     }
-
-                    // Not playing yet — retry the play command
-                    if (playRetry < 3) {
-                        Log.w(TAG, "Playback not verified after try $playRetry, retrying...")
-                        delay(1000L * playRetry)
-                        continue
-                    }
-
-                    // Final attempt — proceed optimistically, polling will catch up
-                    Log.w(TAG, "Playback not verified after final try, proceeding optimistically")
-                    deviceVerified = true
+                    return true
                 }
 
-                return true
+                val code = resp.code()
+                val body = resp.errorBody()?.string()
+                Log.w(TAG, "startPlayback failed: $code body=$body (attempt $attempt)")
+
+                when {
+                    code == 502 && attempt == 1 -> {
+                        Log.d(TAG, "Device not ready (502), retrying in 1s...")
+                        delay(1000)
+                    }
+                    code == 403 -> {
+                        _playbackError.value = "Spotify Premium is required for playback"
+                        return false
+                    }
+                    code == 404 -> {
+                        // Device gone — clear preference so next play re-discovers
+                        settingsStore.clearPreferredSpotifyDeviceId()
+                        deviceVerified = false
+                        _playbackError.value = "Spotify device not responding. Try again."
+                        return false
+                    }
+                    else -> {
+                        _playbackError.value = "Spotify playback failed ($code). Try again."
+                        settingsStore.clearPreferredSpotifyDeviceId()
+                        return false
+                    }
+                }
+            } catch (e: Exception) {
+                Log.e(TAG, "startPlayback error (attempt $attempt): ${e.message}")
+                if (attempt == 2) {
+                    _playbackError.value = "Couldn't reach Spotify. Check your connection."
+                    return false
+                }
+                delay(1000)
             }
-
-            val errorBody = response.errorBody()?.string()
-            Log.w(TAG, "Start playback failed on '${targetDevice.name}': ${response.code()} body=$errorBody")
-
-            // 502 = device not ready yet. Retry with increasing delay.
-            if (response.code() == 502 && playRetry < 3) {
-                val waitMs = playRetry * 2000L
-                Log.d(TAG, "Device not ready (502), waiting ${waitMs}ms before retry...")
-                delay(waitMs)
-                continue
-            }
-
-            // Non-502 failure or final 502 — give up
-            settingsStore.clearPreferredSpotifyDeviceId()
-            return false
         }
         return false
     }
 
     /**
-     * After startPlayback returns 204, poll briefly to verify Spotify is
-     * actually playing our track. On freshly-woken devices, the 204 may be
-     * accepted but playback doesn't start until the device finishes waking.
-     *
-     * Returns true if we see isPlaying=true within a few polls.
+     * Quick verification that playback actually started on a cold device.
+     * 2 polls at 500ms intervals (1s total) — much faster than the old
+     * 5 polls at 1s intervals (5s).
      */
-    private suspend fun verifyPlaybackStarted(auth: String, attempt: Int): Boolean {
-        // Shorter verification on later attempts since device should be warmer
-        val maxPolls = if (attempt == 1) 5 else 3
-        for (poll in 1..maxPolls) {
-            delay(1000)
+    private suspend fun verifyPlaybackStarted(auth: String): Boolean {
+        for (poll in 1..2) {
+            delay(500)
             try {
                 val state = spotifyApi.getPlaybackState(auth)
                 val body = if (state.isSuccessful) state.body() else null
                 if (body != null && body.isPlaying) {
-                    Log.d(TAG, "verifyPlayback: confirmed playing after ${poll}s")
+                    Log.d(TAG, "verifyPlayback: confirmed playing after ${poll * 500}ms")
                     return true
                 }
-                Log.d(TAG, "verifyPlayback poll $poll: isPlaying=${body?.isPlaying}, item=${body?.item?.name}")
             } catch (e: Exception) {
                 Log.d(TAG, "verifyPlayback poll $poll failed: ${e.message}")
             }
@@ -411,129 +390,154 @@ class SpotifyPlaybackHandler @Inject constructor(
         deviceVerified = false
     }
 
+    // ── Unified device resolution (replaces old wake + local wake) ─────
+
     /**
-     * Find available Spotify Connect devices, waking the local Spotify app
-     * only as a last resort.
+     * Ensure at least one Spotify Connect device is available.
+     * Wakes Spotify on this phone if no devices are found.
      *
-     * 1. Check for existing devices via the Web API (no app launch).
-     * 2. If none found, send a background intent to nudge Spotify awake
-     *    without stealing focus, then poll for devices.
+     * Replaces the old split of wakeSpotifyAndAwaitDevice() + wakeLocalSpotifyApp()
+     * which had separate 15s polling loops. Now a single 8s flow with 300ms polling.
      */
-    private suspend fun wakeSpotifyAndAwaitDevice(auth: String): List<SpDevice> {
-        // Fast path: check for devices already available (Spotify running,
-        // or devices on other machines/phones on the account)
+    private suspend fun ensureDevice(auth: String): List<SpDevice> {
+        // Fast path: if device is already verified (warm), just fetch devices
+        if (deviceVerified) {
+            return try {
+                spotifyApi.getDevices(auth).devices
+            } catch (e: Exception) {
+                Log.w(TAG, "Device fetch failed: ${e.message}")
+                emptyList()
+            }
+        }
+
+        // Check for existing devices without waking (Spotify already running)
         try {
             val devices = spotifyApi.getDevices(auth).devices
             if (devices.isNotEmpty()) {
                 Log.d(TAG, "Devices already available (no wake needed): ${devices.size}")
+                deviceVerified = true
                 return devices
             }
         } catch (e: Exception) {
             Log.d(TAG, "Initial device fetch failed: ${e.message}")
         }
 
-        // No devices — nudge Spotify awake via a media button broadcast.
-        // This wakes Spotify's MediaBrowserService in the background without
-        // launching the full UI or stealing focus from our app.
-        nudgeSpotifyBackground()
+        // No devices — nudge Spotify awake via broadcast (invisible) and poll.
+        // If the broadcast doesn't work after 4s, fall back to launch intent.
+        ensureSpotifyRunning()
+        Log.d(TAG, "Polling for devices (${WAKE_POLL_INTERVAL_MS}ms intervals, ${WAKE_TIMEOUT_MS}ms timeout)...")
 
-        // Poll until Spotify registers as a Connect device
-        Log.d(TAG, "Polling for devices for up to ${WAKE_TIMEOUT_MS}ms...")
+        delay(WAKE_INITIAL_DELAY_MS) // Give Spotify time to initialize
         val deadline = System.currentTimeMillis() + WAKE_TIMEOUT_MS
+        val fallbackTime = System.currentTimeMillis() + 2000 // Launch intent fallback after 4s
         var pauseSent = false
+        var pollCount = 0
+        var fallbackFired = false
         while (System.currentTimeMillis() < deadline) {
-            delay(WAKE_POLL_INTERVAL_MS)
+            pollCount++
             try {
                 val devices = spotifyApi.getDevices(auth).devices
                 if (devices.isNotEmpty()) {
-                    Log.d(TAG, "Spotify woke up — found ${devices.size} device(s)")
-                    // Immediately pause — the nudge resumed Spotify's last track,
-                    // and we don't want the user hearing it before our track starts.
+                    Log.d(TAG, "Spotify woke up after $pollCount polls — found ${devices.size} device(s)")
+                    // Silence any stale playback from the wake
                     if (!pauseSent) {
                         pauseSent = true
-                        try {
-                            spotifyApi.pausePlayback(auth)
-                            Log.d(TAG, "Paused Spotify after wake to silence stale playback")
-                        } catch (e: Exception) {
-                            Log.d(TAG, "Pause after wake failed (non-fatal): ${e.message}")
-                        }
+                        try { spotifyApi.pausePlayback(auth) } catch (_: Exception) {}
                     }
+                    deviceVerified = true
                     return devices
                 }
             } catch (e: Exception) {
-                Log.d(TAG, "Device poll during wake failed: ${e.message}")
+                if (pollCount % 10 == 0) Log.d(TAG, "Device poll #$pollCount failed: ${e.message}")
             }
+            // If broadcast didn't work after 4s, try launch intent as fallback
+            if (!fallbackFired && System.currentTimeMillis() > fallbackTime) {
+                fallbackFired = true
+                Log.d(TAG, "Broadcast didn't wake Spotify after 2s, trying launch intent fallback")
+                launchSpotifyFallback()
+            }
+            delay(WAKE_POLL_INTERVAL_MS)
         }
 
-        Log.w(TAG, "Timed out waiting for Spotify device after ${WAKE_TIMEOUT_MS}ms")
+        Log.w(TAG, "Timed out waiting for Spotify device after $pollCount polls (${WAKE_TIMEOUT_MS}ms)")
+        _playbackError.value = "Couldn't find a Spotify device. Open Spotify and try again."
         return emptyList()
     }
 
     /**
-     * Force-wake Spotify on this phone and wait for it to register as a
-     * Connect device. Unlike [wakeSpotifyAndAwaitDevice], this always nudges
-     * Spotify — even when remote devices (speakers, TVs) are already
-     * available — because the user explicitly asked for "This device".
+     * Resolve the synthetic "This device" entry to a real Spotify Connect device ID.
+     *
+     * Always launches Spotify — even when remote devices exist (deviceVerified=true
+     * from finding remote devices like TVs/computers), the LOCAL Spotify app may
+     * not be running. We need Spotify running on this phone to register as a
+     * Smartphone Connect device.
      */
-    private suspend fun wakeLocalSpotifyApp(auth: String): List<SpDevice> {
-        nudgeSpotifyBackground()
-
-        // Poll until we see a Smartphone device (the local phone)
+    private suspend fun resolveLocalDevice(auth: String): SpDevice? {
+        Log.d(TAG, "Resolving local device: model='${Build.MODEL}', manufacturer='${Build.MANUFACTURER}'")
         val localModel = Build.MODEL.lowercase()
-        Log.d(TAG, "wakeLocalSpotifyApp: looking for Smartphone matching model='$localModel' (Build.MODEL=${Build.MODEL}, Build.MANUFACTURER=${Build.MANUFACTURER})")
+        val localManufacturer = Build.MANUFACTURER.lowercase()
+
+        // Always ensure Spotify is running on this phone. Remote devices
+        // (TVs, computers) can appear in the API without local Spotify running.
+        // Use broadcast first (invisible), fall back to launch intent after 4s.
+        ensureSpotifyRunning()
+        delay(WAKE_INITIAL_DELAY_MS)
+
         val deadline = System.currentTimeMillis() + WAKE_TIMEOUT_MS
+        val fallbackTime = System.currentTimeMillis() + 2000
         var pollCount = 0
-        var pauseSent = false
+        var fallbackFired = false
         while (System.currentTimeMillis() < deadline) {
-            delay(WAKE_POLL_INTERVAL_MS)
             pollCount++
             try {
                 val devices = spotifyApi.getDevices(auth).devices
-                Log.d(TAG, "wakeLocal poll #$pollCount: ${devices.map { "'${it.name}'(type=${it.type}, id=${it.id}, active=${it.isActive})" }}")
-                // Pause as soon as we see any device — the nudge resumed the
-                // last song and we don't want the user hearing it.
-                if (devices.isNotEmpty() && !pauseSent) {
-                    pauseSent = true
-                    try {
-                        spotifyApi.pausePlayback(auth)
-                        Log.d(TAG, "Paused Spotify after local wake to silence stale playback")
-                    } catch (e: Exception) {
-                        Log.d(TAG, "Pause after local wake failed (non-fatal): ${e.message}")
-                    }
+                val local = devices.firstOrNull { d ->
+                    d.type == "Smartphone" && (
+                        d.name.lowercase().contains(localModel) ||
+                        d.name.lowercase().contains(localManufacturer)
+                    )
+                } ?: devices.firstOrNull { it.type == "Smartphone" }
+
+                if (local != null) {
+                    deviceVerified = true
+                    settingsStore.setPreferredSpotifyDeviceId(local.id)
+                    Log.d(TAG, "Resolved local device after $pollCount polls: '${local.name}' id=${local.id}")
+                    // Silence stale playback from the wake
+                    try { spotifyApi.pausePlayback(auth) } catch (_: Exception) {}
+                    return local
                 }
-                val hasLocal = devices.any {
-                    it.type == "Smartphone" && it.name.lowercase().contains(localModel)
-                } || devices.any { it.type == "Smartphone" }
-                if (hasLocal) {
-                    Log.d(TAG, "Local Spotify device found after wake: ${devices.size} device(s)")
-                    return devices
+                if (pollCount % 10 == 0) {
+                    Log.d(TAG, "resolveLocal poll #$pollCount: ${devices.map { "'${it.name}'(type=${it.type})" }}")
                 }
-            } catch (e: Exception) {
-                Log.d(TAG, "Device poll during local wake failed: ${e.message}")
+            } catch (_: Exception) {}
+            // Fallback to launch intent if broadcast didn't wake Spotify
+            if (!fallbackFired && System.currentTimeMillis() > fallbackTime) {
+                fallbackFired = true
+                Log.d(TAG, "Broadcast didn't wake local Spotify after 2s, trying launch intent")
+                launchSpotifyFallback()
             }
+            delay(WAKE_POLL_INTERVAL_MS)
         }
 
-        // Last resort — return whatever devices exist even if no smartphone found
-        Log.w(TAG, "wakeLocalSpotifyApp: timed out after ${pollCount} polls, no Smartphone found for model='$localModel'")
-        return try {
-            val devices = spotifyApi.getDevices(auth).devices
-            Log.d(TAG, "wakeLocal last-resort devices: ${devices.map { "'${it.name}'(type=${it.type}, id=${it.id})" }}")
-            devices
-        } catch (e: Exception) {
-            emptyList()
-        }
+        Log.w(TAG, "Could not find local Smartphone device after $pollCount polls (${WAKE_TIMEOUT_MS}ms)")
+        return null
     }
 
     /**
-     * Silently nudge Spotify awake via a media button broadcast.
-     * This wakes Spotify's MediaBrowserService process without launching
-     * its activity or stealing focus from our app.
+     * Wake Spotify's process without showing its UI.
+     *
+     * Primary: targeted KEYCODE_MEDIA_PLAY broadcast. This wakes Spotify's
+     * MediaBrowserService in the background. Targeted broadcasts (with
+     * setPackage) work on all Android versions including 12+; only implicit
+     * broadcasts are restricted.
+     *
+     * The launch intent is NOT used here — it brings Spotify's activity to
+     * the foreground which is jarring ("one music app opening another").
+     * It's only used as a last-resort fallback from [ensureDevice] if the
+     * broadcast doesn't wake Spotify within half the timeout.
      */
-    private fun nudgeSpotifyBackground() {
+    private fun ensureSpotifyRunning() {
         try {
-            // Send a PLAY media button event targeted at Spotify's package.
-            // This wakes the Spotify process and registers it as a Connect
-            // device, without opening the Spotify UI.
             val downEvent = KeyEvent(KeyEvent.ACTION_DOWN, KeyEvent.KEYCODE_MEDIA_PLAY)
             val downIntent = Intent(Intent.ACTION_MEDIA_BUTTON).apply {
                 setPackage(SPOTIFY_PACKAGE)
@@ -549,16 +553,42 @@ class SpotifyPlaybackHandler @Inject constructor(
             context.sendBroadcast(upIntent)
             Log.d(TAG, "Nudged Spotify awake via media button broadcast")
         } catch (e: Exception) {
-            Log.w(TAG, "Media button broadcast failed, falling back to launch intent")
-            // Fallback: launch activity if broadcast doesn't work (older Android)
-            val launchIntent = context.packageManager.getLaunchIntentForPackage(SPOTIFY_PACKAGE)
-            if (launchIntent != null) {
-                launchIntent.addFlags(
-                    Intent.FLAG_ACTIVITY_NEW_TASK or
-                        Intent.FLAG_ACTIVITY_NO_ANIMATION
-                )
+            Log.w(TAG, "Media button broadcast failed: ${e.message}")
+        }
+    }
+
+    /**
+     * Last-resort Spotify wake: launch the activity, then immediately bring
+     * our app back to the foreground so the user barely sees Spotify's UI.
+     * Only used when the media button broadcast failed (Spotify fully killed).
+     */
+    private fun launchSpotifyFallback() {
+        val launchIntent = context.packageManager.getLaunchIntentForPackage(SPOTIFY_PACKAGE)
+        if (launchIntent != null) {
+            launchIntent.addFlags(
+                Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_NO_ANIMATION
+            )
+            try {
                 context.startActivity(launchIntent)
+                Log.d(TAG, "Launched Spotify via activity intent (fallback)")
+                // Immediately bring our app back to the foreground so the user
+                // doesn't see Spotify's UI. The brief process start is enough to
+                // register the Connect device.
+                val bringBackIntent = context.packageManager
+                    .getLaunchIntentForPackage(context.packageName)
+                if (bringBackIntent != null) {
+                    bringBackIntent.addFlags(
+                        Intent.FLAG_ACTIVITY_NEW_TASK or
+                            Intent.FLAG_ACTIVITY_REORDER_TO_FRONT or
+                            Intent.FLAG_ACTIVITY_NO_ANIMATION
+                    )
+                    context.startActivity(bringBackIntent)
+                }
+            } catch (e: Exception) {
+                Log.w(TAG, "Launch intent failed: ${e.message}")
             }
+        } else {
+            _playbackError.value = "Spotify is not installed"
         }
     }
 
@@ -582,91 +612,78 @@ class SpotifyPlaybackHandler @Inject constructor(
         device.id == LOCAL_DEVICE_ID
 
     /**
-     * Pick the best device to play on (matches desktop device picker behavior).
+     * Pick the best device to play on.
      *
-     * 1. Preferred device (saved from previous picker selection) — use if available
-     * 2. Single device — auto-select without prompting
-     * 3. Multiple devices — show picker dialog, save selection as preferred
-     * 4. Preferred device not found — show picker again
-     *
-     * Always injects a synthetic "This device" entry so the local phone is
-     * selectable even when Spotify hasn't registered it as a Connect device yet.
+     * Improvements over old picker:
+     * - Accepts inactive preferred devices (transfer will activate them)
+     *   instead of showing the picker on every cold start
+     * - Auto-selects when 1 real device + synthetic entry (don't show picker)
+     * - Filters restricted devices from the picker
      */
     private suspend fun pickDevice(devices: List<SpDevice>): SpDevice? {
         val controllable = devices.filter { !it.isRestricted }
         val available = controllable.ifEmpty { devices }
-        Log.d(TAG, "pickDevice: ${devices.size} total, ${controllable.size} controllable, ${devices.size - controllable.size} restricted")
 
-        // Always ensure the local device appears in the list. If Spotify
-        // hasn't registered this phone yet, inject a synthetic entry so the
-        // user can pick "This device" and we'll wake Spotify on demand.
-        // Check both model name and manufacturer — Spotify device names vary
-        // (users can rename them, and the API may return "Phone", the model
-        // number, or a custom name). A Smartphone-type device is enough to
-        // confirm the local phone is already registered.
+        // Inject synthetic "This device" if no local smartphone found
         val localModel = Build.MODEL.lowercase()
         val localManufacturer = Build.MANUFACTURER.lowercase()
         val hasLocalDevice = available.any { device ->
             if (device.type != "Smartphone") return@any false
             val name = device.name.lowercase()
-            // Match by model name, manufacturer, or if there's only one smartphone
             name.contains(localModel) || name.contains(localManufacturer)
         } || available.count { it.type == "Smartphone" } == 1
         val withLocal = if (hasLocalDevice) available else available + localDeviceEntry()
 
-        Log.d(TAG, "pickDevice: devices=${withLocal.map { "'${it.name}'(type=${it.type}, active=${it.isActive})" }}")
+        Log.d(TAG, "pickDevice: ${withLocal.map { "'${it.name}'(type=${it.type}, active=${it.isActive})" }}")
 
-        // 1. Check preferred device — only auto-select if it's currently active.
-        // Inactive preferred devices (phantom speakers, TVs on other networks)
-        // should not be auto-targeted; show the picker so the user can choose.
         val preferredId = settingsStore.getPreferredSpotifyDeviceId()
+
+        // 1. Preferred = local placeholder → honour it
         if (preferredId == LOCAL_DEVICE_ID) {
-            // User previously chose "This device" — honour that choice and return
-            // the synthetic local entry so attemptPlay() can wake Spotify locally.
             Log.d(TAG, "Preferred device is local — returning local placeholder")
             return withLocal.firstOrNull { isLocalPlaceholder(it) } ?: localDeviceEntry()
         }
+
+        // 2. Preferred device found → use it (even if inactive — transfer will activate)
+        //    Only clear preference when the device is completely absent from the list.
         if (preferredId != null) {
             val preferred = withLocal.firstOrNull { it.id == preferredId }
-            if (preferred != null && preferred.isActive) {
-                Log.d(TAG, "Using preferred device (active): '${preferred.name}'")
+            if (preferred != null) {
+                Log.d(TAG, "Using preferred device: '${preferred.name}' (active=${preferred.isActive})")
                 return preferred
             }
-            if (preferred != null) {
-                Log.d(TAG, "Preferred device '${preferred.name}' found but not active, clearing preference")
-            } else {
-                Log.d(TAG, "Preferred device $preferredId not available, clearing preference")
-            }
-            // Clear stale preference so the picker shows and user can pick fresh
+            // Device gone — clear preference so picker shows
+            Log.d(TAG, "Preferred device $preferredId no longer available, clearing")
             settingsStore.clearPreferredSpotifyDeviceId()
         }
 
-        // 2. Single device — auto-select (no UX regression for simple setups)
+        // 3. Single real device (+ optional synthetic entry) → auto-select
+        val realDevices = withLocal.filter { !isLocalPlaceholder(it) }
+        if (realDevices.size == 1) {
+            Log.d(TAG, "Single real device, auto-selecting '${realDevices[0].name}'")
+            return realDevices[0]
+        }
         if (withLocal.size == 1) {
-            Log.d(TAG, "Single device, auto-selecting '${withLocal[0].name}'")
+            Log.d(TAG, "Only local placeholder available, auto-selecting")
             return withLocal[0]
         }
 
-        // 3. Already-active device with no preferred set — use it
-        if (preferredId == null) {
-            withLocal.firstOrNull { it.isActive }?.let { active ->
-                Log.d(TAG, "No preferred set, using already-active device '${active.name}'")
-                return active
-            }
+        // 4. Already-active device → use it
+        withLocal.firstOrNull { it.isActive }?.let { active ->
+            Log.d(TAG, "Using already-active device '${active.name}'")
+            return active
         }
 
-        // 4. Multiple devices — show picker dialog and wait for user choice
-        Log.d(TAG, "Multiple devices available, showing picker dialog")
-        // Cancel any in-flight picker from a concurrent play call
-        _devicePickerRequest.value?.deferred?.complete(null)
+        // 5. Multiple devices — show picker
+        Log.d(TAG, "Multiple devices, showing picker dialog")
+        _devicePickerRequest.value?.deferred?.complete(null) // Cancel stale picker
         val deferred = CompletableDeferred<SpDevice?>()
         _devicePickerRequest.value = DevicePickerRequest(withLocal, deferred)
 
         val chosen = deferred.await()
         if (chosen != null) {
-            // Save as preferred device (desktop: preferred_spotify_device_id)
             settingsStore.setPreferredSpotifyDeviceId(chosen.id)
-            Log.d(TAG, "User picked device '${chosen.name}', saved as preferred")
+            Log.d(TAG, "User picked '${chosen.name}', saved as preferred")
         }
         return chosen
     }
