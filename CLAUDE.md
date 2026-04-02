@@ -64,9 +64,13 @@ Apple Music playback runs in a hidden WebView via `MusicKitWebBridge`. The `star
 
 An `AtomicBoolean(trackEndHandled)` prevents both paths from double-firing.
 
-**Critical rule: never suspend the polling loop on network calls.** The `MusicKitWebBridge.evaluate()` function awaits JS async results via `CompletableDeferred`. If a slow operation (like `preload()` which fetches catalog metadata from Apple Music's API) runs inline in the polling loop, the entire loop freezes — no position updates, no safety-net checks, no stall recovery. Even though JS callbacks can fire independently, they may be delayed or suppressed when MusicKit is handling concurrent API requests in the same WebView context. Always use `scope.launch` (fire-and-forget) for non-essential async work within the polling loop.
+**Critical rule: never suspend the polling loop on network calls.** The `MusicKitWebBridge.evaluate()` function awaits JS async results via `CompletableDeferred`. If a slow operation runs inline in the polling loop, the entire loop freezes — no position updates, no safety-net checks, no stall recovery. Even though JS callbacks can fire independently, they may be delayed or suppressed when MusicKit is handling concurrent API requests in the same WebView context. Always use `scope.launch` (fire-and-forget) for non-essential async work within the polling loop.
 
-**Pre-fetching next track:** The polling loop preloads the next Apple Music track's catalog data 30s before the current track ends (so `setQueue()` is near-instant). This runs as a fire-and-forget `scope.launch(Dispatchers.Main)` — NOT inline.
+**Critical rule: never call `preload()` during active playback.** The `preload()` function fires a `music.api.music()` catalog API request through the same MusicKit JS instance that's actively streaming. On Android WebView, this concurrent API call disrupts the active playback stream — observed as MusicKit flipping to `state:"unknown"/isPlaying:false` mid-song, causing the track to stop. The polling loop pre-resolves the next track's Apple Music ID (via `reselectBestSource`) but does NOT call `preload()`. The `setQueue()` call in `play()` is fast enough with a warm WebView.
+
+**Critical rule: never run end-detection on stale poll data.** When the screen is off, `pollPlaybackState()` can time out (Main thread deferred in Doze mode), leaving `_isPlaying` and `playbackStateName` stale in `MusicKitWebBridge`. If the last cached `isPlaying` was `false` (from a transient buffering hiccup), `isOurTrackDone()` would falsely trigger, stopping the song mid-play. The polling loop tracks `pollSucceeded` and only runs end-detection when the poll returned fresh data.
+
+**Pre-resolving next track:** The polling loop resolves the next Apple Music track's ID 30s before the current track ends. This runs as a fire-and-forget `scope.launch(Dispatchers.Main)` — NOT inline. Only the ID is resolved; no `preload()` API call is made (see rule above).
 
 ### .axe Resolver Format
 
@@ -239,6 +243,22 @@ To reactively check if an album is in the user's collection (for toggle UI in co
 - For data that changes frequently (weekly playlists, charts), prefer `forceRefresh = true` from the ViewModel `init` since API calls are cheap.
 - For expensive data (AI recommendations), use stale-while-revalidate: show cached data immediately, refresh in background.
 
+### External Playback Background Survival
+
+Keeping Apple Music and Spotify playing with the screen off requires navigating several Android subsystems that actively try to kill the process. These rules are hard-won from debugging — violating any one causes intermittent playback drops.
+
+**Foreground service — Media3 fights you.** `MediaSessionService` auto-manages foreground status based on ExoPlayer state. During external playback, ExoPlayer is idle (just metadata), so Media3 calls `stopForeground()` and `pauseAllPlayersAndStopSelf()`. Both `onUpdateNotification()` overloads and `pauseAllPlayersAndStopSelf()` must be overridden to return early when `isExternalForeground` is true.
+
+**ExoPlayer stop triggers service demotion.** Calling `ctrl.stop()` during external→external track transitions causes `MediaSessionService` to auto-demote from foreground. Then `startForegroundService()` fails from background (Android 12+). During external→external transitions, skip `ctrl.stop()` and `ctrl.prepare()` — just update metadata via `ctrl.setMediaItems()`.
+
+**Async stop/play race condition.** Calling `router.stopExternalPlayback()` before `playTrackInternal()` in advance paths sends an async `music.stop()` to MusicKit JS that races with the new `setQueue({startPlaying: true})`. The stop arrives after the new track starts, pausing it ~30ms later. The fix: don't call `stopExternalPlayback()` in any advance path (skipNext, skipPrevious, playFromQueue, spinoff). For same-handler transitions, `handler.play()` replaces the queue directly. For cross-handler transitions (e.g. Apple Music→Spotify), `playTrackInternalUnsafe` stops the old handler only when handlers differ.
+
+**WebView lifecycle — don't call keepAlive() in onStop().** `WebView.onResume()`/`resumeTimers()` can block the main thread when the Chromium renderer process is suspending, causing a background ANR that kills the process. The brief WebView stutter on screen-off (~500ms) recovers on its own. Call `keepAlive()` from `MusicKitWebBridge.play()` instead (runs while app is in foreground, before each track starts).
+
+**WebView layer type must be LAYER_TYPE_NONE.** `LAYER_TYPE_HARDWARE` causes GPU context teardown when the screen turns off, disrupting the WebView's audio pipeline. The headless WebView doesn't render anything visible, and Widevine DRM works through `MediaDrm`/`MediaCodec` at the platform level, not the View's rendering layer.
+
+**startService() vs startForegroundService() from background.** On Android 12+, both can throw `ForegroundServiceStartNotAllowedException` when the app is backgrounded. `startService()` is tried first (works more reliably when the service is already running). The service should already be in foreground from initial promotion when the app was visible.
+
 ### On Tour Indicator — Location-Filtered
 
 The "On Tour" teal dot (`#10C9B4`) appears next to the artist name in the mini player and Now Playing screen when the currently playing artist has upcoming concerts near the user's configured concert area.
@@ -307,6 +327,14 @@ The desktop supports dark/light mode toggle. Android should follow system theme 
 **Theme toggle:** The app supports manual dark/light/system selection via settings (`MainViewModel.themeMode`). The resolved `darkTheme` boolean is passed to `ParachordTheme(darkTheme = darkTheme)` in `MainActivity`. This means `isSystemInDarkTheme()` does NOT reflect the app's actual theme — it only checks the Android system setting.
 
 **Always use `ParachordTheme.isDark` instead of `isSystemInDarkTheme()`.** `ParachordTheme` provides `LocalIsDarkTheme` via `CompositionLocalProvider`, accessible as `ParachordTheme.isDark`. This respects the user's in-app toggle. The only places that should call `isSystemInDarkTheme()` are `Theme.kt` (default parameter) and `MainActivity` (system fallback for "auto" mode).
+
+## Build & Deploy
+
+- **Build + install to device:** `./gradlew installDebug` (NOT `assembleDebug`, which only builds the APK without installing)
+- **After installing, force-stop the app** — Android keeps the old process alive with old code in memory. Either swipe away from recents or run: `adb shell am force-stop com.parachord.android`
+- **If code changes aren't reflected on device**, Android may cache optimized dex from a prior install. Do a full uninstall/reinstall: `adb uninstall com.parachord.android && adb install app/build/outputs/apk/debug/app-debug.apk` (clears app data)
+- **Clean build if all else fails:** `./gradlew clean installDebug`
+- **adb path** (not in shell PATH by default): `/Users/jherskowitz/Library/Android/sdk/platform-tools/adb`
 
 ## Tech Stack (Android)
 
@@ -429,6 +457,13 @@ static let darkAccentPurple = Color(hex: "#a78bfa")
 9. **Don't use `isSystemInDarkTheme()` in composables.** The app has a manual dark/light/system toggle. `isSystemInDarkTheme()` only checks the Android system setting, not the app preference. Use `ParachordTheme.isDark` instead, which reads from `LocalIsDarkTheme` provided by `ParachordTheme`. See the Dark Mode section above.
 10. **Don't block the Apple Music polling loop.** Never call `withContext` on a suspend function that awaits a network response (like `MusicKitWebBridge.evaluate()` / `preload()`) inline in `startAppleMusicStatePolling()`. This freezes position updates and the safety-net auto-advance check. Use `scope.launch` (fire-and-forget) for any async work that doesn't need its result in the same loop iteration.
 11. **Don't use inconsistent null defaults in filter/count pairs.** When counting items by a nullable field and filtering by it, both operations must normalize nulls the same way. E.g., `groupBy { it.type?.lowercase() ?: "album" }` counts null as "album", but `filter { it.type?.lowercase() == "album" }` excludes null. Use `((it.type?.lowercase()) ?: "album")` in both places.
+12. **Don't call `router.stopExternalPlayback()` before `playTrackInternal()` in advance paths.** The async `stop()` races with the new `play()` — MusicKit's deferred stop arrives after the new track starts, pausing it. `handler.play()` replaces the queue directly for same-handler transitions. See "External Playback Background Survival" section.
+13. **Don't call `ctrl.stop()` during external→external transitions.** Stopping ExoPlayer triggers `MediaSessionService` auto-demotion from foreground. Skip `stop()`/`prepare()` when `wasAlreadyExternal` is true — just update metadata with `setMediaItems()`.
+14. **Don't call `WebView.onResume()`/`resumeTimers()` from Activity lifecycle callbacks.** These can block the main thread when the Chromium renderer is suspending, causing a background ANR. Call `keepAlive()` from `MusicKitWebBridge.play()` instead (runs in foreground before each track).
+15. **Don't use `LAYER_TYPE_HARDWARE` on the MusicKit WebView.** The headless WebView doesn't render visually; hardware acceleration causes GPU context teardown on screen-off that disrupts audio. Use `LAYER_TYPE_NONE`.
+16. **Don't call `MusicKitWebBridge.preload()` during active playback.** The catalog API request through the same MusicKit JS instance disrupts the active audio stream. Pre-resolve the Apple Music ID only; skip the actual `preload()` call.
+17. **Don't run end-detection on stale Apple Music poll data.** When `pollPlaybackState()` times out (Main thread deferred in Doze), cached `isPlaying` may be stale. Only check `isOurTrackDone()` when the poll succeeded.
+18. **Don't fire Spotify's stale-position watchdog during poll failures.** If API polls are failing (Doze network delays), position won't update — but that doesn't mean the track stopped. Only trigger the 15s stale-position watchdog when `consecutivePollFailures == 0`.
 
 ### iOS-Specific
 
