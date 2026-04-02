@@ -428,8 +428,8 @@ class SpotifyPlaybackHandler @Inject constructor(
         Log.d(TAG, "Polling for devices (${WAKE_POLL_INTERVAL_MS}ms intervals, ${WAKE_TIMEOUT_MS}ms timeout)...")
 
         delay(WAKE_INITIAL_DELAY_MS) // Give Spotify time to initialize
-        val deadline = System.currentTimeMillis() + WAKE_TIMEOUT_MS
-        val fallbackTime = System.currentTimeMillis() + 2000 // Launch intent fallback after 4s
+        var deadline = System.currentTimeMillis() + WAKE_TIMEOUT_MS
+        val fallbackTime = System.currentTimeMillis() + 2000
         var pauseSent = false
         var pollCount = 0
         var fallbackFired = false
@@ -450,11 +450,11 @@ class SpotifyPlaybackHandler @Inject constructor(
             } catch (e: Exception) {
                 if (pollCount % 10 == 0) Log.d(TAG, "Device poll #$pollCount failed: ${e.message}")
             }
-            // If broadcast didn't work after 4s, try launch intent as fallback
             if (!fallbackFired && System.currentTimeMillis() > fallbackTime) {
                 fallbackFired = true
                 Log.d(TAG, "Broadcast didn't wake Spotify after 2s, trying launch intent fallback")
                 launchSpotifyFallback()
+                deadline = System.currentTimeMillis() + 12_000
             }
             delay(WAKE_POLL_INTERVAL_MS)
         }
@@ -483,7 +483,7 @@ class SpotifyPlaybackHandler @Inject constructor(
         ensureSpotifyRunning()
         delay(WAKE_INITIAL_DELAY_MS)
 
-        val deadline = System.currentTimeMillis() + WAKE_TIMEOUT_MS
+        var deadline = System.currentTimeMillis() + WAKE_TIMEOUT_MS
         val fallbackTime = System.currentTimeMillis() + 2000
         var pollCount = 0
         var fallbackFired = false
@@ -500,9 +500,11 @@ class SpotifyPlaybackHandler @Inject constructor(
 
                 if (local != null) {
                     deviceVerified = true
-                    settingsStore.setPreferredSpotifyDeviceId(local.id)
+                    // Keep LOCAL_DEVICE_ID as the preference — the real device ID
+                    // changes between Spotify sessions (process restarts). Saving
+                    // the real ID causes "preferred device not found" on every cold
+                    // start, forcing the picker to show repeatedly.
                     Log.d(TAG, "Resolved local device after $pollCount polls: '${local.name}' id=${local.id}")
-                    // Silence stale playback from the wake
                     try { spotifyApi.pausePlayback(auth) } catch (_: Exception) {}
                     return local
                 }
@@ -515,11 +517,15 @@ class SpotifyPlaybackHandler @Inject constructor(
                 fallbackFired = true
                 Log.d(TAG, "Broadcast didn't wake local Spotify after 2s, trying launch intent")
                 launchSpotifyFallback()
+                // Extend deadline — cold-launching Spotify needs ~10-15s to register
+                // as a Connect device (process start + auth + server registration)
+                deadline = System.currentTimeMillis() + 12_000
+                Log.d(TAG, "Extended timeout to 12s for cold launch")
             }
             delay(WAKE_POLL_INTERVAL_MS)
         }
 
-        Log.w(TAG, "Could not find local Smartphone device after $pollCount polls (${WAKE_TIMEOUT_MS}ms)")
+        Log.w(TAG, "Could not find local Smartphone device after $pollCount polls")
         return null
     }
 
@@ -571,19 +577,11 @@ class SpotifyPlaybackHandler @Inject constructor(
             try {
                 context.startActivity(launchIntent)
                 Log.d(TAG, "Launched Spotify via activity intent (fallback)")
-                // Immediately bring our app back to the foreground so the user
-                // doesn't see Spotify's UI. The brief process start is enough to
-                // register the Connect device.
-                val bringBackIntent = context.packageManager
-                    .getLaunchIntentForPackage(context.packageName)
-                if (bringBackIntent != null) {
-                    bringBackIntent.addFlags(
-                        Intent.FLAG_ACTIVITY_NEW_TASK or
-                            Intent.FLAG_ACTIVITY_REORDER_TO_FRONT or
-                            Intent.FLAG_ACTIVITY_NO_ANIMATION
-                    )
-                    context.startActivity(bringBackIntent)
-                }
+                // Note: we intentionally do NOT bring our app back to front here.
+                // Doing so causes Android to deprioritize Spotify before it can
+                // finish initializing and register as a Connect device. The user
+                // will briefly see Spotify, but playback will work. Our polling
+                // loop will continue in the background.
             } catch (e: Exception) {
                 Log.w(TAG, "Launch intent failed: ${e.message}")
             }
