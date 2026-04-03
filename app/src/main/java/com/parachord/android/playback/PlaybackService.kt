@@ -21,6 +21,8 @@ import androidx.media3.common.AudioAttributes
 import androidx.media3.common.C
 import androidx.media3.common.MediaMetadata
 import androidx.media3.common.Player
+import androidx.media3.common.ForwardingPlayer
+import androidx.media3.common.Player.Commands
 import androidx.media3.exoplayer.ExoPlayer
 import androidx.media3.session.CommandButton
 import androidx.media3.session.MediaNotification
@@ -66,6 +68,7 @@ class PlaybackService : MediaSessionService() {
 
     private var mediaSession: MediaSession? = null
     private var player: ExoPlayer? = null
+    private var forwardingPlayer: ExternalPlaybackForwardingPlayer? = null
     private var isExternalForeground = false
 
     private val serviceScope = CoroutineScope(SupervisorJob() + Dispatchers.Main)
@@ -103,6 +106,8 @@ class PlaybackService : MediaSessionService() {
         /** Intent actions sent by PlaybackController to manage foreground state. */
         const val ACTION_EXTERNAL_PLAYBACK_START = "com.parachord.android.EXTERNAL_PLAYBACK_START"
         const val ACTION_EXTERNAL_PLAYBACK_STOP = "com.parachord.android.EXTERNAL_PLAYBACK_STOP"
+        const val ACTION_EXTERNAL_MODE_ON = "com.parachord.android.EXTERNAL_MODE_ON"
+        const val ACTION_EXTERNAL_MODE_OFF = "com.parachord.android.EXTERNAL_MODE_OFF"
         const val EXTRA_TRACK_TITLE = "track_title"
         const val EXTRA_TRACK_ARTIST = "track_artist"
         const val EXTRA_TRACK_ARTWORK_URL = "track_artwork_url"
@@ -129,7 +134,15 @@ class PlaybackService : MediaSessionService() {
             .build()
         player = exoPlayer
 
-        mediaSession = MediaSession.Builder(this, exoPlayer)
+        // Wrap ExoPlayer in a ForwardingPlayer that reports external playback
+        // state (position, duration, artwork) to the MediaSession. During
+        // external playback, the system media controls (notification shade,
+        // lock screen) show correct progress and artwork instead of the
+        // internal silence loop state.
+        val wrapper = ExternalPlaybackForwardingPlayer(exoPlayer, playbackController, stateHolder)
+        forwardingPlayer = wrapper
+
+        mediaSession = MediaSession.Builder(this, wrapper)
             .build()
 
         // Unified notification provider — same look for ExoPlayer and external playback.
@@ -153,6 +166,12 @@ class PlaybackService : MediaSessionService() {
             }
             ACTION_EXTERNAL_PLAYBACK_STOP -> {
                 demoteFromForeground()
+            }
+            ACTION_EXTERNAL_MODE_ON -> {
+                forwardingPlayer?.externalMode = true
+            }
+            ACTION_EXTERNAL_MODE_OFF -> {
+                forwardingPlayer?.externalMode = false
             }
             ACTION_PLAY_PAUSE -> {
                 playbackController.togglePlayPause()
@@ -262,6 +281,23 @@ class PlaybackService : MediaSessionService() {
                     NOTIFICATION_ID,
                     buildNotification(title, artist, state.isPlaying, currentArtworkBitmap),
                 )
+
+                // Sync ExoPlayer's position with the real external playback
+                // position. ExoPlayer plays a 10-minute silence file, so we
+                // seek it to match the actual track position. This makes the
+                // system media controls (notification shade, lock screen) show
+                // correct progress without needing to override position on
+                // the ForwardingPlayer (which MediaSession only reads once).
+                val externalPos = state.position
+                val p = player
+                if (p != null && externalPos > 0 && externalPos < 600_000) {
+                    val currentPos = p.currentPosition
+                    // Only seek if the positions diverge significantly (avoid
+                    // seek spam that could cause progress bar flicker)
+                    if (kotlin.math.abs(currentPos - externalPos) > 2000) {
+                        p.seekTo(externalPos)
+                    }
+                }
             }
         }
     }
@@ -483,5 +519,90 @@ class PlaybackService : MediaSessionService() {
             action: String,
             extras: Bundle,
         ): Boolean = false
+    }
+
+    /**
+     * Wraps ExoPlayer to report external playback state to MediaSession.
+     *
+     * During external playback (Apple Music / Spotify), ExoPlayer plays silence
+     * to keep the service alive. Without this wrapper, the system media controls
+     * (notification shade, lock screen) would show the silence loop's position/
+     * duration instead of the actual track's. The wrapper:
+     * - Reports position/duration from [PlaybackStateHolder] (the real values)
+     * - Makes next/prev commands available and routes them to [PlaybackController]
+     * - Delegates everything else to the real ExoPlayer
+     */
+    /**
+     * Wraps ExoPlayer to support next/prev commands during external playback.
+     *
+     * During external playback, ExoPlayer plays silence with a single item.
+     * Without this wrapper, the system media controls wouldn't show next/prev
+     * buttons. The wrapper advertises these commands and routes them to
+     * [PlaybackController].
+     *
+     * Position/duration are handled differently: the state observer periodically
+     * seeks ExoPlayer to match the real external position, so MediaSession
+     * naturally reports correct progress without any overrides here.
+     */
+    class ExternalPlaybackForwardingPlayer(
+        private val delegate: ExoPlayer,
+        private val playbackController: PlaybackController,
+        @Suppress("unused") private val stateHolder: PlaybackStateHolder,
+    ) : ForwardingPlayer(delegate) {
+
+        /** When true, next/prev commands are available and routed to PlaybackController. */
+        var externalMode = false
+
+        override fun isCommandAvailable(command: Int): Boolean {
+            if (externalMode && command in EXTERNAL_COMMANDS) return true
+            return super.isCommandAvailable(command)
+        }
+
+        override fun getAvailableCommands(): Commands {
+            if (externalMode) {
+                return super.getAvailableCommands().buildUpon()
+                    .addAll(COMMAND_SEEK_TO_NEXT, COMMAND_SEEK_TO_PREVIOUS,
+                        COMMAND_SEEK_TO_NEXT_MEDIA_ITEM, COMMAND_SEEK_TO_PREVIOUS_MEDIA_ITEM)
+                    .build()
+            }
+            return super.getAvailableCommands()
+        }
+
+        override fun seekToNext() {
+            if (externalMode) { playbackController.skipNext(); return }
+            super.seekToNext()
+        }
+
+        override fun seekToPrevious() {
+            if (externalMode) { playbackController.skipPrevious(); return }
+            super.seekToPrevious()
+        }
+
+        override fun seekToNextMediaItem() {
+            if (externalMode) { playbackController.skipNext(); return }
+            super.seekToNextMediaItem()
+        }
+
+        override fun seekToPreviousMediaItem() {
+            if (externalMode) { playbackController.skipPrevious(); return }
+            super.seekToPreviousMediaItem()
+        }
+
+        override fun hasNextMediaItem(): Boolean {
+            if (externalMode) return true
+            return super.hasNextMediaItem()
+        }
+
+        override fun hasPreviousMediaItem(): Boolean {
+            if (externalMode) return true
+            return super.hasPreviousMediaItem()
+        }
+
+        companion object {
+            private val EXTERNAL_COMMANDS = setOf(
+                COMMAND_SEEK_TO_NEXT, COMMAND_SEEK_TO_PREVIOUS,
+                COMMAND_SEEK_TO_NEXT_MEDIA_ITEM, COMMAND_SEEK_TO_PREVIOUS_MEDIA_ITEM,
+            )
+        }
     }
 }

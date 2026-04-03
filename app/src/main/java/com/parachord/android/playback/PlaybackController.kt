@@ -528,6 +528,7 @@ class PlaybackController @Inject constructor(
             is PlaybackAction.ExoPlayerItem -> {
                 if (isExternalPlayback) sendExternalPlaybackStop()
                 isExternalPlayback = false
+                notifyExternalMode(false)
                 stopSpotifyStatePolling()
                 stopAppleMusicStatePolling()
 
@@ -611,9 +612,15 @@ class PlaybackController @Inject constructor(
                             /* handleAudioFocus= */ false,
                         )
                     }
+
+                    // Play silent audio to keep the service alive. The
+                    // ForwardingPlayer in PlaybackService overrides position/
+                    // duration/commands so system media controls show real
+                    // track progress, artwork, and next/prev buttons.
                     val silenceUri = android.net.Uri.parse(
                         "android.resource://${context.packageName}/${com.parachord.android.R.raw.silence}"
                     )
+                    val artworkUri = routedTrack.artworkUrl?.let { android.net.Uri.parse(it) }
                     val silenceItem = MediaItem.Builder()
                         .setMediaId(routedTrack.id)
                         .setUri(silenceUri)
@@ -622,6 +629,7 @@ class PlaybackController @Inject constructor(
                                 .setTitle(routedTrack.title)
                                 .setArtist(routedTrack.artist)
                                 .setAlbumTitle(routedTrack.album)
+                                .setArtworkUri(artworkUri)
                                 .build()
                         )
                         .build()
@@ -631,6 +639,10 @@ class PlaybackController @Inject constructor(
                     ctrl.prepare()
                     ctrl.play()
                 }
+
+                // Enable external mode on the ForwardingPlayer so MediaSession
+                // reports real position/duration and next/prev commands.
+                notifyExternalMode(true)
 
                 // Set UI state optimistically — show the track with a buffering spinner
                 // so the user gets instant feedback while the handler connects to
@@ -693,6 +705,7 @@ class PlaybackController @Inject constructor(
         val ctrl = controller ?: return
         if (isExternalPlayback) sendExternalPlaybackStop()
         isExternalPlayback = false
+        notifyExternalMode(false)
         stopSpotifyStatePolling()
         stopAppleMusicStatePolling()
 
@@ -1189,6 +1202,19 @@ class PlaybackController @Inject constructor(
     /**
      * Tell [PlaybackService] to demote from foreground when external playback ends.
      */
+    /**
+     * Toggle the ForwardingPlayer's external mode in PlaybackService.
+     * When enabled, MediaSession reports real position/duration from
+     * the external handler and advertises next/prev commands.
+     */
+    private fun notifyExternalMode(enabled: Boolean) {
+        val intent = Intent(context, PlaybackService::class.java).apply {
+            action = if (enabled) PlaybackService.ACTION_EXTERNAL_MODE_ON
+                     else PlaybackService.ACTION_EXTERNAL_MODE_OFF
+        }
+        try { context.startService(intent) } catch (_: Exception) {}
+    }
+
     private fun sendExternalPlaybackStop() {
         val intent = Intent(context, PlaybackService::class.java).apply {
             action = PlaybackService.ACTION_EXTERNAL_PLAYBACK_STOP
