@@ -152,14 +152,10 @@ class PlaybackService : MediaSessionService() {
      * [promoteToForeground]/[demoteFromForeground] and skip Media3's auto-management.
      */
     override fun onUpdateNotification(session: MediaSession, startInForegroundRequired: Boolean) {
-        if (isExternalForeground) {
-            // We're managing foreground ourselves — don't let Media3 demote us.
-            return
-        }
+        if (isExternalForeground) return
         super.onUpdateNotification(session, startInForegroundRequired)
     }
 
-    // Media3 also calls the single-parameter overload in some code paths.
     override fun onUpdateNotification(session: MediaSession) {
         if (isExternalForeground) return
         super.onUpdateNotification(session)

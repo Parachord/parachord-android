@@ -7,6 +7,7 @@ import android.net.wifi.WifiManager
 import android.os.PowerManager
 import android.util.Log
 import android.widget.Toast
+import androidx.media3.common.C
 import androidx.media3.common.MediaItem
 import androidx.media3.common.MediaMetadata
 import androidx.media3.common.Player
@@ -531,6 +532,16 @@ class PlaybackController @Inject constructor(
                 stopAppleMusicStatePolling()
 
                 val ctrl = controller ?: return
+                // Restore normal ExoPlayer settings after external playback
+                ctrl.volume = 1f
+                ctrl.repeatMode = Player.REPEAT_MODE_OFF
+                ctrl.setAudioAttributes(
+                    androidx.media3.common.AudioAttributes.Builder()
+                        .setUsage(C.USAGE_MEDIA)
+                        .setContentType(C.AUDIO_CONTENT_TYPE_MUSIC)
+                        .build(),
+                    /* handleAudioFocus= */ true,
+                )
                 ctrl.stop()
                 ctrl.setMediaItems(listOf(action.mediaItem), 0, 0L)
                 ctrl.prepare()
@@ -579,12 +590,33 @@ class PlaybackController @Inject constructor(
                 // foreground, and re-promoting via startForegroundService() fails
                 // when the app is backgrounded (Android 12+ restriction). Instead,
                 // just update the metadata on the already-prepared player.
+                // Play a silent audio loop on ExoPlayer so Media3's
+                // MediaSessionService sees "player is playing" and keeps the
+                // foreground service alive. Without this, Media3 demotes the
+                // service after ~11 minutes ("Stopping service due to app idle")
+                // because ExoPlayer is idle and the FGS validator sees no active
+                // media playback. Audio focus is disabled for the silence to
+                // avoid conflicting with Chromium's AudioFocusDelegate (which
+                // manages focus for MusicKit WebView audio).
                 controller?.let { ctrl ->
                     if (!wasAlreadyExternal) {
-                        ctrl.stop()
+                        // Disable audio focus for ExoPlayer during external playback.
+                        // Chromium's AudioFocusDelegate handles focus for MusicKit.
+                        // If ExoPlayer holds focus, Chromium loses it and pauses audio.
+                        ctrl.setAudioAttributes(
+                            androidx.media3.common.AudioAttributes.Builder()
+                                .setUsage(C.USAGE_MEDIA)
+                                .setContentType(C.AUDIO_CONTENT_TYPE_MUSIC)
+                                .build(),
+                            /* handleAudioFocus= */ false,
+                        )
                     }
-                    val metadataItem = MediaItem.Builder()
+                    val silenceUri = android.net.Uri.parse(
+                        "android.resource://${context.packageName}/${com.parachord.android.R.raw.silence}"
+                    )
+                    val silenceItem = MediaItem.Builder()
                         .setMediaId(routedTrack.id)
+                        .setUri(silenceUri)
                         .setMediaMetadata(
                             MediaMetadata.Builder()
                                 .setTitle(routedTrack.title)
@@ -593,11 +625,11 @@ class PlaybackController @Inject constructor(
                                 .build()
                         )
                         .build()
-                    ctrl.setMediaItems(listOf(metadataItem))
-                    if (!wasAlreadyExternal) {
-                        ctrl.prepare()
-                    }
-                    // Don't call ctrl.play() — external handler manages actual playback
+                    ctrl.setMediaItems(listOf(silenceItem))
+                    ctrl.repeatMode = Player.REPEAT_MODE_ONE
+                    ctrl.volume = 0f
+                    ctrl.prepare()
+                    ctrl.play()
                 }
 
                 // Set UI state optimistically — show the track with a buffering spinner
@@ -663,6 +695,17 @@ class PlaybackController @Inject constructor(
         isExternalPlayback = false
         stopSpotifyStatePolling()
         stopAppleMusicStatePolling()
+
+        // Restore normal ExoPlayer settings after external playback
+        ctrl.volume = 1f
+        ctrl.repeatMode = Player.REPEAT_MODE_OFF
+        ctrl.setAudioAttributes(
+            androidx.media3.common.AudioAttributes.Builder()
+                .setUsage(C.USAGE_MEDIA)
+                .setContentType(C.AUDIO_CONTENT_TYPE_MUSIC)
+                .build(),
+            /* handleAudioFocus= */ true,
+        )
 
         val mediaItem = track.toMediaItem()
         ctrl.stop()
@@ -878,6 +921,11 @@ class PlaybackController @Inject constructor(
                 // Prefetch: preload the next track's catalog data once we're
                 // within 30 seconds of the end of the current track.
                 var nextTrackPreloaded = false
+                // Track the wall-clock time when the polling loop started
+                // (shortly after handler.play() returned). Used for auto-resume
+                // detection when the WebView pauses the track immediately.
+                val pollingStartedAt = System.currentTimeMillis()
+                var autoResumeAttempted = false
 
                 // Track consecutive poll timeouts — when the Main thread is
                 // deferred (Doze mode, screen off), pollPlaybackState() times out
@@ -968,6 +1016,44 @@ class PlaybackController @Inject constructor(
                         }
                         stallCount = 0
                         lastRecoveryAttempt = 0L
+                    }
+
+                    // ── Auto-resume after background pause ─────────────────
+                    // The WebView's Chromium engine sometimes pauses MusicKit
+                    // immediately after a track starts when the screen is off
+                    // (race condition in Chromium's internal media session
+                    // handling during background state). Detect this and resume.
+                    if (!autoResumeAttempted && pollSucceeded &&
+                        !playing && (stateName == "paused" || stateName == "unknown") &&
+                        position <= 1000 &&
+                        System.currentTimeMillis() - pollingStartedAt < 10_000
+                    ) {
+                        autoResumeAttempted = true
+                        Log.d(TAG, "Apple Music auto-resume: track paused at pos=$position shortly after start (state=$stateName)")
+                        // The system may re-pause immediately after a single resume
+                        // (race with Chromium's background media handling). Retry up
+                        // to 3 times with increasing delays to outlast the system pause.
+                        for (attempt in 1..3) {
+                            kotlinx.coroutines.withTimeoutOrNull(3000) {
+                                withContext(Dispatchers.Main) {
+                                    handler.resume()
+                                }
+                            }
+                            delay(500L * attempt) // 500ms, 1s, 1.5s
+                            // Re-poll to check if resume stuck
+                            val checkResult = kotlinx.coroutines.withTimeoutOrNull(2000) {
+                                withContext(Dispatchers.Main) {
+                                    handler.musicKitBridge.pollPlaybackState()
+                                }
+                                true
+                            }
+                            if (checkResult != null && handler.isPlaying()) {
+                                Log.d(TAG, "Apple Music auto-resume succeeded on attempt $attempt")
+                                stateHolder.update { copy(isPlaying = true) }
+                                break
+                            }
+                            Log.d(TAG, "Apple Music auto-resume attempt $attempt: still paused, retrying...")
+                        }
                     }
 
                     // ── Next-track resolver pre-resolution ───────────────────
