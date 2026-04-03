@@ -94,6 +94,13 @@ class PlaybackController @Inject constructor(
     private var isExternalPlayback = false
 
     /**
+     * Track restored from persistence that hasn't been routed yet.
+     * On first play after restore, we route this track through the full
+     * playback pipeline instead of calling ctrl.play() on the empty ExoPlayer.
+     */
+    private var pendingRestoredTrack: TrackEntity? = null
+
+    /**
      * How long to keep the foreground service alive after external playback is paused.
      * After this timeout, the service is fully demoted and the process may be killed.
      */
@@ -169,6 +176,33 @@ class PlaybackController @Inject constructor(
                             shuffleEnabled = snapshot.shuffleEnabled,
                         )
                     }
+                    // Set the restored track's metadata on ExoPlayer so the
+                    // MediaSession shows the correct track. Without this,
+                    // ExoPlayer has no media items — tapping play triggers
+                    // auto-advance to the NEXT track instead of playing the
+                    // restored one.
+                    controller?.let { ctrl ->
+                        val metadataItem = MediaItem.Builder()
+                            .setMediaId(restoredTrack.id)
+                            .setMediaMetadata(
+                                MediaMetadata.Builder()
+                                    .setTitle(restoredTrack.title)
+                                    .setArtist(restoredTrack.artist)
+                                    .setAlbumTitle(restoredTrack.album)
+                                    .apply {
+                                        restoredTrack.artworkUrl?.let {
+                                            setArtworkUri(android.net.Uri.parse(it))
+                                        }
+                                    }
+                                    .build()
+                            )
+                            .build()
+                        ctrl.setMediaItems(listOf(metadataItem))
+                        // Don't prepare or play — just set the metadata so
+                        // the mini player and MediaSession show the track.
+                    }
+                    // Mark this track as needing full routing when play is tapped
+                    pendingRestoredTrack = restoredTrack
                 }
                 queuePersistence.startObserving()
                 scrobbleManager.startObserving()
@@ -421,8 +455,10 @@ class PlaybackController @Inject constructor(
                     // awake at 500ms intervals while paused.
                     stopSpotifyStatePolling()
                     stopAppleMusicStatePolling()
-                    // Demote from foreground and start idle timeout
-                    sendExternalPlaybackStop()
+                    // DON'T demote from foreground — keep the notification visible
+                    // (showing paused state) like other music players. The state
+                    // observer updates the notification with isPlaying=false.
+                    // The idle timeout handles cleanup if the user doesn't resume.
                     startIdleTimeout()
                 } else {
                     // Cancel idle timeout — user is resuming
@@ -450,6 +486,17 @@ class PlaybackController @Inject constructor(
                     }
                 }
             }
+            return
+        }
+
+        // If we have a pending restored track (app restarted, user taps play),
+        // route it through the full playback pipeline instead of calling
+        // ctrl.play() on ExoPlayer (which has no real media items, causing
+        // it to auto-advance to the next track in the queue).
+        val restored = pendingRestoredTrack
+        if (restored != null) {
+            pendingRestoredTrack = null
+            scope.launch { playTrackInternal(restored) }
             return
         }
 

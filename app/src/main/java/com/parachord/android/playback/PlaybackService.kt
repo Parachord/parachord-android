@@ -568,6 +568,16 @@ class PlaybackService : MediaSessionService() {
             return super.getAvailableCommands()
         }
 
+        override fun play() {
+            if (externalMode) { playbackController.togglePlayPause(); return }
+            super.play()
+        }
+
+        override fun pause() {
+            if (externalMode) { playbackController.togglePlayPause(); return }
+            super.pause()
+        }
+
         override fun seekToNext() {
             if (externalMode) { playbackController.skipNext(); return }
             super.seekToNext()
