@@ -283,6 +283,8 @@ Keeping Apple Music and Spotify playing with the screen off requires navigating 
 
 **WebView layer type must be LAYER_TYPE_NONE.** `LAYER_TYPE_HARDWARE` causes GPU context teardown when the screen turns off, disrupting the WebView's audio pipeline. The headless WebView doesn't render anything visible, and Widevine DRM works through `MediaDrm`/`MediaCodec` at the platform level, not the View's rendering layer.
 
+**Silent ExoPlayer playback keeps the service alive.** Media3's `MediaSessionService` validates that `mediaPlayback` foreground services have an active player. During external playback, ExoPlayer plays a 1-second silent WAV (`res/raw/silence.wav`) on loop at volume 0. This makes Media3 see `isPlaying=true`, preventing the "Stopping service due to app idle" kill at ~11 minutes. Audio focus is disabled on ExoPlayer during silence (`handleAudioFocus=false`) to avoid conflicting with Chromium's `AudioFocusDelegate`. Normal settings are restored when switching back to ExoPlayer playback.
+
 **startService() vs startForegroundService() from background.** On Android 12+, both can throw `ForegroundServiceStartNotAllowedException` when the app is backgrounded. `startService()` is tried first (works more reliably when the service is already running). The service should already be in foreground from initial promotion when the app was visible.
 
 ### On Tour Indicator — Location-Filtered
