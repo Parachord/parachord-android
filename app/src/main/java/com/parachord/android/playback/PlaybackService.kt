@@ -4,8 +4,12 @@ import android.app.Notification
 import android.app.NotificationChannel
 import android.app.NotificationManager
 import android.app.PendingIntent
+import android.content.BroadcastReceiver
+import android.content.Context
 import android.content.Intent
+import android.content.IntentFilter
 import android.content.pm.ServiceInfo
+import android.media.AudioManager
 import android.graphics.Bitmap
 import android.graphics.BitmapFactory
 import android.os.Build
@@ -67,6 +71,25 @@ class PlaybackService : MediaSessionService() {
     private val serviceScope = CoroutineScope(SupervisorJob() + Dispatchers.Main)
     private var stateObserverJob: Job? = null
 
+    /**
+     * Pause playback when an audio output device disconnects (Bluetooth,
+     * wired headset). Standard music player behavior — prevents audio from
+     * blasting through the phone speaker unexpectedly.
+     *
+     * ExoPlayer handles this automatically when playing directly (via
+     * handleAudioFocus), but during external playback ExoPlayer plays
+     * silence with handleAudioFocus=false, so we need an explicit receiver.
+     */
+    private val becomingNoisyReceiver = object : BroadcastReceiver() {
+        override fun onReceive(context: Context?, intent: Intent?) {
+            if (intent?.action == AudioManager.ACTION_AUDIO_BECOMING_NOISY) {
+                Log.d(TAG, "Audio becoming noisy (device disconnected) — pausing playback")
+                playbackController.togglePlayPause()
+            }
+        }
+    }
+    private var noisyReceiverRegistered = false
+
     /** Cached artwork bitmap for the current notification. */
     private var currentArtworkUrl: String? = null
     private var currentArtworkBitmap: Bitmap? = null
@@ -111,6 +134,11 @@ class PlaybackService : MediaSessionService() {
 
         // Unified notification provider — same look for ExoPlayer and external playback.
         setMediaNotificationProvider(UnifiedMediaNotificationProvider())
+
+        // Pause on audio device disconnect (Bluetooth, wired headset)
+        val noisyFilter = IntentFilter(AudioManager.ACTION_AUDIO_BECOMING_NOISY)
+        registerReceiver(becomingNoisyReceiver, noisyFilter)
+        noisyReceiverRegistered = true
 
         startStateObserver()
     }
@@ -190,6 +218,10 @@ class PlaybackService : MediaSessionService() {
     }
 
     override fun onDestroy() {
+        if (noisyReceiverRegistered) {
+            unregisterReceiver(becomingNoisyReceiver)
+            noisyReceiverRegistered = false
+        }
         stateObserverJob?.cancel()
         serviceScope.cancel()
         spotifyHandler.disconnect()
