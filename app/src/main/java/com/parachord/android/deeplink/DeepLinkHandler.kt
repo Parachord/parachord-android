@@ -184,7 +184,20 @@ class DeepLinkHandler @Inject constructor() {
     }
 
     private fun parseSpotifyUri(uri: Uri): DeepLinkAction {
-        // spotify:track:6rqhFgbbKwnb9MLmUQDhG6
+        // Handle Branch.io referrer format used by Spotify's link sharing:
+        // spotify://open?_branch_referrer=<gzip+base64 encoded data>
+        // The referrer contains $full_url=https://open.spotify.com/artist/xxx
+        if (uri.host == "open" && uri.getQueryParameter("_branch_referrer") != null) {
+            val extracted = extractSpotifyUrlFromBranchReferrer(
+                uri.getQueryParameter("_branch_referrer")!!
+            )
+            if (extracted != null) {
+                Log.d(TAG, "Extracted Spotify URL from Branch referrer: $extracted")
+                return parseSpotifyUrl(Uri.parse(extracted))
+            }
+        }
+
+        // Standard format: spotify:track:6rqhFgbbKwnb9MLmUQDhG6
         val ssp = uri.schemeSpecificPart ?: return DeepLinkAction.Unknown(uri)
         val parts = ssp.split(":")
         if (parts.size < 2) return DeepLinkAction.Unknown(uri)
@@ -196,6 +209,29 @@ class DeepLinkHandler @Inject constructor() {
             "artist" -> DeepLinkAction.SpotifyArtist(parts[1])
             else -> DeepLinkAction.Unknown(uri)
         }
+    }
+
+    /**
+     * Spotify's link sharing wraps real URLs in a Branch.io referrer:
+     * gzip-compressed, base64-encoded data containing $full_url parameter.
+     * Decode it to extract the actual open.spotify.com URL.
+     */
+    private fun extractSpotifyUrlFromBranchReferrer(referrer: String): String? = try {
+        val compressed = android.util.Base64.decode(referrer, android.util.Base64.DEFAULT)
+        val decompressed = java.util.zip.GZIPInputStream(compressed.inputStream())
+            .bufferedReader().readText()
+        // Parse the decompressed URL and extract $full_url parameter
+        val refUri = Uri.parse(decompressed)
+        val fullUrl = refUri.getQueryParameter("\$full_url")
+            ?: refUri.getQueryParameter("\$fallback_url")
+        // Strip tracking params to get clean Spotify URL
+        if (fullUrl != null) {
+            val spotifyUri = Uri.parse(fullUrl)
+            "${spotifyUri.scheme}://${spotifyUri.host}${spotifyUri.path}"
+        } else null
+    } catch (e: Exception) {
+        Log.w(TAG, "Failed to decode Branch referrer: ${e.message}")
+        null
     }
 
     private fun parseHttpUrl(uri: Uri): DeepLinkAction {

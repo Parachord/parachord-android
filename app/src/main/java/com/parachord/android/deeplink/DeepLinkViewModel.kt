@@ -331,11 +331,14 @@ class DeepLinkViewModel @Inject constructor(
     }
 
     private suspend fun resolveAndNavigateSpotifyArtist(artistId: String) {
+        Log.d(TAG, "Resolving Spotify artist: $artistId")
         val result = externalLinkResolver.resolveSpotifyArtist(artistId)
         if (result != null) {
+            Log.d(TAG, "Resolved Spotify artist '$artistId' → '${result.name}'")
             _navEvents.emit(DeepLinkNavEvent.Artist(result.name))
         } else {
-            _navEvents.emit(DeepLinkNavEvent.Toast("Could not load Spotify artist"))
+            Log.w(TAG, "Failed to resolve Spotify artist '$artistId'")
+            _navEvents.emit(DeepLinkNavEvent.Toast("Could not load Spotify artist. Make sure Spotify is connected in Settings."))
         }
     }
 
