@@ -176,32 +176,11 @@ class PlaybackController @Inject constructor(
                             shuffleEnabled = snapshot.shuffleEnabled,
                         )
                     }
-                    // Set the restored track's metadata on ExoPlayer so the
-                    // MediaSession shows the correct track. Without this,
-                    // ExoPlayer has no media items — tapping play triggers
-                    // auto-advance to the NEXT track instead of playing the
-                    // restored one.
-                    controller?.let { ctrl ->
-                        val metadataItem = MediaItem.Builder()
-                            .setMediaId(restoredTrack.id)
-                            .setMediaMetadata(
-                                MediaMetadata.Builder()
-                                    .setTitle(restoredTrack.title)
-                                    .setArtist(restoredTrack.artist)
-                                    .setAlbumTitle(restoredTrack.album)
-                                    .apply {
-                                        restoredTrack.artworkUrl?.let {
-                                            setArtworkUri(android.net.Uri.parse(it))
-                                        }
-                                    }
-                                    .build()
-                            )
-                            .build()
-                        ctrl.setMediaItems(listOf(metadataItem))
-                        // Don't prepare or play — just set the metadata so
-                        // the mini player and MediaSession show the track.
-                    }
-                    // Mark this track as needing full routing when play is tapped
+                    // Mark this track as needing full routing when play is
+                    // tapped. Don't set metadata on ExoPlayer here — that
+                    // would make the system notification show a "playing"
+                    // track when nothing is actually playing. Our own mini
+                    // player reads from stateHolder, not ExoPlayer.
                     pendingRestoredTrack = restoredTrack
                 }
                 queuePersistence.startObserving()
@@ -459,12 +438,17 @@ class PlaybackController @Inject constructor(
                     // (showing paused state) like other music players. The state
                     // observer updates the notification with isPlaying=false.
                     // The idle timeout handles cleanup if the user doesn't resume.
+                    // Also pause ExoPlayer's silence so the MediaSession reports
+                    // "paused" and the system widget shows the play button.
+                    sendSilencePlayback(pause = true)
                     startIdleTimeout()
                 } else {
                     // Cancel idle timeout — user is resuming
                     cancelIdleTimeout()
                     handler.resume()
                     stateHolder.update { copy(isPlaying = true) }
+                    // Resume ExoPlayer's silence so MediaSession reports "playing"
+                    sendSilencePlayback(pause = false)
                     // Re-promote to foreground and restart state polling
                     val track = stateHolder.state.value.currentTrack
                     if (track != null) sendExternalPlaybackStart(track)
@@ -1258,6 +1242,20 @@ class PlaybackController @Inject constructor(
         val intent = Intent(context, PlaybackService::class.java).apply {
             action = if (enabled) PlaybackService.ACTION_EXTERNAL_MODE_ON
                      else PlaybackService.ACTION_EXTERNAL_MODE_OFF
+        }
+        try { context.startService(intent) } catch (_: Exception) {}
+    }
+
+    /**
+     * Pause or resume ExoPlayer's silent playback directly via intent,
+     * bypassing the ForwardingPlayer. This syncs the MediaSession's
+     * play/pause state with the external handler so the system widget
+     * shows the correct icon.
+     */
+    private fun sendSilencePlayback(pause: Boolean) {
+        val intent = Intent(context, PlaybackService::class.java).apply {
+            action = if (pause) PlaybackService.ACTION_SILENCE_PAUSE
+                     else PlaybackService.ACTION_SILENCE_RESUME
         }
         try { context.startService(intent) } catch (_: Exception) {}
     }

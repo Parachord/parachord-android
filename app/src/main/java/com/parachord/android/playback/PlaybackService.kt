@@ -108,6 +108,9 @@ class PlaybackService : MediaSessionService() {
         const val ACTION_EXTERNAL_PLAYBACK_STOP = "com.parachord.android.EXTERNAL_PLAYBACK_STOP"
         const val ACTION_EXTERNAL_MODE_ON = "com.parachord.android.EXTERNAL_MODE_ON"
         const val ACTION_EXTERNAL_MODE_OFF = "com.parachord.android.EXTERNAL_MODE_OFF"
+        /** Pause/resume the underlying ExoPlayer directly (bypasses ForwardingPlayer). */
+        const val ACTION_SILENCE_PAUSE = "com.parachord.android.SILENCE_PAUSE"
+        const val ACTION_SILENCE_RESUME = "com.parachord.android.SILENCE_RESUME"
         const val EXTRA_TRACK_TITLE = "track_title"
         const val EXTRA_TRACK_ARTIST = "track_artist"
         const val EXTRA_TRACK_ARTWORK_URL = "track_artwork_url"
@@ -172,6 +175,12 @@ class PlaybackService : MediaSessionService() {
             }
             ACTION_EXTERNAL_MODE_OFF -> {
                 forwardingPlayer?.externalMode = false
+            }
+            ACTION_SILENCE_PAUSE -> {
+                player?.pause()
+            }
+            ACTION_SILENCE_RESUME -> {
+                player?.play()
             }
             ACTION_PLAY_PAUSE -> {
                 playbackController.togglePlayPause()
