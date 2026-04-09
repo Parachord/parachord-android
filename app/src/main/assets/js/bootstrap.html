@@ -17,43 +17,53 @@
     };
     window.console = _console;
 
-    // ── Fetch polyfill ───────────────────────────────────────────────
-    // Override window.fetch to route through NativeBridge.fetchWithOptions().
-    // .axe plugins use standard fetch() for API calls (including POST with JSON body).
-    // NativeBridge returns a JSON envelope: {"status": 200, "ok": true, "body": "..."}
-    window.fetch = async function(url, options = {}) {
-        const method = (options.method || 'GET').toUpperCase();
-        const headers = JSON.stringify(options.headers || {});
-        const body = typeof options.body === 'string' ? options.body
-                   : options.body ? JSON.stringify(options.body) : '';
+    // ── Async Fetch polyfill ────────────────────────────────────────
+    // Override window.fetch to use NativeBridge.fetchAsync() which runs
+    // HTTP requests on a background thread and calls back via JS.
+    // This frees the WebView JS thread so multiple .axe plugin searches
+    // can run concurrently (Bandcamp, SoundCloud, etc.) instead of
+    // blocking sequentially.
+    window.__fetchCallbacks = {};
+    var __fetchIdCounter = 0;
 
-        const envelope = NativeBridge.fetchWithOptions(url, method, headers, body);
-        let parsed;
-        try {
-            parsed = JSON.parse(envelope);
-        } catch (e) {
-            // Fallback: treat entire result as body (legacy NativeBridge.fetch format)
-            return {
-                ok: true,
-                status: 200,
-                text: () => Promise.resolve(envelope),
-                json: () => Promise.resolve(JSON.parse(envelope)),
-                headers: new Headers(),
+    window.fetch = function(url, options) {
+        options = options || {};
+        var method = (options.method || 'GET').toUpperCase();
+        var headers = JSON.stringify(options.headers || {});
+        var body = typeof options.body === 'string' ? options.body
+                 : options.body ? JSON.stringify(options.body) : '';
+
+        var callbackId = 'fetch_' + (++__fetchIdCounter);
+
+        return new Promise(function(resolve, reject) {
+            window.__fetchCallbacks[callbackId] = function(envelopeStr) {
+                delete window.__fetchCallbacks[callbackId];
+                try {
+                    var parsed = JSON.parse(envelopeStr);
+                    var responseBody = parsed.body || '';
+                    resolve({
+                        ok: parsed.ok,
+                        status: parsed.status,
+                        statusText: parsed.ok ? 'OK' : 'Error',
+                        text: function() { return Promise.resolve(responseBody); },
+                        json: function() {
+                            try { return Promise.resolve(JSON.parse(responseBody)); }
+                            catch (e) { return Promise.reject(new Error('Invalid JSON')); }
+                        },
+                        headers: new Headers(),
+                    });
+                } catch (e) {
+                    reject(new Error('Failed to parse fetch response: ' + e.message));
+                }
             };
-        }
 
-        const responseBody = parsed.body || '';
-        return {
-            ok: parsed.ok,
-            status: parsed.status,
-            statusText: parsed.ok ? 'OK' : 'Error',
-            text: () => Promise.resolve(responseBody),
-            json: () => {
-                try { return Promise.resolve(JSON.parse(responseBody)); }
-                catch (e) { return Promise.reject(new Error('Invalid JSON: ' + responseBody.substring(0, 100))); }
-            },
-            headers: new Headers(),
-        };
+            try {
+                NativeBridge.fetchAsync(callbackId, url, method, headers, body);
+            } catch (e) {
+                delete window.__fetchCallbacks[callbackId];
+                reject(e);
+            }
+        });
     };
 
     // Keep nativeFetch as an alias for backward compatibility

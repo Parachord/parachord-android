@@ -72,6 +72,7 @@ class JsBridge @Inject constructor(
             }
         }
         webView = wv
+        nativeBridge.webView = wv // For async fetch callbacks
 
         // Load bootstrap HTML (polyfills + resolver-loader.js)
         wv.loadUrl("file:///android_asset/js/bootstrap.html")

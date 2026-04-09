@@ -31,6 +31,8 @@ class NativeBridge(
     private val scope: CoroutineScope,
     private val dataStore: DataStore<Preferences>,
 ) {
+    /** WebView reference for async fetch callbacks. Set by JsBridge after creation. */
+    var webView: android.webkit.WebView? = null
     /** HTTP client with limited redirects and shorter timeouts for plugin fetches.
      *  YouTube's consent pages create redirect loops that block the JS thread. */
     private val pluginHttpClient: OkHttpClient by lazy {
@@ -97,6 +99,67 @@ class NativeBridge(
         } catch (e: Exception) {
             Log.e(TAG, "fetch error ($method $url): ${e.message}")
             """{"status":0,"ok":false,"body":${escapeJsonString(e.message ?: "Network error")}}"""
+        }
+    }
+
+    // ── Async Fetch ────────────────────────────────────────────────────
+
+    /**
+     * Non-blocking fetch that returns immediately and invokes a JS callback
+     * when the HTTP response arrives. This frees the WebView JS thread to
+     * process other .axe plugin calls concurrently.
+     *
+     * Called from bootstrap.html's `window.fetch` polyfill. The JS side
+     * creates a Promise with a unique callbackId and registers a resolver
+     * in `window.__fetchCallbacks[id]`. When the response arrives, we call
+     * `window.__fetchCallbacks[id](envelope)` from the main thread.
+     */
+    @JavascriptInterface
+    fun fetchAsync(callbackId: String, url: String, method: String, headersJson: String, body: String) {
+        scope.launch(kotlinx.coroutines.Dispatchers.IO) {
+            val envelope = try {
+                val requestBuilder = Request.Builder().url(url)
+
+                // Parse headers
+                if (headersJson.isNotBlank() && headersJson != "{}") {
+                    try {
+                        val cleaned = headersJson.trim().removePrefix("{").removeSuffix("}")
+                        if (cleaned.isNotBlank()) {
+                            cleaned.split(",").forEach { pair ->
+                                val parts = pair.split(":", limit = 2)
+                                if (parts.size == 2) {
+                                    val key = parts[0].trim().removeSurrounding("\"")
+                                    val value = parts[1].trim().removeSurrounding("\"")
+                                    if (key.isNotBlank()) requestBuilder.header(key, value)
+                                }
+                            }
+                        }
+                    } catch (_: Exception) {}
+                }
+
+                val requestBody = when (method.uppercase()) {
+                    "POST", "PUT", "PATCH" -> body.toRequestBody("application/json".toMediaType())
+                    "DELETE" -> if (body.isNotBlank()) body.toRequestBody("application/json".toMediaType()) else null
+                    else -> null
+                }
+                requestBuilder.method(method.uppercase(), requestBody)
+
+                val response = pluginHttpClient.newCall(requestBuilder.build()).execute()
+                val responseBody = response.body?.string() ?: ""
+                """{"status":${response.code},"ok":${response.isSuccessful},"body":${escapeJsonString(responseBody)}}"""
+            } catch (e: Exception) {
+                Log.e(TAG, "fetchAsync error ($method $url): ${e.message}")
+                """{"status":0,"ok":false,"body":${escapeJsonString(e.message ?: "Network error")}}"""
+            }
+
+            // Deliver result back to JS on the main thread
+            val escapedEnvelope = envelope.replace("\\", "\\\\").replace("'", "\\'")
+            kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.Main) {
+                webView?.evaluateJavascript(
+                    "window.__fetchCallbacks && window.__fetchCallbacks['$callbackId'] && window.__fetchCallbacks['$callbackId']('$escapedEnvelope')",
+                    null,
+                )
+            }
         }
     }
 
