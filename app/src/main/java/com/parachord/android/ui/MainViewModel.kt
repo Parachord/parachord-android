@@ -56,6 +56,8 @@ class MainViewModel @Inject constructor(
     private val playlistImportManager: PlaylistImportManager,
     private val concertsRepository: ConcertsRepository,
     private val networkMonitor: NetworkMonitor,
+    private val pluginManager: com.parachord.android.plugin.PluginManager,
+    private val pluginSyncService: com.parachord.android.plugin.PluginSyncService,
 ) : ViewModel() {
 
     companion object {
@@ -108,6 +110,18 @@ class MainViewModel @Inject constructor(
         playbackController.connect()
         playbackController.onTrackEndedListener = { onTrackEnded() }
         playbackController.onUserPlaybackActionListener = { onUserPlaybackAction() }
+
+        // Initialize .axe plugin system and sync updates from marketplace
+        viewModelScope.launch {
+            try {
+                pluginManager.ensureInitialized()
+                Log.d(TAG, "Plugin system ready: ${pluginManager.plugins.value.size} plugins loaded")
+                // Check for plugin updates (debounced to once per 24h)
+                pluginSyncService.syncIfNeeded()
+            } catch (e: Exception) {
+                Log.w(TAG, "Plugin init/sync failed (non-fatal): ${e.message}")
+            }
+        }
         // Periodic friend activity polling (mirrors desktop's 2-minute interval)
         viewModelScope.launch {
             // Initial refresh

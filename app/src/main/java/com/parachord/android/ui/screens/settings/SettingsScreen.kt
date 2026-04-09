@@ -2306,10 +2306,14 @@ private fun AiProviderConfig(
         else -> "" to ""
     }
 
+    // Hardcoded model lists as fallback. These match the defaults in each .axe plugin.
+    // TODO: Replace with dynamic listModels() from PluginManager once the .axe plugins
+    // are wired into the settings flow (requires API key to fetch live model lists).
     val models = when (providerId) {
         "chatgpt" -> listOf("gpt-4o-mini", "gpt-4o", "gpt-4-turbo", "gpt-3.5-turbo")
         "claude" -> listOf("claude-sonnet-4-20250514", "claude-3-5-sonnet-20241022", "claude-3-5-haiku-20241022")
-        "gemini" -> listOf("gemini-2.0-flash", "gemini-2.0-flash-lite", "gemini-1.5-pro", "gemini-1.5-flash")
+        "gemini" -> listOf("gemini-2.5-flash", "gemini-2.0-flash", "gemini-2.0-flash-lite", "gemini-1.5-pro", "gemini-1.5-flash")
+        "ollama" -> listOf("llama3", "mistral", "codellama", "phi3")
         else -> emptyList()
     }
 
