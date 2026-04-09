@@ -518,6 +518,7 @@ class ResolverManager @Inject constructor(
             targetTitle ?: query,
             null,
         )
+        Log.d(TAG, "Plugin resolve($resolverId) raw result: ${resultJson?.take(200)}")
         if (resultJson == null) {
             null
         } else {
