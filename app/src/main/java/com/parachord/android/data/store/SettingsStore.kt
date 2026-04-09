@@ -3,6 +3,7 @@ package com.parachord.android.data.store
 import androidx.datastore.core.DataStore
 import androidx.datastore.preferences.core.Preferences
 import androidx.datastore.preferences.core.booleanPreferencesKey
+import androidx.datastore.preferences.core.longPreferencesKey
 import androidx.datastore.preferences.core.edit
 import androidx.datastore.preferences.core.stringPreferencesKey
 import androidx.datastore.preferences.core.stringSetPreferencesKey
@@ -727,4 +728,15 @@ class SettingsStore @Inject constructor(
         "bandcamp" to -3,
         "youtube" to -6,
     )
+
+    // ── Plugin Sync ──────────────────────────────────────────────────
+
+    private val LAST_PLUGIN_SYNC = longPreferencesKey("last_plugin_sync_timestamp")
+
+    suspend fun getLastPluginSyncTimestamp(): Long =
+        dataStore.data.first()[LAST_PLUGIN_SYNC] ?: 0L
+
+    suspend fun setLastPluginSyncTimestamp(timestamp: Long) {
+        dataStore.edit { it[LAST_PLUGIN_SYNC] = timestamp }
+    }
 }
