@@ -383,6 +383,7 @@ private fun PlugInsTab(
     // Build plugin list from .axe plugins (dynamic) with hardcoded fallback
     val settingsViewModel: SettingsViewModel = hiltViewModel()
     val axePlugins by settingsViewModel.loadedPlugins.collectAsStateWithLifecycle()
+    val disabledPlugins by settingsViewModel.disabledPlugins.collectAsStateWithLifecycle()
     val allPlugins = remember(axePlugins) { buildPluginList(axePlugins) }
 
     val resolverPlugins = allPlugins.filter { it.category == PluginCategory.RESOLVER }
@@ -396,6 +397,10 @@ private fun PlugInsTab(
     fun isConnected(key: String): Boolean {
         val plugin = findPlugin(key)
         val id = plugin?.id ?: key
+
+        // Check user-disabled plugins first — overrides everything
+        if (id in disabledPlugins) return false
+
         return when (id) {
             "spotify" -> spotifyConnected
             "soundcloud" -> soundCloudConnected
@@ -403,8 +408,7 @@ private fun PlugInsTab(
             "lastfm" -> lastFmConnected
             "listenbrainz" -> listenBrainzConnected
             "librefm" -> libreFmConnected
-            "local-files", "localfiles" -> true // always available
-            // Discogs and Wikipedia are always available (no auth) — enabled by default
+            "local-files", "localfiles" -> true
             "discogs" -> id !in disabledMetaProviders
             "wikipedia" -> id !in disabledMetaProviders
             "chatgpt" -> chatGptConnected
@@ -412,16 +416,15 @@ private fun PlugInsTab(
             "gemini" -> geminiConnected
             "ticketmaster" -> ticketmasterConnected
             "seatgeek" -> seatGeekConnected
-            // .axe plugins: enabled if they don't need auth or if they
-            // have configuration stored. Plugins like bandcamp/youtube work
-            // without auth. Ollama needs a local server. Concert services
-            // need API keys.
-            "bandcamp", "youtube" -> true // No auth required
-            "ollama" -> false // Needs local Ollama server — show as disabled until configured
-            "bandsintown", "songkick" -> false // Need API keys — show as disabled until configured
+            // .axe plugins without auth — enabled by default
+            "bandcamp" -> true
+            // .axe plugins that need config — disabled until configured
+            "youtube" -> false // YouTube scraping broken on Android (consent redirects)
+            "ollama" -> false // Needs local server
+            "bandsintown", "songkick" -> false // Need API keys
             else -> {
-                // Unknown .axe plugin — default to disabled (safe default)
-                false
+                // Unknown .axe plugin — default to enabled if we know about it
+                axePlugins.any { it.id == id }
             }
         }
     }
@@ -605,6 +608,8 @@ private fun PlugInsTab(
                     "lastfm" -> onLastFmToggle()
                     "discogs" -> onMetaProviderToggle("discogs", !isConnected("discogs"))
                     "wikipedia" -> onMetaProviderToggle("wikipedia", !isConnected("wikipedia"))
+                    // .axe plugins without native auth — toggle via disabled plugins set
+                    else -> settingsViewModel.setPluginEnabled(plugin.id, !isConnected(plugin.id))
                 }
             },
             scrobbling = scrobbling,

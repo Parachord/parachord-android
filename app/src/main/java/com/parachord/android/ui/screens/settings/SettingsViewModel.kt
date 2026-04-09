@@ -74,6 +74,14 @@ class SettingsViewModel @Inject constructor(
     val disabledMetaProviders: StateFlow<Set<String>> = settingsStore.getDisabledMetaProvidersFlow()
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), emptySet())
 
+    /** Plugins explicitly disabled by the user. */
+    val disabledPlugins: StateFlow<Set<String>> = settingsStore.getDisabledPluginsFlow()
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), emptySet())
+
+    fun setPluginEnabled(pluginId: String, enabled: Boolean) {
+        viewModelScope.launch { settingsStore.setPluginEnabled(pluginId, enabled) }
+    }
+
     val resolverOrder: StateFlow<List<String>> = settingsStore.getResolverOrderFlow()
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), emptyList())
 
