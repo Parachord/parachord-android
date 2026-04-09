@@ -6,33 +6,80 @@
 </head>
 <body>
 <script>
-    // Polyfill console to route through NativeBridge
+    // ── Console polyfill ─────────────────────────────────────────────
+    // Route JS console output to Android's Log via NativeBridge
     const _console = {
-        log: (...args) => NativeBridge.log('debug', args.join(' ')),
-        info: (...args) => NativeBridge.log('info', args.join(' ')),
-        warn: (...args) => NativeBridge.log('warn', args.join(' ')),
-        error: (...args) => NativeBridge.log('error', args.join(' ')),
+        log: (...args) => NativeBridge.log('debug', args.map(String).join(' ')),
+        info: (...args) => NativeBridge.log('info', args.map(String).join(' ')),
+        warn: (...args) => NativeBridge.log('warn', args.map(String).join(' ')),
+        error: (...args) => NativeBridge.log('error', args.map(String).join(' ')),
+        debug: (...args) => NativeBridge.log('debug', args.map(String).join(' ')),
     };
     window.console = _console;
 
-    // Polyfill fetch to route through NativeBridge
-    window.nativeFetch = async function(url, options = {}) {
+    // ── Fetch polyfill ───────────────────────────────────────────────
+    // Override window.fetch to route through NativeBridge.fetchWithOptions().
+    // .axe plugins use standard fetch() for API calls (including POST with JSON body).
+    // NativeBridge returns a JSON envelope: {"status": 200, "ok": true, "body": "..."}
+    window.fetch = async function(url, options = {}) {
+        const method = (options.method || 'GET').toUpperCase();
         const headers = JSON.stringify(options.headers || {});
-        const result = NativeBridge.fetch(url, headers);
+        const body = typeof options.body === 'string' ? options.body
+                   : options.body ? JSON.stringify(options.body) : '';
+
+        const envelope = NativeBridge.fetchWithOptions(url, method, headers, body);
+        let parsed;
+        try {
+            parsed = JSON.parse(envelope);
+        } catch (e) {
+            // Fallback: treat entire result as body (legacy NativeBridge.fetch format)
+            return {
+                ok: true,
+                status: 200,
+                text: () => Promise.resolve(envelope),
+                json: () => Promise.resolve(JSON.parse(envelope)),
+                headers: new Headers(),
+            };
+        }
+
+        const responseBody = parsed.body || '';
         return {
-            ok: true,
-            text: () => Promise.resolve(result),
-            json: () => Promise.resolve(JSON.parse(result)),
+            ok: parsed.ok,
+            status: parsed.status,
+            statusText: parsed.ok ? 'OK' : 'Error',
+            text: () => Promise.resolve(responseBody),
+            json: () => {
+                try { return Promise.resolve(JSON.parse(responseBody)); }
+                catch (e) { return Promise.reject(new Error('Invalid JSON: ' + responseBody.substring(0, 100))); }
+            },
+            headers: new Headers(),
         };
     };
 
-    // Storage API for resolvers
+    // Keep nativeFetch as an alias for backward compatibility
+    window.nativeFetch = window.fetch;
+
+    // ── Storage polyfill ─────────────────────────────────────────────
+    // .axe plugins access config (API keys, tokens) via nativeStorage
     window.nativeStorage = {
         get: (key) => NativeBridge.storageGet(key),
         set: (key, value) => NativeBridge.storageSet(key, value),
     };
 
-    console.log('Parachord JS runtime initialized');
+    console.log('Parachord JS runtime: polyfills loaded');
+</script>
+
+<!-- Load the resolver-loader.js from desktop (unchanged) -->
+<script src="resolver-loader.js"></script>
+
+<script>
+    // Create global ResolverLoader instance for PluginManager to use
+    if (typeof ResolverLoader !== 'undefined') {
+        window.__resolverLoader = new ResolverLoader();
+        console.log('Parachord JS runtime: ResolverLoader ready');
+    } else {
+        console.error('ResolverLoader class not found — resolver-loader.js failed to load');
+    }
 </script>
 </body>
 </html>

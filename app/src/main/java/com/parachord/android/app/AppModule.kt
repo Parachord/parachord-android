@@ -51,8 +51,6 @@ object AppModule {
     fun provideDatabase(@ApplicationContext context: Context): ParachordDatabase =
         ParachordDatabase.create(context)
 
-    @Provides
-    @Singleton
-    fun provideJsBridge(@ApplicationContext context: Context, okHttpClient: OkHttpClient): JsBridge =
-        JsBridge(context, okHttpClient)
+    // JsBridge is provided via @Inject constructor + @Singleton (no manual @Provides needed).
+    // It depends on: @ApplicationContext Context, OkHttpClient, DataStore<Preferences>
 }
