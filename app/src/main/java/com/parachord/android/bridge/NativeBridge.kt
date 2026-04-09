@@ -31,6 +31,16 @@ class NativeBridge(
     private val scope: CoroutineScope,
     private val dataStore: DataStore<Preferences>,
 ) {
+    /** HTTP client with limited redirects and shorter timeouts for plugin fetches.
+     *  YouTube's consent pages create redirect loops that block the JS thread. */
+    private val pluginHttpClient: OkHttpClient by lazy {
+        httpClient.newBuilder()
+            .followRedirects(true)
+            .followSslRedirects(true)
+            .callTimeout(10, java.util.concurrent.TimeUnit.SECONDS)
+            .readTimeout(8, java.util.concurrent.TimeUnit.SECONDS)
+            .build()
+    }
 
     // ── Fetch ────────────────────────────────────────────────────────
 
@@ -78,7 +88,7 @@ class NativeBridge(
             }
             requestBuilder.method(method.uppercase(), requestBody)
 
-            val response = httpClient.newCall(requestBuilder.build()).execute()
+            val response = pluginHttpClient.newCall(requestBuilder.build()).execute()
             val responseBody = response.body?.string() ?: ""
             val statusCode = response.code
             val isOk = response.isSuccessful

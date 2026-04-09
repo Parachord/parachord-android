@@ -29,7 +29,12 @@ class SettingsViewModel @Inject constructor(
     private val listenBrainzApi: ListenBrainzApi,
     private val musicKitBridge: MusicKitWebBridge,
     private val mediaScanner: MediaScanner,
+    private val pluginManager: com.parachord.android.plugin.PluginManager,
 ) : ViewModel() {
+
+    /** Loaded .axe plugins — drives the dynamic plugin list in Settings. */
+    val loadedPlugins: StateFlow<List<com.parachord.android.plugin.PluginManager.PluginInfo>> =
+        pluginManager.plugins
 
     val themeMode: StateFlow<String> = settingsStore.themeMode
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), "system")
