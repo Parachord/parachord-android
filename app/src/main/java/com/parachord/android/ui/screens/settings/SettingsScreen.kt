@@ -14,6 +14,8 @@ import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.ExperimentalLayoutApi
 import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.horizontalScroll
+import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.aspectRatio
 import androidx.compose.foundation.layout.fillMaxSize
@@ -64,6 +66,7 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateListOf
 import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
@@ -128,133 +131,62 @@ private enum class PluginCategory(val label: String) {
     CONCERT_SERVICE("Concerts & Events"),
 }
 
-private val builtInPlugins = listOf(
-    PluginInfo(
-        id = "spotify",
-        name = "Spotify",
-        resolverId = "spotify",
-        bgColor = Color(0xFF1DB954),
-        category = PluginCategory.RESOLVER,
-        capabilities = listOf("Resolve", "Search", "Stream"),
-        description = "Stream music from Spotify via Connect",
-    ),
-    PluginInfo(
-        id = "soundcloud",
-        name = "SoundCloud",
-        resolverId = "soundcloud",
-        bgColor = Color(0xFFFF5500),
-        category = PluginCategory.RESOLVER,
-        capabilities = listOf("Resolve", "Search", "Stream"),
-        description = "Search and stream tracks from SoundCloud",
-    ),
-    PluginInfo(
-        id = "applemusic",
-        name = "Apple Music",
-        resolverId = "applemusic",
-        bgColor = Color(0xFFFA243C), // Match ResolverIconColors.applemusic
-        category = PluginCategory.RESOLVER,
-        capabilities = listOf("Resolve", "Search", "Stream"),
-        description = "Search and stream from Apple Music via MusicKit",
-    ),
-    PluginInfo(
-        id = "local-files",
-        name = "Local Files",
-        resolverId = "localfiles",
-        bgColor = Color(0xFFA855F7), // Match ResolverIconColors.localfiles
-        category = PluginCategory.RESOLVER,
-        capabilities = listOf("Resolve", "Browse", "Stream"),
-        description = "Play music stored on your device",
-    ),
-    PluginInfo(
-        id = "lastfm",
-        name = "Last.fm",
-        resolverId = "lastfm",
-        bgColor = Color(0xFFD51007),
-        category = PluginCategory.META_SERVICE,
-        capabilities = listOf("Metadata", "Scrobble", "Recommendations"),
-        description = "Scrobbling, artist info, and recommendations",
-    ),
-    PluginInfo(
-        id = "listenbrainz",
-        name = "ListenBrainz",
-        resolverId = "listenbrainz",
-        bgColor = Color(0xFF353070),
-        category = PluginCategory.META_SERVICE,
-        capabilities = listOf("Scrobble", "Stats"),
-        description = "Open-source listening history and statistics",
-    ),
-    PluginInfo(
-        id = "librefm",
-        name = "Libre.fm",
-        resolverId = "librefm",
-        bgColor = Color(0xFF4CAF50), // Match ResolverIconColors.librefm
-        category = PluginCategory.META_SERVICE,
-        capabilities = listOf("Scrobble"),
-        description = "Free and open music scrobbling service",
-    ),
-    PluginInfo(
-        id = "discogs",
-        name = "Discogs",
-        resolverId = "discogs",
-        bgColor = Color(0xFF333333), // Match ResolverIconColors.discogs
-        category = PluginCategory.META_SERVICE,
-        capabilities = listOf("Metadata", "Bios", "Images"),
-        description = "Artist bios and images from the Discogs community database",
-    ),
-    PluginInfo(
-        id = "wikipedia",
-        name = "Wikipedia",
-        resolverId = "wikipedia",
-        bgColor = Color(0xFF000000), // Match ResolverIconColors.wikipedia
-        category = PluginCategory.META_SERVICE,
-        capabilities = listOf("Metadata", "Bios", "Images"),
-        description = "Encyclopedia-style artist bios and images via Wikidata",
-    ),
-    PluginInfo(
-        id = "chatgpt",
-        name = "ChatGPT",
-        resolverId = "chatgpt",
-        bgColor = Color(0xFF10A37F),
-        category = PluginCategory.META_SERVICE,
-        capabilities = listOf("AI DJ", "Chat"),
-        description = "Generate playlists and chat with AI DJ using ChatGPT.",
-    ),
-    PluginInfo(
-        id = "claude",
-        name = "Claude",
-        resolverId = "claude",
-        bgColor = Color(0xFFD97757),
-        category = PluginCategory.META_SERVICE,
-        capabilities = listOf("AI DJ", "Chat"),
-        description = "Anthropic's Claude — thoughtful and capable AI assistant.",
-    ),
-    PluginInfo(
-        id = "gemini",
-        name = "Google Gemini",
-        resolverId = "gemini",
-        bgColor = Color(0xFF4285F4),
-        category = PluginCategory.META_SERVICE,
-        capabilities = listOf("AI DJ", "Chat"),
-        description = "Generate playlists and chat with AI DJ using Google Gemini.",
-    ),
-    PluginInfo(
-        id = "ticketmaster",
-        name = "Ticketmaster",
-        resolverId = "ticketmaster",
-        bgColor = Color(0xFF026CDF),
-        category = PluginCategory.CONCERT_SERVICE,
-        capabilities = listOf("Concerts", "Events", "Tickets"),
-        description = "Discover concerts and buy tickets via Ticketmaster",
-    ),
-    PluginInfo(
-        id = "seatgeek",
-        name = "SeatGeek",
-        resolverId = "seatgeek",
-        bgColor = Color(0xFFFC4C02), // Match ResolverIconColors.seatgeek
-        category = PluginCategory.CONCERT_SERVICE,
-        capabilities = listOf("Concerts", "Events", "Tickets"),
-        description = "Find live events and tickets via SeatGeek",
-    ),
+/**
+ * Convert .axe plugin data from [PluginManager] into the UI's [PluginInfo].
+ * Falls back to a hardcoded plugin list when the plugin system hasn't loaded yet.
+ */
+private fun buildPluginList(
+    axePlugins: List<com.parachord.android.plugin.PluginManager.PluginInfo>
+): List<PluginInfo> {
+    if (axePlugins.isEmpty()) return builtInPluginsFallback
+
+    return axePlugins.map { axe ->
+        val category = when {
+            axe.capabilities["resolve"] == true -> PluginCategory.RESOLVER
+            axe.capabilities["concerts"] == true -> PluginCategory.CONCERT_SERVICE
+            else -> PluginCategory.META_SERVICE
+        }
+        val caps = axe.capabilities.filter { it.value }.keys.map { key ->
+            key.replaceFirstChar { it.uppercase() }
+        }
+        PluginInfo(
+            id = axe.id,
+            name = axe.name,
+            resolverId = axe.id,
+            bgColor = parseColor(axe.color),
+            category = category,
+            capabilities = caps,
+            description = "v${axe.version}",
+        )
+    }
+}
+
+/** Parse a hex color string from the .axe manifest (e.g., "#1DB954"). */
+private fun parseColor(hex: String): Color {
+    if (hex.isBlank()) return Color(0xFF7C3AED) // default purple
+    return try {
+        Color(android.graphics.Color.parseColor(hex))
+    } catch (_: Exception) {
+        Color(0xFF7C3AED)
+    }
+}
+
+/** Hardcoded fallback used before the .axe plugin system initializes. */
+private val builtInPluginsFallback = listOf(
+    PluginInfo("spotify", "Spotify", "spotify", Color(0xFF1DB954), PluginCategory.RESOLVER, listOf("Resolve", "Search", "Stream"), "Stream music from Spotify via Connect"),
+    PluginInfo("soundcloud", "SoundCloud", "soundcloud", Color(0xFFFF5500), PluginCategory.RESOLVER, listOf("Resolve", "Search", "Stream"), "Search and stream tracks from SoundCloud"),
+    PluginInfo("applemusic", "Apple Music", "applemusic", Color(0xFFFA243C), PluginCategory.RESOLVER, listOf("Resolve", "Search", "Stream"), "Search and stream from Apple Music via MusicKit"),
+    PluginInfo("localfiles", "Local Files", "localfiles", Color(0xFFA855F7), PluginCategory.RESOLVER, listOf("Resolve", "Browse", "Stream"), "Play music stored on your device"),
+    PluginInfo("lastfm", "Last.fm", "lastfm", Color(0xFFD51007), PluginCategory.META_SERVICE, listOf("Metadata", "Scrobble"), "Scrobbling, artist info, and recommendations"),
+    PluginInfo("listenbrainz", "ListenBrainz", "listenbrainz", Color(0xFF353070), PluginCategory.META_SERVICE, listOf("Scrobble", "Stats"), "Open-source listening history and statistics"),
+    PluginInfo("librefm", "Libre.fm", "librefm", Color(0xFF4CAF50), PluginCategory.META_SERVICE, listOf("Scrobble"), "Free and open music scrobbling service"),
+    PluginInfo("discogs", "Discogs", "discogs", Color(0xFF333333), PluginCategory.META_SERVICE, listOf("Metadata", "Bios"), "Artist bios and images from Discogs"),
+    PluginInfo("wikipedia", "Wikipedia", "wikipedia", Color(0xFF000000), PluginCategory.META_SERVICE, listOf("Metadata", "Bios"), "Encyclopedia-style artist bios via Wikidata"),
+    PluginInfo("chatgpt", "ChatGPT", "chatgpt", Color(0xFF10A37F), PluginCategory.META_SERVICE, listOf("AI DJ", "Chat"), "Generate playlists and chat with AI DJ using ChatGPT"),
+    PluginInfo("claude", "Claude", "claude", Color(0xFFD97757), PluginCategory.META_SERVICE, listOf("AI DJ", "Chat"), "Anthropic's Claude AI assistant"),
+    PluginInfo("gemini", "Google Gemini", "gemini", Color(0xFF4285F4), PluginCategory.META_SERVICE, listOf("AI DJ", "Chat"), "Generate playlists and chat with Google Gemini"),
+    PluginInfo("ticketmaster", "Ticketmaster", "ticketmaster", Color(0xFF026CDF), PluginCategory.CONCERT_SERVICE, listOf("Concerts", "Events"), "Discover concerts and buy tickets"),
+    PluginInfo("seatgeek", "SeatGeek", "seatgeek", Color(0xFFFC4C02), PluginCategory.CONCERT_SERVICE, listOf("Concerts", "Events"), "Find live events and tickets"),
 )
 
 // ── Settings Screen ────────────────────────────────────────────────
@@ -392,7 +324,7 @@ fun SettingsScreen(
 
 // ── Plug-Ins Tab ───────────────────────────────────────────────────
 
-@OptIn(ExperimentalMaterial3Api::class)
+@OptIn(ExperimentalMaterial3Api::class, ExperimentalLayoutApi::class)
 @Composable
 private fun PlugInsTab(
     spotifyConnected: Boolean,
@@ -444,22 +376,36 @@ private fun PlugInsTab(
     onTicketmasterDisconnect: () -> Unit = {},
     onSeatGeekClientIdSubmit: (String) -> Unit = {},
     onSeatGeekDisconnect: () -> Unit = {},
+    onBandsintownApiKeySubmit: (String) -> Unit = {},
+    onBandsintownDisconnect: () -> Unit = {},
+    onSongkickApiKeySubmit: (String) -> Unit = {},
+    onSongkickDisconnect: () -> Unit = {},
     concertLocation: SettingsStore.ConcertLocation = SettingsStore.ConcertLocation(null, null, null, 50),
     onConcertLocationSelected: (Double, Double, String) -> Unit = { _, _, _ -> },
 ) {
     var selectedPlugin by remember { mutableStateOf<PluginInfo?>(null) }
 
-    val resolverPlugins = builtInPlugins.filter { it.category == PluginCategory.RESOLVER }
-    val metaServices = builtInPlugins.filter { it.category == PluginCategory.META_SERVICE }
-    val concertServices = builtInPlugins.filter { it.category == PluginCategory.CONCERT_SERVICE }
+    // Build plugin list from .axe plugins (dynamic) with hardcoded fallback
+    val settingsViewModel: SettingsViewModel = hiltViewModel()
+    val axePlugins by settingsViewModel.loadedPlugins.collectAsStateWithLifecycle()
+    val disabledPlugins by settingsViewModel.disabledPlugins.collectAsStateWithLifecycle()
+    val allPlugins = remember(axePlugins) { buildPluginList(axePlugins) }
 
-    // Lookup can be by id ("local-files") or resolverId ("localfiles")
+    val resolverPlugins = allPlugins.filter { it.category == PluginCategory.RESOLVER }
+    val metaServices = allPlugins.filter { it.category == PluginCategory.META_SERVICE }
+    val concertServices = allPlugins.filter { it.category == PluginCategory.CONCERT_SERVICE }
+
+    // Lookup can be by id or resolverId
     fun findPlugin(key: String): PluginInfo? =
-        builtInPlugins.find { it.id == key || it.resolverId == key }
+        allPlugins.find { it.id == key || it.resolverId == key }
 
     fun isConnected(key: String): Boolean {
         val plugin = findPlugin(key)
         val id = plugin?.id ?: key
+
+        // Check user-disabled plugins first — overrides everything
+        if (id in disabledPlugins) return false
+
         return when (id) {
             "spotify" -> spotifyConnected
             "soundcloud" -> soundCloudConnected
@@ -467,8 +413,7 @@ private fun PlugInsTab(
             "lastfm" -> lastFmConnected
             "listenbrainz" -> listenBrainzConnected
             "librefm" -> libreFmConnected
-            "local-files" -> true // always available
-            // Discogs and Wikipedia are always available (no auth) — enabled by default
+            "local-files", "localfiles" -> true
             "discogs" -> id !in disabledMetaProviders
             "wikipedia" -> id !in disabledMetaProviders
             "chatgpt" -> chatGptConnected
@@ -476,7 +421,19 @@ private fun PlugInsTab(
             "gemini" -> geminiConnected
             "ticketmaster" -> ticketmasterConnected
             "seatgeek" -> seatGeekConnected
-            else -> false
+            // .axe plugins without auth — enabled by default
+            "bandcamp" -> true
+            // .axe plugins that need config — disabled until configured
+            // Bandsintown/Songkick — connected when API key is stored
+            "bandsintown", "songkick" -> {
+                val hasKey = settingsViewModel.hasPluginApiKey(id)
+                hasKey
+            }
+            // YouTube and Ollama are filtered out by PluginManager (mobile: false)
+            else -> {
+                // Unknown .axe plugin — default to enabled if we know about it
+                axePlugins.any { it.id == id }
+            }
         }
     }
 
@@ -542,11 +499,12 @@ private fun PlugInsTab(
                 Spacer(modifier = Modifier.height(12.dp))
             }
             item {
-                Row(
+                androidx.compose.foundation.layout.FlowRow(
                     modifier = Modifier
                         .fillMaxWidth()
                         .padding(horizontal = 16.dp),
                     horizontalArrangement = Arrangement.spacedBy(12.dp),
+                    verticalArrangement = Arrangement.spacedBy(12.dp),
                 ) {
                     disabledResolverPlugins.forEach { plugin ->
                         PluginTile(
@@ -554,7 +512,7 @@ private fun PlugInsTab(
                             isConnected = false,
                             priorityNumber = null,
                             onClick = { selectedPlugin = plugin },
-                            modifier = Modifier.weight(1f),
+                            modifier = Modifier.width(100.dp),
                             grayed = true,
                         )
                     }
@@ -579,32 +537,25 @@ private fun PlugInsTab(
             )
             Spacer(modifier = Modifier.height(12.dp))
         }
-        // Meta Services tiles: 3 per row
-        val rows = metaServices.chunked(3)
-        rows.forEach { rowPlugins ->
-            item {
-                Row(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .padding(horizontal = 16.dp)
-                        .padding(bottom = if (rowPlugins !== rows.last()) 12.dp else 0.dp),
-                    horizontalArrangement = Arrangement.spacedBy(12.dp),
-                ) {
-                    rowPlugins.forEach { plugin ->
-                        val connected = isConnected(plugin.id)
-                        PluginTile(
-                            plugin = plugin,
-                            isConnected = connected,
-                            priorityNumber = null,
-                            onClick = { selectedPlugin = plugin },
-                            modifier = Modifier.weight(1f),
-                            grayed = !connected,
-                        )
-                    }
-                    // Fill remaining space in last row
-                    repeat(3 - rowPlugins.size) {
-                        Spacer(modifier = Modifier.weight(1f))
-                    }
+        // Meta Services tiles: wrap to multiple rows
+        item {
+            androidx.compose.foundation.layout.FlowRow(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(horizontal = 16.dp),
+                horizontalArrangement = Arrangement.spacedBy(12.dp),
+                verticalArrangement = Arrangement.spacedBy(12.dp),
+            ) {
+                metaServices.forEach { plugin ->
+                    val connected = isConnected(plugin.id)
+                    PluginTile(
+                        plugin = plugin,
+                        isConnected = connected,
+                        priorityNumber = null,
+                        onClick = { selectedPlugin = plugin },
+                        modifier = Modifier.width(100.dp),
+                        grayed = !connected,
+                    )
                 }
             }
         }
@@ -648,6 +599,35 @@ private fun PlugInsTab(
             }
         }
 
+        // Plugin updates section
+        item {
+            Spacer(modifier = Modifier.height(24.dp))
+            HorizontalDivider(modifier = Modifier.padding(horizontal = 16.dp))
+            Spacer(modifier = Modifier.height(16.dp))
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(horizontal = 16.dp),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                Column(modifier = Modifier.weight(1f)) {
+                    Text(
+                        text = "Plugin Updates",
+                        style = MaterialTheme.typography.bodyMedium,
+                        fontWeight = FontWeight.Medium,
+                    )
+                    Text(
+                        text = "${allPlugins.size} plugins loaded",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                }
+                TextButton(onClick = { settingsViewModel.syncPlugins() }) {
+                    Text("Check for updates")
+                }
+            }
+        }
+
         item { Spacer(modifier = Modifier.height(32.dp)) }
     }
 
@@ -665,6 +645,8 @@ private fun PlugInsTab(
                     "lastfm" -> onLastFmToggle()
                     "discogs" -> onMetaProviderToggle("discogs", !isConnected("discogs"))
                     "wikipedia" -> onMetaProviderToggle("wikipedia", !isConnected("wikipedia"))
+                    // .axe plugins without native auth — toggle via disabled plugins set
+                    else -> settingsViewModel.setPluginEnabled(plugin.id, !isConnected(plugin.id))
                 }
             },
             scrobbling = scrobbling,
@@ -700,6 +682,10 @@ private fun PlugInsTab(
             onTicketmasterDisconnect = onTicketmasterDisconnect,
             onSeatGeekClientIdSubmit = onSeatGeekClientIdSubmit,
             onSeatGeekDisconnect = onSeatGeekDisconnect,
+            onBandsintownApiKeySubmit = { settingsViewModel.savePluginApiKey("bandsintown", it) },
+            onBandsintownDisconnect = { settingsViewModel.clearPluginApiKey("bandsintown") },
+            onSongkickApiKeySubmit = { settingsViewModel.savePluginApiKey("songkick", it) },
+            onSongkickDisconnect = { settingsViewModel.clearPluginApiKey("songkick") },
             concertLocation = concertLocation,
             onConcertLocationSelected = onConcertLocationSelected,
         )
@@ -709,6 +695,7 @@ private fun PlugInsTab(
 // ── Draggable Resolver Row ────────────────────────────────────────
 
 @Composable
+@OptIn(ExperimentalLayoutApi::class)
 private fun DraggableResolverRow(
     resolverOrder: List<String>,
     findPlugin: (String) -> PluginInfo?,
@@ -732,9 +719,13 @@ private fun DraggableResolverRow(
         (draggingIndex + shift).coerceIn(0, resolverOrder.size - 1)
     } else -1
 
+    // Horizontal scrollable row for drag-to-reorder. FlowRow breaks
+    // drag because you can't drag across rows. Fixed 100dp tile width
+    // prevents tiles from being too small with many resolvers.
     Row(
         modifier = Modifier
             .fillMaxWidth()
+            .horizontalScroll(rememberScrollState())
             .padding(horizontal = 16.dp),
         horizontalArrangement = Arrangement.spacedBy(12.dp),
     ) {
@@ -749,7 +740,7 @@ private fun DraggableResolverRow(
 
             Box(
                 modifier = Modifier
-                    .weight(1f)
+                    .width(100.dp)
                     .zIndex(if (isDragging) 1f else 0f)
                     .then(
                         if (isDragging) {
@@ -950,6 +941,10 @@ private fun PluginConfigSheet(
     onTicketmasterDisconnect: () -> Unit = {},
     onSeatGeekClientIdSubmit: (String) -> Unit = {},
     onSeatGeekDisconnect: () -> Unit = {},
+    onBandsintownApiKeySubmit: (String) -> Unit = {},
+    onBandsintownDisconnect: () -> Unit = {},
+    onSongkickApiKeySubmit: (String) -> Unit = {},
+    onSongkickDisconnect: () -> Unit = {},
     concertLocation: SettingsStore.ConcertLocation = SettingsStore.ConcertLocation(null, null, null, 50),
     onConcertLocationSelected: (Double, Double, String) -> Unit = { _, _, _ -> },
 ) {
@@ -1075,7 +1070,7 @@ private fun PluginConfigSheet(
                     onConnect = onAppleMusicAuthorize,
                     onDisconnect = onAppleMusicDisconnect,
                 )
-                "local-files" -> LocalFilesConfig(
+                "local-files", "localfiles" -> LocalFilesConfig(
                     scanProgress = scanProgress,
                     onScanLocalFiles = onScanLocalFiles,
                 )
@@ -1140,6 +1135,35 @@ private fun PluginConfigSheet(
                     onDisconnect = onSeatGeekDisconnect,
                     concertLocation = concertLocation,
                     onConcertLocationSelected = onConcertLocationSelected,
+                )
+                "bandsintown" -> ConcertProviderConfig(
+                    isConnected = isConnected,
+                    keyLabel = "App ID",
+                    keyHint = "Enter your Bandsintown App ID",
+                    devPortalLabel = "artists.bandsintown.com",
+                    devPortalUrl = "https://artists.bandsintown.com/support/api-installation",
+                    onSubmitKey = onBandsintownApiKeySubmit,
+                    onDisconnect = onBandsintownDisconnect,
+                    concertLocation = concertLocation,
+                    onConcertLocationSelected = onConcertLocationSelected,
+                )
+                "songkick" -> ConcertProviderConfig(
+                    isConnected = isConnected,
+                    keyLabel = "API Key",
+                    keyHint = "Enter your Songkick API key",
+                    devPortalLabel = "songkick.com/developer",
+                    devPortalUrl = "https://www.songkick.com/developer",
+                    onSubmitKey = onSongkickApiKeySubmit,
+                    onDisconnect = onSongkickDisconnect,
+                    concertLocation = concertLocation,
+                    onConcertLocationSelected = onConcertLocationSelected,
+                )
+                // Generic .axe plugin toggle — no special config UI
+                else -> ToggleableMetaConfig(
+                    isEnabled = isConnected,
+                    onToggle = onToggleConnection,
+                    enabledText = "${plugin.name} is enabled",
+                    disabledText = "Enable ${plugin.name}",
                 )
             }
         }
@@ -2306,10 +2330,14 @@ private fun AiProviderConfig(
         else -> "" to ""
     }
 
+    // Hardcoded model lists as fallback. These match the defaults in each .axe plugin.
+    // TODO: Replace with dynamic listModels() from PluginManager once the .axe plugins
+    // are wired into the settings flow (requires API key to fetch live model lists).
     val models = when (providerId) {
         "chatgpt" -> listOf("gpt-4o-mini", "gpt-4o", "gpt-4-turbo", "gpt-3.5-turbo")
         "claude" -> listOf("claude-sonnet-4-20250514", "claude-3-5-sonnet-20241022", "claude-3-5-haiku-20241022")
-        "gemini" -> listOf("gemini-2.0-flash", "gemini-2.0-flash-lite", "gemini-1.5-pro", "gemini-1.5-flash")
+        "gemini" -> listOf("gemini-2.5-flash", "gemini-2.0-flash", "gemini-2.0-flash-lite", "gemini-1.5-pro", "gemini-1.5-flash")
+        "ollama" -> listOf("llama3", "mistral", "codellama", "phi3")
         else -> emptyList()
     }
 
@@ -2360,17 +2388,33 @@ private fun AiProviderConfig(
 
     var apiKey by remember { mutableStateOf("") }
     var showSavedConfirmation by remember { mutableStateOf(false) }
+
+    // Dynamic model lists from .axe plugins — fetch when connected
+    val settingsViewModel: SettingsViewModel = hiltViewModel()
+    val dynamicModels by settingsViewModel.dynamicModels.collectAsStateWithLifecycle()
+    val modelsLoading by settingsViewModel.modelsLoading.collectAsStateWithLifecycle()
+
+    // Use dynamic models if available, fall back to hardcoded
+    val effectiveModels = if (dynamicModels.isNotEmpty()) {
+        dynamicModels.map { it.value }
+    } else {
+        models
+    }
+
+    // Fetch dynamic models when this provider is connected
+    LaunchedEffect(providerId, isConnected) {
+        if (isConnected) settingsViewModel.loadModelsForProvider(providerId)
+    }
+
     // Initialize to the currently saved model, falling back to the first available
-    var selectedModel by remember {
+    var selectedModel by remember(effectiveModels) {
         mutableStateOf(
-            if (currentModel.isNotBlank() && currentModel in models) currentModel
-            else models.firstOrNull() ?: ""
+            if (currentModel.isNotBlank() && currentModel in effectiveModels) currentModel
+            else effectiveModels.firstOrNull() ?: currentModel
         )
     }
     var modelDropdownExpanded by remember { mutableStateOf(false) }
 
-    // Listening history toggle — shared across all AI providers
-    val settingsViewModel: SettingsViewModel = hiltViewModel()
     val sendListeningHistory by settingsViewModel.sendListeningHistory.collectAsStateWithLifecycle()
 
     Spacer(modifier = Modifier.height(12.dp))
@@ -2447,7 +2491,7 @@ private fun AiProviderConfig(
             expanded = modelDropdownExpanded,
             onDismissRequest = { modelDropdownExpanded = false },
         ) {
-            models.forEach { model ->
+            effectiveModels.forEach { model ->
                 DropdownMenuItem(
                     text = { Text(model, style = MaterialTheme.typography.bodyMedium) },
                     onClick = {

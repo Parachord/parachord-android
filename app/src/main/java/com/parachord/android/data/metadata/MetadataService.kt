@@ -34,6 +34,7 @@ class MetadataService @Inject constructor(
     private val discogs: DiscogsProvider,
     private val spotify: SpotifyProvider,
     private val settingsStore: SettingsStore,
+    private val appleMusicApi: com.parachord.android.data.api.AppleMusicApi,
 ) {
     private val providers: List<MetadataProvider> by lazy {
         listOf(musicBrainz, wikipedia, lastFm, discogs, spotify).sortedBy { it.priority }
@@ -141,7 +142,53 @@ class MetadataService @Inject constructor(
             .awaitAll()
             .flatten()
 
-        deduplicateAlbums(results).take(limit)
+        val deduped = deduplicateAlbums(results).take(limit)
+
+        // Enrich albums that only have Cover Art Archive URLs (which may 404)
+        // with artwork from iTunes Search API. Matches the desktop fix in
+        // fetchSingleAlbumArt() → getAlbumArtFromResolvers() fallback.
+        enrichDiscographyArtwork(artistName, deduped)
+    }
+
+    /**
+     * For albums whose artworkUrl points to Cover Art Archive (which may 404),
+     * attempt to find better artwork from iTunes Search API.
+     * Runs enrichment in parallel for all albums needing it.
+     */
+    private suspend fun enrichDiscographyArtwork(
+        artistName: String,
+        albums: List<AlbumSearchResult>,
+    ): List<AlbumSearchResult> = coroutineScope {
+        albums.map { album ->
+            async {
+                val url = album.artworkUrl
+                // Only enrich albums with CAA URLs (they may 404)
+                if (url != null && url.contains("coverartarchive.org")) {
+                    try {
+                        val term = "$artistName ${album.title}"
+                        val response = appleMusicApi.search(
+                            term = term,
+                            entity = "album",
+                            limit = 3,
+                        )
+                        val match = response.results.firstOrNull { item ->
+                            item.collectionName != null &&
+                                item.artistName?.lowercase()?.contains(artistName.lowercase()) == true
+                        }
+                        val itunesArt = match?.artworkUrl100?.replace("100x100", "600x600")
+                        if (itunesArt != null) {
+                            album.copy(artworkUrl = itunesArt)
+                        } else {
+                            album // Keep CAA URL as fallback (might work for some albums)
+                        }
+                    } catch (_: Exception) {
+                        album
+                    }
+                } else {
+                    album
+                }
+            }
+        }.awaitAll()
     }
 
     /**

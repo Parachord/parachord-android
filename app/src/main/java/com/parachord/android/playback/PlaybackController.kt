@@ -709,6 +709,29 @@ class PlaybackController @Inject constructor(
                         startSpotifyStatePolling()
                 }
             }
+
+            is PlaybackAction.BrowserPlayback -> {
+                // Non-streaming resolver (e.g., Bandcamp) — open in system browser.
+                // Show the track in the mini player but don't manage playback state.
+                Log.d(TAG, "Opening in browser: ${action.url}")
+                stateHolder.update {
+                    copy(
+                        currentTrack = routedTrack,
+                        isPlaying = false,
+                        upNext = snapshot.upNext,
+                        playbackContext = snapshot.playbackContext,
+                    )
+                }
+                try {
+                    val browserIntent = android.content.Intent(
+                        android.content.Intent.ACTION_VIEW,
+                        android.net.Uri.parse(action.url),
+                    ).addFlags(android.content.Intent.FLAG_ACTIVITY_NEW_TASK)
+                    context.startActivity(browserIntent)
+                } catch (e: Exception) {
+                    Log.e(TAG, "Failed to open browser: ${e.message}")
+                }
+            }
         }
 
         // If the track has no artwork, try to fetch it in the background

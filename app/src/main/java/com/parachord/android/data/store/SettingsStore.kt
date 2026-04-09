@@ -3,6 +3,7 @@ package com.parachord.android.data.store
 import androidx.datastore.core.DataStore
 import androidx.datastore.preferences.core.Preferences
 import androidx.datastore.preferences.core.booleanPreferencesKey
+import androidx.datastore.preferences.core.longPreferencesKey
 import androidx.datastore.preferences.core.edit
 import androidx.datastore.preferences.core.stringPreferencesKey
 import androidx.datastore.preferences.core.stringSetPreferencesKey
@@ -727,4 +728,36 @@ class SettingsStore @Inject constructor(
         "bandcamp" to -3,
         "youtube" to -6,
     )
+
+    // ── Plugin Sync ──────────────────────────────────────────────────
+
+    private val LAST_PLUGIN_SYNC = longPreferencesKey("last_plugin_sync_timestamp")
+
+    suspend fun getLastPluginSyncTimestamp(): Long =
+        dataStore.data.first()[LAST_PLUGIN_SYNC] ?: 0L
+
+    suspend fun setLastPluginSyncTimestamp(timestamp: Long) {
+        dataStore.edit { it[LAST_PLUGIN_SYNC] = timestamp }
+    }
+
+    // ── Disabled Plugins ─────────────────────────────────────────────
+
+    private val DISABLED_PLUGINS = stringPreferencesKey("disabled_plugins")
+
+    /** Plugins that are explicitly disabled by the user (comma-separated IDs). */
+    suspend fun getDisabledPlugins(): Set<String> {
+        val raw = dataStore.data.first()[DISABLED_PLUGINS] ?: return emptySet()
+        return raw.split(",").filter { it.isNotBlank() }.toSet()
+    }
+
+    fun getDisabledPluginsFlow(): Flow<Set<String>> = dataStore.data.map { prefs ->
+        val raw = prefs[DISABLED_PLUGINS] ?: return@map emptySet()
+        raw.split(",").filter { it.isNotBlank() }.toSet()
+    }
+
+    suspend fun setPluginEnabled(pluginId: String, enabled: Boolean) {
+        val current = getDisabledPlugins().toMutableSet()
+        if (enabled) current.remove(pluginId) else current.add(pluginId)
+        dataStore.edit { it[DISABLED_PLUGINS] = current.joinToString(",") }
+    }
 }

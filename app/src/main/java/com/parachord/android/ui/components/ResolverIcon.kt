@@ -66,6 +66,8 @@ object ResolverIconColors {
     val gemini = Color(0xFF4285F4)
     val ticketmaster = Color(0xFF026CDF)
     val seatgeek = Color(0xFFFC4C02)
+    val bandsintown = Color(0xFF00B4B3)
+    val songkick = Color(0xFFF80046)
 
     fun forResolver(resolver: String?): Color? = when (resolver?.lowercase()) {
         "spotify" -> spotify
@@ -85,6 +87,8 @@ object ResolverIconColors {
         "gemini" -> gemini
         "ticketmaster" -> ticketmaster
         "seatgeek" -> seatgeek
+        "bandsintown" -> bandsintown
+        "songkick" -> songkick
         else -> null
     }
 }
@@ -160,6 +164,12 @@ object ResolverIconPaths {
     // Gemini — Google AI curved sparkle (matching desktop)
     val gemini = "M12 0C12 6.627 6.627 12 0 12c6.627 0 12 5.373 12 12 0-6.627 5.373-12 12-12-6.627 0-12-5.373-12-12z"
 
+    // Bandsintown — official logo (from desktop app.js)
+    val bandsintown = "M6.399 12.8v4.8H19.2v1.6H4.799V0H0v24h24V12.8H6.399Zm4.801-8H6.399v6.4H11.2V4.8Zm6.4 0h-4.8v6.4h4.8V4.8ZM24 0h-4.8v11.2H24V0Z"
+
+    // Songkick — official "sk" logo (from desktop app.js)
+    val songkick = "M6.55 18.779c-1.855 0-3.372-.339-4.598-1.602l1.92-1.908c.63.631 1.74.853 2.715.853 1.186 0 1.739-.391 1.739-1.089 0-.291-.06-.529-.239-.717-.15-.154-.404-.273-.795-.324l-1.455-.205c-1.064-.152-1.891-.51-2.43-1.072-.555-.578-.84-1.395-.84-2.434C2.536 8.066 4.2 6.45 6.96 6.45c1.74 0 3.048.407 4.086 1.448L9.171 9.77c-.765-.766-1.77-.715-2.295-.715-1.039 0-1.465.597-1.465 1.125 0 .152.051.375.24.561.15.153.404.307.832.359l1.467.203c1.09.153 1.875.495 2.385 1.005.645.63.9 1.53.9 2.655 0 2.47-2.127 3.819-4.68 3.819l-.005-.003zM20.813 2.651C19.178 1.432 17.37.612 15.089.237v10.875l3.261-4.539h3.565l-4.095 5.72s.944 1.51 1.515 2.405c.586.899 1.139 1.14 1.965 1.14h.57v2.806h-.872c-1.812 0-2.9-.33-3.72-1.575-.504-.811-2.175-3.436-2.175-3.436v4.995H12.12V-.001H12c-3.852 0-6.509.931-8.811 2.652C-.132 5.137.001 8.451.001 11.997c0 3.547-.133 6.867 3.188 9.352C5.491 23.074 8.148 24 12 24s6.51-.927 8.812-2.651C24.131 18.865 24 15.544 24 11.997c0-3.546.132-6.859-3.188-9.346h.001z"
+
     // Ticketmaster — official "T" wordmark logo
     val ticketmaster = "M7.5 7.5h3.2v-4h2.6v4H17v2.4h-3.7V16c0 1.1.4 1.6 1.4 1.6.7 0 1.4-.2 2.1-.5l.7 2.2c-1 .5-2.1.8-3.3.8-2.5 0-3.5-1.4-3.5-3.8V9.9H7.5V7.5z"
 
@@ -184,6 +194,8 @@ object ResolverIconPaths {
         "gemini" -> gemini
         "ticketmaster" -> ticketmaster
         "seatgeek" -> seatgeek
+        "bandsintown" -> bandsintown
+        "songkick" -> songkick
         else -> null
     }
 }

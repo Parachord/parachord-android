@@ -6,33 +6,90 @@
 </head>
 <body>
 <script>
-    // Polyfill console to route through NativeBridge
+    // ── Console polyfill ─────────────────────────────────────────────
+    // Route JS console output to Android's Log via NativeBridge
     const _console = {
-        log: (...args) => NativeBridge.log('debug', args.join(' ')),
-        info: (...args) => NativeBridge.log('info', args.join(' ')),
-        warn: (...args) => NativeBridge.log('warn', args.join(' ')),
-        error: (...args) => NativeBridge.log('error', args.join(' ')),
+        log: (...args) => NativeBridge.log('debug', args.map(String).join(' ')),
+        info: (...args) => NativeBridge.log('info', args.map(String).join(' ')),
+        warn: (...args) => NativeBridge.log('warn', args.map(String).join(' ')),
+        error: (...args) => NativeBridge.log('error', args.map(String).join(' ')),
+        debug: (...args) => NativeBridge.log('debug', args.map(String).join(' ')),
     };
     window.console = _console;
 
-    // Polyfill fetch to route through NativeBridge
-    window.nativeFetch = async function(url, options = {}) {
-        const headers = JSON.stringify(options.headers || {});
-        const result = NativeBridge.fetch(url, headers);
-        return {
-            ok: true,
-            text: () => Promise.resolve(result),
-            json: () => Promise.resolve(JSON.parse(result)),
-        };
+    // ── Async Fetch polyfill ────────────────────────────────────────
+    // Override window.fetch to use NativeBridge.fetchAsync() which runs
+    // HTTP requests on a background thread and calls back via JS.
+    // This frees the WebView JS thread so multiple .axe plugin searches
+    // can run concurrently (Bandcamp, SoundCloud, etc.) instead of
+    // blocking sequentially.
+    window.__fetchCallbacks = {};
+    var __fetchIdCounter = 0;
+
+    window.fetch = function(url, options) {
+        options = options || {};
+        var method = (options.method || 'GET').toUpperCase();
+        var headers = JSON.stringify(options.headers || {});
+        var body = typeof options.body === 'string' ? options.body
+                 : options.body ? JSON.stringify(options.body) : '';
+
+        var callbackId = 'fetch_' + (++__fetchIdCounter);
+
+        return new Promise(function(resolve, reject) {
+            window.__fetchCallbacks[callbackId] = function(envelopeStr) {
+                delete window.__fetchCallbacks[callbackId];
+                try {
+                    var parsed = JSON.parse(envelopeStr);
+                    var responseBody = parsed.body || '';
+                    resolve({
+                        ok: parsed.ok,
+                        status: parsed.status,
+                        statusText: parsed.ok ? 'OK' : 'Error',
+                        text: function() { return Promise.resolve(responseBody); },
+                        json: function() {
+                            try { return Promise.resolve(JSON.parse(responseBody)); }
+                            catch (e) { return Promise.reject(new Error('Invalid JSON')); }
+                        },
+                        headers: new Headers(),
+                    });
+                } catch (e) {
+                    reject(new Error('Failed to parse fetch response: ' + e.message));
+                }
+            };
+
+            try {
+                NativeBridge.fetchAsync(callbackId, url, method, headers, body);
+            } catch (e) {
+                delete window.__fetchCallbacks[callbackId];
+                reject(e);
+            }
+        });
     };
 
-    // Storage API for resolvers
+    // Keep nativeFetch as an alias for backward compatibility
+    window.nativeFetch = window.fetch;
+
+    // ── Storage polyfill ─────────────────────────────────────────────
+    // .axe plugins access config (API keys, tokens) via nativeStorage
     window.nativeStorage = {
         get: (key) => NativeBridge.storageGet(key),
         set: (key, value) => NativeBridge.storageSet(key, value),
     };
 
-    console.log('Parachord JS runtime initialized');
+    console.log('Parachord JS runtime: polyfills loaded');
+</script>
+
+<!-- Load the resolver-loader.js from desktop (unchanged) -->
+<script src="resolver-loader.js"></script>
+
+<script>
+    // Create global ResolverLoader instance for PluginManager to use
+    if (typeof ResolverLoader !== 'undefined') {
+        window.__resolverLoader = new ResolverLoader();
+        console.log('Parachord JS runtime: ResolverLoader ready');
+    } else {
+        console.error('ResolverLoader class not found — resolver-loader.js failed to load');
+    }
 </script>
 </body>
 </html>

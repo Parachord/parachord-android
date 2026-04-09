@@ -6,6 +6,7 @@ import com.parachord.android.data.api.SpotifyApi
 import com.parachord.android.data.db.dao.TrackDao
 import com.parachord.android.data.store.SettingsStore
 import com.parachord.android.playback.handlers.MusicKitWebBridge
+import com.parachord.android.plugin.PluginManager
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.async
 import kotlinx.coroutines.coroutineScope
@@ -38,6 +39,7 @@ class ResolverManager @Inject constructor(
     private val json: Json,
     private val musicKitBridge: MusicKitWebBridge,
     private val trackDao: TrackDao,
+    private val pluginManager: PluginManager,
 ) {
     companion object {
         private const val TAG = "ResolverManager"
@@ -49,12 +51,18 @@ class ResolverManager @Inject constructor(
     /** Timestamp of last proactive token freshness check (epochMs). */
     @Volatile private var lastTokenCheck = 0L
 
+    /** Native resolvers that have Kotlin implementations (always available). */
+    private val nativeResolverIds = setOf("spotify", "applemusic", "soundcloud", "localfiles")
+
     private val _resolvers = MutableStateFlow(
         listOf(
             ResolverInfo(id = "spotify", name = "Spotify", enabled = true),
             ResolverInfo(id = "applemusic", name = "Apple Music", enabled = true),
             ResolverInfo(id = "soundcloud", name = "SoundCloud", enabled = true),
             ResolverInfo(id = "localfiles", name = "Local Files", enabled = true),
+            // .axe-only resolvers — no native Kotlin implementation, executed via JsBridge
+            ResolverInfo(id = "bandcamp", name = "Bandcamp", enabled = true),
+            ResolverInfo(id = "youtube", name = "YouTube", enabled = true),
         )
     )
     val resolvers: StateFlow<List<ResolverInfo>> = _resolvers.asStateFlow()
@@ -121,6 +129,18 @@ class ResolverManager @Inject constructor(
             }
             if (activeResolvers.isEmpty() || "localfiles" in activeResolvers) {
                 add(async { resolveLocalFile(targetTitle, targetArtist) })
+            }
+            // .axe-only resolvers (bandcamp, youtube, etc.) — executed via JsBridge.
+            // Native resolvers take priority (faster, no JS bridge overhead);
+            // .axe resolvers fill gaps for sources with no native implementation.
+            val disabledPlugins = settingsStore.getDisabledPlugins()
+            val axeResolverIds = pluginManager.plugins.value
+                .filter { it.capabilities["resolve"] == true && it.id !in nativeResolverIds && it.id !in disabledPlugins }
+                .map { it.id }
+            for (resolverId in axeResolverIds) {
+                if (activeResolvers.isEmpty() || resolverId in activeResolvers) {
+                    add(async { resolveViaPlugin(resolverId, query, targetTitle, targetArtist) })
+                }
             }
         }
 
@@ -479,7 +499,64 @@ class ResolverManager @Inject constructor(
                 matchedDurationMs = best.duration,
             )
         }
+
+    // ── .axe Plugin Resolver ──────────────────────────────────────────
+
+    /**
+     * Resolve a track via an .axe plugin (bandcamp, youtube, etc.).
+     * The plugin's resolve() function returns a JSON result that we
+     * map to a [ResolvedSource].
+     */
+    private suspend fun resolveViaPlugin(
+        resolverId: String,
+        query: String,
+        targetTitle: String?,
+        targetArtist: String?,
+    ): ResolvedSource? = try {
+        val resultJson = pluginManager.resolve(
+            resolverId,
+            targetArtist ?: "",
+            targetTitle ?: query,
+            null,
+        )
+        Log.d(TAG, "Plugin resolve($resolverId) raw result: ${resultJson?.take(200)}")
+        if (resultJson == null) {
+            null
+        } else {
+            val result = json.decodeFromString<AxeResolveResult>(resultJson)
+            val resolvedUrl = result.url ?: return@resolveViaPlugin null
+            ResolvedSource(
+                resolver = resolverId,
+                sourceType = result.sourceType ?: resolverId,
+                url = resolvedUrl,
+                spotifyUri = result.spotifyUri,
+                spotifyId = result.spotifyId,
+                soundcloudId = result.soundcloudId,
+                appleMusicId = result.appleMusicId,
+                confidence = 0.9,
+                matchedTitle = result.title,
+                matchedArtist = result.artist,
+                matchedDurationMs = result.duration,
+            )
+        }
+    } catch (e: Exception) {
+        Log.w(TAG, "Plugin resolve($resolverId) failed: ${e.message}")
+        null
+    }
 }
+
+@kotlinx.serialization.Serializable
+private data class AxeResolveResult(
+    val url: String? = null,
+    val title: String? = null,
+    val artist: String? = null,
+    val duration: Long? = null,
+    val sourceType: String? = null,
+    val spotifyUri: String? = null,
+    val spotifyId: String? = null,
+    val soundcloudId: String? = null,
+    val appleMusicId: String? = null,
+)
 
 // ── SoundCloud API Response Models ──────────────────────────────────
 

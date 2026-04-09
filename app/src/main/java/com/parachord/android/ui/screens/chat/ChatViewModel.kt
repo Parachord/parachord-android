@@ -31,9 +31,20 @@ class ChatViewModel @Inject constructor(
     private val claudeProvider: ClaudeProvider,
     private val geminiProvider: GeminiProvider,
     val cardEnricher: ChatCardEnricher,
+    private val pluginManager: com.parachord.android.plugin.PluginManager,
 ) : ViewModel() {
 
-    private val providers: List<AiChatProvider> = listOf(chatGptProvider, claudeProvider, geminiProvider)
+    // Native providers + .axe-only AI providers (e.g., Ollama)
+    private val providers: List<AiChatProvider> by lazy {
+        val native = listOf(chatGptProvider, claudeProvider, geminiProvider)
+        val nativeIds = native.map { it.id }.toSet()
+        // Add AxeAiProvider wrappers for .axe AI plugins not already covered natively
+        val axeProviders = pluginManager.plugins.value
+            .filter { it.capabilities["chat"] == true || it.capabilities["generate"] == true }
+            .filter { it.id !in nativeIds }
+            .map { com.parachord.android.ai.providers.AxeAiProvider(it.id, it.name, pluginManager) }
+        native + axeProviders
+    }
 
     private val _selectedProviderId = MutableStateFlow<String?>(null)
     val selectedProviderId: StateFlow<String?> = _selectedProviderId.asStateFlow()
@@ -52,11 +63,21 @@ class ChatViewModel @Inject constructor(
         settingsStore.getAiProviderApiKeyFlow("claude"),
         settingsStore.getAiProviderApiKeyFlow("gemini"),
     ) { chatGptKey, claudeKey, geminiKey ->
-        listOf(
+        val native = listOf(
             AiProviderInfo("chatgpt", "ChatGPT", chatGptKey != null, ""),
             AiProviderInfo("claude", "Claude", claudeKey != null, ""),
             AiProviderInfo("gemini", "Google Gemini", geminiKey != null, ""),
         )
+        // Add .axe-only AI providers (Ollama, etc.) — they don't require API keys
+        // (configured = true when no auth required, or when key is stored)
+        val nativeIds = native.map { it.id }.toSet()
+        val axeProviders = pluginManager.plugins.value
+            .filter { (it.capabilities["chat"] == true || it.capabilities["generate"] == true) && it.id !in nativeIds }
+            .map { plugin ->
+                val requiresAuth = plugin.capabilities["requiresAuth"] == true
+                AiProviderInfo(plugin.id, plugin.name, isConfigured = !requiresAuth, currentModel = "")
+            }
+        native + axeProviders
     }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), emptyList())
 
     init {
