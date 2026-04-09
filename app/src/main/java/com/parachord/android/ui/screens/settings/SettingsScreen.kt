@@ -1025,7 +1025,7 @@ private fun PluginConfigSheet(
                     onConnect = onAppleMusicAuthorize,
                     onDisconnect = onAppleMusicDisconnect,
                 )
-                "local-files" -> LocalFilesConfig(
+                "local-files", "localfiles" -> LocalFilesConfig(
                     scanProgress = scanProgress,
                     onScanLocalFiles = onScanLocalFiles,
                 )
@@ -1090,6 +1090,13 @@ private fun PluginConfigSheet(
                     onDisconnect = onSeatGeekDisconnect,
                     concertLocation = concertLocation,
                     onConcertLocationSelected = onConcertLocationSelected,
+                )
+                // Generic .axe plugin toggle — no special config UI
+                else -> ToggleableMetaConfig(
+                    isEnabled = isConnected,
+                    onToggle = onToggleConnection,
+                    enabledText = "${plugin.name} is enabled",
+                    disabledText = "Enable ${plugin.name}",
                 )
             }
         }
