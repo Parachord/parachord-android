@@ -115,18 +115,26 @@ class PluginManager @Inject constructor(
         for ((id, pair) in all) {
             val (version, axeJson) = pair
             try {
-                val escaped = axeJson.replace("\\", "\\\\").replace("`", "\\`")
-                val result = jsRuntime.evaluate("""
-                    (async () => {
-                        try {
-                            await window.__resolverLoader.loadResolver(JSON.parse(`$escaped`));
-                            return 'ok';
-                        } catch (e) {
-                            return 'error: ' + e.message;
-                        }
-                    })()
+                // Base64-encode the .axe JSON to avoid escaping issues with
+                // backticks, $, quotes, and newlines in the embedded JS code.
+                val b64 = android.util.Base64.encodeToString(
+                    axeJson.toByteArray(), android.util.Base64.NO_WRAP
+                )
+                // evaluateJavascript returns the synchronous result of the expression.
+                // Async IIFEs return a Promise object ({}) not the resolved value.
+                // Use a callback-based approach: store the result in a global var,
+                // then read it in a second evaluate() call.
+                jsRuntime.evaluate("""
+                    window.__lastPluginResult = 'pending';
+                    window.__resolverLoader.loadResolver(JSON.parse(atob('$b64')))
+                        .then(function() { window.__lastPluginResult = 'ok'; })
+                        .catch(function(e) { window.__lastPluginResult = 'error: ' + e.message; });
                 """.trimIndent())
 
+                // Give the promise a moment to resolve (loadResolver is fast — just JSON parsing)
+                kotlinx.coroutines.delay(50)
+
+                val result = jsRuntime.evaluate("window.__lastPluginResult")
                 val cleanResult = result?.removeSurrounding("\"")
                 if (cleanResult == "ok") {
                     val info = parsePluginInfo(axeJson)
