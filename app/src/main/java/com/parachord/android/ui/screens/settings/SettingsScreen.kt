@@ -376,6 +376,10 @@ private fun PlugInsTab(
     onTicketmasterDisconnect: () -> Unit = {},
     onSeatGeekClientIdSubmit: (String) -> Unit = {},
     onSeatGeekDisconnect: () -> Unit = {},
+    onBandsintownApiKeySubmit: (String) -> Unit = {},
+    onBandsintownDisconnect: () -> Unit = {},
+    onSongkickApiKeySubmit: (String) -> Unit = {},
+    onSongkickDisconnect: () -> Unit = {},
     concertLocation: SettingsStore.ConcertLocation = SettingsStore.ConcertLocation(null, null, null, 50),
     onConcertLocationSelected: (Double, Double, String) -> Unit = { _, _, _ -> },
 ) {
@@ -420,7 +424,11 @@ private fun PlugInsTab(
             // .axe plugins without auth — enabled by default
             "bandcamp" -> true
             // .axe plugins that need config — disabled until configured
-            "bandsintown", "songkick" -> false // Need API keys
+            // Bandsintown/Songkick — connected when API key is stored
+            "bandsintown", "songkick" -> {
+                val hasKey = settingsViewModel.hasPluginApiKey(id)
+                hasKey
+            }
             // YouTube and Ollama are filtered out by PluginManager (mobile: false)
             else -> {
                 // Unknown .axe plugin — default to enabled if we know about it
@@ -674,6 +682,10 @@ private fun PlugInsTab(
             onTicketmasterDisconnect = onTicketmasterDisconnect,
             onSeatGeekClientIdSubmit = onSeatGeekClientIdSubmit,
             onSeatGeekDisconnect = onSeatGeekDisconnect,
+            onBandsintownApiKeySubmit = { settingsViewModel.savePluginApiKey("bandsintown", it) },
+            onBandsintownDisconnect = { settingsViewModel.clearPluginApiKey("bandsintown") },
+            onSongkickApiKeySubmit = { settingsViewModel.savePluginApiKey("songkick", it) },
+            onSongkickDisconnect = { settingsViewModel.clearPluginApiKey("songkick") },
             concertLocation = concertLocation,
             onConcertLocationSelected = onConcertLocationSelected,
         )
@@ -929,6 +941,10 @@ private fun PluginConfigSheet(
     onTicketmasterDisconnect: () -> Unit = {},
     onSeatGeekClientIdSubmit: (String) -> Unit = {},
     onSeatGeekDisconnect: () -> Unit = {},
+    onBandsintownApiKeySubmit: (String) -> Unit = {},
+    onBandsintownDisconnect: () -> Unit = {},
+    onSongkickApiKeySubmit: (String) -> Unit = {},
+    onSongkickDisconnect: () -> Unit = {},
     concertLocation: SettingsStore.ConcertLocation = SettingsStore.ConcertLocation(null, null, null, 50),
     onConcertLocationSelected: (Double, Double, String) -> Unit = { _, _, _ -> },
 ) {
@@ -1117,6 +1133,28 @@ private fun PluginConfigSheet(
                     devPortalUrl = "https://seatgeek.com/account/develop",
                     onSubmitKey = onSeatGeekClientIdSubmit,
                     onDisconnect = onSeatGeekDisconnect,
+                    concertLocation = concertLocation,
+                    onConcertLocationSelected = onConcertLocationSelected,
+                )
+                "bandsintown" -> ConcertProviderConfig(
+                    isConnected = isConnected,
+                    keyLabel = "App ID",
+                    keyHint = "Enter your Bandsintown App ID",
+                    devPortalLabel = "artists.bandsintown.com",
+                    devPortalUrl = "https://artists.bandsintown.com/support/api-installation",
+                    onSubmitKey = onBandsintownApiKeySubmit,
+                    onDisconnect = onBandsintownDisconnect,
+                    concertLocation = concertLocation,
+                    onConcertLocationSelected = onConcertLocationSelected,
+                )
+                "songkick" -> ConcertProviderConfig(
+                    isConnected = isConnected,
+                    keyLabel = "API Key",
+                    keyHint = "Enter your Songkick API key",
+                    devPortalLabel = "songkick.com/developer",
+                    devPortalUrl = "https://www.songkick.com/developer",
+                    onSubmitKey = onSongkickApiKeySubmit,
+                    onDisconnect = onSongkickDisconnect,
                     concertLocation = concertLocation,
                     onConcertLocationSelected = onConcertLocationSelected,
                 )

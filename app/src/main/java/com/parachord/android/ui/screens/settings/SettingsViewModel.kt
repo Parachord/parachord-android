@@ -136,6 +136,22 @@ class SettingsViewModel @Inject constructor(
         viewModelScope.launch { settingsStore.setPluginEnabled(pluginId, enabled) }
     }
 
+    /** Save an API key for a plugin (stored as {pluginId}_api_key in DataStore). */
+    fun savePluginApiKey(pluginId: String, apiKey: String) {
+        viewModelScope.launch { settingsStore.setAiProviderApiKey(pluginId, apiKey) }
+    }
+
+    fun clearPluginApiKey(pluginId: String) {
+        viewModelScope.launch { settingsStore.clearAiProviderApiKey(pluginId) }
+    }
+
+    /** Check if a plugin has a stored API key (synchronous for composable use). */
+    fun hasPluginApiKey(pluginId: String): Boolean {
+        return kotlinx.coroutines.runBlocking {
+            settingsStore.getAiProviderApiKey(pluginId) != null
+        }
+    }
+
     /** Manually trigger plugin sync from marketplace. */
     fun syncPlugins() {
         viewModelScope.launch {
