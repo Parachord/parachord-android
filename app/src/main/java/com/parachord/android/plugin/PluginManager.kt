@@ -200,6 +200,17 @@ class PluginManager @Inject constructor(
         entries
     }
 
+    // ── Raw JS Evaluation ──────────────────────────────────────────────
+
+    /**
+     * Evaluate a raw JS script on the plugin runtime.
+     * Used by AxeScrobbler and other components that need direct JS access.
+     */
+    suspend fun evaluateJs(script: String): String? {
+        ensureInitialized()
+        return jsRuntime.evaluate(script)?.unquote()
+    }
+
     // ── Resolver Calls ───────────────────────────────────────────────
 
     /**
