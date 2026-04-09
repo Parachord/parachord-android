@@ -31,6 +31,7 @@ class SettingsViewModel @Inject constructor(
     private val musicKitBridge: MusicKitWebBridge,
     private val mediaScanner: MediaScanner,
     private val pluginManager: com.parachord.android.plugin.PluginManager,
+    private val pluginSyncService: com.parachord.android.plugin.PluginSyncService,
 ) : ViewModel() {
 
     /** Loaded .axe plugins — drives the dynamic plugin list in Settings. */
@@ -133,6 +134,22 @@ class SettingsViewModel @Inject constructor(
 
     fun setPluginEnabled(pluginId: String, enabled: Boolean) {
         viewModelScope.launch { settingsStore.setPluginEnabled(pluginId, enabled) }
+    }
+
+    /** Manually trigger plugin sync from marketplace. */
+    fun syncPlugins() {
+        viewModelScope.launch {
+            try {
+                val result = pluginSyncService.sync()
+                if (result.hasChanges) {
+                    Log.d("SettingsVM", "Plugin sync: ${result.added.size} added, ${result.updated.size} updated")
+                } else {
+                    Log.d("SettingsVM", "Plugin sync: all up to date")
+                }
+            } catch (e: Exception) {
+                Log.w("SettingsVM", "Plugin sync failed: ${e.message}")
+            }
+        }
     }
 
     val resolverOrder: StateFlow<List<String>> = settingsStore.getResolverOrderFlow()

@@ -591,6 +591,35 @@ private fun PlugInsTab(
             }
         }
 
+        // Plugin updates section
+        item {
+            Spacer(modifier = Modifier.height(24.dp))
+            HorizontalDivider(modifier = Modifier.padding(horizontal = 16.dp))
+            Spacer(modifier = Modifier.height(16.dp))
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(horizontal = 16.dp),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                Column(modifier = Modifier.weight(1f)) {
+                    Text(
+                        text = "Plugin Updates",
+                        style = MaterialTheme.typography.bodyMedium,
+                        fontWeight = FontWeight.Medium,
+                    )
+                    Text(
+                        text = "${allPlugins.size} plugins loaded",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                }
+                TextButton(onClick = { settingsViewModel.syncPlugins() }) {
+                    Text("Check for updates")
+                }
+            }
+        }
+
         item { Spacer(modifier = Modifier.height(32.dp)) }
     }
 

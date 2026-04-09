@@ -133,8 +133,9 @@ class ResolverManager @Inject constructor(
             // .axe-only resolvers (bandcamp, youtube, etc.) — executed via JsBridge.
             // Native resolvers take priority (faster, no JS bridge overhead);
             // .axe resolvers fill gaps for sources with no native implementation.
+            val disabledPlugins = settingsStore.getDisabledPlugins()
             val axeResolverIds = pluginManager.plugins.value
-                .filter { it.capabilities["resolve"] == true && it.id !in nativeResolverIds }
+                .filter { it.capabilities["resolve"] == true && it.id !in nativeResolverIds && it.id !in disabledPlugins }
                 .map { it.id }
             for (resolverId in axeResolverIds) {
                 if (activeResolvers.isEmpty() || resolverId in activeResolvers) {
