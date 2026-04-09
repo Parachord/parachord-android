@@ -2359,6 +2359,7 @@ private fun AiProviderConfig(
     Spacer(modifier = Modifier.height(12.dp))
 
     var apiKey by remember { mutableStateOf("") }
+    var showSavedConfirmation by remember { mutableStateOf(false) }
     // Initialize to the currently saved model, falling back to the first available
     var selectedModel by remember {
         mutableStateOf(
@@ -2404,8 +2405,21 @@ private fun AiProviderConfig(
 
     OutlinedTextField(
         value = apiKey,
-        onValueChange = { apiKey = it },
+        onValueChange = {
+            apiKey = it
+            showSavedConfirmation = false
+        },
         label = { Text("API Key") },
+        placeholder = {
+            if (isConnected && apiKey.isEmpty()) {
+                Text("••••••••••••••••", color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.5f))
+            }
+        },
+        supportingText = if (showSavedConfirmation) {
+            { Text("API key saved", color = MaterialTheme.colorScheme.primary) }
+        } else if (isConnected && apiKey.isEmpty()) {
+            { Text("Key saved — enter a new key to replace it", color = MaterialTheme.colorScheme.onSurfaceVariant) }
+        } else null,
         singleLine = true,
         visualTransformation = PasswordVisualTransformation(),
         modifier = Modifier.fillMaxWidth(),
@@ -2455,6 +2469,7 @@ private fun AiProviderConfig(
                 if (apiKey.isNotBlank()) {
                     onSaveConfig(providerId, apiKey.trim(), selectedModel)
                     apiKey = ""
+                    showSavedConfirmation = true
                 }
             },
             enabled = apiKey.isNotBlank(),
