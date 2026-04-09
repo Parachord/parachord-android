@@ -147,7 +147,14 @@ class PluginManager @Inject constructor(
             }
         }
 
-        _plugins.value = pluginInfos.sortedBy { it.name }
+        // Filter out plugins that declare mobile: false in capabilities.
+        // Omitted mobile field = works on all platforms (backward compatible).
+        val platformFiltered = pluginInfos.filter { it.capabilities["mobile"] != false }
+        _plugins.value = platformFiltered.sortedBy { it.name }
+        if (pluginInfos.size != platformFiltered.size) {
+            val hidden = pluginInfos.filter { it.capabilities["mobile"] == false }.map { it.id }
+            Log.d(TAG, "Hidden ${hidden.size} plugins not supported on mobile: $hidden")
+        }
     }
 
     private data class PluginEntry(val id: String, val version: String, val axeJson: String)

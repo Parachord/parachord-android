@@ -419,9 +419,8 @@ private fun PlugInsTab(
             // .axe plugins without auth — enabled by default
             "bandcamp" -> true
             // .axe plugins that need config — disabled until configured
-            "youtube" -> false // YouTube scraping broken on Android (consent redirects)
-            "ollama" -> false // Needs local server
             "bandsintown", "songkick" -> false // Need API keys
+            // YouTube and Ollama are filtered out by PluginManager (mobile: false)
             else -> {
                 // Unknown .axe plugin — default to enabled if we know about it
                 axePlugins.any { it.id == id }
