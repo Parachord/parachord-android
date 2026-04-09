@@ -27,6 +27,8 @@ sealed class PlaybackAction {
     data class ExoPlayerItem(val mediaItem: MediaItem) : PlaybackAction()
     /** Playback is managed externally (e.g. Spotify App Remote). Position/state updates come from the handler. */
     data class ExternalPlayback(val handler: ExternalPlaybackHandler) : PlaybackAction()
+    /** Open URL in the system browser (for non-streaming resolvers like Bandcamp). */
+    data class BrowserPlayback(val url: String, val track: com.parachord.android.data.db.entity.TrackEntity) : PlaybackAction()
 }
 
 /**

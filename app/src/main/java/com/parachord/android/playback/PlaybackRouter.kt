@@ -28,6 +28,7 @@ class PlaybackRouter @Inject constructor(
     private val spotifyHandler: SpotifyPlaybackHandler,
     private val appleMusicHandler: AppleMusicPlaybackHandler,
     private val soundCloudHandler: SoundCloudPlaybackHandler,
+    private val pluginManager: com.parachord.android.plugin.PluginManager,
 ) {
     companion object {
         private const val TAG = "PlaybackRouter"
@@ -49,6 +50,17 @@ class PlaybackRouter @Inject constructor(
      * Returns null if no handler can play this track.
      */
     suspend fun route(track: TrackEntity): PlaybackAction? {
+        // Check if this track's resolver is a non-streaming .axe plugin (e.g., Bandcamp).
+        // These plugins resolve tracks (find them) but can't stream audio — open in browser.
+        val resolver = track.resolver
+        if (resolver != null && track.sourceUrl != null) {
+            val plugin = pluginManager.plugins.value.find { it.id == resolver }
+            if (plugin != null && plugin.capabilities["stream"] == false && plugin.capabilities["resolve"] == true) {
+                Log.d(TAG, "Non-streaming resolver '$resolver' — routing to browser: ${track.sourceUrl}")
+                return PlaybackAction.BrowserPlayback(track.sourceUrl!!, track)
+            }
+        }
+
         // Find the first handler that can handle this track
         for (handler in handlers) {
             if (!handler.canHandle(track)) continue

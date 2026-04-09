@@ -66,6 +66,7 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateListOf
 import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
@@ -2320,17 +2321,33 @@ private fun AiProviderConfig(
 
     var apiKey by remember { mutableStateOf("") }
     var showSavedConfirmation by remember { mutableStateOf(false) }
+
+    // Dynamic model lists from .axe plugins — fetch when connected
+    val settingsViewModel: SettingsViewModel = hiltViewModel()
+    val dynamicModels by settingsViewModel.dynamicModels.collectAsStateWithLifecycle()
+    val modelsLoading by settingsViewModel.modelsLoading.collectAsStateWithLifecycle()
+
+    // Use dynamic models if available, fall back to hardcoded
+    val effectiveModels = if (dynamicModels.isNotEmpty()) {
+        dynamicModels.map { it.value }
+    } else {
+        models
+    }
+
+    // Fetch dynamic models when this provider is connected
+    LaunchedEffect(providerId, isConnected) {
+        if (isConnected) settingsViewModel.loadModelsForProvider(providerId)
+    }
+
     // Initialize to the currently saved model, falling back to the first available
-    var selectedModel by remember {
+    var selectedModel by remember(effectiveModels) {
         mutableStateOf(
-            if (currentModel.isNotBlank() && currentModel in models) currentModel
-            else models.firstOrNull() ?: ""
+            if (currentModel.isNotBlank() && currentModel in effectiveModels) currentModel
+            else effectiveModels.firstOrNull() ?: currentModel
         )
     }
     var modelDropdownExpanded by remember { mutableStateOf(false) }
 
-    // Listening history toggle — shared across all AI providers
-    val settingsViewModel: SettingsViewModel = hiltViewModel()
     val sendListeningHistory by settingsViewModel.sendListeningHistory.collectAsStateWithLifecycle()
 
     Spacer(modifier = Modifier.height(12.dp))
@@ -2407,7 +2424,7 @@ private fun AiProviderConfig(
             expanded = modelDropdownExpanded,
             onDismissRequest = { modelDropdownExpanded = false },
         ) {
-            models.forEach { model ->
+            effectiveModels.forEach { model ->
                 DropdownMenuItem(
                     text = { Text(model, style = MaterialTheme.typography.bodyMedium) },
                     onClick = {

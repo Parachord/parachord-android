@@ -13,6 +13,7 @@ import com.parachord.android.playback.handlers.MusicKitWebBridge
 import com.parachord.android.playback.scrobbler.LibreFmScrobbler
 import dagger.hilt.android.lifecycle.HiltViewModel
 import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.map
@@ -35,6 +36,58 @@ class SettingsViewModel @Inject constructor(
     /** Loaded .axe plugins — drives the dynamic plugin list in Settings. */
     val loadedPlugins: StateFlow<List<com.parachord.android.plugin.PluginManager.PluginInfo>> =
         pluginManager.plugins
+
+    // ── Dynamic AI Model Lists ───────────────────────────────────────
+
+    data class ModelOption(val value: String, val label: String)
+
+    private val _dynamicModels = MutableStateFlow<List<ModelOption>>(emptyList())
+    val dynamicModels: StateFlow<List<ModelOption>> = _dynamicModels.asStateFlow()
+
+    private val _modelsLoading = MutableStateFlow(false)
+    val modelsLoading: StateFlow<Boolean> = _modelsLoading.asStateFlow()
+
+    /** Fetch available models from an AI provider's .axe plugin. */
+    fun loadModelsForProvider(providerId: String) {
+        viewModelScope.launch {
+            _modelsLoading.value = true
+            try {
+                val apiKey = settingsStore.getAiProviderApiKey(providerId) ?: ""
+                val configJson = """{"apiKey":"${apiKey.replace("\"", "\\\"")}"}"""
+                val resultJson = pluginManager.listModels(providerId, configJson)
+                if (resultJson != null) {
+                    val models = parseModelList(resultJson)
+                    if (models.isNotEmpty()) {
+                        _dynamicModels.value = models
+                        _modelsLoading.value = false
+                        return@launch
+                    }
+                }
+            } catch (e: Exception) {
+                Log.w("SettingsVM", "Failed to load models for $providerId: ${e.message}")
+            }
+            // Fallback to empty — UI will use hardcoded defaults
+            _dynamicModels.value = emptyList()
+            _modelsLoading.value = false
+        }
+    }
+
+    private fun parseModelList(json: String): List<ModelOption> {
+        return try {
+            val array = kotlinx.serialization.json.Json { ignoreUnknownKeys = true }
+                .parseToJsonElement(json)
+            if (array is kotlinx.serialization.json.JsonArray) {
+                array.mapNotNull { element ->
+                    val obj = element as? kotlinx.serialization.json.JsonObject ?: return@mapNotNull null
+                    val value = obj["value"]?.let { (it as? kotlinx.serialization.json.JsonPrimitive)?.content } ?: return@mapNotNull null
+                    val label = obj["label"]?.let { (it as? kotlinx.serialization.json.JsonPrimitive)?.content } ?: value
+                    ModelOption(value, label)
+                }
+            } else emptyList()
+        } catch (e: Exception) {
+            emptyList()
+        }
+    }
 
     val themeMode: StateFlow<String> = settingsStore.themeMode
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), "system")
