@@ -1,0 +1,26 @@
+<variant
+    name="debug"
+    package="com.parachord.shared"
+    minSdkVersion="26"
+    targetSdkVersion="26"
+    debuggable="true"
+    mergedManifest="build/intermediates/merged_manifest/debug/processDebugManifest/AndroidManifest.xml"
+    partialResultsDir="build/intermediates/unit_test_lint_partial_results/debug/lintAnalyzeDebugUnitTest/out"
+    desugaredMethodsFiles="/Users/jherskowitz/.gradle/caches/8.11.1/transforms/fe350ac2d2e4f7c324e8bcb33e4af2f2/transformed/D8BackportedDesugaredMethods.txt">
+  <buildFeatures
+      namespacing="REQUIRED"/>
+  <sourceProviders>
+  </sourceProviders>
+  <testSourceProviders>
+    <sourceProvider
+        manifests="src/androidUnitTest/AndroidManifest.xml"
+        javaDirectories="src/test/java:src/testDebug/java:src/androidUnitTest/kotlin:src/test/kotlin:src/androidUnitTestDebug/kotlin:src/testDebug/kotlin"
+        assetsDirectories="src/test/assets:src/androidUnitTest/assets:src/testDebug/assets:src/androidUnitTestDebug/assets"
+        unitTest="true"/>
+  </testSourceProviders>
+  <testFixturesSourceProviders>
+  </testFixturesSourceProviders>
+  <artifact
+      type="UNIT_TEST">
+  </artifact>
+</variant>

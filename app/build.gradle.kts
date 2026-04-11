@@ -97,6 +97,9 @@ android {
 }
 
 dependencies {
+    // KMP shared module
+    implementation(project(":shared"))
+
     // AndroidX Core
     implementation(libs.androidx.core.ktx)
     implementation(libs.androidx.webkit)

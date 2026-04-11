@@ -1,0 +1,19 @@
+<lint-module
+    format="1"
+    dir="/Users/jherskowitz/Development/parachord/parachord-android/shared"
+    name=":shared"
+    type="LIBRARY"
+    maven="Parachord:shared:unspecified"
+    agpVersion="8.7.3"
+    buildFolder="build"
+    bootClassPath="/Users/jherskowitz/Library/Android/sdk/platforms/android-35/android.jar:/Users/jherskowitz/Library/Android/sdk/build-tools/34.0.0/core-lambda-stubs.jar"
+    javaSourceLevel="17"
+    compileTarget="android-35"
+    neverShrinking="true">
+  <lintOptions
+      abortOnError="true"
+      absolutePaths="true"
+      checkReleaseBuilds="true"
+      explainIssues="true"/>
+  <variant name="debug"/>
+</lint-module>
