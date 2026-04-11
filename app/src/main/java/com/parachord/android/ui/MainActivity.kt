@@ -143,6 +143,22 @@ class MainActivity : ComponentActivity() {
     }
 
     private fun handleDeepLink(intent: Intent?) {
+        // Handle ACTION_SEND from the share sheet (user shared a URL from
+        // another app like Spotify, Apple Music, or a browser)
+        if (intent?.action == Intent.ACTION_SEND && intent.type == "text/plain") {
+            val sharedText = intent.getStringExtra(Intent.EXTRA_TEXT)
+            if (!sharedText.isNullOrBlank()) {
+                // Extract URL from shared text (may contain extra text around the URL)
+                val url = extractUrl(sharedText)
+                if (url != null) {
+                    pendingDeepLink.value = Uri.parse(url)
+                    return
+                }
+            }
+            return
+        }
+
+        // Handle ACTION_VIEW (direct URL taps)
         val uri = intent?.data ?: return
         // Auth callbacks go directly to OAuthManager (fast path)
         if (uri.scheme == "parachord" && uri.host == "auth") {
@@ -153,6 +169,13 @@ class MainActivity : ComponentActivity() {
         }
         // Store for the composable-scoped ViewModel to process
         pendingDeepLink.value = uri
+    }
+
+    /** Extract the first URL from shared text (which may include extra context). */
+    private fun extractUrl(text: String): String? {
+        // Common patterns: "Check out X on Spotify https://open.spotify.com/..."
+        val urlRegex = Regex("""https?://[^\s]+""")
+        return urlRegex.find(text)?.value
     }
 }
 
