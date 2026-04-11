@@ -17,24 +17,48 @@ The question: what's the best path to supporting both Android and iOS from a sin
 4. **Tight-loop polling**: 500ms Apple Music state polling, 300ms Spotify device polling — must not block or jank
 5. **Complex native integrations**: OAuth via Custom Tabs/ASWebAuthenticationSession, Room database with 11 migrations, media notifications, home screen widget
 
-### Code shareability analysis (from Android codebase)
+### The .axe plugin system changes the equation (implemented April 2025)
+
+The Android app now runs the **same .axe plugin system as the desktop Electron app**. This is significant for cross-platform strategy because:
+
+1. **19 .axe plugins loaded on Android** via a headless WebView (`JsBridge`) running `resolver-loader.js` unchanged from desktop. The same JSON plugin files with embedded JavaScript execute on both platforms.
+
+2. **`JsRuntime` interface** (`plugin/JsRuntime.kt`) abstracts the JS execution layer. Android implements it via `WebView`; iOS would implement it via `JavaScriptCore` (built into iOS, no WebView needed). The `PluginManager` depends on `JsRuntime`, not `JsBridge` — making it KMP-shareable.
+
+3. **What's now shared via .axe plugins (no per-platform implementation needed):**
+   - Resolver search/resolve (Bandcamp, future resolvers)
+   - AI providers (ChatGPT, Gemini, Claude, Ollama) — dynamic model lists
+   - Metadata services (Discogs, Wikipedia)
+   - Concert services (Ticketmaster, SeatGeek, Bandsintown, Songkick)
+   - Plugin marketplace sync from GitHub repo
+   - Plugin versioning, hot-reload, enable/disable
+
+4. **What this means for KMP migration:** The .axe plugin system is inherently cross-platform (JS runs everywhere). The Kotlin wrapper (`PluginManager`, `PluginSyncService`) is pure business logic that moves directly into a KMP shared module. Only the `JsRuntime` implementation is platform-specific — and it's ~100 lines per platform.
+
+5. **What this means for native Kotlin code:** Some native Kotlin implementations (AI providers, metadata providers) can now be **gradually replaced** by .axe plugin delegation, reducing the native code that needs to be maintained per-platform. The native implementations remain as high-performance fallbacks where JS bridge latency matters (e.g., resolver search where native Spotify/Apple Music APIs are faster).
+
+### Code shareability analysis (updated with .axe plugin system)
 
 | Layer | Lines (approx) | Shareable? |
 |-------|----------------|------------|
-| API clients (Spotify, Last.fm, MusicBrainz, LB, Ticketmaster, SeatGeek) | ~5K | 100% — pure HTTP + serialization |
-| Repositories (13 repos: charts, concerts, friends, history, etc.) | ~8K | ~90% |
-| Resolver pipeline (ResolverManager, ResolverScoring, TrackResolverCache) | ~3K | 95% — pure business logic |
-| AI services (chat, recommendations, Claude/GPT/Gemini providers) | ~5K | 95% |
-| Scrobblers (ListenBrainz, Last.fm, Libre.fm) | ~3K | 100% |
+| **.axe plugin system (PluginManager, JsRuntime, sync)** | **~1.5K** | **100% — JsRuntime interface makes it KMP-ready** |
+| **.axe plugins (19 JSON+JS files, resolver-loader.js)** | **~2K** | **100% — same files on all platforms** |
+| API clients (Spotify, Last.fm, MusicBrainz, LB, etc.) | ~5K | 100% — pure HTTP + serialization |
+| Repositories (13 repos) | ~8K | ~90% |
+| Resolver pipeline (ResolverManager, Scoring, Cache) | ~3K | 95% — .axe resolvers integrated alongside native |
+| AI services (native + AxeAiProvider wrapper) | ~5K | 95% — .axe AI providers for future services |
+| Scrobblers (native + AxeScrobbler wrapper) | ~3K | 100% — wrapper ready for .axe migration |
 | Metadata providers + enrichment | ~4K | 90% |
 | Playlist/XSPF parsing, sync engine | ~3K | 85% |
-| **Subtotal shareable** | **~31K** | **~68%** |
+| **Subtotal shareable** | **~35K** | **~73%** |
 | Playback handlers (Spotify, AppleMusic, SoundCloud, ExoPlayer) | ~5K | 0% — fundamentally platform-specific |
-| PlaybackService (MediaSession, foreground service) | ~3K | 0% |
+| PlaybackService (MediaSession, foreground service, silent playback) | ~3K | 0% |
 | MusicKit WebView bridge | ~1.5K | 0% (Android=WebView, iOS=native MusicKit) |
+| JsBridge (Android WebView implementation of JsRuntime) | ~0.1K | 0% — iOS uses JavaScriptCore instead |
+| NativeBridge (Android-specific fetch/storage polyfills) | ~0.2K | 0% — iOS version uses URLSession/UserDefaults |
 | UI (Compose screens, components, navigation) | ~10K | Depends on approach |
 | Database (Room entities, DAOs, migrations) | ~3K | 50% (entities yes, DAOs no) |
-| **Subtotal platform-specific** | **~22K** | |
+| **Subtotal platform-specific** | **~23K** | |
 
 ---
 
@@ -68,9 +92,9 @@ The question: what's the best path to supporting both Android and iOS from a sin
 - Debugging Kotlin/Native on iOS can be harder than pure Swift
 - Hilt doesn't work multiplatform — need to migrate DI
 
-**Desktop code sharing:** None directly (desktop is JS/React)
+**Desktop code sharing:** Significant via .axe plugins — the same 19 plugin files run on desktop (Electron), Android (WebView), and iOS (JavaScriptCore). AI providers, metadata services, resolver logic, and concert services are shared across ALL THREE platforms through the plugin system. This is code sharing that KMP alone couldn't provide (Kotlin doesn't run in Electron).
 
-**Verdict:** Best incremental path. Preserves your 51K lines of investment. ~68% shared day one.
+**Verdict:** Best incremental path. Preserves your 51K lines of investment. ~73% shared day one (up from ~68% before the .axe plugin system). The `JsRuntime` interface is already defined and implemented on Android — iOS just needs a ~100-line `JavaScriptCore` implementation.
 
 ---
 
@@ -218,9 +242,9 @@ The question: what's the best path to supporting both Android and iOS from a sin
 | Factor | KMP + Compose | React Native | Flutter | Capacitor | Separate Native |
 |--------|:---:|:---:|:---:|:---:|:---:|
 | Migration effort | **Medium** | High | Very High | Low* | High (iOS only) |
-| Code reuse (existing Android) | **~68%** | 0% | 0% | 0%** | 100% Android / 0% iOS |
-| Code sharing (cross-platform) | **~75%** | ~90% | ~90% | ~60%*** | 0% |
-| Desktop code sharing | None | Medium | None | High* | None |
+| Code reuse (existing Android) | **~73%** | 0% | 0% | 0%** | 100% Android / 0% iOS |
+| Code sharing (cross-platform) | **~80%** | ~90% | ~90% | ~60%*** | 0% |
+| Desktop code sharing | **High (.axe plugins)** | Medium | None | High* | **Medium (.axe plugins)** |
 | Background audio | **Native** | Bridged | Bridged | **Broken** | **Native** |
 | Spotify/MusicKit integration | **Native** | Bridged | Bridged | **Broken** | **Native** |
 | Playback polling performance | **Native** | Good | Good | Poor | **Native** |
@@ -239,12 +263,13 @@ The question: what's the best path to supporting both Android and iOS from a sin
 **For Parachord specifically: KMP + Compose Multiplatform.**
 
 Reasoning:
-1. **You've already written 51K lines of refined Kotlin.** KMP preserves ~68% of that investment. Every other option throws it away.
-2. **The hard parts are unavoidably platform-specific.** ExoPlayer vs AVPlayer, MediaSession vs MPNowPlayingInfoCenter, WebView MusicKit vs native MusicKit — no framework eliminates this work. KMP's `expect`/`actual` gives the cleanest abstraction for these boundaries.
-3. **Capacitor is disqualified** — background WebView audio is fundamentally broken on mobile.
-4. **React Native and Flutter** require complete rewrites with questionable native integration quality for a multi-backend music player.
-5. **Separate native** gives the best quality but doubles maintenance forever.
-6. **KMP is the Kotlin-native path** — Google officially endorses it, JetBrains maintains it, and the Android ecosystem is converging on it.
+1. **You've already written 51K lines of refined Kotlin.** KMP preserves ~73% of that investment. Every other option throws it away.
+2. **The .axe plugin system bridges KMP and desktop.** The same 19 .axe plugins run on desktop (Electron JS), Android (WebView JS), and iOS (JavaScriptCore). This gives KMP something no other framework offers: **three-platform code sharing** for AI providers, resolvers, metadata, and concert services — without rewriting the desktop app. The `JsRuntime` interface is already KMP-ready.
+3. **The hard parts are unavoidably platform-specific.** ExoPlayer vs AVPlayer, MediaSession vs MPNowPlayingInfoCenter, WebView MusicKit vs native MusicKit — no framework eliminates this work. KMP's `expect`/`actual` gives the cleanest abstraction for these boundaries.
+4. **Capacitor is disqualified** — background WebView audio is fundamentally broken on mobile.
+5. **React Native and Flutter** require complete rewrites with questionable native integration quality for a multi-backend music player.
+6. **Separate native** gives the best quality but doubles maintenance forever. The .axe plugin system reduces this penalty somewhat (plugins are shared), but the Kotlin business logic still needs to be rewritten in Swift.
+7. **KMP is the Kotlin-native path** — Google officially endorses it, JetBrains maintains it, and the Android ecosystem is converging on it.
 
 ### Runner-up: Separate Native Codebases
 
@@ -260,23 +285,29 @@ Only if sharing code between mobile and the Electron desktop app becomes a top p
 
 1. **Phase 1 — Shared module extraction** (no iOS yet)
    - Create `:shared` KMP module
+   - Move `JsRuntime` interface + `PluginManager` + `PluginSyncService` to `commonMain` (already KMP-ready — no Android imports)
    - Migrate pure business logic: resolver pipeline, scoring, API clients (Retrofit → Ktor), serialization models
    - Android app imports from `:shared` — verify nothing breaks
    - Migrate Room → SQLDelight for cross-platform database
 
 2. **Phase 2 — Platform abstraction layer**
    - Define `expect`/`actual` interfaces for: playback (ExoPlayer/AVPlayer), auth (OAuth flows), settings (DataStore/UserDefaults), media session
+   - Add `expect`/`actual` for `JsRuntime`: Android `actual` = existing `JsBridge` (WebView), iOS `actual` = `JavaScriptCore` wrapper (~100 lines)
    - Android `actual` implementations wrap existing code
    - This is refactoring, not rewriting — same logic, new module boundaries
 
 3. **Phase 3 — iOS app**
    - iOS `actual` implementations: AVPlayer, MusicKit (native), Spotify iOS SDK, MPNowPlayingInfoCenter
+   - iOS `JsRuntime` via JavaScriptCore — loads the same .axe plugins and resolver-loader.js
+   - **Day-one iOS features via .axe plugins:** All 17 mobile-compatible plugins work immediately — AI providers, Bandcamp resolver, concert services, metadata. No native Kotlin/Swift implementation needed for these.
    - UI in Compose Multiplatform (shares ~80% with Android) OR SwiftUI consuming shared Kotlin
    - Start with playback + resolver pipeline → Now Playing screen → Library → remaining screens
 
 4. **Phase 4 — Feature parity**
    - AI DJ chat, scrobbling, friends, weekly playlists, concerts
    - These are mostly shared-module code — iOS gets them "for free" once Phase 1 is complete
+   - .axe plugins provide immediate coverage for AI providers (no Swift AI provider code needed)
+   - Marketplace sync works on both platforms — plugin updates reach iOS and Android simultaneously
 
 ### Key library migrations for KMP
 
@@ -288,6 +319,10 @@ Only if sharing code between mobile and the Electron desktop app becomes a top p
 | DataStore | KMP-native settings lib or `expect`/`actual` | Low |
 | Coil | Coil 3 (has KMP support) | Low |
 | kotlinx.serialization | Same (already KMP) | None |
+| JsBridge (WebView) | `expect`/`actual` JsRuntime | **Low — interface already defined** |
+| PluginManager | Same (already pure Kotlin) | **None — move to commonMain** |
+| PluginSyncService | Same (swap OkHttp for Ktor) | **Low** |
+| NativeBridge | Platform-specific `actual` | Low (URLSession on iOS) |
 
 ---
 
@@ -392,7 +427,17 @@ One `git clone`. One CI pipeline. `./gradlew :androidApp:installDebug` builds An
 
 ## Appendix: Cross-Platform vs Platform-Specific Feature Breakdown
 
-### Cross-Platform (`shared/commonMain/`) — ~68% of codebase
+### Cross-Platform (`shared/commonMain/`) — ~73% of codebase
+
+**.axe Plugin System (shares code with desktop Electron app):**
+- `JsRuntime` interface — Android: WebView, iOS: JavaScriptCore
+- `PluginManager` — loading, semver deduplication, hot-reload, evaluateJs()
+- `PluginSyncService` — marketplace sync from GitHub (24h debounce)
+- `AxeAiProvider` — wraps .axe AI plugins as `AiChatProvider` implementations
+- `AxeScrobbler` — wraps .axe scrobbler plugins (ready for future migration)
+- 19 .axe plugin files (JSON+JS) — same files on Android, iOS, and desktop
+- `resolver-loader.js` — unchanged from desktop (422 lines)
+- Platform capability filtering (`mobile: false` hides YouTube, Ollama on mobile)
 
 **Resolver Pipeline (all of it):**
 - `ResolverManager.resolve()` — calls search APIs across all resolver backends
@@ -472,4 +517,4 @@ One `git clone`. One CI pipeline. `./gradlew :androidApp:installDebug` builds An
 - UserDefaults / `@AppStorage`
 - OAuth via ASWebAuthenticationSession
 
-**Key insight:** The platform-specific layer is relatively stable plumbing that rarely changes once built. Every new feature — new API integration, recommendation algorithm, resolver, scrobbler — goes in the shared module and works on both platforms immediately.
+**Key insight:** The platform-specific layer is relatively stable plumbing that rarely changes once built. Every new feature — new API integration, recommendation algorithm, resolver, scrobbler — goes in the shared module and works on both platforms immediately. With the .axe plugin system, new resolvers, AI providers, and services can be added as .axe plugins that work on **all three platforms** (desktop, Android, iOS) without any native code.
