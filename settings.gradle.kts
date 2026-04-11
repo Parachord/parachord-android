@@ -23,3 +23,4 @@ dependencyResolutionManagement {
 
 rootProject.name = "Parachord"
 include(":app")
+include(":shared")
