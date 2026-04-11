@@ -98,9 +98,27 @@ An `AtomicBoolean(trackEndHandled)` prevents both paths from double-firing.
 
 **Pre-resolving next track:** The polling loop resolves the next Apple Music track's ID 30s before the current track ends. This runs as a fire-and-forget `scope.launch(Dispatchers.Main)` — NOT inline. Only the ID is resolved; no `preload()` API call is made (see rule above).
 
-### .axe Resolver Format
+### .axe Plugin System — Full Integration
 
-Desktop resolvers are JSON-based plugin manifests with embedded JS. The Android app has a JS bridge architecture for running these, but native Kotlin resolvers are preferred for performance. The `ResolverManager` currently uses native API calls (Spotify Web API search) rather than the JS bridge.
+The Android app runs the **same .axe plugin system as desktop**. 19 plugins loaded via `JsBridge` (headless WebView) executing `resolver-loader.js` unchanged from the Electron app. The `PluginManager` handles loading, semver deduplication, hot-reload, and marketplace sync from the `parachord-plugins` GitHub repo.
+
+**Architecture:**
+- `JsRuntime` interface (`plugin/JsRuntime.kt`) — platform-agnostic JS execution abstraction. Android: `JsBridge` (WebView). iOS future: JavaScriptCore. KMP-ready.
+- `PluginManager` — loads .axe files from `assets/plugins/` (bundled) + `filesDir/plugins/` (downloaded updates). Deduplicates by semver (higher version wins). Provides type-safe Kotlin methods for resolve/search/AI/scrobble calls.
+- `NativeBridge` — polyfills `fetch` (async, non-blocking), `console`, and `storage` (backed by DataStore) for the JS runtime.
+- `PluginSyncService` — fetches `manifest.json` from GitHub, downloads updated .axe files, calls `PluginManager.reloadPlugins()` for hot-reload. Runs on app start (24h debounce) + manual "Check for updates" in Settings.
+
+**Plugin types loaded:**
+- **Content resolvers** (stream: true): spotify, applemusic, soundcloud, localfiles — native Kotlin takes priority (faster), .axe as fallback
+- **Content resolvers** (stream: false): bandcamp — resolves tracks but opens browser for playback (matches desktop behavior)
+- **AI providers**: chatgpt, gemini, claude — native Kotlin handles these, `AxeAiProvider` wrapper available for .axe-only providers (ollama)
+- **Meta-services**: discogs, wikipedia, lastfm, listenbrainz, librefm — native Kotlin implementations, `AxeScrobbler` wrapper ready for migration
+- **Concert services**: ticketmaster, seatgeek, bandsintown, songkick — API key config in Settings
+- **Filtered out on mobile**: youtube (consent redirect blocks Chromium renderer), ollama (needs local server) — via `capabilities.mobile: false`
+
+**Native-first resolver strategy:** For spotify/applemusic/soundcloud/localfiles, the native Kotlin resolver always runs first (faster, no JS bridge overhead). .axe resolvers (bandcamp, future resolvers) fill gaps for sources with no native implementation. Both run in parallel via `ResolverManager.resolve()`.
+
+**Key files:** `plugin/JsRuntime.kt`, `plugin/PluginManager.kt`, `plugin/PluginSyncService.kt`, `bridge/JsBridge.kt`, `bridge/NativeBridge.kt`, `ai/providers/AxeAiProvider.kt`, `playback/scrobbler/AxeScrobbler.kt`
 
 ### On-the-fly Track Resolution
 
@@ -465,6 +483,11 @@ static let darkAccentPurple = Color(hex: "#a78bfa")
 | Shared UI components | `ui/components/AlbumContextMenu.kt`, `ui/components/ArtistContextMenu.kt`, `ui/components/TrackContextMenu.kt`, `ui/components/TrackRow.kt`, `ui/components/ResolverIconRow.kt` |
 | Weekly playlists | `data/repository/WeeklyPlaylistsRepository.kt`, `ui/screens/playlists/WeeklyPlaylistScreen.kt`, `WeeklyPlaylistViewModel.kt` |
 | Concerts / On Tour | `data/repository/ConcertsRepository.kt`, `data/api/TicketmasterApi.kt`, `data/api/SeatGeekApi.kt`, `ui/screens/discover/ConcertsScreen.kt` |
+| .axe plugin system | `plugin/JsRuntime.kt`, `plugin/PluginManager.kt`, `plugin/PluginSyncService.kt` |
+| JS bridge | `bridge/JsBridge.kt`, `bridge/NativeBridge.kt`, `assets/js/bootstrap.html`, `assets/js/resolver-loader.js` |
+| .axe AI wrapper | `ai/providers/AxeAiProvider.kt` |
+| .axe scrobbler wrapper | `playback/scrobbler/AxeScrobbler.kt` |
+| Bundled plugins | `assets/plugins/*.axe` (19 files) |
 
 ## Common Mistakes to Avoid
 
@@ -498,6 +521,10 @@ static let darkAccentPurple = Color(hex: "#a78bfa")
 24. **Don't use a short timeout after launching Spotify from a killed state.** Cold-launching Spotify takes ~5-6s to register as a Connect device (process start + auth + server registration). Extend the polling deadline to 12s when the launch intent fallback fires.
 21. **Don't use compounding retry layers for Spotify playback.** The old `playWithRetry(3) × attemptPlay 502 retries(3) × verification(5 polls)` compounded to 27.5s worst case. Use a single-pass flow: one `attemptPlay()` with a single 502 retry and 2 quick verification polls.
 22. **Don't require preferred Spotify devices to be active.** An inactive but present device just needs a transfer. Only show the device picker when the preferred device is completely absent from the API response (device removed/renamed).
+25. **Don't use synchronous `NativeBridge.fetch()` for .axe plugin HTTP requests.** Synchronous fetch blocks the WebView JS thread, preventing concurrent plugin execution (e.g., Bandcamp search blocks while YouTube fetch hangs). Use `NativeBridge.fetchAsync()` with a callback pattern instead — HTTP runs on `Dispatchers.IO`, result injected back via `evaluateJavascript()`.
+26. **Don't use JS template literals (backticks) to pass .axe JSON to `evaluateJavascript`.** Backticks and `$` in the embedded JS code break the template string. Use Base64-encoding: `atob('${base64}')` in JS to decode.
+27. **Don't use async IIFE with `evaluateJavascript`.** It returns a `Promise` object (`{}`) not the resolved value. Use a callback pattern: store result in `window.__lastPluginResult`, then read it in a second `evaluate()` call.
+28. **Don't manage audio focus explicitly during external playback.** Chromium's WebView has its own `AudioFocusDelegate`. Our explicit `requestAudioFocus()` competed with it, causing `AUDIOFOCUS_LOSS` → we paused MusicKit → stopped playback mid-song. Let Chromium handle it for WebView audio; Spotify handles its own.
 
 ### iOS-Specific
 
@@ -508,6 +535,16 @@ static let darkAccentPurple = Color(hex: "#a78bfa")
 10. **Don't block the main actor.** Network calls and metadata lookups must run in a `Task` or detached context. Use `@MainActor` only for UI state updates.
 11. **Don't use `Timer` for playback progress.** Use `AVPlayer.addPeriodicTimeObserver(forInterval:queue:using:)` instead — it's synchronized with the audio clock.
 12. **Don't forget to handle Spotify SDK auth flow.** The iOS SDK requires handling the redirect URL in `SceneDelegate.scene(_:openURLContexts:)` or via `.onOpenURL` in SwiftUI.
+
+## Deep Link Handling
+
+### Spotify Branch.io Referrer Format
+
+Spotify's link sharing wraps real URLs in a Branch.io referrer: `spotify://open?_branch_referrer=<gzip+base64 data>`. The compressed payload contains `$full_url=https://open.spotify.com/artist/xxx`. `DeepLinkHandler.parseSpotifyUri()` detects this format, decompresses via `GZIPInputStream(Base64.decode(...))`, extracts the `$full_url` parameter, and routes it through `parseSpotifyUrl()`.
+
+### Spotify URL Resolution
+
+Spotify URLs contain opaque IDs (`/artist/4Z8W4fKeB5YxbusRwVAqVK`) with no human-readable name. `ExternalLinkResolver.resolveSpotifyArtist()` calls `GET /v1/artists/{id}` to get the name, then navigates to the artist page. Requires a valid Spotify access token — if missing, shows a helpful error directing the user to connect Spotify in Settings.
 
 ## AI Provider Integration Learnings
 
