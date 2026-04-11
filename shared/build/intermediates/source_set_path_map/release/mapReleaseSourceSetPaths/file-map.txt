@@ -1,9 +1,0 @@
-com.parachord.shared-pngs-0 /Users/jherskowitz/Development/parachord/parachord-android/shared/build/generated/res/pngs/release
-com.parachord.shared-resValues-1 /Users/jherskowitz/Development/parachord/parachord-android/shared/build/generated/res/resValues/release
-com.parachord.shared-mergeReleaseResources-2 /Users/jherskowitz/Development/parachord/parachord-android/shared/build/intermediates/incremental/release/mergeReleaseResources/merged.dir
-com.parachord.shared-mergeReleaseResources-3 /Users/jherskowitz/Development/parachord/parachord-android/shared/build/intermediates/incremental/release/mergeReleaseResources/stripped.dir
-com.parachord.shared-release-4 /Users/jherskowitz/Development/parachord/parachord-android/shared/build/intermediates/merged_res/release/mergeReleaseResources
-com.parachord.shared-androidMain-5 /Users/jherskowitz/Development/parachord/parachord-android/shared/src/androidMain/res
-com.parachord.shared-androidRelease-6 /Users/jherskowitz/Development/parachord/parachord-android/shared/src/androidRelease/res
-com.parachord.shared-main-7 /Users/jherskowitz/Development/parachord/parachord-android/shared/src/main/res
-com.parachord.shared-release-8 /Users/jherskowitz/Development/parachord/parachord-android/shared/src/release/res
