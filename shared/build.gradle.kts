@@ -22,12 +22,17 @@ kotlin {
         commonMain.dependencies {
             implementation(libs.kotlinx.serialization.json)
             implementation(libs.kotlinx.coroutines.core)
+            // Ktor HTTP client (Phase 2)
+            implementation(libs.ktor.client.core)
+            implementation(libs.ktor.client.content.negotiation)
+            implementation(libs.ktor.serialization.kotlinx.json)
+            implementation(libs.ktor.client.logging)
         }
         androidMain.dependencies {
-            // Platform-specific deps added per phase
+            implementation(libs.ktor.client.okhttp)
         }
         iosMain.dependencies {
-            // Platform-specific deps added per phase
+            implementation(libs.ktor.client.darwin)
         }
     }
 }
