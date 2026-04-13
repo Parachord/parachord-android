@@ -1,0 +1,74 @@
+package com.parachord.shared.api
+
+/**
+ * ListenBrainz API response models.
+ * The actual API client migration from OkHttp → Ktor is deferred
+ * because ListenBrainzApi uses manual JSON parsing (not Retrofit).
+ * Models are shared now; client conversion happens in Phase 5.
+ */
+
+/** A single listen from the ListenBrainz API. */
+data class LbListen(
+    val artistName: String,
+    val trackName: String,
+    val releaseName: String? = null,
+    val listenedAt: Long = 0,
+)
+
+/** Artist stat from ListenBrainz stats API. */
+data class LbArtistStat(
+    val name: String,
+    val listenCount: Int = 0,
+)
+
+/** Recording (track) stat from ListenBrainz stats API. */
+data class LbRecordingStat(
+    val trackName: String,
+    val artistName: String,
+    val releaseName: String? = null,
+    val listenCount: Int = 0,
+)
+
+/** Release (album) stat from ListenBrainz stats API. */
+data class LbReleaseStat(
+    val releaseName: String,
+    val artistName: String,
+    val listenCount: Int = 0,
+)
+
+/** A recommended track from a ListenBrainz recommendation playlist. */
+data class LbRecommendedTrack(
+    val title: String,
+    val artist: String,
+    val album: String? = null,
+)
+
+/** A playlist "created for" a user by ListenBrainz. */
+data class LbCreatedForPlaylist(
+    val id: String,
+    val title: String,
+    val date: String,
+    val annotation: String = "",
+)
+
+/** A track from a ListenBrainz playlist with album art info. */
+data class LbPlaylistTrack(
+    val id: String,
+    val title: String,
+    val artist: String,
+    val album: String? = null,
+    val albumArt: String? = null,
+    val durationMs: Long? = null,
+    val mbid: String? = null,
+)
+
+/** Result from the ListenBrainz MBID Mapper lookup. */
+data class MbidMapperResult(
+    val artistMbid: String?,
+    val artistCreditName: String?,
+    val recordingName: String?,
+    val recordingMbid: String?,
+    val releaseName: String?,
+    val releaseMbid: String?,
+    val confidence: Double = 0.0,
+)
