@@ -1,0 +1,39 @@
+CREATE TABLE IF NOT EXISTS artists (
+    id TEXT NOT NULL PRIMARY KEY,
+    name TEXT NOT NULL,
+    imageUrl TEXT,
+    spotifyId TEXT,
+    genres TEXT,
+    addedAt INTEGER NOT NULL DEFAULT 0
+);
+
+getAll:
+SELECT * FROM artists ORDER BY name ASC;
+
+getById:
+SELECT * FROM artists WHERE id = ?;
+
+getByName:
+SELECT * FROM artists WHERE name = ? LIMIT 1;
+
+getBySpotifyId:
+SELECT * FROM artists WHERE spotifyId = ?;
+
+existsByName:
+SELECT EXISTS(SELECT 1 FROM artists WHERE name = ?);
+
+search:
+SELECT * FROM artists WHERE name LIKE '%' || ? || '%';
+
+insert:
+INSERT OR REPLACE INTO artists (id, name, imageUrl, spotifyId, genres, addedAt)
+VALUES (?, ?, ?, ?, ?, ?);
+
+updateImageByName:
+UPDATE artists SET imageUrl = ? WHERE name = ? AND (imageUrl IS NULL OR imageUrl = '');
+
+deleteById:
+DELETE FROM artists WHERE id = ?;
+
+deleteByName:
+DELETE FROM artists WHERE name = ?;

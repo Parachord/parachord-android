@@ -1,0 +1,38 @@
+CREATE TABLE IF NOT EXISTS friends (
+    id TEXT NOT NULL PRIMARY KEY,
+    username TEXT NOT NULL,
+    service TEXT NOT NULL,
+    displayName TEXT NOT NULL,
+    avatarUrl TEXT,
+    addedAt INTEGER NOT NULL,
+    lastFetchedAt INTEGER NOT NULL DEFAULT 0,
+    cachedTrackName TEXT,
+    cachedTrackArtist TEXT,
+    cachedTrackAlbum TEXT,
+    cachedTrackTimestamp INTEGER NOT NULL DEFAULT 0,
+    cachedTrackArtworkUrl TEXT,
+    pinnedToSidebar INTEGER NOT NULL DEFAULT 0,
+    autoPinned INTEGER NOT NULL DEFAULT 0
+);
+
+getAll:
+SELECT * FROM friends ORDER BY addedAt DESC;
+
+getPinned:
+SELECT * FROM friends WHERE pinnedToSidebar = 1 ORDER BY cachedTrackTimestamp DESC;
+
+getById:
+SELECT * FROM friends WHERE id = ?;
+
+upsert:
+INSERT OR REPLACE INTO friends (id, username, service, displayName, avatarUrl, addedAt, lastFetchedAt, cachedTrackName, cachedTrackArtist, cachedTrackAlbum, cachedTrackTimestamp, cachedTrackArtworkUrl, pinnedToSidebar, autoPinned)
+VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?);
+
+setPinned:
+UPDATE friends SET pinnedToSidebar = ?, autoPinned = ? WHERE id = ?;
+
+updateCachedTrack:
+UPDATE friends SET cachedTrackName = ?, cachedTrackArtist = ?, cachedTrackAlbum = ?, cachedTrackTimestamp = ?, cachedTrackArtworkUrl = ?, lastFetchedAt = ? WHERE id = ?;
+
+deleteById:
+DELETE FROM friends WHERE id = ?;

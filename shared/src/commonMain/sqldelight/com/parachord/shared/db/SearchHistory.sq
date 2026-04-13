@@ -1,0 +1,30 @@
+CREATE TABLE IF NOT EXISTS search_history (
+    id INTEGER NOT NULL PRIMARY KEY AUTOINCREMENT,
+    query TEXT NOT NULL,
+    resultType TEXT,
+    resultName TEXT,
+    resultArtist TEXT,
+    artworkUrl TEXT,
+    timestamp INTEGER NOT NULL DEFAULT 0
+);
+
+getRecent:
+SELECT * FROM search_history ORDER BY timestamp DESC LIMIT 50;
+
+insert:
+INSERT INTO search_history (query, resultType, resultName, resultArtist, artworkUrl, timestamp)
+VALUES (?, ?, ?, ?, ?, ?);
+
+deleteByQuery:
+DELETE FROM search_history WHERE LOWER(query) = LOWER(?);
+
+deleteById:
+DELETE FROM search_history WHERE id = ?;
+
+clearAll:
+DELETE FROM search_history;
+
+trimToLimit:
+DELETE FROM search_history WHERE id NOT IN (
+    SELECT id FROM search_history ORDER BY timestamp DESC LIMIT 50
+);

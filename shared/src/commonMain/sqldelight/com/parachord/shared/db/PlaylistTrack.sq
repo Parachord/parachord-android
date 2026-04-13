@@ -1,0 +1,36 @@
+CREATE TABLE IF NOT EXISTS playlist_tracks (
+    playlistId TEXT NOT NULL,
+    position INTEGER NOT NULL,
+    trackTitle TEXT NOT NULL,
+    trackArtist TEXT NOT NULL,
+    trackAlbum TEXT,
+    trackDuration INTEGER,
+    trackArtworkUrl TEXT,
+    trackSourceUrl TEXT,
+    trackResolver TEXT,
+    trackSpotifyUri TEXT,
+    trackSoundcloudId TEXT,
+    trackSpotifyId TEXT,
+    trackAppleMusicId TEXT,
+    addedAt INTEGER NOT NULL DEFAULT 0,
+    PRIMARY KEY (playlistId, position),
+    FOREIGN KEY (playlistId) REFERENCES playlists(id) ON DELETE CASCADE
+);
+
+CREATE INDEX IF NOT EXISTS idx_playlist_tracks_playlistId ON playlist_tracks(playlistId);
+
+getByPlaylistId:
+SELECT * FROM playlist_tracks WHERE playlistId = ? ORDER BY position ASC;
+
+getMaxPosition:
+SELECT COALESCE(MAX(position), -1) FROM playlist_tracks WHERE playlistId = ?;
+
+insert:
+INSERT OR REPLACE INTO playlist_tracks (playlistId, position, trackTitle, trackArtist, trackAlbum, trackDuration, trackArtworkUrl, trackSourceUrl, trackResolver, trackSpotifyUri, trackSoundcloudId, trackSpotifyId, trackAppleMusicId, addedAt)
+VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?);
+
+deleteByPlaylistId:
+DELETE FROM playlist_tracks WHERE playlistId = ?;
+
+deleteTrack:
+DELETE FROM playlist_tracks WHERE playlistId = ? AND position = ?;

@@ -1,0 +1,35 @@
+CREATE TABLE IF NOT EXISTS albums (
+    id TEXT NOT NULL PRIMARY KEY,
+    title TEXT NOT NULL,
+    artist TEXT NOT NULL,
+    artworkUrl TEXT,
+    year INTEGER,
+    trackCount INTEGER,
+    addedAt INTEGER NOT NULL DEFAULT 0,
+    spotifyId TEXT
+);
+
+getAll:
+SELECT * FROM albums ORDER BY addedAt DESC;
+
+getById:
+SELECT * FROM albums WHERE id = ?;
+
+search:
+SELECT * FROM albums WHERE title LIKE '%' || ? || '%' OR artist LIKE '%' || ? || '%';
+
+existsByTitleAndArtist:
+SELECT EXISTS(SELECT 1 FROM albums WHERE title = ? AND artist = ?);
+
+getByTitleAndArtist:
+SELECT * FROM albums WHERE title = ? AND artist = ? LIMIT 1;
+
+insert:
+INSERT OR REPLACE INTO albums (id, title, artist, artworkUrl, year, trackCount, addedAt, spotifyId)
+VALUES (?, ?, ?, ?, ?, ?, ?, ?);
+
+updateArtworkByTitleAndArtist:
+UPDATE albums SET artworkUrl = ? WHERE title = ? AND artist = ? AND (artworkUrl IS NULL OR artworkUrl = '');
+
+deleteById:
+DELETE FROM albums WHERE id = ?;

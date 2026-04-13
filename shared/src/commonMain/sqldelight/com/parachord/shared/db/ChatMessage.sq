@@ -1,0 +1,31 @@
+CREATE TABLE IF NOT EXISTS chat_messages (
+    id INTEGER NOT NULL PRIMARY KEY AUTOINCREMENT,
+    providerId TEXT NOT NULL,
+    role TEXT NOT NULL,
+    content TEXT NOT NULL,
+    toolCallsJson TEXT,
+    toolCallId TEXT,
+    toolName TEXT,
+    timestamp INTEGER NOT NULL DEFAULT 0
+);
+
+getByProvider:
+SELECT * FROM chat_messages WHERE providerId = ? ORDER BY timestamp ASC, id ASC;
+
+insert:
+INSERT INTO chat_messages (providerId, role, content, toolCallsJson, toolCallId, toolName, timestamp)
+VALUES (?, ?, ?, ?, ?, ?, ?);
+
+clearByProvider:
+DELETE FROM chat_messages WHERE providerId = ?;
+
+clearAll:
+DELETE FROM chat_messages;
+
+deleteOlderThan:
+DELETE FROM chat_messages WHERE timestamp < ?;
+
+trimToLimit:
+DELETE FROM chat_messages WHERE providerId = ? AND id NOT IN (
+    SELECT id FROM chat_messages WHERE providerId = ? ORDER BY timestamp DESC, id DESC LIMIT ?
+);

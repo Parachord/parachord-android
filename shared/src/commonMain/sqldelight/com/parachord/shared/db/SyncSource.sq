@@ -1,0 +1,46 @@
+CREATE TABLE IF NOT EXISTS sync_sources (
+    itemId TEXT NOT NULL,
+    itemType TEXT NOT NULL,
+    providerId TEXT NOT NULL,
+    externalId TEXT,
+    addedAt INTEGER NOT NULL DEFAULT 0,
+    syncedAt INTEGER NOT NULL DEFAULT 0,
+    PRIMARY KEY (itemId, itemType, providerId)
+);
+
+getByItem:
+SELECT * FROM sync_sources WHERE itemId = ? AND itemType = ?;
+
+getByProvider:
+SELECT * FROM sync_sources WHERE providerId = ? AND itemType = ?;
+
+getAllByProvider:
+SELECT * FROM sync_sources WHERE providerId = ?;
+
+countByProvider:
+SELECT COUNT(*) FROM sync_sources WHERE providerId = ? AND itemType = ?;
+
+getByKey:
+SELECT * FROM sync_sources WHERE itemId = ? AND itemType = ? AND providerId = ?;
+
+getMostRecentByProvider:
+SELECT * FROM sync_sources WHERE providerId = ? AND itemType = ? ORDER BY addedAt DESC LIMIT 1;
+
+insert:
+INSERT OR REPLACE INTO sync_sources (itemId, itemType, providerId, externalId, addedAt, syncedAt)
+VALUES (?, ?, ?, ?, ?, ?);
+
+deleteByKey:
+DELETE FROM sync_sources WHERE itemId = ? AND itemType = ? AND providerId = ?;
+
+deleteAllForItem:
+DELETE FROM sync_sources WHERE itemId = ? AND itemType = ?;
+
+deleteAllForProvider:
+DELETE FROM sync_sources WHERE providerId = ?;
+
+deleteByProviderAndType:
+DELETE FROM sync_sources WHERE providerId = ? AND itemType = ?;
+
+deleteOrphanedTrackSources:
+DELETE FROM sync_sources WHERE itemType = 'track' AND itemId NOT IN (SELECT id FROM tracks);
