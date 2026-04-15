@@ -89,8 +89,14 @@ class FreshDropsViewModel constructor(
     }
 
     private fun loadReleases(forceRefresh: Boolean = false) {
-        // Cancel any in-flight load to avoid duplicate collections
-        loadJob?.cancel()
+        // Don't restart an in-flight load unless the caller explicitly wants
+        // a force-refresh. Without this guard, the `init { }` load and the
+        // Compose `LifecycleResumeEffect` load race against each other and
+        // cancel each other out — killing the fetch before it can cache
+        // anything to disk.
+        val current = loadJob
+        if (current != null && current.isActive && !forceRefresh) return
+        current?.cancel()
         loadJob = viewModelScope.launch {
             // Show cached results immediately (stale-while-revalidate)
             repository.cached?.let { cached ->

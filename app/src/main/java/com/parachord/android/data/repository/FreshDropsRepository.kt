@@ -263,6 +263,11 @@ class FreshDropsRepository constructor(
                     // Only rate-limit if we used MusicBrainz search (mapper is fast/unlimited)
                     // The browse call always hits MB, so always delay for that
                     delay(1100)
+                } catch (e: kotlinx.coroutines.CancellationException) {
+                    // Re-throw cancellation so the loop terminates cleanly instead
+                    // of catching it in the generic Exception handler below and
+                    // continuing into 20 phantom "failed" iterations.
+                    throw e
                 } catch (e: Exception) {
                     Log.w(TAG, "Failed to fetch releases for '${artist.name}'", e)
                 }

@@ -114,6 +114,20 @@ val androidModule = module {
 
     single {
         OkHttpClient.Builder()
+            // Identify the app on every outbound request. MusicBrainz
+            // specifically rate-limits / 403s requests with the default
+            // okhttp/x.y.z User-Agent — without this, Fresh Drops and
+            // Critical Darlings artwork fetches both fail. Good practice
+            // for every other API too.
+            .addInterceptor { chain ->
+                val req = chain.request().newBuilder()
+                    .header(
+                        "User-Agent",
+                        "Parachord/${com.parachord.android.BuildConfig.VERSION_NAME} (Android; https://parachord.app)",
+                    )
+                    .build()
+                chain.proceed(req)
+            }
             .addInterceptor(HttpLoggingInterceptor().apply {
                 level = HttpLoggingInterceptor.Level.BASIC
             })
