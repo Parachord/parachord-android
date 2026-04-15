@@ -84,6 +84,13 @@ class SpotifyClient(private val httpClient: HttpClient) {
             header("Authorization", auth); parameter("position_ms", positionMs)
         }
 
+    suspend fun setVolume(auth: String, volumePercent: Int, deviceId: String? = null): HttpResponse =
+        httpClient.put("$BASE/v1/me/player/volume") {
+            header("Authorization", auth)
+            parameter("volume_percent", volumePercent.coerceIn(0, 100))
+            if (deviceId != null) parameter("device_id", deviceId)
+        }
+
     suspend fun getPlaybackState(auth: String): HttpResponse =
         httpClient.get("$BASE/v1/me/player") { header("Authorization", auth) }
 

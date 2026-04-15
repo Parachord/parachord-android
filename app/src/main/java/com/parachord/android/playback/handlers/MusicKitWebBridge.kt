@@ -596,6 +596,10 @@ class MusicKitWebBridge constructor(
         return parseSuccessResponse(result)
     }
 
+    // Note: MusicKit v3 music.volume has no effect on Android WebView —
+    // DRM audio goes through MediaDrm/MediaCodec, bypassing the JS audio pipeline.
+    // Volume normalization is handled on the Spotify side instead.
+
     /** Pause playback. */
     suspend fun pause() {
         musicKitReady.await()
