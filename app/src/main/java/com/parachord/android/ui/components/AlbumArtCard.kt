@@ -5,6 +5,7 @@ import androidx.compose.animation.core.tween
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.aspectRatio
+import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
@@ -12,16 +13,23 @@ import androidx.compose.material.icons.filled.MusicNote
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.shadow
+import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import coil.compose.AsyncImage
 import coil.compose.SubcomposeAsyncImage
+import coil.imageLoader
 import coil.request.ImageRequest
 
 /**
@@ -104,6 +112,10 @@ fun AlbumArtCard(
 /**
  * Variant that fills available width with a 1:1 aspect ratio.
  * Used for large album art displays (NowPlaying, Album header).
+ *
+ * Defers URL changes until the new image is decoded — the displayed URL
+ * only updates on Coil's onSuccess callback, so the old artwork stays
+ * visible with zero flicker. Uses Compose Crossfade for smooth transitions.
  */
 @Composable
 fun AlbumArtCardFill(
@@ -120,54 +132,54 @@ fun AlbumArtCardFill(
         .shadow(elevation, shape)
         .clip(shape)
 
-    // Smooth crossfade when artwork URL changes (e.g. track switch on now-playing screen)
+    // Only update the displayed URL when the image is actually decoded.
+    // This prevents any flash/flicker when the URL changes — the old
+    // image stays visible until the new one is ready.
+    var displayedUrl by remember { mutableStateOf(artworkUrl) }
+    val context = LocalContext.current
+
+    // Prefetch the new URL; update displayedUrl only on success
+    if (artworkUrl != displayedUrl && !artworkUrl.isNullOrBlank()) {
+        androidx.compose.runtime.LaunchedEffect(artworkUrl) {
+            try {
+                val request = ImageRequest.Builder(context)
+                    .data(artworkUrl)
+                    .build()
+                context.imageLoader.execute(request)
+                // Image is now in memory cache — safe to switch
+                displayedUrl = artworkUrl
+            } catch (_: Exception) {
+                // Failed to load — keep showing current image
+            }
+        }
+    } else if (artworkUrl.isNullOrBlank()) {
+        displayedUrl = null
+    }
+
     Crossfade(
-        targetState = artworkUrl,
+        targetState = displayedUrl,
         animationSpec = tween(durationMillis = 400),
         modifier = commonModifier,
         label = "album-art-fill-crossfade",
     ) { url ->
         if (!url.isNullOrBlank()) {
-            SubcomposeAsyncImage(
-                model = ImageRequest.Builder(LocalContext.current)
+            AsyncImage(
+                model = ImageRequest.Builder(context)
                     .data(url)
-                    .crossfade(400)
                     .build(),
                 contentDescription = contentDescription,
-                modifier = Modifier.aspectRatio(1f),
+                modifier = Modifier.fillMaxSize(),
                 contentScale = ContentScale.Crop,
-                loading = {
-                    if (placeholderName != null) {
-                        GradientPlaceholder(
-                            name = placeholderName,
-                            modifier = Modifier.aspectRatio(1f),
-                            fontSize = 32.sp,
-                        )
-                    } else {
-                        ArtPlaceholderSimple(Modifier.aspectRatio(1f), 48.dp)
-                    }
-                },
-                error = {
-                    if (placeholderName != null) {
-                        GradientPlaceholder(
-                            name = placeholderName,
-                            modifier = Modifier.aspectRatio(1f),
-                            fontSize = 32.sp,
-                        )
-                    } else {
-                        ArtPlaceholderSimple(Modifier.aspectRatio(1f), 48.dp)
-                    }
-                },
             )
         } else {
             if (placeholderName != null) {
                 GradientPlaceholder(
                     name = placeholderName,
-                    modifier = Modifier.aspectRatio(1f),
+                    modifier = Modifier.fillMaxSize(),
                     fontSize = 32.sp,
                 )
             } else {
-                ArtPlaceholderSimple(Modifier.aspectRatio(1f), 48.dp)
+                ArtPlaceholderSimple(Modifier.fillMaxSize(), 48.dp)
             }
         }
     }

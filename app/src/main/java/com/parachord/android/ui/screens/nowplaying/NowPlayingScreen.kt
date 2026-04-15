@@ -359,21 +359,23 @@ fun NowPlayingScreen(
                         }
                     }
 
-                    // Album name (tappable to navigate)
-                    if (!displayAlbum.isNullOrBlank() && displayArtist.isNotBlank()) {
-                        Spacer(modifier = Modifier.height(2.dp))
-                        Text(
-                            text = displayAlbum,
-                            style = MaterialTheme.typography.bodySmall,
-                            color = PlayerTextSecondary.copy(alpha = 0.7f),
-                            textAlign = TextAlign.Center,
-                            maxLines = 1,
-                            overflow = TextOverflow.Ellipsis,
-                            modifier = Modifier.hapticClickable {
-                                onNavigateToAlbum(displayAlbum, displayArtist)
-                            },
-                        )
-                    }
+                    // Album name — always reserve space to prevent artwork resize
+                    // when album metadata arrives late (e.g. from streaming source).
+                    Spacer(modifier = Modifier.height(2.dp))
+                    val hasAlbum = !displayAlbum.isNullOrBlank() && displayArtist.isNotBlank()
+                    Text(
+                        text = if (hasAlbum) displayAlbum!! else " ",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = if (hasAlbum) PlayerTextSecondary.copy(alpha = 0.7f) else Color.Transparent,
+                        textAlign = TextAlign.Center,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis,
+                        modifier = if (hasAlbum) {
+                            Modifier.hapticClickable {
+                                onNavigateToAlbum(displayAlbum!!, displayArtist)
+                            }
+                        } else Modifier,
+                    )
 
                     // Resolver source dropdown — shows current source with option to switch
                     if (track?.resolver != null) {

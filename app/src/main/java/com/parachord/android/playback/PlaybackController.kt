@@ -698,7 +698,10 @@ class PlaybackController constructor(
                         upNext = snapshot.upNext,
                         playbackContext = snapshot.playbackContext,
                         shuffleEnabled = snapshot.shuffleEnabled,
-                        streamingMetadata = null, // Reset until polling confirms actual metadata
+                        // Keep existing artwork visible until streaming source confirms.
+                        // Setting null here causes a flash to placeholder initials
+                        // before the streaming artwork loads.
+                        streamingMetadata = streamingMetadata,
                     )
                 }
 
