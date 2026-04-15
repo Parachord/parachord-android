@@ -15,11 +15,8 @@ import com.parachord.android.data.metadata.TrackEnrichmentRequest
 import com.parachord.android.sync.SyncEngine
 import kotlinx.coroutines.flow.Flow
 import java.util.UUID
-import javax.inject.Inject
-import javax.inject.Singleton
 
-@Singleton
-class LibraryRepository @Inject constructor(
+class LibraryRepository constructor(
     private val trackDao: TrackDao,
     private val albumDao: AlbumDao,
     private val artistDao: ArtistDao,

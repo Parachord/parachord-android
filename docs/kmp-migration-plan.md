@@ -9,6 +9,8 @@ The Android app (191 files, ~51K lines) needs to share ~73% of its code with a f
 **Target code sharing: ~73%** (all business logic, data layer, networking, AI, resolver, plugin system)
 **Stays platform-specific:** Compose UI (82 files), PlaybackService/MediaSession, MediaScanner, Android widgets, JsBridge, NetworkMonitor
 
+> **Current status (April 2026):** Phases 0-7 complete. The `:shared` KMP module contains platform abstractions, models, API client infrastructure, SQLDelight schema, Koin DI, resolver scoring, metadata service, AI models/tools, plugin system, deep link parsing, and config. Phase 8 (Coil upgrade) is pending. Phase 9 (deferred tasks) covers the remaining "actual migration" work where the app switches from Retrofit/Room to Ktor/SQLDelight, and from TrackEntity to the shared Track model. iOS development can begin now using the shared module — the core business logic, plugin system, and API client interfaces are all shareable.
+
 ---
 
 ## Phase 0: Project Structure Setup
@@ -889,6 +891,72 @@ All Compose files that use `AsyncImage` or `rememberAsyncImagePainter` (estimate
 
 ---
 
+## Phase 9: Deferred Migration Tasks
+
+These tasks were identified during Phases 5-7 as too large to tackle inline. They complete the migration to full code sharing but can be done incrementally without blocking iOS development.
+
+### 9A: TrackEntity → Shared Track Model
+**Scope:** Replace `com.parachord.android.data.db.entity.TrackEntity` with `com.parachord.shared.model.Track` across the entire app. This is the single largest remaining blocker to moving QueueManager, PlaybackController business logic, and ScrobbleManager to shared.
+
+**Why deferred:** TrackEntity is referenced in 100+ files (every ViewModel, every screen, every repository, every playback handler). Changing it requires updating every call site simultaneously.
+
+**Approach:**
+1. Add extension functions `TrackEntity.toTrack()` and `Track.toEntity()` as a bridge
+2. Migrate one subsystem at a time (e.g., QueueManager first, then ScrobbleManager, then repositories)
+3. Eventually remove TrackEntity and use Track + Room type converters, or replace Room with SQLDelight queries that return Track directly
+
+**Depends on:** Phase 3 (SQLDelight) being wired into actual data access — currently the app still uses Room DAOs.
+
+**Effort:** Large (3-5 days)
+
+### 9B: SettingsStore → Multiplatform Settings
+**Scope:** Migrate SettingsStore (78+ public methods, DataStore-backed) to use `com.russhwolf:multiplatform-settings` or a shared interface so iOS can provide its own NSUserDefaults backend.
+
+**Why deferred:** SettingsStore is the most widely referenced service in the app. The current bridge approach (passing function params like `getResolverOrder: suspend () -> List<String>` to shared classes) works but doesn't fully share the settings logic.
+
+**Approach:**
+1. Add `multiplatform-settings` dependency to shared module
+2. Create shared `SettingsStore` class using `Settings` backend
+3. Android: provide `SharedPreferencesSettings` (backed by DataStore migration)
+4. iOS: provide `NSUserDefaultsSettings`
+5. Migrate each settings section incrementally (resolver prefs, auth tokens, AI config, etc.)
+
+**Effort:** Medium-Large (2-4 days)
+
+### 9C: QueueManager + QueuePersistence → Shared
+**Scope:** Move QueueManager (pure queue logic) and QueuePersistence (JSON serialization) to shared/commonMain once TrackEntity → Track migration (9A) is complete.
+
+**Why deferred:** Blocked on 9A. QueueManager is already pure logic with no Android deps except TrackEntity.
+
+**Effort:** Small (half day, once 9A is done)
+
+### 9D: Room → SQLDelight Actual Migration
+**Scope:** Switch the app's actual data access from Room DAOs to SQLDelight queries. Currently the app still uses Room for all DB operations; the SQLDelight .sq files in shared are infrastructure-ready but not wired in.
+
+**Why deferred:** This is a high-risk change touching every repository and DAO consumer. Requires careful data migration (Room DB → SQLDelight DB) to preserve user data on upgrade.
+
+**Approach:**
+1. Wire SQLDelight queries in repositories (one repository at a time)
+2. Add a one-time Room → SQLDelight data migration in `ParachordApplication.onCreate()`
+3. Remove Room DAOs and entities once all repositories use SQLDelight
+4. Remove Room dependency from app/build.gradle.kts
+
+**Effort:** Large (5-7 days)
+
+### 9E: Retrofit → Ktor Actual Migration
+**Scope:** Switch the app's API calls from Retrofit interfaces to the shared Ktor clients. Currently the app still uses Retrofit for all HTTP calls; the Ktor clients in shared are infrastructure-ready but not wired in.
+
+**Why deferred:** Similar to 9D — touching every repository and API consumer. The Ktor clients need to match every Retrofit endpoint exactly.
+
+**Approach:**
+1. Switch one API at a time (e.g., MusicBrainzApi first since it's simplest)
+2. Verify each endpoint returns identical data structures
+3. Remove Retrofit interfaces and OkHttp dependency once fully migrated
+
+**Effort:** Medium (3-5 days)
+
+---
+
 ## Phase Ordering and Dependencies
 
 ```
@@ -909,26 +977,37 @@ Phase 6 (Plugins) ------- depends on Phase 5 (PluginManager refs)
 Phase 7 (Abstractions) -- depends on Phase 5 (SettingsStore used by repos)
     |
 Phase 8 (Coil 3) -------- independent, can run anytime after Phase 0
+    |
+Phase 9 (Deferred) ------ incremental, no single dependency
+    9A (TrackEntity→Track) -- prerequisite for 9C
+    9B (SettingsStore)     -- independent
+    9C (QueueManager)      -- depends on 9A
+    9D (Room→SQLDelight)   -- depends on 9A (uses Track model throughout)
+    9E (Retrofit→Ktor)     -- independent
 ```
 
-Phases 2 and 3 can run in parallel. Phase 8 can run anytime.
+Phases 2 and 3 can run in parallel. Phase 8 can run anytime. Phase 9 tasks are independent of each other (except 9C depends on 9A) and can be done incrementally between feature work.
 
 ---
 
 ## Summary Table
 
-| Phase | Scope | Files Moved/New | Files Modified | Effort | Risk |
-|---|---|---|---|---|---|
-| 0 | Project structure | 3 new | 2 | 1-2 hours | Very Low |
-| 1 | Models + serialization | ~30 new | ~80 | 1-2 days | Low |
-| 2 | Retrofit -> Ktor | ~10 new | ~15 | 3-5 days | Medium |
-| 3 | Room -> SQLDelight | ~20 new | ~20 | 5-7 days | High |
-| 4 | Hilt -> Koin | 2 new, 4 deleted | ~110 | 3-4 days | Medium |
-| 5 | Repositories + logic | ~45 moved | ~50 | 5-7 days | Medium |
-| 6 | Plugin system | 3 moved, 2 new | ~5 | 1-2 days | Low |
-| 7 | Platform abstractions | ~10 new | ~10 | 2-3 days | Medium |
-| 8 | Coil 2 -> 3 | 0 | ~25 | 0.5 days | Low |
-| **Total** | | **~125 files** | **~320 modifications** | **~22-33 days** | |
+| Phase | Scope | Files Moved/New | Files Modified | Effort | Risk | Status |
+|---|---|---|---|---|---|---|
+| 0 | Project structure | 3 new | 2 | 1-2 hours | Very Low | ✅ Done |
+| 1 | Models + serialization | ~30 new | ~80 | 1-2 days | Low | ✅ Done |
+| 2 | Retrofit -> Ktor (infra) | ~10 new | ~15 | 3-5 days | Medium | ✅ Done |
+| 3 | Room -> SQLDelight (infra) | ~20 new | ~20 | 5-7 days | High | ✅ Done |
+| 4 | Hilt -> Koin | 2 new, 4 deleted | ~110 | 3-4 days | Medium | ✅ Done |
+| 5 | Business logic → shared | ~12 new | ~25 | 5-7 days | Medium | ✅ Done |
+| 6 | Plugin system | 5 new | ~8 | 1-2 days | Low | ✅ Done |
+| 7 | Platform abstractions | 4 new | ~3 | 2-3 days | Medium | ✅ Done |
+| 8 | Coil 2 -> 3 | 0 | ~25 | 0.5 days | Low | Pending |
+| 9A | TrackEntity → Track | 2 new | ~100+ | 3-5 days | High | Deferred |
+| 9B | SettingsStore → KMP | ~3 new | ~5 | 2-4 days | Medium | Deferred |
+| 9C | QueueManager → shared | 1 moved | ~3 | 0.5 days | Low | Deferred (needs 9A) |
+| 9D | Room → SQLDelight (actual) | 0 | ~30 | 5-7 days | High | Deferred (needs 9A) |
+| 9E | Retrofit → Ktor (actual) | 0 | ~15 | 3-5 days | Medium | Deferred |
 
 ## What Stays in `:app` (androidApp) — NOT Shared
 

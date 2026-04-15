@@ -52,7 +52,7 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.em
 import androidx.compose.ui.unit.sp
-import androidx.hilt.navigation.compose.hiltViewModel
+import org.koin.androidx.compose.koinViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.Headphones
@@ -88,7 +88,7 @@ fun NowPlayingScreen(
     listenAlongFriend: FriendEntity? = null,
     onStopListenAlong: () -> Unit = {},
     modifier: Modifier = Modifier,
-    viewModel: NowPlayingViewModel = hiltViewModel(),
+    viewModel: NowPlayingViewModel = koinViewModel(),
 ) {
     val playbackState by viewModel.playbackState.collectAsStateWithLifecycle()
     val resolverOrder by viewModel.resolverOrder.collectAsStateWithLifecycle()
@@ -296,11 +296,11 @@ fun NowPlayingScreen(
                         .weight(1f)
                         .padding(horizontal = 8.dp)
                         .then(
-                            if (track?.album != null && track.artist.isNotBlank()) {
+                            track?.album?.takeIf { track.artist.isNotBlank() }?.let { album ->
                                 Modifier.hapticClickable {
-                                    onNavigateToAlbum(track.album, track.artist)
+                                    onNavigateToAlbum(album, track.artist)
                                 }
-                            } else Modifier
+                            } ?: Modifier
                         ),
                     cornerRadius = 12.dp,
                     elevation = 8.dp,

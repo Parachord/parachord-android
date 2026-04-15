@@ -29,7 +29,6 @@ import com.parachord.android.playback.PlaybackStateHolder
 import com.parachord.android.resolver.ResolverManager
 import com.parachord.android.resolver.ResolverScoring
 import com.parachord.android.resolver.TrackResolverCache
-import dagger.hilt.android.lifecycle.HiltViewModel
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
@@ -37,8 +36,6 @@ import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
-import javax.inject.Inject
-
 data class CollectionStats(
     val tracks: Int = 0,
     val albums: Int = 0,
@@ -55,8 +52,7 @@ data class DiscoverPreview(
     val label: String = "",
 )
 
-@HiltViewModel
-class HomeViewModel @Inject constructor(
+class HomeViewModel constructor(
     private val repository: LibraryRepository,
     private val friendsRepository: FriendsRepository,
     private val playbackController: PlaybackController,

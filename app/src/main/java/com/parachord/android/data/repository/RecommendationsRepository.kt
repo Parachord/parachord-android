@@ -5,7 +5,6 @@ import android.util.Log
 import com.parachord.android.data.api.ListenBrainzApi
 import com.parachord.android.data.metadata.MetadataService
 import com.parachord.android.data.store.SettingsStore
-import dagger.hilt.android.qualifiers.ApplicationContext
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.async
 import kotlinx.coroutines.coroutineScope
@@ -19,8 +18,6 @@ import okhttp3.OkHttpClient
 import okhttp3.Request
 import org.json.JSONObject
 import java.io.File
-import javax.inject.Inject
-import javax.inject.Singleton
 
 /**
  * Repository for music recommendations, mirroring the desktop app's approach.
@@ -33,9 +30,8 @@ import javax.inject.Singleton
  *
  * Both services are fetched in parallel; either can fail without blocking the other.
  */
-@Singleton
-class RecommendationsRepository @Inject constructor(
-    @ApplicationContext private val context: Context,
+class RecommendationsRepository constructor(
+    private val context: Context,
     private val listenBrainzApi: ListenBrainzApi,
     private val settingsStore: SettingsStore,
     private val metadataService: MetadataService,

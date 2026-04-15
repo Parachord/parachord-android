@@ -3,8 +3,6 @@ package com.parachord.android.playback.handlers
 import android.util.Log
 import com.parachord.android.data.db.entity.TrackEntity
 import kotlinx.coroutines.delay
-import javax.inject.Inject
-import javax.inject.Singleton
 
 /**
  * Handles Apple Music playback via MusicKit JS inside a hidden WebView.
@@ -13,8 +11,7 @@ import javax.inject.Singleton
  * streaming is managed by MusicKit JS, not ExoPlayer. The [MusicKitWebBridge]
  * handles all communication with the WebView.
  */
-@Singleton
-class AppleMusicPlaybackHandler @Inject constructor(
+class AppleMusicPlaybackHandler constructor(
     val musicKitBridge: MusicKitWebBridge,
 ) : SourceHandler, ExternalPlaybackHandler {
 

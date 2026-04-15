@@ -81,7 +81,7 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.em
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.Alignment
-import androidx.hilt.navigation.compose.hiltViewModel
+import org.koin.androidx.compose.koinViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import coil.compose.SubcomposeAsyncImage
 import kotlinx.coroutines.launch
@@ -112,8 +112,8 @@ fun CollectionScreen(
     onNavigateToAlbum: (albumTitle: String, artistName: String) -> Unit = { _, _ -> },
     initialTab: Int = 0,
     modifier: Modifier = Modifier,
-    viewModel: LibraryViewModel = hiltViewModel(),
-    friendsViewModel: FriendsViewModel = hiltViewModel(),
+    viewModel: LibraryViewModel = koinViewModel(),
+    friendsViewModel: FriendsViewModel = koinViewModel(),
 ) {
     val sortedArtists by viewModel.sortedArtists.collectAsStateWithLifecycle()
     val sortedAlbums by viewModel.sortedAlbums.collectAsStateWithLifecycle()

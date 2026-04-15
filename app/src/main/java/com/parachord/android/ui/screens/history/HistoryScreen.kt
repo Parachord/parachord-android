@@ -55,7 +55,7 @@ import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.em
-import androidx.hilt.navigation.compose.hiltViewModel
+import org.koin.androidx.compose.koinViewModel
 import com.parachord.android.data.repository.HistoryAlbum
 import com.parachord.android.data.repository.HistoryArtist
 import com.parachord.android.data.repository.HistoryTrack
@@ -96,7 +96,7 @@ fun HistoryScreen(
     onNavigateToAlbum: (albumTitle: String, artistName: String) -> Unit = { _, _ -> },
     onNavigateToArtist: (String) -> Unit = {},
     modifier: Modifier = Modifier,
-    viewModel: HistoryViewModel = hiltViewModel(),
+    viewModel: HistoryViewModel = koinViewModel(),
 ) {
     val selectedPeriod by viewModel.selectedPeriod.collectAsState()
     val topTracks by viewModel.topTracks.collectAsState()

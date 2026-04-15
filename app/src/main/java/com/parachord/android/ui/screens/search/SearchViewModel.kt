@@ -17,7 +17,6 @@ import com.parachord.android.resolver.ResolvedSource
 import com.parachord.android.resolver.ResolverManager
 import com.parachord.android.resolver.TrackResolverCache
 import com.parachord.android.resolver.trackKey
-import dagger.hilt.android.lifecycle.HiltViewModel
 import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.FlowPreview
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -29,11 +28,8 @@ import kotlinx.coroutines.flow.flatMapLatest
 import kotlinx.coroutines.flow.flowOf
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
-import javax.inject.Inject
-
 @OptIn(FlowPreview::class, ExperimentalCoroutinesApi::class)
-@HiltViewModel
-class SearchViewModel @Inject constructor(
+class SearchViewModel constructor(
     private val repository: LibraryRepository,
     private val metadataService: MetadataService,
     private val playbackController: PlaybackController,

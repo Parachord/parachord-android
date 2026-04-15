@@ -20,8 +20,6 @@ import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.sync.Semaphore
 import kotlinx.coroutines.sync.withPermit
-import javax.inject.Inject
-import javax.inject.Singleton
 
 /**
  * Centralized, session-wide cache for track resolver results.
@@ -35,8 +33,7 @@ import javax.inject.Singleton
  * ViewModels observe [trackResolvers] for UI display and call [resolveInBackground]
  * to submit tracks for resolution.
  */
-@Singleton
-class TrackResolverCache @Inject constructor(
+class TrackResolverCache constructor(
     private val resolverManager: ResolverManager,
     private val libraryRepository: LibraryRepository,
     private val settingsStore: SettingsStore,

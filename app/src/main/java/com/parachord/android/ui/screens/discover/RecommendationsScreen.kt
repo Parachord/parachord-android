@@ -47,7 +47,7 @@ import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.em
-import androidx.hilt.navigation.compose.hiltViewModel
+import org.koin.androidx.compose.koinViewModel
 import com.parachord.android.data.repository.RecommendedArtist
 import com.parachord.android.data.repository.RecommendedTrack
 import com.parachord.android.data.repository.Resource
@@ -70,7 +70,7 @@ fun RecommendationsScreen(
     onBack: () -> Unit,
     onNavigateToArtist: (String) -> Unit = {},
     modifier: Modifier = Modifier,
-    viewModel: RecommendationsViewModel = hiltViewModel(),
+    viewModel: RecommendationsViewModel = koinViewModel(),
 ) {
     val recommendedArtists by viewModel.recommendedArtists.collectAsState()
     val recommendedTracks by viewModel.recommendedTracks.collectAsState()

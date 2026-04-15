@@ -1,47 +1,104 @@
 package com.parachord.android.data.db.dao
 
-import androidx.room.Dao
-import androidx.room.Insert
-import androidx.room.Query
+import app.cash.sqldelight.db.SqlDriver
+import com.parachord.shared.db.Chat_messages
+import com.parachord.shared.db.ParachordDb
 import com.parachord.android.data.db.entity.ChatMessageEntity
+import com.parachord.shared.model.ChatMessageRecord
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.withContext
 
-@Dao
-interface ChatMessageDao {
+/**
+ * Concrete DAO wrapping SQLDelight [ChatMessageQueries].
+ * Drop-in replacement for the former Room @Dao interface.
+ */
+class ChatMessageDao(private val db: ParachordDb, private val driver: SqlDriver) {
+
+    private val queries get() = db.chatMessageQueries
+
+    /* ---- Mapping ---- */
+
+    private fun Chat_messages.toChatMessageRecord() = ChatMessageRecord(
+        id = id,
+        providerId = providerId,
+        role = role,
+        content = content,
+        toolCallsJson = toolCallsJson,
+        toolCallId = toolCallId,
+        toolName = toolName,
+        timestamp = timestamp,
+    )
+
+    /* ---- Suspend one-shot reads ---- */
 
     /** Get all messages for a provider, ordered chronologically. */
-    @Query("SELECT * FROM chat_messages WHERE providerId = :providerId ORDER BY timestamp ASC, id ASC")
-    suspend fun getByProvider(providerId: String): List<ChatMessageEntity>
+    suspend fun getByProvider(providerId: String): List<ChatMessageEntity> = withContext(Dispatchers.IO) {
+        queries.getByProvider(providerId).executeAsList().map { it.toChatMessageRecord() }
+    }
 
-    /** Insert a single message. */
-    @Insert
-    suspend fun insert(entity: ChatMessageEntity): Long
+    /* ---- Writes ---- */
+
+    /** Insert a single message. Returns the row id via lastInsertedRowId. */
+    suspend fun insert(entity: ChatMessageEntity): Long = withContext(Dispatchers.IO) {
+        queries.insert(
+            providerId = entity.providerId,
+            role = entity.role,
+            content = entity.content,
+            toolCallsJson = entity.toolCallsJson,
+            toolCallId = entity.toolCallId,
+            toolName = entity.toolName,
+            timestamp = entity.timestamp,
+        )
+        // SQLDelight INSERT doesn't return the row id directly; use the driver.
+        driver.executeQuery(
+            identifier = null,
+            sql = "SELECT last_insert_rowid()",
+            mapper = { cursor ->
+                cursor.next()
+                app.cash.sqldelight.db.QueryResult.Value(cursor.getLong(0)!!)
+            },
+            parameters = 0,
+        ).value
+    }
 
     /** Insert multiple messages. */
-    @Insert
-    suspend fun insertAll(entities: List<ChatMessageEntity>)
+    suspend fun insertAll(entities: List<ChatMessageEntity>): Unit = withContext(Dispatchers.IO) {
+        queries.transaction {
+            for (entity in entities) {
+                queries.insert(
+                    providerId = entity.providerId,
+                    role = entity.role,
+                    content = entity.content,
+                    toolCallsJson = entity.toolCallsJson,
+                    toolCallId = entity.toolCallId,
+                    toolName = entity.toolName,
+                    timestamp = entity.timestamp,
+                )
+            }
+        }
+    }
 
     /** Clear all messages for a specific provider. */
-    @Query("DELETE FROM chat_messages WHERE providerId = :providerId")
-    suspend fun clearByProvider(providerId: String)
+    suspend fun clearByProvider(providerId: String): Unit = withContext(Dispatchers.IO) {
+        queries.clearByProvider(providerId)
+    }
 
     /** Clear all chat messages (all providers). */
-    @Query("DELETE FROM chat_messages")
-    suspend fun clearAll()
+    suspend fun clearAll(): Unit = withContext(Dispatchers.IO) {
+        queries.clearAll()
+    }
 
     /** Delete messages older than the given timestamp (epoch millis). */
-    @Query("DELETE FROM chat_messages WHERE timestamp < :cutoffMillis")
-    suspend fun deleteOlderThan(cutoffMillis: Long)
+    suspend fun deleteOlderThan(cutoffMillis: Long): Unit = withContext(Dispatchers.IO) {
+        queries.deleteOlderThan(cutoffMillis)
+    }
 
     /** Keep only the most recent [limit] messages per provider (trim old ones). */
-    @Query(
-        """DELETE FROM chat_messages
-           WHERE providerId = :providerId
-           AND id NOT IN (
-               SELECT id FROM chat_messages
-               WHERE providerId = :providerId
-               ORDER BY timestamp DESC, id DESC
-               LIMIT :limit
-           )"""
-    )
-    suspend fun trimToLimit(providerId: String, limit: Int)
+    suspend fun trimToLimit(providerId: String, limit: Int): Unit = withContext(Dispatchers.IO) {
+        queries.trimToLimit(
+            providerId = providerId,
+            providerId_ = providerId,
+            `value` = limit.toLong(),
+        )
+    }
 }

@@ -4,7 +4,6 @@ import android.content.Context
 import android.util.Log
 import com.parachord.android.data.api.MusicBrainzApi
 import com.parachord.android.data.metadata.MusicBrainzProvider
-import dagger.hilt.android.qualifiers.ApplicationContext
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.Flow
@@ -22,8 +21,6 @@ import java.io.StringReader
 import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
-import javax.inject.Inject
-import javax.inject.Singleton
 
 /**
  * Repository for Critical Darlings — top-rated albums from leading music publications.
@@ -36,9 +33,8 @@ import javax.inject.Singleton
  * Desktop caches art and uses a 4-hour staleness check. We keep it simple for now —
  * fetch on each screen open and cache in memory.
  */
-@Singleton
-class CriticalDarlingsRepository @Inject constructor(
-    @ApplicationContext private val context: Context,
+class CriticalDarlingsRepository constructor(
+    private val context: Context,
     private val okHttpClient: OkHttpClient,
     private val musicBrainzApi: MusicBrainzApi,
 ) {

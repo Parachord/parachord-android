@@ -1,7 +1,17 @@
 package com.parachord.android.app
 
 import android.app.Application
-import dagger.hilt.android.HiltAndroidApp
+import com.parachord.android.di.androidModule
+import com.parachord.shared.di.sharedModule
+import org.koin.android.ext.koin.androidContext
+import org.koin.core.context.startKoin
 
-@HiltAndroidApp
-class ParachordApplication : Application()
+class ParachordApplication : Application() {
+    override fun onCreate() {
+        super.onCreate()
+        startKoin {
+            androidContext(this@ParachordApplication)
+            modules(sharedModule, androidModule)
+        }
+    }
+}

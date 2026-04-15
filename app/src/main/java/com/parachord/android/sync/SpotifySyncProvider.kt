@@ -11,11 +11,8 @@ import com.parachord.android.data.db.entity.TrackEntity
 import com.parachord.android.data.store.SettingsStore
 import kotlinx.coroutines.delay
 import java.time.Instant
-import javax.inject.Inject
-import javax.inject.Singleton
 
-@Singleton
-class SpotifySyncProvider @Inject constructor(
+class SpotifySyncProvider constructor(
     private val spotifyApi: SpotifyApi,
     private val settingsStore: SettingsStore,
     private val oAuthManager: OAuthManager,

@@ -59,7 +59,7 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.em
 import androidx.compose.ui.unit.sp
-import androidx.hilt.navigation.compose.hiltViewModel
+import org.koin.androidx.compose.koinViewModel
 import com.parachord.android.data.repository.ChartAlbum
 import com.parachord.android.data.repository.ChartSong
 import com.parachord.android.data.repository.CHARTS_COUNTRIES
@@ -84,7 +84,7 @@ fun PopOfTheTopsScreen(
     onNavigateToAlbum: (albumTitle: String, artistName: String) -> Unit = { _, _ -> },
     onNavigateToArtist: (String) -> Unit = {},
     modifier: Modifier = Modifier,
-    viewModel: PopOfTheTopsViewModel = hiltViewModel(),
+    viewModel: PopOfTheTopsViewModel = koinViewModel(),
 ) {
     val albums by viewModel.albums.collectAsState()
     val songs by viewModel.songs.collectAsState()

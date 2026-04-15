@@ -8,14 +8,11 @@ import android.provider.MediaStore
 import com.parachord.android.data.db.entity.AlbumEntity
 import com.parachord.android.data.db.entity.TrackEntity
 import com.parachord.android.data.repository.LibraryRepository
-import dagger.hilt.android.qualifiers.ApplicationContext
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.withContext
-import javax.inject.Inject
-import javax.inject.Singleton
 
 data class ScanProgress(
     val isScanning: Boolean = false,
@@ -23,9 +20,8 @@ data class ScanProgress(
     val albumsFound: Int = 0,
 )
 
-@Singleton
-class MediaScanner @Inject constructor(
-    @ApplicationContext private val context: Context,
+class MediaScanner constructor(
+    private val context: Context,
     private val repository: LibraryRepository,
 ) {
     private val _progress = MutableStateFlow(ScanProgress())

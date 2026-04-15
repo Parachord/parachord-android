@@ -12,7 +12,6 @@ import com.parachord.android.playback.PlaybackContext
 import com.parachord.android.playback.PlaybackController
 import com.parachord.android.playback.PlaybackStateHolder
 import com.parachord.android.resolver.TrackResolverCache
-import dagger.hilt.android.lifecycle.HiltViewModel
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
@@ -20,10 +19,7 @@ import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
 import java.util.UUID
-import javax.inject.Inject
-
-@HiltViewModel
-class WeeklyPlaylistViewModel @Inject constructor(
+class WeeklyPlaylistViewModel constructor(
     savedStateHandle: SavedStateHandle,
     private val weeklyPlaylistsRepository: WeeklyPlaylistsRepository,
     private val libraryRepository: LibraryRepository,

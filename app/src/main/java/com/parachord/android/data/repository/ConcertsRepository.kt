@@ -6,7 +6,6 @@ import com.parachord.android.BuildConfig
 import com.parachord.android.data.api.SeatGeekApi
 import com.parachord.android.data.api.TicketmasterApi
 import com.parachord.android.data.store.SettingsStore
-import dagger.hilt.android.qualifiers.ApplicationContext
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.async
 import kotlinx.coroutines.awaitAll
@@ -24,8 +23,6 @@ import java.time.LocalDate
 import java.time.LocalDateTime
 import java.time.ZoneId
 import java.time.format.DateTimeFormatter
-import javax.inject.Inject
-import javax.inject.Singleton
 
 /**
  * Unified concert/event data from Ticketmaster + SeatGeek.
@@ -132,9 +129,8 @@ data class ConcertArtist(
     val imageUrl: String? = null,
 )
 
-@Singleton
-class ConcertsRepository @Inject constructor(
-    @ApplicationContext private val context: Context,
+class ConcertsRepository constructor(
+    private val context: Context,
     private val ticketmasterApi: TicketmasterApi,
     private val seatGeekApi: SeatGeekApi,
     private val settingsStore: SettingsStore,

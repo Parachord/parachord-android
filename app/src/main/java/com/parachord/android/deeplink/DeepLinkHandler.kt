@@ -2,57 +2,10 @@ package com.parachord.android.deeplink
 
 import android.net.Uri
 import android.util.Log
-import javax.inject.Inject
-import javax.inject.Singleton
+import com.parachord.shared.deeplink.DeepLinkAction
+import com.parachord.shared.deeplink.ExternalUrlParser
 
 private const val TAG = "DeepLinkHandler"
-
-/**
- * All possible actions from a deep link or external URL.
- */
-sealed class DeepLinkAction {
-    // ── Playback ──
-    data class Play(val artist: String, val title: String) : DeepLinkAction()
-    data class Control(val action: String) : DeepLinkAction()
-    data class QueueAdd(val artist: String, val title: String, val album: String?) : DeepLinkAction()
-    data object QueueClear : DeepLinkAction()
-    data class Shuffle(val enabled: Boolean) : DeepLinkAction()
-    data class Volume(val level: Int) : DeepLinkAction()
-
-    // ── Navigation ──
-    data object NavigateHome : DeepLinkAction()
-    data class NavigateArtist(val name: String, val tab: String? = null) : DeepLinkAction()
-    data class NavigateAlbum(val artist: String, val title: String) : DeepLinkAction()
-    data class NavigateLibrary(val tab: String? = null) : DeepLinkAction()
-    data class NavigateHistory(val tab: String? = null, val period: String? = null) : DeepLinkAction()
-    data class NavigateFriend(val id: String, val tab: String? = null) : DeepLinkAction()
-    data class NavigateRecommendations(val tab: String? = null) : DeepLinkAction()
-    data object NavigateCharts : DeepLinkAction()
-    data object NavigateCriticalDarlings : DeepLinkAction()
-    data object NavigatePlaylists : DeepLinkAction()
-    data class NavigatePlaylist(val id: String) : DeepLinkAction()
-    data class NavigateSettings(val tab: String? = null) : DeepLinkAction()
-    data class NavigateSearch(val query: String?, val source: String? = null) : DeepLinkAction()
-    data class NavigateChat(val prompt: String? = null) : DeepLinkAction()
-
-    // ── Import ──
-    data class ImportPlaylist(val url: String) : DeepLinkAction()
-
-    // ── External URL lookups ──
-    data class SpotifyTrack(val trackId: String) : DeepLinkAction()
-    data class SpotifyAlbum(val albumId: String) : DeepLinkAction()
-    data class SpotifyPlaylist(val playlistId: String) : DeepLinkAction()
-    data class SpotifyArtist(val artistId: String) : DeepLinkAction()
-    data class AppleMusicSong(val songId: String) : DeepLinkAction()
-    data class AppleMusicAlbum(val albumId: String) : DeepLinkAction()
-    data class AppleMusicPlaylist(val playlistId: String) : DeepLinkAction()
-
-    // ── Auth (pass-through) ──
-    data class OAuthCallback(val uri: Uri) : DeepLinkAction()
-
-    // ── Unknown ──
-    data class Unknown(val uri: Uri) : DeepLinkAction()
-}
 
 /**
  * Parses incoming URIs into [DeepLinkAction]s.
@@ -66,8 +19,7 @@ sealed class DeepLinkAction {
  * Desktop equivalent: protocol URL handler in app.js:9648-10122,
  * external URL parsing in resolver-loader.js:217-413
  */
-@Singleton
-class DeepLinkHandler @Inject constructor() {
+class DeepLinkHandler constructor() {
 
     fun parse(uri: Uri): DeepLinkAction {
         Log.d(TAG, "Parsing URI: $uri")
@@ -76,38 +28,38 @@ class DeepLinkHandler @Inject constructor() {
             "parachord" -> parseParachord(uri)
             "spotify" -> parseSpotifyUri(uri)
             "https", "http" -> parseHttpUrl(uri)
-            else -> DeepLinkAction.Unknown(uri)
+            else -> DeepLinkAction.Unknown(uri.toString())
         }
     }
 
     private fun parseParachord(uri: Uri): DeepLinkAction {
-        val host = uri.host ?: return DeepLinkAction.Unknown(uri)
+        val host = uri.host ?: return DeepLinkAction.Unknown(uri.toString())
         val pathSegments = uri.pathSegments
 
         return when (host) {
-            "auth" -> DeepLinkAction.OAuthCallback(uri)
+            "auth" -> DeepLinkAction.OAuthCallback(uri.toString())
 
             "play" -> {
-                val artist = uri.getQueryParameter("artist") ?: return DeepLinkAction.Unknown(uri)
-                val title = uri.getQueryParameter("title") ?: return DeepLinkAction.Unknown(uri)
+                val artist = uri.getQueryParameter("artist") ?: return DeepLinkAction.Unknown(uri.toString())
+                val title = uri.getQueryParameter("title") ?: return DeepLinkAction.Unknown(uri.toString())
                 DeepLinkAction.Play(artist, title)
             }
 
             "control" -> {
-                val action = pathSegments.firstOrNull() ?: return DeepLinkAction.Unknown(uri)
+                val action = pathSegments.firstOrNull() ?: return DeepLinkAction.Unknown(uri.toString())
                 DeepLinkAction.Control(action)
             }
 
             "queue" -> {
                 when (pathSegments.firstOrNull()) {
                     "add" -> {
-                        val artist = uri.getQueryParameter("artist") ?: return DeepLinkAction.Unknown(uri)
-                        val title = uri.getQueryParameter("title") ?: return DeepLinkAction.Unknown(uri)
+                        val artist = uri.getQueryParameter("artist") ?: return DeepLinkAction.Unknown(uri.toString())
+                        val title = uri.getQueryParameter("title") ?: return DeepLinkAction.Unknown(uri.toString())
                         val album = uri.getQueryParameter("album")
                         DeepLinkAction.QueueAdd(artist, title, album)
                     }
                     "clear" -> DeepLinkAction.QueueClear
-                    else -> DeepLinkAction.Unknown(uri)
+                    else -> DeepLinkAction.Unknown(uri.toString())
                 }
             }
 
@@ -115,25 +67,25 @@ class DeepLinkHandler @Inject constructor() {
                 when (pathSegments.firstOrNull()) {
                     "on" -> DeepLinkAction.Shuffle(enabled = true)
                     "off" -> DeepLinkAction.Shuffle(enabled = false)
-                    else -> DeepLinkAction.Unknown(uri)
+                    else -> DeepLinkAction.Unknown(uri.toString())
                 }
             }
 
             "volume" -> {
                 val level = pathSegments.firstOrNull()?.toIntOrNull()
-                    ?: return DeepLinkAction.Unknown(uri)
+                    ?: return DeepLinkAction.Unknown(uri.toString())
                 DeepLinkAction.Volume(level.coerceIn(0, 100))
             }
 
             "home" -> DeepLinkAction.NavigateHome
             "artist" -> {
-                val name = pathSegments.firstOrNull() ?: return DeepLinkAction.Unknown(uri)
+                val name = pathSegments.firstOrNull() ?: return DeepLinkAction.Unknown(uri.toString())
                 val tab = pathSegments.getOrNull(1)
                 DeepLinkAction.NavigateArtist(name, tab)
             }
             "album" -> {
-                val artist = pathSegments.getOrNull(0) ?: return DeepLinkAction.Unknown(uri)
-                val title = pathSegments.getOrNull(1) ?: return DeepLinkAction.Unknown(uri)
+                val artist = pathSegments.getOrNull(0) ?: return DeepLinkAction.Unknown(uri.toString())
+                val title = pathSegments.getOrNull(1) ?: return DeepLinkAction.Unknown(uri.toString())
                 DeepLinkAction.NavigateAlbum(artist, title)
             }
             "library" -> {
@@ -146,7 +98,7 @@ class DeepLinkHandler @Inject constructor() {
                 DeepLinkAction.NavigateHistory(tab, period)
             }
             "friend" -> {
-                val id = pathSegments.firstOrNull() ?: return DeepLinkAction.Unknown(uri)
+                val id = pathSegments.firstOrNull() ?: return DeepLinkAction.Unknown(uri.toString())
                 val tab = pathSegments.getOrNull(1)
                 DeepLinkAction.NavigateFriend(id, tab)
             }
@@ -158,7 +110,7 @@ class DeepLinkHandler @Inject constructor() {
             "critics-picks" -> DeepLinkAction.NavigateCriticalDarlings
             "playlists" -> DeepLinkAction.NavigatePlaylists
             "playlist" -> {
-                val id = pathSegments.firstOrNull() ?: return DeepLinkAction.Unknown(uri)
+                val id = pathSegments.firstOrNull() ?: return DeepLinkAction.Unknown(uri.toString())
                 DeepLinkAction.NavigatePlaylist(id)
             }
             "settings" -> {
@@ -175,11 +127,11 @@ class DeepLinkHandler @Inject constructor() {
                 DeepLinkAction.NavigateChat(prompt)
             }
             "import" -> {
-                val url = uri.getQueryParameter("url") ?: return DeepLinkAction.Unknown(uri)
+                val url = uri.getQueryParameter("url") ?: return DeepLinkAction.Unknown(uri.toString())
                 DeepLinkAction.ImportPlaylist(url)
             }
 
-            else -> DeepLinkAction.Unknown(uri)
+            else -> DeepLinkAction.Unknown(uri.toString())
         }
     }
 
@@ -198,16 +150,16 @@ class DeepLinkHandler @Inject constructor() {
         }
 
         // Standard format: spotify:track:6rqhFgbbKwnb9MLmUQDhG6
-        val ssp = uri.schemeSpecificPart ?: return DeepLinkAction.Unknown(uri)
+        val ssp = uri.schemeSpecificPart ?: return DeepLinkAction.Unknown(uri.toString())
         val parts = ssp.split(":")
-        if (parts.size < 2) return DeepLinkAction.Unknown(uri)
+        if (parts.size < 2) return DeepLinkAction.Unknown(uri.toString())
 
         return when (parts[0]) {
             "track" -> DeepLinkAction.SpotifyTrack(parts[1])
             "album" -> DeepLinkAction.SpotifyAlbum(parts[1])
             "playlist" -> DeepLinkAction.SpotifyPlaylist(parts[1])
             "artist" -> DeepLinkAction.SpotifyArtist(parts[1])
-            else -> DeepLinkAction.Unknown(uri)
+            else -> DeepLinkAction.Unknown(uri.toString())
         }
     }
 
@@ -238,13 +190,13 @@ class DeepLinkHandler @Inject constructor() {
         return when (uri.host) {
             "open.spotify.com" -> parseSpotifyUrl(uri)
             "music.apple.com" -> parseAppleMusicUrl(uri)
-            else -> DeepLinkAction.Unknown(uri)
+            else -> DeepLinkAction.Unknown(uri.toString())
         }
     }
 
     private fun parseSpotifyUrl(uri: Uri): DeepLinkAction {
         val segments = uri.pathSegments
-        if (segments.size < 2) return DeepLinkAction.Unknown(uri)
+        if (segments.size < 2) return DeepLinkAction.Unknown(uri.toString())
 
         // Handle /intl-xx/ prefix (e.g., /intl-en/track/xxx)
         val (type, id) = if (segments[0].startsWith("intl-") && segments.size >= 3) {
@@ -258,17 +210,17 @@ class DeepLinkHandler @Inject constructor() {
             "album" -> DeepLinkAction.SpotifyAlbum(id)
             "playlist" -> DeepLinkAction.SpotifyPlaylist(id)
             "artist" -> DeepLinkAction.SpotifyArtist(id)
-            else -> DeepLinkAction.Unknown(uri)
+            else -> DeepLinkAction.Unknown(uri.toString())
         }
     }
 
     private fun parseAppleMusicUrl(uri: Uri): DeepLinkAction {
         val segments = uri.pathSegments
-        if (segments.size < 3) return DeepLinkAction.Unknown(uri)
+        if (segments.size < 3) return DeepLinkAction.Unknown(uri.toString())
 
         // Skip country code (first segment)
         val type = segments[1]
-        val id = segments.lastOrNull() ?: return DeepLinkAction.Unknown(uri)
+        val id = segments.lastOrNull() ?: return DeepLinkAction.Unknown(uri.toString())
 
         val songId = uri.getQueryParameter("i")
 
@@ -286,7 +238,7 @@ class DeepLinkHandler @Inject constructor() {
                 val artistName = if (segments.size >= 4) segments[2] else id
                 DeepLinkAction.NavigateArtist(artistName.replace("-", " "))
             }
-            else -> DeepLinkAction.Unknown(uri)
+            else -> DeepLinkAction.Unknown(uri.toString())
         }
     }
 }

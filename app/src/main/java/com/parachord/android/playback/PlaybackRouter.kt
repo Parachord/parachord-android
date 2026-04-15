@@ -10,8 +10,6 @@ import com.parachord.android.playback.handlers.AppleMusicPlaybackHandler
 import com.parachord.android.playback.handlers.SoundCloudPlaybackHandler
 import com.parachord.android.playback.handlers.SourceHandler
 import com.parachord.android.playback.handlers.SpotifyPlaybackHandler
-import javax.inject.Inject
-import javax.inject.Singleton
 
 /**
  * Routes tracks to the appropriate playback handler based on resolver type.
@@ -23,8 +21,7 @@ import javax.inject.Singleton
  * 4. Local files → ExoPlayer with content:// URI
  * 5. Direct streams → ExoPlayer with HTTP URL
  */
-@Singleton
-class PlaybackRouter @Inject constructor(
+class PlaybackRouter constructor(
     private val spotifyHandler: SpotifyPlaybackHandler,
     private val appleMusicHandler: AppleMusicPlaybackHandler,
     private val soundCloudHandler: SoundCloudPlaybackHandler,

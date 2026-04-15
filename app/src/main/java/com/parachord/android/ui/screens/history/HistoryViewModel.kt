@@ -20,22 +20,18 @@ import com.parachord.android.resolver.ResolverManager
 import com.parachord.android.resolver.ResolverScoring
 import com.parachord.android.resolver.TrackResolverCache
 import com.parachord.android.resolver.trackKey
-import dagger.hilt.android.lifecycle.HiltViewModel
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
-import javax.inject.Inject
-
 /**
  * ViewModel for the History screen.
  * Manages top tracks, albums, artists, and recent listening history.
  * Supports track resolution and playback via the resolver pipeline.
  */
-@HiltViewModel
-class HistoryViewModel @Inject constructor(
+class HistoryViewModel constructor(
     private val historyRepository: HistoryRepository,
     private val resolverManager: ResolverManager,
     private val resolverScoring: ResolverScoring,

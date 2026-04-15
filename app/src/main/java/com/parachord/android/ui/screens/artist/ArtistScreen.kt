@@ -70,7 +70,7 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.em
-import androidx.hilt.navigation.compose.hiltViewModel
+import org.koin.androidx.compose.koinViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.parachord.android.data.db.entity.TrackEntity
 import androidx.compose.ui.graphics.Color
@@ -104,7 +104,7 @@ fun ArtistScreen(
     onNavigateToArtist: (String) -> Unit = {},
     initialTab: String? = null,
     modifier: Modifier = Modifier,
-    viewModel: ArtistViewModel = hiltViewModel(),
+    viewModel: ArtistViewModel = koinViewModel(),
 ) {
     val artistInfo by viewModel.artistInfo.collectAsStateWithLifecycle()
     val topTracks by viewModel.topTracks.collectAsStateWithLifecycle()

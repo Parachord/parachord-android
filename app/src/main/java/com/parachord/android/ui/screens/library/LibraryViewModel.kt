@@ -16,7 +16,6 @@ import com.parachord.android.playback.PlaybackController
 import com.parachord.android.resolver.ResolverManager
 import com.parachord.android.resolver.ResolverScoring
 import com.parachord.android.resolver.TrackResolverCache
-import dagger.hilt.android.lifecycle.HiltViewModel
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
@@ -24,10 +23,7 @@ import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
-import javax.inject.Inject
-
-@HiltViewModel
-class LibraryViewModel @Inject constructor(
+class LibraryViewModel constructor(
     private val repository: LibraryRepository,
     private val playbackController: PlaybackController,
     private val imageEnrichmentService: ImageEnrichmentService,

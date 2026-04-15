@@ -28,8 +28,6 @@ import com.parachord.android.playback.handlers.SpotifyPlaybackHandler
 import com.parachord.android.playback.PlaybackState
 import com.parachord.android.playback.PlaybackStateHolder
 import com.parachord.android.playback.effectiveTrack
-import dagger.hilt.android.lifecycle.HiltViewModel
-import dagger.hilt.android.qualifiers.ApplicationContext
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
@@ -39,11 +37,8 @@ import kotlinx.coroutines.flow.flatMapLatest
 import kotlinx.coroutines.flow.flowOf
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.stateIn
-import javax.inject.Inject
-
-@HiltViewModel
-class MainViewModel @Inject constructor(
-    @ApplicationContext private val context: Context,
+class MainViewModel constructor(
+    private val context: Context,
     private val playbackStateHolder: PlaybackStateHolder,
     private val playbackController: PlaybackController,
     private val libraryRepository: LibraryRepository,

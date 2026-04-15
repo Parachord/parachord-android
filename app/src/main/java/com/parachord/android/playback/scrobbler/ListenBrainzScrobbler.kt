@@ -9,8 +9,6 @@ import okhttp3.Request
 import okhttp3.RequestBody.Companion.toRequestBody
 import org.json.JSONArray
 import org.json.JSONObject
-import javax.inject.Inject
-import javax.inject.Singleton
 
 /**
  * ListenBrainz scrobbler — sends JSON POST requests to api.listenbrainz.org.
@@ -20,8 +18,7 @@ import javax.inject.Singleton
  *
  * API docs: https://listenbrainz.readthedocs.io/en/latest/users/api/core.html
  */
-@Singleton
-class ListenBrainzScrobbler @Inject constructor(
+class ListenBrainzScrobbler constructor(
     private val settingsStore: SettingsStore,
     private val okHttpClient: OkHttpClient,
 ) : Scrobbler {

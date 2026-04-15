@@ -12,8 +12,6 @@ import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.flow.collectLatest
 import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.launch
-import javax.inject.Inject
-import javax.inject.Singleton
 
 /**
  * Dispatches scrobble events to all enabled scrobbler plugins.
@@ -26,8 +24,7 @@ import javax.inject.Singleton
  * - Send "scrobble" after listening to max(30s, min(duration/2, 240s))
  * - Only scrobble once per track play
  */
-@Singleton
-class ScrobbleManager @Inject constructor(
+class ScrobbleManager constructor(
     private val settingsStore: SettingsStore,
     private val stateHolder: PlaybackStateHolder,
     private val scrobblers: Set<@JvmSuppressWildcards Scrobbler>,

@@ -24,10 +24,7 @@ import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
-import dagger.hilt.android.qualifiers.ApplicationContext
 import retrofit2.HttpException
-import javax.inject.Inject
-import javax.inject.Singleton
 
 /**
  * Handles Spotify playback via the Web API (Spotify Connect).
@@ -40,12 +37,11 @@ import javax.inject.Singleton
  *
  * Requires an active Spotify device and Premium account.
  */
-@Singleton
-class SpotifyPlaybackHandler @Inject constructor(
+class SpotifyPlaybackHandler constructor(
     private val spotifyApi: SpotifyApi,
     private val settingsStore: SettingsStore,
     private val oAuthManager: OAuthManager,
-    @ApplicationContext private val context: Context,
+    private val context: Context,
 ) : SourceHandler, ExternalPlaybackHandler {
 
     companion object {

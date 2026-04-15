@@ -2,23 +2,22 @@ package com.parachord.android.sync
 
 import android.content.Context
 import android.util.Log
-import androidx.hilt.work.HiltWorker
 import androidx.work.CoroutineWorker
 import androidx.work.WorkerParameters
 import com.parachord.android.auth.OAuthManager
 import com.parachord.android.data.store.SettingsStore
-import dagger.assisted.Assisted
-import dagger.assisted.AssistedInject
 import kotlinx.coroutines.flow.first
+import org.koin.core.component.KoinComponent
+import org.koin.core.component.inject
 
-@HiltWorker
-class LibrarySyncWorker @AssistedInject constructor(
-    @Assisted appContext: Context,
-    @Assisted workerParams: WorkerParameters,
-    private val syncEngine: SyncEngine,
-    private val settingsStore: SettingsStore,
-    private val oAuthManager: OAuthManager,
-) : CoroutineWorker(appContext, workerParams) {
+class LibrarySyncWorker(
+    appContext: Context,
+    workerParams: WorkerParameters,
+) : CoroutineWorker(appContext, workerParams), KoinComponent {
+
+    private val syncEngine: SyncEngine by inject()
+    private val settingsStore: SettingsStore by inject()
+    private val oAuthManager: OAuthManager by inject()
 
     companion object {
         private const val TAG = "LibrarySyncWorker"

@@ -6,8 +6,6 @@ import com.parachord.android.data.api.ListenBrainzApi
 import com.parachord.android.data.store.SettingsStore
 import kotlinx.coroutines.async
 import kotlinx.coroutines.coroutineScope
-import javax.inject.Inject
-import javax.inject.Singleton
 
 /**
  * Repository for ListenBrainz Weekly Jams and Weekly Exploration playlists.
@@ -17,8 +15,7 @@ import javax.inject.Singleton
  * containing "weekly jams" or "weekly exploration", sorts by date descending, and takes
  * the most recent 4 of each type. Tracks are loaded lazily per playlist.
  */
-@Singleton
-class WeeklyPlaylistsRepository @Inject constructor(
+class WeeklyPlaylistsRepository constructor(
     private val listenBrainzApi: ListenBrainzApi,
     private val settingsStore: SettingsStore,
 ) {

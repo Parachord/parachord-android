@@ -2,6 +2,7 @@ package com.parachord.android.deeplink
 
 import android.net.Uri
 import android.util.Log
+import com.parachord.shared.deeplink.DeepLinkAction
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.parachord.android.ai.AiChatService
@@ -10,7 +11,6 @@ import com.parachord.android.playback.PlaybackController
 import com.parachord.android.playback.QueueManager
 import com.parachord.android.playlist.PlaylistImportManager
 import com.parachord.android.resolver.ResolverManager
-import dagger.hilt.android.lifecycle.HiltViewModel
 import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharedFlow
@@ -18,7 +18,6 @@ import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asSharedFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.launch
-import javax.inject.Inject
 
 private const val TAG = "DeepLinkViewModel"
 
@@ -54,8 +53,7 @@ data class DeepLinkConfirmation(
     val action: DeepLinkAction,
 )
 
-@HiltViewModel
-class DeepLinkViewModel @Inject constructor(
+class DeepLinkViewModel constructor(
     private val deepLinkHandler: DeepLinkHandler,
     private val externalLinkResolver: ExternalLinkResolver,
     private val playbackController: PlaybackController,
@@ -102,10 +100,11 @@ class DeepLinkViewModel @Inject constructor(
     private fun buildConfirmation(action: DeepLinkAction): DeepLinkConfirmation? {
         return when (action) {
             is DeepLinkAction.NavigateChat -> {
-                if (action.prompt != null) {
+                val prompt = action.prompt
+                if (prompt != null) {
                     DeepLinkConfirmation(
                         title = "Send to Chat",
-                        message = "An external link wants to send this message to chat:\n\n\"${action.prompt.take(500)}\"",
+                        message = "An external link wants to send this message to chat:\n\n\"${prompt.take(500)}\"",
                         action = action,
                     )
                 } else null // No prompt → just navigate, no confirmation needed

@@ -31,7 +31,7 @@ import androidx.media3.session.MediaSessionService
 import com.google.common.collect.ImmutableList
 import com.parachord.android.R
 import com.parachord.android.playback.handlers.SpotifyPlaybackHandler
-import dagger.hilt.android.AndroidEntryPoint
+import org.koin.android.ext.android.inject
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
@@ -41,7 +41,6 @@ import kotlinx.coroutines.flow.collectLatest
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import java.net.URL
-import javax.inject.Inject
 
 /**
  * Foreground service that manages audio playback via ExoPlayer and exposes a
@@ -59,12 +58,11 @@ import javax.inject.Inject
  * We handle this by explicitly calling [startForeground] with a persistent
  * notification, preventing Android from killing the process.
  */
-@AndroidEntryPoint
 class PlaybackService : MediaSessionService() {
 
-    @Inject lateinit var spotifyHandler: SpotifyPlaybackHandler
-    @Inject lateinit var playbackController: PlaybackController
-    @Inject lateinit var stateHolder: PlaybackStateHolder
+    private val spotifyHandler: SpotifyPlaybackHandler by inject()
+    private val playbackController: PlaybackController by inject()
+    private val stateHolder: PlaybackStateHolder by inject()
 
     private var mediaSession: MediaSession? = null
     private var player: ExoPlayer? = null

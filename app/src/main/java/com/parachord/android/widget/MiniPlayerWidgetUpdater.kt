@@ -13,7 +13,6 @@ import android.util.Log
 import android.util.LruCache
 import com.parachord.android.playback.PlaybackController
 import com.parachord.android.playback.PlaybackStateHolder
-import dagger.hilt.android.qualifiers.ApplicationContext
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
@@ -23,27 +22,24 @@ import kotlinx.coroutines.flow.collectLatest
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import java.net.URL
-import javax.inject.Inject
-import javax.inject.Singleton
 
 /**
  * Observes [PlaybackStateHolder] and pushes updates to the mini player widget.
  *
  * Also registers a broadcast receiver for widget button presses and forwards
- * them to [PlaybackController]. This lives as a Hilt singleton so it can
+ * them to [PlaybackController]. This lives as a Koin singleton so it can
  * access injected dependencies that the plain [AppWidgetProvider] cannot.
  */
-@Singleton
-class MiniPlayerWidgetUpdater @Inject constructor(
-    @ApplicationContext private val context: Context,
+class MiniPlayerWidgetUpdater constructor(
+    private val context: Context,
     private val stateHolder: PlaybackStateHolder,
-    private val playbackControllerLazy: dagger.Lazy<PlaybackController>,
+    private val playbackControllerLazy: Lazy<PlaybackController>,
 ) {
     companion object {
         private const val TAG = "WidgetUpdater"
 
         // Cached last-known state so the widget provider can read it
-        // during onUpdate() without needing Hilt.
+        // during onUpdate() without needing DI.
         @Volatile var lastTitle: String? = null
         @Volatile var lastArtist: String? = null
         @Volatile var lastIsPlaying: Boolean = false
@@ -62,9 +58,9 @@ class MiniPlayerWidgetUpdater @Inject constructor(
     private val mediaActionReceiver = object : BroadcastReceiver() {
         override fun onReceive(ctx: Context, intent: Intent) {
             when (intent.getStringExtra("action")) {
-                "play_pause" -> playbackControllerLazy.get().togglePlayPause()
-                "skip_next" -> playbackControllerLazy.get().skipNext()
-                "skip_previous" -> playbackControllerLazy.get().skipPrevious()
+                "play_pause" -> playbackControllerLazy.value.togglePlayPause()
+                "skip_next" -> playbackControllerLazy.value.skipNext()
+                "skip_previous" -> playbackControllerLazy.value.skipPrevious()
             }
         }
     }

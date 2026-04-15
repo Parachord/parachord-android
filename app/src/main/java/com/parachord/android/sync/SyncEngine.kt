@@ -1,19 +1,15 @@
 package com.parachord.android.sync
 
 import android.util.Log
-import androidx.room.withTransaction
-import com.parachord.android.data.db.ParachordDatabase
+import com.parachord.shared.db.ParachordDb
 import com.parachord.android.data.db.dao.*
 import com.parachord.android.data.db.entity.*
 import com.parachord.android.data.store.SettingsStore
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
-import javax.inject.Inject
-import javax.inject.Singleton
 
-@Singleton
-class SyncEngine @Inject constructor(
-    private val db: ParachordDatabase,
+class SyncEngine constructor(
+    private val db: ParachordDb,
     private val trackDao: TrackDao,
     private val albumDao: AlbumDao,
     private val artistDao: ArtistDao,
@@ -189,7 +185,7 @@ class SyncEngine @Inject constructor(
         val now = System.currentTimeMillis()
 
         // Batch all writes in a single transaction so Room emits only one Flow update
-        db.withTransaction {
+        run {
             if (toAdd.isNotEmpty()) {
                 trackDao.insertAll(toAdd.map { it.entity })
                 syncSourceDao.insertAll(toAdd.map { synced ->
@@ -271,7 +267,7 @@ class SyncEngine @Inject constructor(
 
         val now = System.currentTimeMillis()
 
-        db.withTransaction {
+        run {
             if (toAdd.isNotEmpty()) {
                 albumDao.insertAll(toAdd.map { it.entity })
                 syncSourceDao.insertAll(toAdd.map { synced ->
@@ -337,7 +333,7 @@ class SyncEngine @Inject constructor(
 
         val now = System.currentTimeMillis()
 
-        db.withTransaction {
+        run {
             if (toAdd.isNotEmpty()) {
                 artistDao.insertAll(toAdd.map { it.entity })
                 syncSourceDao.insertAll(toAdd.map { synced ->
@@ -645,7 +641,7 @@ class SyncEngine @Inject constructor(
         val spotifySource = sources.find { it.providerId == SpotifySyncProvider.PROVIDER_ID }
         if (spotifySource?.externalId != null) {
             try {
-                spotifyProvider.removeTracks(listOf(spotifySource.externalId))
+                spotifyProvider.removeTracks(listOf(spotifySource.externalId!!))
             } catch (e: Exception) {
                 Log.e(TAG, "Failed to remove track from Spotify", e)
             }
@@ -658,7 +654,7 @@ class SyncEngine @Inject constructor(
         val spotifySource = sources.find { it.providerId == SpotifySyncProvider.PROVIDER_ID }
         if (spotifySource?.externalId != null) {
             try {
-                spotifyProvider.removeAlbums(listOf(spotifySource.externalId))
+                spotifyProvider.removeAlbums(listOf(spotifySource.externalId!!))
             } catch (e: Exception) {
                 Log.e(TAG, "Failed to remove album from Spotify", e)
             }
@@ -671,7 +667,7 @@ class SyncEngine @Inject constructor(
         val spotifySource = sources.find { it.providerId == SpotifySyncProvider.PROVIDER_ID }
         if (spotifySource?.externalId != null) {
             try {
-                spotifyProvider.unfollowArtists(listOf(spotifySource.externalId))
+                spotifyProvider.unfollowArtists(listOf(spotifySource.externalId!!))
             } catch (e: Exception) {
                 Log.e(TAG, "Failed to unfollow artist on Spotify", e)
             }

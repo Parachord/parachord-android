@@ -55,7 +55,7 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.em
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.graphics.Color
-import androidx.hilt.navigation.compose.hiltViewModel
+import org.koin.androidx.compose.koinViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.parachord.android.ui.components.AlbumArtCard
 import com.parachord.android.ui.components.ContextMenuItem
@@ -77,7 +77,7 @@ fun AlbumScreen(
     onBack: () -> Unit,
     onNavigateToArtist: (String) -> Unit = {},
     modifier: Modifier = Modifier,
-    viewModel: AlbumViewModel = hiltViewModel(),
+    viewModel: AlbumViewModel = koinViewModel(),
 ) {
     val albumDetail by viewModel.albumDetail.collectAsStateWithLifecycle()
     val isLoading by viewModel.isLoading.collectAsStateWithLifecycle()

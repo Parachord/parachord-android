@@ -8,8 +8,6 @@ import okhttp3.OkHttpClient
 import okhttp3.Request
 import okhttp3.RequestBody.Companion.toRequestBody
 import org.json.JSONObject
-import javax.inject.Inject
-import javax.inject.Singleton
 
 /**
  * ListenBrainz API client for fetching listening history and stats.
@@ -17,8 +15,7 @@ import javax.inject.Singleton
  *
  * API docs: https://listenbrainz.readthedocs.io/en/latest/users/api/core.html
  */
-@Singleton
-class ListenBrainzApi @Inject constructor(
+class ListenBrainzApi constructor(
     private val okHttpClient: OkHttpClient,
 ) {
     companion object {

@@ -6,16 +6,13 @@ import com.parachord.android.data.api.MbReleaseGroupEntry
 import com.parachord.android.data.api.MusicBrainzApi
 import kotlinx.coroutines.CompletableDeferred
 import java.util.concurrent.ConcurrentHashMap
-import javax.inject.Inject
-import javax.inject.Singleton
 
 /**
  * MusicBrainz metadata provider.
  * Free, no auth needed. Primary source for MBIDs and structured metadata.
  * Highest priority (tried first) because it's always available.
  */
-@Singleton
-class MusicBrainzProvider @Inject constructor(
+class MusicBrainzProvider constructor(
     private val api: MusicBrainzApi,
 ) : MetadataProvider {
 

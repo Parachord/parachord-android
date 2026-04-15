@@ -7,13 +7,9 @@ import com.parachord.android.data.store.SettingsStore
 import com.parachord.android.sync.SpotifySyncProvider
 import com.parachord.android.sync.SyncEngine
 import com.parachord.android.sync.SyncScheduler
-import dagger.hilt.android.lifecycle.HiltViewModel
 import kotlinx.coroutines.flow.*
 import kotlinx.coroutines.launch
-import javax.inject.Inject
-
-@HiltViewModel
-class SyncViewModel @Inject constructor(
+class SyncViewModel constructor(
     private val syncEngine: SyncEngine,
     private val syncScheduler: SyncScheduler,
     private val settingsStore: SettingsStore,

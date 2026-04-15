@@ -1,0 +1,327 @@
+package com.parachord.android.di
+
+import android.content.Context
+import androidx.datastore.core.DataStore
+import androidx.datastore.preferences.core.Preferences
+import androidx.datastore.preferences.preferencesDataStore
+import com.parachord.android.ai.AiChatService
+import com.parachord.android.ai.AiRecommendationService
+import com.parachord.android.ai.ChatCardEnricher
+import com.parachord.android.ai.ChatContextProvider
+import com.parachord.android.ai.providers.ChatGptProvider
+import com.parachord.android.ai.providers.ClaudeProvider
+import com.parachord.android.ai.providers.GeminiProvider
+import com.parachord.android.ai.tools.DjToolExecutor
+import com.parachord.android.auth.OAuthManager
+import com.parachord.android.bridge.JsBridge
+import com.parachord.shared.plugin.PluginFileAccess
+import com.parachord.android.data.api.GeoLocationService
+import com.parachord.android.data.api.LastFmApi
+import com.parachord.android.data.api.ListenBrainzApi
+import com.parachord.android.data.api.MusicBrainzApi
+import com.parachord.android.data.api.SpotifyApi
+import com.parachord.android.data.api.AppleMusicApi
+import com.parachord.android.data.api.TicketmasterApi
+import com.parachord.android.data.api.SeatGeekApi
+import com.parachord.android.data.db.dao.*
+import com.parachord.shared.db.DriverFactory
+import com.parachord.android.data.metadata.DiscogsProvider
+import com.parachord.android.data.metadata.ImageEnrichmentService
+import com.parachord.android.data.metadata.LastFmProvider
+import com.parachord.android.data.metadata.MbidEnrichmentService
+import com.parachord.android.data.metadata.MetadataService
+import com.parachord.android.data.metadata.MusicBrainzProvider
+import com.parachord.android.data.metadata.SpotifyProvider
+import com.parachord.android.data.metadata.WikipediaProvider
+import com.parachord.android.data.network.NetworkMonitor
+import com.parachord.android.data.repository.*
+import com.parachord.android.data.scanner.MediaScanner
+import com.parachord.android.data.store.SettingsStore
+import com.parachord.android.deeplink.DeepLinkHandler
+import com.parachord.android.deeplink.DeepLinkViewModel
+import com.parachord.android.deeplink.ExternalLinkResolver
+import com.parachord.android.playback.*
+import com.parachord.android.playback.handlers.*
+import com.parachord.android.playback.scrobbler.*
+import com.parachord.android.playlist.PlaylistImportManager
+import com.parachord.android.plugin.PluginManager
+import com.parachord.android.plugin.PluginSyncService
+import com.parachord.android.resolver.ResolverManager
+import com.parachord.android.resolver.ResolverScoring
+import com.parachord.android.resolver.TrackResolverCache
+import com.parachord.android.sync.SpotifySyncProvider
+import com.parachord.android.sync.SyncEngine
+import com.parachord.android.sync.SyncScheduler
+import com.parachord.android.ui.MainViewModel
+import com.parachord.android.ui.screens.album.AlbumViewModel
+import com.parachord.android.ui.screens.artist.ArtistViewModel
+import com.parachord.android.ui.screens.chat.ChatViewModel
+import com.parachord.android.ui.screens.discover.*
+import com.parachord.android.ui.screens.friends.FriendDetailViewModel
+import com.parachord.android.ui.screens.friends.FriendsViewModel
+import com.parachord.android.ui.screens.history.HistoryViewModel
+import com.parachord.android.ui.screens.home.HomeViewModel
+import com.parachord.android.ui.screens.library.LibraryViewModel
+import com.parachord.android.ui.screens.nowplaying.NowPlayingViewModel
+import com.parachord.android.ui.screens.playlists.*
+import com.parachord.android.ui.screens.search.SearchViewModel
+import com.parachord.android.ui.screens.settings.SettingsViewModel
+import com.parachord.android.ui.screens.sync.SyncViewModel
+import com.parachord.android.widget.MiniPlayerWidgetUpdater
+import kotlinx.serialization.json.Json
+import okhttp3.OkHttpClient
+import okhttp3.logging.HttpLoggingInterceptor
+import org.koin.android.ext.koin.androidContext
+import org.koin.core.module.dsl.singleOf
+import org.koin.core.module.dsl.viewModelOf
+import org.koin.dsl.module
+import retrofit2.Retrofit
+import retrofit2.converter.kotlinx.serialization.asConverterFactory
+import okhttp3.MediaType.Companion.toMediaType
+import java.util.concurrent.TimeUnit
+
+private val Context.dataStore: DataStore<Preferences> by preferencesDataStore(name = "settings")
+
+/**
+ * Android Koin module — provides all Android-specific dependencies.
+ * Replaces the 4 Hilt modules: ApiModule, AppModule, DatabaseModule, ScrobblerModule.
+ */
+val androidModule = module {
+
+    // ── Core Infrastructure ──────────────────────────────────────────
+
+    single {
+        com.parachord.shared.config.AppConfig(
+            lastFmApiKey = com.parachord.android.BuildConfig.LASTFM_API_KEY,
+            lastFmSharedSecret = com.parachord.android.BuildConfig.LASTFM_SHARED_SECRET,
+            spotifyClientId = com.parachord.android.BuildConfig.SPOTIFY_CLIENT_ID,
+            soundCloudClientId = com.parachord.android.BuildConfig.SOUNDCLOUD_CLIENT_ID,
+            soundCloudClientSecret = com.parachord.android.BuildConfig.SOUNDCLOUD_CLIENT_SECRET,
+            appleMusicDeveloperToken = com.parachord.android.BuildConfig.APPLE_MUSIC_DEVELOPER_TOKEN,
+            ticketmasterApiKey = com.parachord.android.BuildConfig.TICKETMASTER_API_KEY,
+            seatGeekClientId = com.parachord.android.BuildConfig.SEATGEEK_CLIENT_ID,
+        )
+    }
+
+    single {
+        Json {
+            ignoreUnknownKeys = true
+            isLenient = true
+            encodeDefaults = true
+            coerceInputValues = true
+        }
+    }
+
+    single {
+        OkHttpClient.Builder()
+            .addInterceptor(HttpLoggingInterceptor().apply {
+                level = HttpLoggingInterceptor.Level.BASIC
+            })
+            .connectTimeout(15, TimeUnit.SECONDS)
+            .readTimeout(30, TimeUnit.SECONDS)
+            .writeTimeout(15, TimeUnit.SECONDS)
+            .build()
+    }
+
+    single<DataStore<Preferences>> { androidContext().dataStore }
+
+    single { DriverFactory(androidContext()).createDriver() }
+    single { com.parachord.shared.db.ParachordDb(get()) }
+
+    // ── Retrofit API Clients (kept for backward compatibility during migration) ──
+
+    single<SpotifyApi> {
+        Retrofit.Builder()
+            .baseUrl("https://api.spotify.com/")
+            .client(get())
+            .addConverterFactory(get<Json>().asConverterFactory("application/json".toMediaType()))
+            .build()
+            .create(SpotifyApi::class.java)
+    }
+
+    single<LastFmApi> {
+        Retrofit.Builder()
+            .baseUrl("https://ws.audioscrobbler.com/2.0/")
+            .client(get())
+            .addConverterFactory(get<Json>().asConverterFactory("application/json".toMediaType()))
+            .build()
+            .create(LastFmApi::class.java)
+    }
+
+    single<MusicBrainzApi> {
+        Retrofit.Builder()
+            .baseUrl("https://musicbrainz.org/ws/2/")
+            .client(get())
+            .addConverterFactory(get<Json>().asConverterFactory("application/json".toMediaType()))
+            .build()
+            .create(MusicBrainzApi::class.java)
+    }
+
+    single<AppleMusicApi> {
+        Retrofit.Builder()
+            .baseUrl("https://itunes.apple.com/")
+            .client(get())
+            .addConverterFactory(get<Json>().asConverterFactory("application/json".toMediaType()))
+            .build()
+            .create(AppleMusicApi::class.java)
+    }
+
+    single<TicketmasterApi> {
+        Retrofit.Builder()
+            .baseUrl("https://app.ticketmaster.com/")
+            .client(get())
+            .addConverterFactory(get<Json>().asConverterFactory("application/json".toMediaType()))
+            .build()
+            .create(TicketmasterApi::class.java)
+    }
+
+    single<SeatGeekApi> {
+        Retrofit.Builder()
+            .baseUrl("https://api.seatgeek.com/2/")
+            .client(get())
+            .addConverterFactory(get<Json>().asConverterFactory("application/json".toMediaType()))
+            .build()
+            .create(SeatGeekApi::class.java)
+    }
+
+    // ── DAOs ─────────────────────────────────────────────────────────
+
+    single { TrackDao(get(), get()) }
+    single { AlbumDao(get()) }
+    single { ArtistDao(get()) }
+    single { PlaylistDao(get()) }
+    single { PlaylistTrackDao(get()) }
+    single { FriendDao(get()) }
+    single { ChatMessageDao(get(), get()) }
+    single { SearchHistoryDao(get()) }
+    single { SyncSourceDao(get()) }
+
+    // ── Settings & Auth ──────────────────────────────────────────────
+
+    singleOf(::SettingsStore)
+    singleOf(::OAuthManager)
+    singleOf(::NetworkMonitor)
+
+    // ── Playback ─────────────────────────────────────────────────────
+
+    singleOf(::PlaybackStateHolder)
+    singleOf(::QueueManager)
+    singleOf(::QueuePersistence)
+    singleOf(::PlaybackRouter)
+    singleOf(::PlaybackController)
+    singleOf(::ScrobbleManager)
+    singleOf(::SpotifyPlaybackHandler)
+    singleOf(::AppleMusicPlaybackHandler)
+    singleOf(::SoundCloudPlaybackHandler)
+    singleOf(::MusicKitWebBridge)
+
+    // ── Scrobblers (as set) ──────────────────────────────────────────
+
+    singleOf(::LastFmScrobbler)
+    singleOf(::ListenBrainzScrobbler)
+    singleOf(::LibreFmScrobbler)
+    single<Set<Scrobbler>> {
+        setOf(get<LastFmScrobbler>(), get<ListenBrainzScrobbler>(), get<LibreFmScrobbler>())
+    }
+
+    // ── Metadata ─────────────────────────────────────────────────────
+
+    singleOf(::MetadataService)
+    singleOf(::MusicBrainzProvider)
+    singleOf(::LastFmProvider)
+    singleOf(::SpotifyProvider)
+    singleOf(::WikipediaProvider)
+    singleOf(::DiscogsProvider)
+    singleOf(::ImageEnrichmentService)
+    singleOf(::MbidEnrichmentService)
+
+    // ── Resolvers ────────────────────────────────────────────────────
+
+    singleOf(::ResolverManager)
+    singleOf(::ResolverScoring)
+    singleOf(::TrackResolverCache)
+
+    // ── Repositories ─────────────────────────────────────────────────
+
+    singleOf(::LibraryRepository)
+    singleOf(::ChartsRepository)
+    singleOf(::HistoryRepository)
+    singleOf(::FriendsRepository)
+    singleOf(::RecommendationsRepository)
+    singleOf(::FreshDropsRepository)
+    singleOf(::CriticalDarlingsRepository)
+    singleOf(::WeeklyPlaylistsRepository)
+    singleOf(::ConcertsRepository)
+
+    // ── AI ────────────────────────────────────────────────────────────
+
+    singleOf(::AiChatService)
+    singleOf(::AiRecommendationService)
+    singleOf(::ChatContextProvider)
+    singleOf(::ChatCardEnricher)
+    singleOf(::ChatGptProvider)
+    singleOf(::ClaudeProvider)
+    singleOf(::GeminiProvider)
+    singleOf(::DjToolExecutor)
+
+    // ── Plugins ──────────────────────────────────────────────────────
+
+    singleOf(::JsBridge)
+    single { PluginFileAccess(androidContext()) }
+    single { com.parachord.shared.plugin.PluginManager(get<PluginFileAccess>(), get<JsBridge>()) }
+    single {
+        val settingsStore: com.parachord.android.data.store.SettingsStore = get()
+        com.parachord.shared.plugin.PluginSyncService(
+            httpClient = get(),
+            pluginManager = get(),
+            fileAccess = get(),
+            getLastSyncTimestamp = { settingsStore.getLastPluginSyncTimestamp() },
+            setLastSyncTimestamp = { settingsStore.setLastPluginSyncTimestamp(it) },
+        )
+    }
+
+    // ── Deep Links ───────────────────────────────────────────────────
+
+    singleOf(::DeepLinkHandler)
+    singleOf(::ExternalLinkResolver)
+
+    // ── Sync ─────────────────────────────────────────────────────────
+
+    singleOf(::SyncEngine)
+    singleOf(::SpotifySyncProvider)
+    singleOf(::SyncScheduler)
+    singleOf(::MediaScanner)
+    singleOf(::PlaylistImportManager)
+    singleOf(::GeoLocationService)
+    singleOf(::ListenBrainzApi)
+
+    // ── Widget ───────────────────────────────────────────────────────
+
+    single { MiniPlayerWidgetUpdater(get(), get(), lazy { get<PlaybackController>() }) }
+
+    // ── ViewModels ───────────────────────────────────────────────────
+
+    viewModelOf(::MainViewModel)
+    viewModelOf(::SettingsViewModel)
+    viewModelOf(::HomeViewModel)
+    viewModelOf(::LibraryViewModel)
+    viewModelOf(::SearchViewModel)
+    viewModelOf(::NowPlayingViewModel)
+    viewModelOf(::ChatViewModel)
+    viewModelOf(::HistoryViewModel)
+    viewModelOf(::FriendsViewModel)
+    viewModelOf(::FriendDetailViewModel)
+    viewModelOf(::ArtistViewModel)
+    viewModelOf(::AlbumViewModel)
+    viewModelOf(::PlaylistsViewModel)
+    viewModelOf(::PlaylistDetailViewModel)
+    viewModelOf(::EditPlaylistViewModel)
+    viewModelOf(::WeeklyPlaylistViewModel)
+    viewModelOf(::RecommendationsViewModel)
+    viewModelOf(::FreshDropsViewModel)
+    viewModelOf(::CriticalDarlingsViewModel)
+    viewModelOf(::PopOfTheTopsViewModel)
+    viewModelOf(::ConcertsViewModel)
+    viewModelOf(::SyncViewModel)
+    viewModelOf(::DeepLinkViewModel)
+}

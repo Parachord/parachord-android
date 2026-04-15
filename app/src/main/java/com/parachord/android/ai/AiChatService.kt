@@ -12,8 +12,6 @@ import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.withContext
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonElement
-import javax.inject.Inject
-import javax.inject.Singleton
 
 /**
  * Orchestrates AI chat conversations with tool-call looping.
@@ -21,8 +19,7 @@ import javax.inject.Singleton
  *
  * Messages are persisted to Room and retained for 30 days.
  */
-@Singleton
-class AiChatService @Inject constructor(
+class AiChatService constructor(
     private val toolExecutor: DjToolExecutor,
     private val contextProvider: ChatContextProvider,
     private val chatMessageDao: ChatMessageDao,
@@ -170,7 +167,7 @@ class AiChatService @Inject constructor(
             persistMessage(provider.id, assistantMsg)
 
             // Execute each tool call and add results to history
-            for (toolCall in currentResponse.toolCalls!!) {
+            for (toolCall in currentResponse.toolCalls.orEmpty()) {
                 onProgress(toolProgressText(toolCall.name))
 
                 val result = toolExecutor.execute(toolCall.name, toolCall.arguments)

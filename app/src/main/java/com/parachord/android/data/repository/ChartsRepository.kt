@@ -12,11 +12,8 @@ import kotlinx.coroutines.withContext
 import okhttp3.OkHttpClient
 import okhttp3.Request
 import org.json.JSONObject
-import javax.inject.Inject
-import javax.inject.Singleton
 
-@Singleton
-class ChartsRepository @Inject constructor(
+class ChartsRepository constructor(
     private val okHttpClient: OkHttpClient,
     private val lastFmApi: LastFmApi,
 ) {

@@ -65,7 +65,7 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.em
 import androidx.compose.ui.unit.sp
-import androidx.hilt.navigation.compose.hiltViewModel
+import org.koin.androidx.compose.koinViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import coil.compose.AsyncImage
 import com.parachord.android.data.repository.ConcertEvent
@@ -91,7 +91,7 @@ fun ConcertsScreen(
     onBack: () -> Unit,
     onNavigateToArtist: (String) -> Unit = {},
     modifier: Modifier = Modifier,
-    viewModel: ConcertsViewModel = hiltViewModel(),
+    viewModel: ConcertsViewModel = koinViewModel(),
 ) {
     val events by viewModel.events.collectAsStateWithLifecycle()
     val isRefreshing by viewModel.isRefreshing.collectAsStateWithLifecycle()

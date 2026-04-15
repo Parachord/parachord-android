@@ -30,11 +30,8 @@ import okhttp3.OkHttpClient
 import okhttp3.Request
 import okhttp3.RequestBody.Companion.toRequestBody
 import java.util.concurrent.TimeUnit
-import javax.inject.Inject
-import javax.inject.Singleton
 
-@Singleton
-class ChatGptProvider @Inject constructor(
+class ChatGptProvider constructor(
     private val client: OkHttpClient,
     private val json: Json,
 ) : AiChatProvider {
@@ -146,10 +143,11 @@ class ChatGptProvider @Inject constructor(
             }
             ChatRole.ASSISTANT -> {
                 put("role", "assistant")
-                if (msg.toolCalls != null && msg.toolCalls.isNotEmpty()) {
+                val calls = msg.toolCalls
+                if (calls != null && calls.isNotEmpty()) {
                     put("content", JsonNull)
                     put("tool_calls", buildJsonArray {
-                        for (tc in msg.toolCalls) {
+                        for (tc in calls) {
                             add(buildJsonObject {
                                 put("id", tc.id)
                                 put("type", "function")
@@ -180,7 +178,7 @@ class ChatGptProvider @Inject constructor(
         put("function", buildJsonObject {
             put("name", tool.name)
             put("description", tool.description)
-            put("parameters", tool.parameters)
+            tool.parameters?.let { put("parameters", it) }
         })
     }
 }

@@ -5,7 +5,6 @@ import android.util.Log
 import com.parachord.android.data.api.ListenBrainzApi
 import com.parachord.android.data.api.MbidMapperResult
 import com.parachord.android.data.db.dao.TrackDao
-import dagger.hilt.android.qualifiers.ApplicationContext
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
@@ -15,8 +14,6 @@ import kotlinx.serialization.encodeToString
 import kotlinx.serialization.json.Json
 import java.io.File
 import java.util.concurrent.ConcurrentHashMap
-import javax.inject.Inject
-import javax.inject.Singleton
 
 /**
  * Background MBID enrichment service using the ListenBrainz MBID Mapper.
@@ -33,9 +30,8 @@ import javax.inject.Singleton
  * - PlaybackController (enrich current track on playback)
  * - LibraryRepository (enrich on import)
  */
-@Singleton
-class MbidEnrichmentService @Inject constructor(
-    @ApplicationContext private val context: Context,
+class MbidEnrichmentService constructor(
+    private val context: Context,
     private val listenBrainzApi: ListenBrainzApi,
     private val trackDao: TrackDao,
 ) {

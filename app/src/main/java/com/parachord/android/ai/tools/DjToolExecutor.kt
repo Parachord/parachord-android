@@ -11,16 +11,13 @@ import com.parachord.android.playback.PlaybackStateHolder
 import com.parachord.android.resolver.ResolverManager
 import com.parachord.android.resolver.ResolverScoring
 import java.util.UUID
-import javax.inject.Inject
-import javax.inject.Singleton
 
 /**
  * Executes DJ tool calls from the AI chat.
  * Maps tool names + arguments to PlaybackController / MetadataService / etc. calls.
  * Mirrors the desktop app's dj-tools.js executor logic.
  */
-@Singleton
-class DjToolExecutor @Inject constructor(
+class DjToolExecutor constructor(
     private val playbackController: PlaybackController,
     private val stateHolder: PlaybackStateHolder,
     private val metadataService: MetadataService,

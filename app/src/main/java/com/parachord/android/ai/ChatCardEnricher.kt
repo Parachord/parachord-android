@@ -3,16 +3,13 @@ package com.parachord.android.ai
 import com.parachord.android.data.metadata.MetadataService
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
-import javax.inject.Inject
-import javax.inject.Singleton
 
 /**
  * Enriches chat cards with artwork URLs by looking up metadata from providers.
  * Results are cached in-memory to avoid redundant API calls for cards that
  * appear multiple times or when scrolling.
  */
-@Singleton
-class ChatCardEnricher @Inject constructor(
+class ChatCardEnricher constructor(
     private val metadataService: MetadataService,
 ) {
     /** Cache of "type:key" → artworkUrl. Null value means "looked up, nothing found." */

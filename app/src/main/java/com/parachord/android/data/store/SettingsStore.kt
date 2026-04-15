@@ -11,15 +11,12 @@ import com.parachord.android.BuildConfig
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.map
-import javax.inject.Inject
-import javax.inject.Singleton
 
 /**
  * Preferences store replacing electron-store from the desktop app.
  * Uses Jetpack DataStore for type-safe, async key-value storage.
  */
-@Singleton
-class SettingsStore @Inject constructor(
+class SettingsStore constructor(
     private val dataStore: DataStore<Preferences>,
 ) {
     companion object {

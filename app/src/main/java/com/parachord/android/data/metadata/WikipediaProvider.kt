@@ -7,8 +7,6 @@ import kotlinx.coroutines.withContext
 import okhttp3.OkHttpClient
 import okhttp3.Request
 import org.json.JSONObject
-import javax.inject.Inject
-import javax.inject.Singleton
 
 /**
  * Wikipedia metadata provider.
@@ -22,8 +20,7 @@ import javax.inject.Singleton
  * Wikipedia bios are encyclopedia-style and longer than Last.fm's.
  * All APIs are public, no auth required.
  */
-@Singleton
-class WikipediaProvider @Inject constructor(
+class WikipediaProvider constructor(
     private val musicBrainzApi: MusicBrainzApi,
     private val musicBrainzProvider: MusicBrainzProvider,
     private val okHttpClient: OkHttpClient,

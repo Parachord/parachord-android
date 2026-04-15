@@ -56,7 +56,7 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.em
 import androidx.compose.ui.unit.sp
-import androidx.hilt.navigation.compose.hiltViewModel
+import org.koin.androidx.compose.koinViewModel
 import com.parachord.android.data.repository.FreshDrop
 import com.parachord.android.data.repository.Resource
 import com.parachord.android.ui.components.AlbumArtCard
@@ -79,7 +79,7 @@ fun FreshDropsScreen(
     onNavigateToAlbum: (albumTitle: String, artistName: String) -> Unit = { _, _ -> },
     onNavigateToArtist: (String) -> Unit = {},
     modifier: Modifier = Modifier,
-    viewModel: FreshDropsViewModel = hiltViewModel(),
+    viewModel: FreshDropsViewModel = koinViewModel(),
 ) {
     val releasesResource by viewModel.releases.collectAsState()
     val searchQuery by viewModel.searchQuery.collectAsState()

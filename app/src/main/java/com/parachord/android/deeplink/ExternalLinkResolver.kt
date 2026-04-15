@@ -6,8 +6,6 @@ import com.parachord.android.data.api.SpotifyApi
 import com.parachord.android.data.api.bestImageUrl
 import com.parachord.android.data.db.entity.TrackEntity
 import com.parachord.android.data.store.SettingsStore
-import javax.inject.Inject
-import javax.inject.Singleton
 
 private const val TAG = "ExternalLinkResolver"
 
@@ -18,8 +16,7 @@ private const val TAG = "ExternalLinkResolver"
  * - Spotify: spotify.axe -> lookupUrl() calls /v1/tracks/{id}, /v1/albums/{id}
  * - Apple Music: apple-music.axe -> lookupUrl() calls iTunes /lookup?id={id}
  */
-@Singleton
-class ExternalLinkResolver @Inject constructor(
+class ExternalLinkResolver constructor(
     private val spotifyApi: SpotifyApi,
     private val appleMusicApi: AppleMusicApi,
     private val settingsStore: SettingsStore,

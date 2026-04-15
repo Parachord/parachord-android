@@ -24,8 +24,6 @@ import okhttp3.Request
 import okhttp3.RequestBody.Companion.toRequestBody
 import java.io.IOException
 import java.util.concurrent.TimeUnit
-import javax.inject.Inject
-import javax.inject.Singleton
 
 private const val DEFAULT_MODEL = "claude-sonnet-4-6-20250320"
 private const val DEFAULT_ENDPOINT = "https://api.anthropic.com/v1/messages"
@@ -38,8 +36,7 @@ private const val MAX_TOKENS = 4096
  * tool calls use `tool_use` content blocks, and tool results are user messages
  * with `tool_result` content blocks.
  */
-@Singleton
-class ClaudeProvider @Inject constructor(
+class ClaudeProvider constructor(
     private val httpClient: OkHttpClient,
     private val json: Json,
 ) : AiChatProvider {
@@ -109,7 +106,8 @@ class ClaudeProvider @Inject constructor(
                     })
                 }
                 ChatRole.ASSISTANT -> {
-                    if (msg.toolCalls.isNullOrEmpty()) {
+                    val toolCalls = msg.toolCalls
+                    if (toolCalls.isNullOrEmpty()) {
                         // Plain text response
                         apiMessages.add(buildJsonObject {
                             put("role", "assistant")
@@ -124,7 +122,7 @@ class ClaudeProvider @Inject constructor(
                                     put("text", msg.content)
                                 })
                             }
-                            for (tc in msg.toolCalls) {
+                            for (tc in toolCalls) {
                                 add(buildJsonObject {
                                     put("type", "tool_use")
                                     put("id", tc.id)
@@ -168,7 +166,7 @@ class ClaudeProvider @Inject constructor(
                         add(buildJsonObject {
                             put("name", tool.name)
                             put("description", tool.description)
-                            put("input_schema", tool.parameters)
+                            tool.parameters?.let { put("input_schema", it) }
                         })
                     }
                 })

@@ -7,8 +7,7 @@ import android.webkit.WebView
 import android.webkit.WebViewClient
 import androidx.datastore.core.DataStore
 import androidx.datastore.preferences.core.Preferences
-import com.parachord.android.plugin.JsRuntime
-import dagger.hilt.android.qualifiers.ApplicationContext
+import com.parachord.shared.plugin.JsRuntime
 import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -18,8 +17,6 @@ import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.withContext
 import okhttp3.OkHttpClient
-import javax.inject.Inject
-import javax.inject.Singleton
 
 private const val TAG = "JsBridge"
 
@@ -33,9 +30,8 @@ private const val TAG = "JsBridge"
  * the interface, not the Android-specific WebView — enabling future KMP
  * migration where iOS would use JavaScriptCore instead.
  */
-@Singleton
-class JsBridge @Inject constructor(
-    @ApplicationContext private val context: Context,
+class JsBridge constructor(
+    private val context: Context,
     private val httpClient: OkHttpClient,
     private val dataStore: DataStore<Preferences>,
 ) : JsRuntime {

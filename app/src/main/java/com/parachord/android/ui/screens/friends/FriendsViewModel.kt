@@ -5,16 +5,12 @@ import androidx.lifecycle.viewModelScope
 import com.parachord.android.data.db.entity.FriendEntity
 import com.parachord.android.data.repository.FriendsRepository
 import com.parachord.android.data.repository.Resource
-import dagger.hilt.android.lifecycle.HiltViewModel
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
-import javax.inject.Inject
-
-@HiltViewModel
-class FriendsViewModel @Inject constructor(
+class FriendsViewModel constructor(
     private val friendsRepository: FriendsRepository,
 ) : ViewModel() {
 

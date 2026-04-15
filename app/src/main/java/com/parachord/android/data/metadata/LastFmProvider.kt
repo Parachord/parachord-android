@@ -5,16 +5,13 @@ import com.parachord.android.data.api.LastFmApi
 import com.parachord.android.data.api.bestImageUrl
 import kotlinx.coroutines.async
 import kotlinx.coroutines.coroutineScope
-import javax.inject.Inject
-import javax.inject.Singleton
 
 /**
  * Last.fm metadata provider.
  * Rich artist bios, images, similar artists, and tags.
  * Requires a Last.fm API key (set in BuildConfig or constants).
  */
-@Singleton
-class LastFmProvider @Inject constructor(
+class LastFmProvider constructor(
     private val api: LastFmApi,
 ) : MetadataProvider {
 

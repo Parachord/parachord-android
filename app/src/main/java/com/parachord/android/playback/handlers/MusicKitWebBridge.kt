@@ -18,7 +18,6 @@ import android.webkit.WebView
 import android.webkit.WebViewClient
 import androidx.webkit.WebViewAssetLoader
 import com.parachord.android.data.store.SettingsStore
-import dagger.hilt.android.qualifiers.ApplicationContext
 import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.MutableSharedFlow
@@ -35,8 +34,6 @@ import android.util.Base64
 import android.view.WindowManager
 import java.util.concurrent.ConcurrentHashMap
 import java.util.concurrent.atomic.AtomicInteger
-import javax.inject.Inject
-import javax.inject.Singleton
 
 /**
  * Bridge between Kotlin and Apple's MusicKit JS running inside a hidden WebView.
@@ -49,9 +46,8 @@ import javax.inject.Singleton
  * - Kotlin -> JS: via [evaluate] wrapping calls in async IIFEs
  * - JS -> Kotlin: via [MusicKitJsInterface] @JavascriptInterface callbacks
  */
-@Singleton
-class MusicKitWebBridge @Inject constructor(
-    @ApplicationContext private val context: Context,
+class MusicKitWebBridge constructor(
+    private val context: Context,
     private val settingsStore: SettingsStore,
     private val json: Json,
 ) {

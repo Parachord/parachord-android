@@ -11,7 +11,6 @@ import com.parachord.android.data.db.dao.ArtistDao
 import com.parachord.android.data.db.dao.PlaylistDao
 import com.parachord.android.data.db.dao.PlaylistTrackDao
 import com.parachord.android.data.db.dao.TrackDao
-import dagger.hilt.android.qualifiers.ApplicationContext
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Deferred
 import kotlinx.coroutines.Dispatchers
@@ -20,8 +19,6 @@ import kotlinx.coroutines.async
 import java.io.File
 import java.io.FileOutputStream
 import java.util.concurrent.ConcurrentHashMap
-import javax.inject.Inject
-import javax.inject.Singleton
 
 /**
  * Lazily enriches artist images and album artwork for collection items
@@ -34,9 +31,8 @@ import javax.inject.Singleton
  * In-flight requests are deduplicated so that multiple UI items requesting the
  * same artist/album image don't trigger redundant network calls.
  */
-@Singleton
-class ImageEnrichmentService @Inject constructor(
-    @ApplicationContext private val context: Context,
+class ImageEnrichmentService constructor(
+    private val context: Context,
     private val metadataService: MetadataService,
     private val artistDao: ArtistDao,
     private val albumDao: AlbumDao,

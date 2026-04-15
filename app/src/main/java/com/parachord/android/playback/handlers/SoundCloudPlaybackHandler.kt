@@ -9,8 +9,6 @@ import kotlinx.serialization.Serializable
 import kotlinx.serialization.json.Json
 import okhttp3.OkHttpClient
 import okhttp3.Request
-import javax.inject.Inject
-import javax.inject.Singleton
 
 /**
  * Handles SoundCloud playback by fetching stream URLs from the SoundCloud API
@@ -21,8 +19,7 @@ import javax.inject.Singleton
  * Unlike the desktop (which needs a proxy fetch + blob URL for CORS), Android
  * can play the stream URLs directly via ExoPlayer.
  */
-@Singleton
-class SoundCloudPlaybackHandler @Inject constructor(
+class SoundCloudPlaybackHandler constructor(
     private val settingsStore: SettingsStore,
     private val okHttpClient: OkHttpClient,
     private val json: Json,

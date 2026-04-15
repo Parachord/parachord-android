@@ -11,7 +11,6 @@ import com.parachord.android.data.store.SettingsStore
 import com.parachord.android.playback.QueuePersistence
 import com.parachord.android.playback.handlers.MusicKitWebBridge
 import com.parachord.android.playback.scrobbler.LibreFmScrobbler
-import dagger.hilt.android.lifecycle.HiltViewModel
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.SharingStarted
@@ -19,10 +18,7 @@ import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
-import javax.inject.Inject
-
-@HiltViewModel
-class SettingsViewModel @Inject constructor(
+class SettingsViewModel constructor(
     private val settingsStore: SettingsStore,
     private val oAuthManager: OAuthManager,
     private val queuePersistence: QueuePersistence,
@@ -31,11 +27,11 @@ class SettingsViewModel @Inject constructor(
     private val musicKitBridge: MusicKitWebBridge,
     private val mediaScanner: MediaScanner,
     private val pluginManager: com.parachord.android.plugin.PluginManager,
-    private val pluginSyncService: com.parachord.android.plugin.PluginSyncService,
+    private val pluginSyncService: com.parachord.shared.plugin.PluginSyncService,
 ) : ViewModel() {
 
     /** Loaded .axe plugins — drives the dynamic plugin list in Settings. */
-    val loadedPlugins: StateFlow<List<com.parachord.android.plugin.PluginManager.PluginInfo>> =
+    val loadedPlugins: StateFlow<List<com.parachord.shared.plugin.PluginManager.PluginInfo>> =
         pluginManager.plugins
 
     // ── Dynamic AI Model Lists ───────────────────────────────────────
