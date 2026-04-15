@@ -62,6 +62,7 @@ import androidx.compose.material3.TextButton
 import androidx.compose.material3.TopAppBar
 import androidx.compose.material3.rememberModalBottomSheetState
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateListOf
@@ -622,8 +623,33 @@ private fun PlugInsTab(
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                     )
                 }
-                TextButton(onClick = { settingsViewModel.syncPlugins() }) {
-                    Text("Check for updates")
+                val syncStatus by settingsViewModel.pluginSyncStatus.collectAsState()
+                TextButton(
+                    onClick = { settingsViewModel.syncPlugins() },
+                    enabled = syncStatus !is SettingsViewModel.PluginSyncStatus.Syncing,
+                ) {
+                    when (val status = syncStatus) {
+                        is SettingsViewModel.PluginSyncStatus.Syncing -> {
+                            CircularProgressIndicator(
+                                modifier = Modifier.size(16.dp),
+                                strokeWidth = 2.dp,
+                                color = MaterialTheme.colorScheme.primary,
+                            )
+                            Spacer(modifier = Modifier.width(8.dp))
+                            Text("Checking…")
+                        }
+                        is SettingsViewModel.PluginSyncStatus.Done -> {
+                            val label = when {
+                                status.added > 0 || status.updated > 0 ->
+                                    "✓ ${status.added + status.updated} updated"
+                                status.failed > 0 -> "⚠ ${status.failed} failed"
+                                else -> "✓ Up to date"
+                            }
+                            Text(label)
+                        }
+                        is SettingsViewModel.PluginSyncStatus.Error -> Text("⚠ Failed")
+                        else -> Text("Check for updates")
+                    }
                 }
             }
         }

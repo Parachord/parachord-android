@@ -148,18 +148,41 @@ class SettingsViewModel constructor(
         }
     }
 
+    /**
+     * Plugin sync status for the Settings UI — drives the spinner on the
+     * "Check for updates" button and the result banner/toast.
+     */
+    sealed class PluginSyncStatus {
+        data object Idle : PluginSyncStatus()
+        data object Syncing : PluginSyncStatus()
+        data class Done(val added: Int, val updated: Int, val failed: Int) : PluginSyncStatus()
+        data class Error(val message: String) : PluginSyncStatus()
+    }
+
+    private val _pluginSyncStatus = MutableStateFlow<PluginSyncStatus>(PluginSyncStatus.Idle)
+    val pluginSyncStatus: StateFlow<PluginSyncStatus> = _pluginSyncStatus.asStateFlow()
+
     /** Manually trigger plugin sync from marketplace. */
     fun syncPlugins() {
+        if (_pluginSyncStatus.value is PluginSyncStatus.Syncing) return // Already running
         viewModelScope.launch {
+            _pluginSyncStatus.value = PluginSyncStatus.Syncing
             try {
                 val result = pluginSyncService.sync()
-                if (result.hasChanges) {
-                    Log.d("SettingsVM", "Plugin sync: ${result.added.size} added, ${result.updated.size} updated")
-                } else {
-                    Log.d("SettingsVM", "Plugin sync: all up to date")
-                }
+                _pluginSyncStatus.value = PluginSyncStatus.Done(
+                    added = result.added.size,
+                    updated = result.updated.size,
+                    failed = result.failed.size,
+                )
+                Log.d("SettingsVM", "Plugin sync: ${result.added.size} added, ${result.updated.size} updated, ${result.failed.size} failed")
             } catch (e: Exception) {
                 Log.w("SettingsVM", "Plugin sync failed: ${e.message}")
+                _pluginSyncStatus.value = PluginSyncStatus.Error(e.message ?: "Sync failed")
+            }
+            // Auto-clear status after 4s so the banner goes away
+            kotlinx.coroutines.delay(4000)
+            if (_pluginSyncStatus.value !is PluginSyncStatus.Syncing) {
+                _pluginSyncStatus.value = PluginSyncStatus.Idle
             }
         }
     }

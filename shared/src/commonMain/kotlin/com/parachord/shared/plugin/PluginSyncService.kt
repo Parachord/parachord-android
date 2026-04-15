@@ -48,6 +48,9 @@ class PluginSyncService constructor(
 
     private val json = Json { ignoreUnknownKeys = true }
 
+    /** Plain-identifier pattern for plugin IDs. Matches the filesystem allowlist. */
+    private val safePluginIdRegex = Regex("^[A-Za-z0-9_.-]+$")
+
     /**
      * Sync plugins from the marketplace if enough time has passed since last sync.
      * Returns null if sync was skipped (too recent).
@@ -73,7 +76,11 @@ class PluginSyncService constructor(
             return SyncResult(failed = listOf("manifest"))
         }
 
-        val localPlugins = pluginManager.plugins.value.associateBy { it.id }
+        // Compare against ALL parsed plugins (including platform-filtered ones
+        // like youtube/ollama with mobile: false) so we don't re-download them
+        // on every sync. Using pluginManager.plugins (filtered) would see them
+        // as missing every time and keep re-fetching.
+        val localPlugins = pluginManager.allLoadedPlugins.value.associateBy { it.id }
 
         val added = mutableListOf<String>()
         val updated = mutableListOf<String>()
@@ -87,6 +94,15 @@ class PluginSyncService constructor(
 
             if (pluginManager.compareSemver(remoteVersion, localVersion) <= 0) {
                 unchanged++
+                continue
+            }
+
+            // Reject unsafe plugin IDs before hitting the network. The filesystem
+            // layer also validates, but failing here avoids a wasted HTTP request
+            // and logs the rejection clearly. security: H2
+            if (!safePluginIdRegex.matches(remote.id)) {
+                Log.w(TAG, "Rejecting manifest entry with unsafe id: '${remote.id}'")
+                failed.add(remote.id)
                 continue
             }
 

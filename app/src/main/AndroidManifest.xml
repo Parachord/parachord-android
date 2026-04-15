@@ -23,6 +23,34 @@
         android:usesCleartextTraffic="false"
         android:networkSecurityConfig="@xml/network_security_config">
 
+        <!--
+            OAuth redirect receiver. Dedicated activity with noHistory="true"
+            and Theme.NoDisplay so Chrome Custom Tabs auto-close when the
+            callback fires. Forwards the redirect URI to MainActivity.
+        -->
+        <activity
+            android:name=".auth.OAuthRedirectActivity"
+            android:exported="true"
+            android:launchMode="singleTask"
+            android:noHistory="true"
+            android:excludeFromRecents="true"
+            android:taskAffinity=""
+            android:theme="@android:style/Theme.NoDisplay">
+            <!--
+                High priority to beat MainActivity's catch-all parachord://
+                filter for the specific auth host — otherwise Android shows
+                a disambiguation chooser when the redirect fires.
+            -->
+            <intent-filter android:priority="999">
+                <action android:name="android.intent.action.VIEW" />
+                <category android:name="android.intent.category.DEFAULT" />
+                <category android:name="android.intent.category.BROWSABLE" />
+                <data
+                    android:scheme="parachord"
+                    android:host="auth" />
+            </intent-filter>
+        </activity>
+
         <activity
             android:name=".ui.MainActivity"
             android:exported="true"
@@ -33,22 +61,40 @@
                 <category android:name="android.intent.category.LAUNCHER" />
             </intent-filter>
 
-            <!-- Deep link for OAuth callbacks -->
+            <!--
+                Deep links for all Parachord protocol URLs. Hosts are listed
+                explicitly (rather than a catch-all scheme match) so that the
+                auth host goes ONLY to OAuthRedirectActivity and Android's
+                intent resolver doesn't show a disambiguation chooser on the
+                OAuth callback. See OAuthRedirectActivity.kt.
+            -->
             <intent-filter>
                 <action android:name="android.intent.action.VIEW" />
                 <category android:name="android.intent.category.DEFAULT" />
                 <category android:name="android.intent.category.BROWSABLE" />
-                <data
-                    android:scheme="parachord"
-                    android:host="auth" />
-            </intent-filter>
-
-            <!-- Deep link for all Parachord protocol URLs -->
-            <intent-filter>
-                <action android:name="android.intent.action.VIEW" />
-                <category android:name="android.intent.category.DEFAULT" />
-                <category android:name="android.intent.category.BROWSABLE" />
-                <data android:scheme="parachord" />
+                <!-- Playback -->
+                <data android:scheme="parachord" android:host="play" />
+                <data android:scheme="parachord" android:host="control" />
+                <data android:scheme="parachord" android:host="queue" />
+                <data android:scheme="parachord" android:host="shuffle" />
+                <data android:scheme="parachord" android:host="volume" />
+                <!-- Navigation -->
+                <data android:scheme="parachord" android:host="home" />
+                <data android:scheme="parachord" android:host="artist" />
+                <data android:scheme="parachord" android:host="album" />
+                <data android:scheme="parachord" android:host="library" />
+                <data android:scheme="parachord" android:host="history" />
+                <data android:scheme="parachord" android:host="friend" />
+                <data android:scheme="parachord" android:host="recommendations" />
+                <data android:scheme="parachord" android:host="charts" />
+                <data android:scheme="parachord" android:host="critics-picks" />
+                <data android:scheme="parachord" android:host="playlists" />
+                <data android:scheme="parachord" android:host="playlist" />
+                <data android:scheme="parachord" android:host="settings" />
+                <data android:scheme="parachord" android:host="search" />
+                <data android:scheme="parachord" android:host="chat" />
+                <!-- Import -->
+                <data android:scheme="parachord" android:host="import" />
             </intent-filter>
 
             <!-- Spotify web URLs -->

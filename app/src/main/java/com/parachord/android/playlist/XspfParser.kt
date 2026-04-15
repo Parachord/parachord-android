@@ -18,8 +18,25 @@ data class XspfPlaylist(
 object XspfParser {
 
     fun parse(xspfContent: String): XspfPlaylist {
+        // security: H10 — cap input size to defend against XML bombs / huge
+        // playlists. 10 MiB is ~100x a realistic XSPF file.
+        if (xspfContent.length > 10 * 1024 * 1024) {
+            throw IllegalArgumentException("XSPF content too large (${xspfContent.length} bytes)")
+        }
+
         val parser = Xml.newPullParser()
         parser.setFeature(XmlPullParser.FEATURE_PROCESS_NAMESPACES, false)
+        // Explicitly disable DTD and external entity processing to block
+        // billion-laughs and XXE attacks. Android's default XmlPullParser
+        // implementation doesn't fetch external resources, but setting these
+        // features explicitly makes the intent clear and resilient to a
+        // future parser swap. security: H10
+        try {
+            parser.setFeature("http://xmlpull.org/v1/doc/features.html#process-docdecl", false)
+        } catch (_: Exception) { /* not supported by this parser — safe default */ }
+        try {
+            parser.setFeature("http://xmlpull.org/v1/doc/features.html#validation", false)
+        } catch (_: Exception) { /* not supported by this parser — safe default */ }
         parser.setInput(StringReader(xspfContent))
 
         var playlistTitle = "Imported Playlist"

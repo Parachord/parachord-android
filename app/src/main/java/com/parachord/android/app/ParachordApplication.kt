@@ -9,6 +9,7 @@ import org.koin.core.context.startKoin
 class ParachordApplication : Application() {
     override fun onCreate() {
         super.onCreate()
+        registerActivityLifecycleCallbacks(CurrentActivityHolder)
         startKoin {
             androidContext(this@ParachordApplication)
             modules(sharedModule, androidModule)

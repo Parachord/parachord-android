@@ -28,10 +28,6 @@ android {
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
 
-        manifestPlaceholders["appAuthRedirectScheme"] = "parachord"
-        manifestPlaceholders["redirectSchemeName"] = "parachord"
-        manifestPlaceholders["redirectHostName"] = "auth"
-
         // API keys — loaded from local.properties or environment variables
         buildConfigField("String", "LASTFM_API_KEY", "\"${localProp("LASTFM_API_KEY")}\"")
         buildConfigField("String", "LASTFM_SHARED_SECRET", "\"${localProp("LASTFM_SHARED_SECRET")}\"")
@@ -141,10 +137,10 @@ dependencies {
     implementation(libs.androidx.media3.ui)
     implementation(libs.androidx.media) // MediaStyle notification for external playback
 
-    // Spotify App Remote SDK (AAR from GitHub releases)
-    implementation(files("libs/spotify-app-remote-release-0.8.0.aar"))
-    implementation(libs.spotify.auth)
-    implementation(libs.gson)
+    // Note: Spotify App Remote SDK + Spotify Auth SDK removed — we use
+    // Spotify Web API (Connect) via OkHttp for all Spotify interactions.
+    // Removing them also removes the libraries' intent-filter injections
+    // that conflicted with our OAuth redirect receiver.
 
     // Koin DI
     implementation(libs.koin.android)

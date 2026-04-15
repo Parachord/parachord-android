@@ -31,11 +31,17 @@ class OAuthManager constructor(
         private const val REDIRECT_URI = "parachord://auth/callback"
     }
 
-    // PKCE state for OAuth flows
-    private var codeVerifier: String? = null
-
-    // Track which service initiated the current PKCE flow
-    private var pendingOAuthService: String? = null
+    /**
+     * PKCE + CSRF state for in-flight OAuth flows, keyed by the OAuth `state`
+     * parameter. Allowing concurrent flows (e.g. user starts Spotify then
+     * SoundCloud) was previously broken because they shared a single
+     * [codeVerifier] field — and there was no state parameter at all, so a
+     * malicious app registering the `parachord://auth` scheme could feed us
+     * an auth code from a replayed or forged authorization response.
+     *
+     * security: H5
+     */
+    private val pendingFlows = mutableMapOf<String, PendingOAuthFlow>()
 
     /** Mutex to prevent concurrent refresh attempts. */
     private val refreshMutex = Mutex()
@@ -99,11 +105,16 @@ class OAuthManager constructor(
         }
     }
 
-    /** Launch Spotify OAuth flow with PKCE in a Custom Tab. */
+    /** Launch Spotify OAuth flow with PKCE + state CSRF protection in a Custom Tab. */
     fun launchSpotifyAuth(clientId: String) {
         val verifier = generateCodeVerifier()
-        codeVerifier = verifier
-        pendingOAuthService = "spotify"
+        val state = generateOAuthState()
+        pendingFlows[state] = PendingOAuthFlow(
+            service = "spotify",
+            codeVerifier = verifier,
+            createdAt = System.currentTimeMillis(),
+        )
+        prunePendingFlows()
         val challenge = generateCodeChallenge(verifier)
 
         val uri = Uri.parse("https://accounts.spotify.com/authorize")
@@ -126,13 +137,14 @@ class OAuthManager constructor(
             ).joinToString(" "))
             .appendQueryParameter("code_challenge_method", "S256")
             .appendQueryParameter("code_challenge", challenge)
+            .appendQueryParameter("state", state)
             .build()
 
         launchCustomTab(uri)
     }
 
     /**
-     * Launch SoundCloud OAuth 2.1 flow with PKCE in a Custom Tab.
+     * Launch SoundCloud OAuth 2.1 flow with PKCE + state in a Custom Tab.
      * Uses the user's own client ID from settings, or falls back to BuildConfig.
      */
     suspend fun launchSoundCloudAuth() {
@@ -144,8 +156,13 @@ class OAuthManager constructor(
         }
 
         val verifier = generateCodeVerifier()
-        codeVerifier = verifier
-        pendingOAuthService = "soundcloud"
+        val state = generateOAuthState()
+        pendingFlows[state] = PendingOAuthFlow(
+            service = "soundcloud",
+            codeVerifier = verifier,
+            createdAt = System.currentTimeMillis(),
+        )
+        prunePendingFlows()
         val challenge = generateCodeChallenge(verifier)
 
         val uri = Uri.parse("https://secure.soundcloud.com/authorize")
@@ -155,6 +172,7 @@ class OAuthManager constructor(
             .appendQueryParameter("redirect_uri", "$REDIRECT_URI/soundcloud")
             .appendQueryParameter("code_challenge_method", "S256")
             .appendQueryParameter("code_challenge", challenge)
+            .appendQueryParameter("state", state)
             .build()
 
         launchCustomTab(uri)
@@ -184,8 +202,17 @@ class OAuthManager constructor(
 
     private suspend fun handleSpotifyCallback(uri: Uri): Boolean {
         val code = uri.getQueryParameter("code") ?: return false
-        val verifier = codeVerifier ?: return false
-        codeVerifier = null
+        val state = uri.getQueryParameter("state")
+        if (state == null) {
+            Log.w(TAG, "Spotify callback missing state parameter — rejecting")
+            return false
+        }
+        val flow = pendingFlows.remove(state)
+        if (flow == null || flow.service != "spotify") {
+            Log.w(TAG, "Spotify callback state mismatch — possible CSRF; rejecting")
+            return false
+        }
+        val verifier = flow.codeVerifier
 
         return try {
             val body = FormBody.Builder()
@@ -221,9 +248,17 @@ class OAuthManager constructor(
 
     private suspend fun handleSoundCloudCallback(uri: Uri): Boolean {
         val code = uri.getQueryParameter("code") ?: return false
-        val verifier = codeVerifier ?: return false
-        codeVerifier = null
-        pendingOAuthService = null
+        val state = uri.getQueryParameter("state")
+        if (state == null) {
+            Log.w(TAG, "SoundCloud callback missing state parameter — rejecting")
+            return false
+        }
+        val flow = pendingFlows.remove(state)
+        if (flow == null || flow.service != "soundcloud") {
+            Log.w(TAG, "SoundCloud callback state mismatch — possible CSRF; rejecting")
+            return false
+        }
+        val verifier = flow.codeVerifier
 
         return try {
             val clientId = settingsStore.getSoundCloudClientId()
@@ -370,15 +405,50 @@ class OAuthManager constructor(
     }
 
     private fun launchCustomTab(uri: Uri) {
-        val intent = CustomTabsIntent.Builder().build()
-        intent.intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
-        intent.launchUrl(context, uri)
+        val customTabsIntent = CustomTabsIntent.Builder().build()
+        // Prefer the currently-resumed Activity so the Chrome Custom Tab runs
+        // in the same task as MainActivity. This lets Android pop Chrome off
+        // the back stack when our OAuthRedirectActivity returns focus to
+        // MainActivity after the OAuth callback — otherwise Chrome stays
+        // alive in its own separate task. Fallback to application context
+        // with NEW_TASK if no Activity is tracked (defensive; should always
+        // have one since OAuth is initiated from the Settings screen).
+        val activity = com.parachord.android.app.CurrentActivityHolder.current
+        if (activity != null) {
+            customTabsIntent.launchUrl(activity, uri)
+        } else {
+            customTabsIntent.intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+            customTabsIntent.launchUrl(context, uri)
+        }
     }
 
     private fun generateCodeVerifier(): String {
         val bytes = ByteArray(32)
         SecureRandom().nextBytes(bytes)
         return bytes.joinToString("") { "%02x".format(it) }
+    }
+
+    /**
+     * Generate a cryptographically-random OAuth `state` parameter for CSRF
+     * protection. 24 bytes = 192 bits of entropy, encoded URL-safe Base64.
+     * security: H5
+     */
+    private fun generateOAuthState(): String {
+        val bytes = ByteArray(24)
+        SecureRandom().nextBytes(bytes)
+        return android.util.Base64.encodeToString(
+            bytes,
+            android.util.Base64.URL_SAFE or android.util.Base64.NO_WRAP or android.util.Base64.NO_PADDING,
+        )
+    }
+
+    /**
+     * Drop pending flows older than 10 minutes so a stale/abandoned launch
+     * doesn't leak verifiers indefinitely.
+     */
+    private fun prunePendingFlows() {
+        val cutoff = System.currentTimeMillis() - 10 * 60 * 1000L
+        pendingFlows.entries.removeAll { it.value.createdAt < cutoff }
     }
 
     private fun generateCodeChallenge(verifier: String): String {
@@ -391,6 +461,16 @@ class OAuthManager constructor(
         return digest.joinToString("") { "%02x".format(it) }
     }
 }
+
+/**
+ * In-flight OAuth flow state keyed by the `state` parameter.
+ * security: H5
+ */
+private data class PendingOAuthFlow(
+    val service: String,
+    val codeVerifier: String,
+    val createdAt: Long,
+)
 
 @Serializable
 private data class SpotifyTokenResponse(

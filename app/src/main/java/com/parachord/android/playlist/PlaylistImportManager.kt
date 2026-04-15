@@ -11,6 +11,7 @@ import com.parachord.android.data.store.SettingsStore
 import com.parachord.android.playback.handlers.MusicKitWebBridge
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
+import okhttp3.HttpUrl.Companion.toHttpUrlOrNull
 import okhttp3.OkHttpClient
 import okhttp3.Request
 import retrofit2.HttpException
@@ -171,6 +172,8 @@ class PlaylistImportManager constructor(
     }
 
     private suspend fun importXspfFromUrl(url: String): ImportResult {
+        // security: H10 — require HTTPS and block private-network SSRF targets
+        validateRemoteXspfUrl(url)
         val request = Request.Builder().url(url).build()
         val response = httpClient.newCall(request).execute()
         if (!response.isSuccessful) {
@@ -188,6 +191,59 @@ class PlaylistImportManager constructor(
             tracks = parsed.tracks,
             artworkUrl = null,
         )
+    }
+
+    /**
+     * Reject non-HTTPS schemes and private / loopback / link-local host targets.
+     * Protects against deep-link-triggered SSRF through parachord://import.
+     * security: H10
+     */
+    private fun validateRemoteXspfUrl(url: String) {
+        val parsed = try {
+            url.toHttpUrlOrNull()
+        } catch (_: Exception) {
+            null
+        } ?: throw IllegalArgumentException("Invalid playlist URL")
+
+        if (!parsed.isHttps) {
+            throw IllegalArgumentException("Playlist URL must use https:// (got ${parsed.scheme})")
+        }
+        val host = parsed.host.lowercase()
+        if (host.isBlank()) {
+            throw IllegalArgumentException("Playlist URL is missing a host")
+        }
+        if (isPrivateOrLocalHost(host)) {
+            throw IllegalArgumentException("Playlist URL targets a private / loopback address: $host")
+        }
+    }
+
+    /**
+     * Literal-string host check. We don't resolve DNS here (that would introduce
+     * a TOCTOU race); callers with a resolvable attacker-controlled hostname can
+     * still reach internal IPs via DNS rebinding. Revisit with a socket-level
+     * post-resolution check if that threat becomes relevant.
+     */
+    private fun isPrivateOrLocalHost(host: String): Boolean {
+        if (host == "localhost") return true
+        // Literal IPv4 private / loopback / link-local
+        val ipv4 = Regex("^(\\d{1,3})\\.(\\d{1,3})\\.(\\d{1,3})\\.(\\d{1,3})$").matchEntire(host)
+        if (ipv4 != null) {
+            val octets = ipv4.groupValues.drop(1).map { it.toIntOrNull() ?: return true }
+            val (a, b) = octets[0] to octets[1]
+            return a == 10 ||
+                a == 127 ||
+                (a == 169 && b == 254) ||
+                (a == 172 && b in 16..31) ||
+                (a == 192 && b == 168) ||
+                a == 0
+        }
+        // IPv6 loopback / link-local / unique-local
+        if (host == "::1" || host == "[::1]") return true
+        if (host.startsWith("[fc") || host.startsWith("[fd") || host.startsWith("[fe80")) return true
+        if (host.startsWith("fc") || host.startsWith("fd") || host.startsWith("fe80")) return true
+        // .local mDNS
+        if (host.endsWith(".local")) return true
+        return false
     }
 
     private suspend fun savePlaylist(

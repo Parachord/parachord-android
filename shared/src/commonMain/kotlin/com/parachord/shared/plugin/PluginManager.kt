@@ -42,7 +42,16 @@ class PluginManager constructor(
     )
 
     private val _plugins = MutableStateFlow<List<PluginInfo>>(emptyList())
+    /** Plugins loaded and active on this platform — filtered by capabilities.mobile. */
     val plugins: StateFlow<List<PluginInfo>> = _plugins.asStateFlow()
+
+    private val _allLoadedPlugins = MutableStateFlow<List<PluginInfo>>(emptyList())
+    /**
+     * All plugins parsed from disk including ones filtered out by platform
+     * capabilities (e.g. `mobile: false`). Used by [PluginSyncService] for
+     * version comparison so it doesn't keep re-downloading filtered plugins.
+     */
+    val allLoadedPlugins: StateFlow<List<PluginInfo>> = _allLoadedPlugins.asStateFlow()
 
     private val initMutex = Mutex()
     private var initialized = false
@@ -130,7 +139,11 @@ class PluginManager constructor(
             }
         }
 
-        // Filter out plugins that declare mobile: false in capabilities.
+        // Publish the full unfiltered set for version-comparison purposes.
+        _allLoadedPlugins.value = pluginInfos.sortedBy { it.name }
+
+        // Filter out plugins that declare mobile: false in capabilities for the
+        // active runtime set that drives UI and routing.
         val platformFiltered = pluginInfos.filter { it.capabilities["mobile"] != false }
         _plugins.value = platformFiltered.sortedBy { it.name }
         if (pluginInfos.size != platformFiltered.size) {
