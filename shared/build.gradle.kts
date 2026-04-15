@@ -24,16 +24,18 @@ kotlin {
             implementation(libs.kotlinx.serialization.json)
             implementation(libs.kotlinx.coroutines.core)
             // Ktor HTTP client (Phase 2)
-            implementation(libs.ktor.client.core)
+            api(libs.ktor.client.core)
             implementation(libs.ktor.client.content.negotiation)
             implementation(libs.ktor.serialization.kotlinx.json)
             implementation(libs.ktor.client.logging)
             // SQLDelight (Phase 3)
-            implementation(libs.sqldelight.coroutines)
+            api(libs.sqldelight.coroutines)
+            // Koin (Phase 4)
+            api(libs.koin.core)
         }
         androidMain.dependencies {
             implementation(libs.ktor.client.okhttp)
-            implementation(libs.sqldelight.android.driver)
+            api(libs.sqldelight.android.driver)
         }
         iosMain.dependencies {
             implementation(libs.ktor.client.darwin)

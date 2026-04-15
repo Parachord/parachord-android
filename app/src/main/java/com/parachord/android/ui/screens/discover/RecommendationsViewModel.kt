@@ -14,7 +14,6 @@ import com.parachord.android.data.repository.Resource
 import com.parachord.android.playback.PlaybackController
 import com.parachord.android.resolver.ResolverManager
 import com.parachord.android.resolver.ResolverScoring
-import dagger.hilt.android.lifecycle.HiltViewModel
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
@@ -23,16 +22,13 @@ import kotlinx.coroutines.launch
 import com.parachord.android.playback.PlaybackContext
 import com.parachord.android.resolver.ResolverScoring.Companion.MIN_CONFIDENCE_THRESHOLD
 import java.util.UUID
-import javax.inject.Inject
-
 /**
  * ViewModel for the Recommendations screen.
  * Fetches recommended artists and tracks based on listening history.
  * Supports source filtering: All | Last.fm | ListenBrainz (matching desktop).
  * Resolves tracks through the resolver pipeline for content resolver badges.
  */
-@HiltViewModel
-class RecommendationsViewModel @Inject constructor(
+class RecommendationsViewModel constructor(
     private val recommendationsRepository: RecommendationsRepository,
     private val resolverManager: ResolverManager,
     private val resolverScoring: ResolverScoring,

@@ -152,7 +152,7 @@ class MiniPlayerWidgetProvider : AppWidgetProvider() {
 
     /**
      * Send a media action broadcast that [MiniPlayerWidgetUpdater] picks up
-     * to forward to the PlaybackController (which has Hilt injection).
+     * to forward to the PlaybackController (which has Koin injection).
      */
     private fun sendMediaAction(context: Context, action: String) {
         val intent = Intent("com.parachord.android.WIDGET_MEDIA_ACTION").apply {

@@ -92,7 +92,7 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.em
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.zIndex
-import androidx.hilt.navigation.compose.hiltViewModel
+import org.koin.androidx.compose.koinViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.parachord.android.BuildConfig
 import com.parachord.android.data.scanner.ScanProgress
@@ -136,7 +136,7 @@ private enum class PluginCategory(val label: String) {
  * Falls back to a hardcoded plugin list when the plugin system hasn't loaded yet.
  */
 private fun buildPluginList(
-    axePlugins: List<com.parachord.android.plugin.PluginManager.PluginInfo>
+    axePlugins: List<com.parachord.shared.plugin.PluginManager.PluginInfo>
 ): List<PluginInfo> {
     if (axePlugins.isEmpty()) return builtInPluginsFallback
 
@@ -195,7 +195,7 @@ private val builtInPluginsFallback = listOf(
 @Composable
 fun SettingsScreen(
     modifier: Modifier = Modifier,
-    viewModel: SettingsViewModel = hiltViewModel(),
+    viewModel: SettingsViewModel = koinViewModel(),
 ) {
     val themeMode by viewModel.themeMode.collectAsStateWithLifecycle()
     val scrobbling by viewModel.scrobblingEnabled.collectAsStateWithLifecycle()
@@ -386,7 +386,7 @@ private fun PlugInsTab(
     var selectedPlugin by remember { mutableStateOf<PluginInfo?>(null) }
 
     // Build plugin list from .axe plugins (dynamic) with hardcoded fallback
-    val settingsViewModel: SettingsViewModel = hiltViewModel()
+    val settingsViewModel: SettingsViewModel = koinViewModel()
     val axePlugins by settingsViewModel.loadedPlugins.collectAsStateWithLifecycle()
     val disabledPlugins by settingsViewModel.disabledPlugins.collectAsStateWithLifecycle()
     val allPlugins = remember(axePlugins) { buildPluginList(axePlugins) }
@@ -2390,7 +2390,7 @@ private fun AiProviderConfig(
     var showSavedConfirmation by remember { mutableStateOf(false) }
 
     // Dynamic model lists from .axe plugins — fetch when connected
-    val settingsViewModel: SettingsViewModel = hiltViewModel()
+    val settingsViewModel: SettingsViewModel = koinViewModel()
     val dynamicModels by settingsViewModel.dynamicModels.collectAsStateWithLifecycle()
     val modelsLoading by settingsViewModel.modelsLoading.collectAsStateWithLifecycle()
 
@@ -2538,7 +2538,7 @@ private fun GeneralTab(
     onPersistQueueChanged: (Boolean) -> Unit,
     spotifyConnected: Boolean,
 ) {
-    val syncViewModel: SyncViewModel = hiltViewModel()
+    val syncViewModel: SyncViewModel = koinViewModel()
     val syncEnabled by syncViewModel.syncEnabled.collectAsStateWithLifecycle()
     val lastSyncAt by syncViewModel.lastSyncAt.collectAsStateWithLifecycle()
     var showSyncSetupSheet by remember { mutableStateOf(false) }

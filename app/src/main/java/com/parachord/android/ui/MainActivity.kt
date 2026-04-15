@@ -53,7 +53,7 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.unit.Velocity
 import androidx.compose.ui.unit.dp
-import androidx.hilt.navigation.compose.hiltViewModel
+import org.koin.androidx.compose.koinViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.navigation.NavDestination.Companion.hierarchy
 import androidx.navigation.NavGraph.Companion.findStartDestination
@@ -78,24 +78,17 @@ import com.parachord.android.ui.navigation.ParachordNavHost
 import com.parachord.android.ui.navigation.Routes
 import com.parachord.android.ui.theme.LocalResolverOrder
 import com.parachord.android.ui.theme.ParachordTheme
-import dagger.hilt.android.AndroidEntryPoint
+import org.koin.android.ext.android.inject
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.launch
-import javax.inject.Inject
 
-@AndroidEntryPoint
 class MainActivity : ComponentActivity() {
 
-    @Inject
-    lateinit var oAuthManager: OAuthManager
-
-    @Inject
-    lateinit var musicKitBridge: MusicKitWebBridge
-
-    @Inject
-    lateinit var settingsStore: SettingsStore
+    private val oAuthManager: OAuthManager by inject()
+    private val musicKitBridge: MusicKitWebBridge by inject()
+    private val settingsStore: SettingsStore by inject()
 
     /** Pending deep link URI stored for the composable to process. */
     internal val pendingDeepLink = MutableStateFlow<Uri?>(null)
@@ -181,7 +174,7 @@ class MainActivity : ComponentActivity() {
 
 @Composable
 fun ParachordApp() {
-    val mainViewModel: MainViewModel = hiltViewModel()
+    val mainViewModel: MainViewModel = koinViewModel()
     val themeMode by mainViewModel.themeMode.collectAsStateWithLifecycle()
     val darkTheme = when (themeMode) {
         "dark" -> true
@@ -231,7 +224,7 @@ private fun ParachordAppContent(mainViewModel: MainViewModel) {
     }
 
     // Handle deep link navigation events
-    val deepLinkViewModel: DeepLinkViewModel = hiltViewModel()
+    val deepLinkViewModel: DeepLinkViewModel = koinViewModel()
 
     // Process pending deep links from the Activity (intent handling).
     // The Activity stores the URI; the composable-scoped ViewModel processes it.

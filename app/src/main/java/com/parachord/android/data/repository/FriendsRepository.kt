@@ -17,15 +17,12 @@ import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.flow
 import kotlinx.coroutines.withContext
 import java.util.UUID
-import javax.inject.Inject
-import javax.inject.Singleton
 
 /**
  * Repository for managing friends and fetching their listening data.
  * Mirrors the desktop app's friend management (add, validate, fetch activity).
  */
-@Singleton
-class FriendsRepository @Inject constructor(
+class FriendsRepository constructor(
     private val friendDao: FriendDao,
     private val lastFmApi: LastFmApi,
     private val listenBrainzApi: ListenBrainzApi,

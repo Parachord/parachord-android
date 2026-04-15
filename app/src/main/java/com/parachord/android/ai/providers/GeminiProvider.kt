@@ -22,8 +22,6 @@ import okhttp3.OkHttpClient
 import okhttp3.Request
 import okhttp3.RequestBody.Companion.toRequestBody
 import java.util.concurrent.TimeUnit
-import javax.inject.Inject
-import javax.inject.Singleton
 
 /**
  * Google Gemini provider using Google AI API.
@@ -35,8 +33,7 @@ import javax.inject.Singleton
  * - Roles: `user`/`model` (not `assistant`)
  * - Tool calls as `functionCall` parts, results as `functionResponse`
  */
-@Singleton
-class GeminiProvider @Inject constructor(
+class GeminiProvider constructor(
     private val okHttpClient: OkHttpClient,
     private val json: Json,
 ) : AiChatProvider {
@@ -133,7 +130,7 @@ class GeminiProvider @Inject constructor(
                         add(buildJsonObject {
                             put("name", tool.name)
                             put("description", tool.description)
-                            put("parameters", tool.parameters)
+                            tool.parameters?.let { put("parameters", it) }
                         })
                     }
                 })

@@ -1,53 +1,95 @@
 package com.parachord.android.data.db.dao
 
-import androidx.room.Dao
-import androidx.room.Delete
-import androidx.room.Insert
-import androidx.room.OnConflictStrategy
-import androidx.room.Query
-import androidx.room.Update
+import app.cash.sqldelight.coroutines.asFlow
+import app.cash.sqldelight.coroutines.mapToList
+import app.cash.sqldelight.coroutines.mapToOneOrNull
+import com.parachord.shared.db.ParachordDb
+import com.parachord.shared.db.Playlists
 import com.parachord.android.data.db.entity.PlaylistEntity
+import com.parachord.shared.model.Playlist
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.flow.map
+import kotlinx.coroutines.withContext
 
-@Dao
-interface PlaylistDao {
-    @Query("SELECT * FROM playlists ORDER BY updatedAt DESC")
-    fun getAll(): Flow<List<PlaylistEntity>>
+/**
+ * Concrete DAO wrapping SQLDelight [PlaylistQueries].
+ * Drop-in replacement for the former Room @Dao interface.
+ */
+class PlaylistDao(private val db: ParachordDb) {
 
-    @Query("SELECT * FROM playlists WHERE id = :id")
-    suspend fun getById(id: String): PlaylistEntity?
+    private val queries get() = db.playlistQueries
 
-    @Query("SELECT * FROM playlists WHERE id = :id")
-    fun getByIdFlow(id: String): Flow<PlaylistEntity?>
+    /* ---- Mapping ---- */
 
-    @Query("SELECT * FROM playlists WHERE spotifyId = :spotifyId LIMIT 1")
-    suspend fun getBySpotifyId(spotifyId: String): PlaylistEntity?
+    private fun Playlists.toPlaylist() = Playlist(
+        id = id,
+        name = name,
+        description = description,
+        artworkUrl = artworkUrl,
+        trackCount = trackCount.toInt(),
+        createdAt = createdAt,
+        updatedAt = updatedAt,
+        spotifyId = spotifyId,
+        snapshotId = snapshotId,
+        lastModified = lastModified,
+        locallyModified = locallyModified != 0L,
+        ownerName = ownerName,
+    )
 
-    @Insert(onConflict = OnConflictStrategy.REPLACE)
-    suspend fun insert(playlist: PlaylistEntity)
+    /* ---- Queries returning Flow ---- */
 
-    @Update
-    suspend fun update(playlist: PlaylistEntity)
+    fun getAll(): Flow<List<PlaylistEntity>> =
+        queries.getAll().asFlow().mapToList(Dispatchers.IO).map { rows -> rows.map { it.toPlaylist() } }
 
-    @Query("SELECT * FROM playlists ORDER BY updatedAt DESC")
-    suspend fun getAllSync(): List<PlaylistEntity>
+    fun getByIdFlow(id: String): Flow<PlaylistEntity?> =
+        queries.getById(id).asFlow().mapToOneOrNull(Dispatchers.IO).map { it?.toPlaylist() }
 
-    @Query("UPDATE playlists SET artworkUrl = :artworkUrl WHERE id = :id AND (artworkUrl IS NULL OR artworkUrl = '')")
-    suspend fun updateArtworkById(id: String, artworkUrl: String)
+    /* ---- Suspend one-shot reads ---- */
 
-    /**
-     * Backfill lastModified from the most recent track addedAt in each playlist.
-     * Falls back to updatedAt when a playlist has no tracks.
-     */
-    @Query("""
-        UPDATE playlists SET lastModified = COALESCE(
-            (SELECT MAX(addedAt) FROM playlist_tracks WHERE playlist_tracks.playlistId = playlists.id),
-            updatedAt
+    suspend fun getById(id: String): PlaylistEntity? = withContext(Dispatchers.IO) {
+        queries.getById(id).executeAsOneOrNull()?.toPlaylist()
+    }
+
+    suspend fun getBySpotifyId(spotifyId: String): PlaylistEntity? = withContext(Dispatchers.IO) {
+        queries.getBySpotifyId(spotifyId).executeAsOneOrNull()?.toPlaylist()
+    }
+
+    suspend fun getAllSync(): List<PlaylistEntity> = withContext(Dispatchers.IO) {
+        queries.getAll().executeAsList().map { it.toPlaylist() }
+    }
+
+    /* ---- Writes ---- */
+
+    suspend fun insert(playlist: PlaylistEntity): Unit = withContext(Dispatchers.IO) {
+        queries.insert(
+            id = playlist.id,
+            name = playlist.name,
+            description = playlist.description,
+            artworkUrl = playlist.artworkUrl,
+            trackCount = playlist.trackCount.toLong(),
+            createdAt = playlist.createdAt,
+            updatedAt = playlist.updatedAt,
+            spotifyId = playlist.spotifyId,
+            snapshotId = playlist.snapshotId,
+            lastModified = playlist.lastModified,
+            locallyModified = if (playlist.locallyModified) 1L else 0L,
+            ownerName = playlist.ownerName,
         )
-        WHERE lastModified = 0
-    """)
-    suspend fun backfillLastModified()
+    }
 
-    @Delete
-    suspend fun delete(playlist: PlaylistEntity)
+    /** INSERT OR REPLACE — same as insert since the .sq uses INSERT OR REPLACE. */
+    suspend fun update(playlist: PlaylistEntity): Unit = insert(playlist)
+
+    suspend fun updateArtworkById(id: String, artworkUrl: String): Unit = withContext(Dispatchers.IO) {
+        queries.updateArtworkById(artworkUrl = artworkUrl, id = id)
+    }
+
+    suspend fun backfillLastModified(): Unit = withContext(Dispatchers.IO) {
+        queries.backfillLastModified()
+    }
+
+    suspend fun delete(playlist: PlaylistEntity): Unit = withContext(Dispatchers.IO) {
+        queries.deleteById(playlist.id)
+    }
 }

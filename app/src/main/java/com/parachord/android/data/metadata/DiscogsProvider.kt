@@ -7,8 +7,6 @@ import kotlinx.coroutines.withContext
 import okhttp3.OkHttpClient
 import okhttp3.Request
 import org.json.JSONObject
-import javax.inject.Inject
-import javax.inject.Singleton
 
 /**
  * Discogs metadata provider.
@@ -22,8 +20,7 @@ import javax.inject.Singleton
  *
  * Mirrors the desktop app's getDiscogsBio() and getDiscogsArtistImage() functions.
  */
-@Singleton
-class DiscogsProvider @Inject constructor(
+class DiscogsProvider constructor(
     private val okHttpClient: OkHttpClient,
     private val settingsStore: SettingsStore,
 ) : MetadataProvider {

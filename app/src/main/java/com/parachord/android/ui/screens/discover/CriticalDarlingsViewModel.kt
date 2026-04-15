@@ -5,13 +5,10 @@ import androidx.lifecycle.viewModelScope
 import com.parachord.android.data.repository.CriticalDarlingsRepository
 import com.parachord.android.data.repository.CriticsPickAlbum
 import com.parachord.android.data.repository.Resource
-import dagger.hilt.android.lifecycle.HiltViewModel
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.launch
-import javax.inject.Inject
-
 /**
  * ViewModel for the Critical Darlings screen.
  *
@@ -20,8 +17,7 @@ import javax.inject.Inject
  * - Sort options: recent (default), artist
  * - Search by album title or artist name
  */
-@HiltViewModel
-class CriticalDarlingsViewModel @Inject constructor(
+class CriticalDarlingsViewModel constructor(
     private val repository: CriticalDarlingsRepository,
 ) : ViewModel() {
 

@@ -5,16 +5,13 @@ import com.parachord.android.data.api.SpotifyApi
 import com.parachord.android.data.api.bestImageUrl
 import com.parachord.android.data.store.SettingsStore
 import retrofit2.HttpException
-import javax.inject.Inject
-import javax.inject.Singleton
 
 /**
  * Spotify metadata provider.
  * Best album art and preview URLs. Only available when user is authenticated.
  * Lowest priority since it requires OAuth and has rate limits.
  */
-@Singleton
-class SpotifyProvider @Inject constructor(
+class SpotifyProvider constructor(
     private val api: SpotifyApi,
     private val settingsStore: SettingsStore,
     private val oAuthManager: OAuthManager,

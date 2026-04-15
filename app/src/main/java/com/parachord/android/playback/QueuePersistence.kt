@@ -13,8 +13,6 @@ import kotlinx.coroutines.flow.debounce
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.launch
 import kotlinx.serialization.json.Json
-import javax.inject.Inject
-import javax.inject.Singleton
 
 /**
  * Persists and restores queue state across app restarts.
@@ -23,8 +21,7 @@ import javax.inject.Singleton
  * debounces changes, and serializes to DataStore as JSON. Only active when the
  * "Remember queue" setting is enabled.
  */
-@Singleton
-class QueuePersistence @Inject constructor(
+class QueuePersistence constructor(
     private val settingsStore: SettingsStore,
     private val queueManager: QueueManager,
     private val stateHolder: PlaybackStateHolder,

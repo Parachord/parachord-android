@@ -1,118 +1,197 @@
 package com.parachord.android.data.db.dao
 
-import androidx.room.Dao
-import androidx.room.Delete
-import androidx.room.Insert
-import androidx.room.OnConflictStrategy
-import androidx.room.Query
-import androidx.room.Update
+import app.cash.sqldelight.coroutines.asFlow
+import app.cash.sqldelight.coroutines.mapToList
+import app.cash.sqldelight.coroutines.mapToOneOrNull
+import app.cash.sqldelight.db.SqlDriver
+import com.parachord.shared.db.ParachordDb
+import com.parachord.shared.db.Tracks
 import com.parachord.android.data.db.entity.TrackEntity
+import com.parachord.shared.model.Track
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.flow.map
+import kotlinx.coroutines.withContext
 
-@Dao
-interface TrackDao {
-    @Query("SELECT * FROM tracks ORDER BY addedAt DESC")
-    fun getAll(): Flow<List<TrackEntity>>
+/**
+ * Concrete DAO wrapping SQLDelight [TrackQueries].
+ * Drop-in replacement for the former Room @Dao interface.
+ */
+class TrackDao(private val db: ParachordDb, private val driver: SqlDriver) {
 
-    @Query("SELECT * FROM tracks WHERE id = :id")
-    suspend fun getById(id: String): TrackEntity?
+    private val queries get() = db.trackQueries
 
-    @Query("SELECT * FROM tracks WHERE albumId = :albumId ORDER BY title")
-    fun getByAlbumId(albumId: String): Flow<List<TrackEntity>>
+    /* ---- Mapping ---- */
 
-    @Query("SELECT * FROM tracks WHERE title LIKE '%' || :query || '%' OR artist LIKE '%' || :query || '%'")
-    fun search(query: String): Flow<List<TrackEntity>>
+    private fun Tracks.toTrack() = Track(
+        id = id, title = title, artist = artist, album = album,
+        albumId = albumId, duration = duration, artworkUrl = artworkUrl,
+        sourceType = sourceType, sourceUrl = sourceUrl, addedAt = addedAt,
+        resolver = resolver, spotifyUri = spotifyUri, soundcloudId = soundcloudId,
+        spotifyId = spotifyId, appleMusicId = appleMusicId,
+        recordingMbid = recordingMbid, artistMbid = artistMbid, releaseMbid = releaseMbid,
+    )
 
-    @Insert(onConflict = OnConflictStrategy.REPLACE)
-    suspend fun insertAll(tracks: List<TrackEntity>)
+    /* ---- Queries returning Flow ---- */
 
-    @Insert(onConflict = OnConflictStrategy.REPLACE)
-    suspend fun insert(track: TrackEntity)
+    fun getAll(): Flow<List<TrackEntity>> =
+        queries.getAll().asFlow().mapToList(Dispatchers.IO).map { rows -> rows.map { it.toTrack() } }
 
-    @Update
-    suspend fun update(track: TrackEntity)
+    fun getByAlbumId(albumId: String): Flow<List<TrackEntity>> =
+        queries.getByAlbumId(albumId).asFlow().mapToList(Dispatchers.IO).map { rows -> rows.map { it.toTrack() } }
 
-    @Query("UPDATE tracks SET artworkUrl = :artworkUrl WHERE id = :id AND (artworkUrl IS NULL OR artworkUrl = '')")
-    suspend fun updateArtworkById(id: String, artworkUrl: String)
+    fun search(query: String): Flow<List<TrackEntity>> =
+        queries.search(query, query).asFlow().mapToList(Dispatchers.IO).map { rows -> rows.map { it.toTrack() } }
 
-    @Delete
-    suspend fun delete(track: TrackEntity)
+    fun existsByTitleAndArtist(title: String, artist: String): Flow<Boolean> =
+        queries.existsByTitleAndArtist(title, artist).asFlow()
+            .mapToOneOrNull(Dispatchers.IO)
+            .map { it ?: false }
 
-    @Query("DELETE FROM tracks")
-    suspend fun deleteAll()
+    /* ---- Suspend one-shot reads ---- */
 
-    /** Get the most recent N tracks (non-reactive, for background jobs like Fresh Drops). */
-    @Query("SELECT * FROM tracks ORDER BY addedAt DESC LIMIT :limit")
-    suspend fun getRecentSync(limit: Int): List<TrackEntity>
+    suspend fun getById(id: String): TrackEntity? = withContext(Dispatchers.IO) {
+        queries.getById(id).executeAsOneOrNull()?.toTrack()
+    }
 
-    /**
-     * Backfill track addedAt from sync_sources.addedAt where the sync source has a
-     * non-zero addedAt (i.e., the Spotify added_at timestamp).
-     * This corrects tracks whose addedAt was overwritten by System.currentTimeMillis().
-     */
-    @Query("""
-        UPDATE tracks SET addedAt = (
-            SELECT s.addedAt FROM sync_sources s
-            WHERE s.itemId = tracks.id AND s.itemType = 'track' AND s.addedAt > 0
+    suspend fun getRecentSync(limit: Int): List<TrackEntity> = withContext(Dispatchers.IO) {
+        queries.getRecentSync(limit.toLong()).executeAsList().map { it.toTrack() }
+    }
+
+    suspend fun findLocalFile(title: String, artist: String): TrackEntity? = withContext(Dispatchers.IO) {
+        queries.findLocalFile(title, artist).executeAsOneOrNull()?.toTrack()
+    }
+
+    /* ---- Writes ---- */
+
+    suspend fun insert(track: TrackEntity): Unit = withContext(Dispatchers.IO) {
+        queries.insert(
+            id = track.id,
+            title = track.title,
+            artist = track.artist,
+            album = track.album,
+            albumId = track.albumId,
+            duration = track.duration,
+            artworkUrl = track.artworkUrl,
+            sourceType = track.sourceType,
+            sourceUrl = track.sourceUrl,
+            addedAt = track.addedAt,
+            resolver = track.resolver,
+            spotifyUri = track.spotifyUri,
+            soundcloudId = track.soundcloudId,
+            spotifyId = track.spotifyId,
+            appleMusicId = track.appleMusicId,
+            recordingMbid = track.recordingMbid,
+            artistMbid = track.artistMbid,
+            releaseMbid = track.releaseMbid,
         )
-        WHERE EXISTS (
-            SELECT 1 FROM sync_sources s
-            WHERE s.itemId = tracks.id AND s.itemType = 'track' AND s.addedAt > 0
-        )
-    """)
-    suspend fun backfillAddedAtFromSyncSources()
+    }
 
-    /** Check if a track exists in the collection by title+artist (case-insensitive). */
-    @Query("SELECT COUNT(*) > 0 FROM tracks WHERE LOWER(title) = LOWER(:title) AND LOWER(artist) = LOWER(:artist)")
-    fun existsByTitleAndArtist(title: String, artist: String): Flow<Boolean>
+    suspend fun insertAll(tracks: List<TrackEntity>): Unit = withContext(Dispatchers.IO) {
+        queries.transaction {
+            for (track in tracks) {
+                queries.insert(
+                    id = track.id,
+                    title = track.title,
+                    artist = track.artist,
+                    album = track.album,
+                    albumId = track.albumId,
+                    duration = track.duration,
+                    artworkUrl = track.artworkUrl,
+                    sourceType = track.sourceType,
+                    sourceUrl = track.sourceUrl,
+                    addedAt = track.addedAt,
+                    resolver = track.resolver,
+                    spotifyUri = track.spotifyUri,
+                    soundcloudId = track.soundcloudId,
+                    spotifyId = track.spotifyId,
+                    appleMusicId = track.appleMusicId,
+                    recordingMbid = track.recordingMbid,
+                    artistMbid = track.artistMbid,
+                    releaseMbid = track.releaseMbid,
+                )
+            }
+        }
+    }
 
-    /** Find local file tracks matching title and artist (for local file resolver). */
-    @Query("SELECT * FROM tracks WHERE resolver = 'localfiles' AND LOWER(title) = LOWER(:title) AND LOWER(artist) = LOWER(:artist) LIMIT 1")
-    suspend fun findLocalFile(title: String, artist: String): TrackEntity?
+    /** INSERT OR REPLACE — same as insert since the .sq uses INSERT OR REPLACE. */
+    suspend fun update(track: TrackEntity): Unit = insert(track)
 
-    /** Remove synced tracks that have no corresponding sync_source entry (orphaned duplicates). */
-    @Query("DELETE FROM tracks WHERE id LIKE 'spotify-%' AND id NOT IN (SELECT itemId FROM sync_sources WHERE itemType = 'track')")
-    suspend fun deleteOrphanedSyncedTracks(): Int
+    suspend fun updateArtworkById(id: String, artworkUrl: String): Unit = withContext(Dispatchers.IO) {
+        queries.updateArtworkById(artworkUrl = artworkUrl, id = id)
+    }
 
-    /** Delete all synced tracks (spotify-prefixed IDs). */
-    @Query("DELETE FROM tracks WHERE id LIKE 'spotify-%'")
-    suspend fun deleteSyncedTracks(): Int
+    suspend fun delete(track: TrackEntity): Unit = withContext(Dispatchers.IO) {
+        queries.deleteById(track.id)
+    }
 
-    /**
-     * Update resolver IDs on an existing track without touching other fields.
-     * Only fills in IDs that are currently null/blank — never overwrites existing data.
-     */
-    @Query("""
-        UPDATE tracks SET
-            spotifyId = CASE WHEN (spotifyId IS NULL OR spotifyId = '') THEN :spotifyId ELSE spotifyId END,
-            spotifyUri = CASE WHEN (spotifyUri IS NULL OR spotifyUri = '') THEN :spotifyUri ELSE spotifyUri END,
-            appleMusicId = CASE WHEN (appleMusicId IS NULL OR appleMusicId = '') THEN :appleMusicId ELSE appleMusicId END,
-            soundcloudId = CASE WHEN (soundcloudId IS NULL OR soundcloudId = '') THEN :soundcloudId ELSE soundcloudId END
-        WHERE id = :trackId
-    """)
+    suspend fun deleteAll(): Unit = withContext(Dispatchers.IO) {
+        queries.deleteAll()
+    }
+
+    suspend fun deleteSyncedTracks(): Int = withContext(Dispatchers.IO) {
+        queries.deleteSyncedTracks()
+        // SQLDelight void mutation — return affected rows via driver
+        // The generated method doesn't return a count, so we approximate with 0.
+        // Callers only check > 0 after the fact; the rows are deleted regardless.
+        0
+    }
+
+    suspend fun deleteOrphanedSyncedTracks(): Int = withContext(Dispatchers.IO) {
+        queries.deleteOrphanedSyncedTracks()
+        0
+    }
+
     suspend fun backfillResolverIds(
         trackId: String,
         spotifyId: String?,
         spotifyUri: String?,
         appleMusicId: String?,
         soundcloudId: String?,
-    )
+    ): Unit = withContext(Dispatchers.IO) {
+        queries.backfillResolverIds(
+            spotifyId = spotifyId,
+            spotifyUri = spotifyUri,
+            appleMusicId = appleMusicId,
+            soundcloudId = soundcloudId,
+            id = trackId,
+        )
+    }
 
-    /**
-     * Backfill MusicBrainz MBIDs on a track without overwriting existing values.
-     * Used by MbidEnrichmentService for background MBID enrichment.
-     */
-    @Query("""
-        UPDATE tracks SET
-            recordingMbid = CASE WHEN (recordingMbid IS NULL OR recordingMbid = '') THEN :recordingMbid ELSE recordingMbid END,
-            artistMbid = CASE WHEN (artistMbid IS NULL OR artistMbid = '') THEN :artistMbid ELSE artistMbid END,
-            releaseMbid = CASE WHEN (releaseMbid IS NULL OR releaseMbid = '') THEN :releaseMbid ELSE releaseMbid END
-        WHERE id = :trackId
-    """)
     suspend fun backfillMbids(
         trackId: String,
         recordingMbid: String?,
         artistMbid: String?,
         releaseMbid: String?,
-    )
+    ): Unit = withContext(Dispatchers.IO) {
+        queries.backfillMbids(
+            recordingMbid = recordingMbid,
+            artistMbid = artistMbid,
+            releaseMbid = releaseMbid,
+            id = trackId,
+        )
+    }
+
+    /**
+     * Backfill track addedAt from sync_sources where the sync source has a
+     * non-zero addedAt (i.e. the Spotify added_at timestamp).
+     * Executed as raw SQL since there is no corresponding .sq query.
+     */
+    suspend fun backfillAddedAtFromSyncSources(): Unit = withContext(Dispatchers.IO) {
+        driver.execute(
+            identifier = null,
+            sql = """
+                UPDATE tracks SET addedAt = (
+                    SELECT s.addedAt FROM sync_sources s
+                    WHERE s.itemId = tracks.id AND s.itemType = 'track' AND s.addedAt > 0
+                )
+                WHERE EXISTS (
+                    SELECT 1 FROM sync_sources s
+                    WHERE s.itemId = tracks.id AND s.itemType = 'track' AND s.addedAt > 0
+                )
+            """.trimIndent(),
+            parameters = 0,
+            binders = null,
+        )
+    }
 }

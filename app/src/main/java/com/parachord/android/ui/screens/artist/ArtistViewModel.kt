@@ -23,7 +23,6 @@ import com.parachord.android.resolver.ResolverManager
 import com.parachord.android.resolver.ResolverScoring
 import com.parachord.android.resolver.TrackResolverCache
 import com.parachord.android.resolver.trackKey
-import dagger.hilt.android.lifecycle.HiltViewModel
 import kotlinx.coroutines.async
 import kotlinx.coroutines.awaitAll
 import kotlinx.coroutines.delay
@@ -35,10 +34,7 @@ import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
 import java.util.UUID
-import javax.inject.Inject
-
-@HiltViewModel
-class ArtistViewModel @Inject constructor(
+class ArtistViewModel constructor(
     savedStateHandle: SavedStateHandle,
     private val metadataService: MetadataService,
     private val resolverManager: ResolverManager,

@@ -1,16 +1,6 @@
 package com.parachord.android.data.db.entity
 
-import androidx.room.Entity
-import androidx.room.PrimaryKey
+import com.parachord.shared.model.Album
 
-@Entity(tableName = "albums")
-data class AlbumEntity(
-    @PrimaryKey val id: String,
-    val title: String,
-    val artist: String,
-    val artworkUrl: String? = null,
-    val year: Int? = null,
-    val trackCount: Int? = null,
-    val addedAt: Long = System.currentTimeMillis(),
-    val spotifyId: String? = null,
-)
+/** Typealias so existing code referencing AlbumEntity continues to compile. */
+typealias AlbumEntity = Album

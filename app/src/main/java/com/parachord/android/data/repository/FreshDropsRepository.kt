@@ -11,7 +11,6 @@ import com.parachord.android.data.db.dao.TrackDao
 import com.parachord.android.data.metadata.MbidEnrichmentService
 import com.parachord.android.data.metadata.MusicBrainzProvider
 import com.parachord.android.data.store.SettingsStore
-import dagger.hilt.android.qualifiers.ApplicationContext
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.Flow
@@ -23,8 +22,6 @@ import kotlinx.serialization.json.Json
 import java.io.File
 import java.time.LocalDate
 import java.time.format.DateTimeFormatter
-import javax.inject.Inject
-import javax.inject.Singleton
 
 /**
  * Repository for Fresh Drops — new releases from artists the user listens to.
@@ -40,9 +37,8 @@ import javax.inject.Singleton
  * artist MBID resolution, avoiding rate-limited MusicBrainz search calls.
  * MBID results are cached to disk with a 90-day TTL (matching desktop).
  */
-@Singleton
-class FreshDropsRepository @Inject constructor(
-    @ApplicationContext private val context: Context,
+class FreshDropsRepository constructor(
+    private val context: Context,
     private val musicBrainzApi: MusicBrainzApi,
     private val lastFmApi: LastFmApi,
     private val listenBrainzApi: ListenBrainzApi,

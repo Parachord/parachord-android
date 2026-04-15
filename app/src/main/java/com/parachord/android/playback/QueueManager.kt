@@ -4,8 +4,6 @@ import com.parachord.android.data.db.entity.TrackEntity
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
-import javax.inject.Inject
-import javax.inject.Singleton
 
 /**
  * Immutable snapshot of the queue state, exposed to UI via StateFlow.
@@ -25,8 +23,7 @@ data class QueueSnapshot(
  *
  * All mutations emit a new [QueueSnapshot] via [snapshot].
  */
-@Singleton
-class QueueManager @Inject constructor() {
+class QueueManager constructor() {
 
     private val upNext = mutableListOf<TrackEntity>()
     private val playHistory = mutableListOf<TrackEntity>()

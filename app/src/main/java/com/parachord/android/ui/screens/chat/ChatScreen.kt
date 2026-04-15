@@ -67,7 +67,7 @@ import androidx.compose.ui.text.withStyle
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
-import androidx.hilt.navigation.compose.hiltViewModel
+import org.koin.androidx.compose.koinViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.parachord.android.ai.ChatCardEnricher
 import com.parachord.android.ai.ChatRole
@@ -198,7 +198,7 @@ fun ChatScreen(
     onNavigateToArtist: (artistName: String) -> Unit = {},
     onNavigateToAlbum: (albumTitle: String, artistName: String) -> Unit = { _, _ -> },
     onPlayTrack: (title: String, artist: String) -> Unit = { _, _ -> },
-    viewModel: ChatViewModel = hiltViewModel(),
+    viewModel: ChatViewModel = koinViewModel(),
 ) {
     val messages by viewModel.messages.collectAsStateWithLifecycle()
     val isLoading by viewModel.isLoading.collectAsStateWithLifecycle()

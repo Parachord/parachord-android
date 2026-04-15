@@ -7,7 +7,6 @@ import android.util.Log
 import androidx.browser.customtabs.CustomTabsIntent
 import com.parachord.android.BuildConfig
 import com.parachord.android.data.store.SettingsStore
-import dagger.hilt.android.qualifiers.ApplicationContext
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
@@ -20,12 +19,9 @@ import okhttp3.OkHttpClient
 import okhttp3.Request
 import java.security.MessageDigest
 import java.security.SecureRandom
-import javax.inject.Inject
-import javax.inject.Singleton
 
-@Singleton
-class OAuthManager @Inject constructor(
-    @ApplicationContext private val context: Context,
+class OAuthManager constructor(
+    private val context: Context,
     private val settingsStore: SettingsStore,
     private val okHttpClient: OkHttpClient,
     private val json: Json,

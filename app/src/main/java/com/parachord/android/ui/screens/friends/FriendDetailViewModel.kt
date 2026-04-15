@@ -22,14 +22,10 @@ import com.parachord.android.resolver.ResolverManager
 import com.parachord.android.resolver.ResolverScoring
 import com.parachord.android.resolver.TrackResolverCache
 import com.parachord.android.resolver.trackKey
-import dagger.hilt.android.lifecycle.HiltViewModel
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.launch
-import javax.inject.Inject
-
-@HiltViewModel
-class FriendDetailViewModel @Inject constructor(
+class FriendDetailViewModel constructor(
     savedStateHandle: SavedStateHandle,
     private val friendsRepository: FriendsRepository,
     private val resolverManager: ResolverManager,

@@ -1,31 +1,69 @@
 package com.parachord.android.data.db.dao
 
-import androidx.room.Dao
-import androidx.room.Insert
-import androidx.room.Query
+import app.cash.sqldelight.coroutines.asFlow
+import app.cash.sqldelight.coroutines.mapToList
+import com.parachord.shared.db.ParachordDb
+import com.parachord.shared.db.Search_history
 import com.parachord.android.data.db.entity.SearchHistoryEntity
+import com.parachord.shared.model.SearchHistory
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.flow.map
+import kotlinx.coroutines.withContext
 
-@Dao
-interface SearchHistoryDao {
+/**
+ * Concrete DAO wrapping SQLDelight [SearchHistoryQueries].
+ * Drop-in replacement for the former Room @Dao interface.
+ */
+class SearchHistoryDao(private val db: ParachordDb) {
 
-    @Query("SELECT * FROM search_history ORDER BY timestamp DESC LIMIT 50")
-    fun getRecent(): Flow<List<SearchHistoryEntity>>
+    private val queries get() = db.searchHistoryQueries
 
-    @Insert
-    suspend fun insert(entry: SearchHistoryEntity)
+    /* ---- Mapping ---- */
+
+    private fun Search_history.toSearchHistory() = SearchHistory(
+        id = id,
+        query = query,
+        resultType = resultType,
+        resultName = resultName,
+        resultArtist = resultArtist,
+        artworkUrl = artworkUrl,
+        timestamp = timestamp,
+    )
+
+    /* ---- Queries returning Flow ---- */
+
+    fun getRecent(): Flow<List<SearchHistoryEntity>> =
+        queries.getRecent().asFlow().mapToList(Dispatchers.IO).map { rows -> rows.map { it.toSearchHistory() } }
+
+    /* ---- Writes ---- */
+
+    suspend fun insert(entry: SearchHistoryEntity): Unit = withContext(Dispatchers.IO) {
+        queries.insert(
+            query = entry.query,
+            resultType = entry.resultType,
+            resultName = entry.resultName,
+            resultArtist = entry.resultArtist,
+            artworkUrl = entry.artworkUrl,
+            timestamp = entry.timestamp,
+        )
+    }
 
     /** Delete older entries with the same query (case-insensitive) before inserting. */
-    @Query("DELETE FROM search_history WHERE LOWER(query) = LOWER(:query)")
-    suspend fun deleteByQuery(query: String)
+    suspend fun deleteByQuery(query: String): Unit = withContext(Dispatchers.IO) {
+        queries.deleteByQuery(query)
+    }
 
-    @Query("DELETE FROM search_history WHERE id = :id")
-    suspend fun deleteById(id: Long)
+    suspend fun deleteById(id: Long): Unit = withContext(Dispatchers.IO) {
+        queries.deleteById(id)
+    }
 
-    @Query("DELETE FROM search_history")
-    suspend fun clearAll()
+    suspend fun clearAll(): Unit = withContext(Dispatchers.IO) {
+        queries.clearAll()
+    }
 
     /** Keep only the 50 most recent entries. */
-    @Query("DELETE FROM search_history WHERE id NOT IN (SELECT id FROM search_history ORDER BY timestamp DESC LIMIT 50)")
-    suspend fun trimToLimit()
+    suspend fun trimToLimit(): Unit = withContext(Dispatchers.IO) {
+        queries.trimToLimit()
+    }
 }

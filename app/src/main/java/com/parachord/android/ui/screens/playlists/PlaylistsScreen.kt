@@ -53,7 +53,7 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.em
 import androidx.compose.ui.unit.sp
-import androidx.hilt.navigation.compose.hiltViewModel
+import org.koin.androidx.compose.koinViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import kotlinx.coroutines.launch
 import com.parachord.android.ui.components.AlbumArtCard
@@ -71,7 +71,7 @@ fun PlaylistsScreen(
     onOpenDrawer: () -> Unit = {},
     onNavigateToPlaylist: (playlistId: String) -> Unit = {},
     modifier: Modifier = Modifier,
-    viewModel: PlaylistsViewModel = hiltViewModel(),
+    viewModel: PlaylistsViewModel = koinViewModel(),
 ) {
     val playlists by viewModel.playlists.collectAsStateWithLifecycle()
     val sortedPlaylists by viewModel.sortedPlaylists.collectAsStateWithLifecycle()

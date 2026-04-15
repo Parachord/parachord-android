@@ -45,7 +45,7 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.em
-import androidx.hilt.navigation.compose.hiltViewModel
+import org.koin.androidx.compose.koinViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import coil.compose.AsyncImage
 import com.parachord.android.data.db.entity.SearchHistoryEntity
@@ -61,7 +61,7 @@ fun SearchScreen(
     onNavigateToAlbum: (albumTitle: String, artistName: String) -> Unit = { _, _ -> },
     onOpenDrawer: () -> Unit = {},
     modifier: Modifier = Modifier,
-    viewModel: SearchViewModel = hiltViewModel(),
+    viewModel: SearchViewModel = koinViewModel(),
 ) {
     val query by viewModel.query.collectAsStateWithLifecycle()
     val localTracks by viewModel.localTrackResults.collectAsStateWithLifecycle()
@@ -312,8 +312,12 @@ fun SearchScreen(
                 onEntryClick = { entry ->
                     when (entry.resultType) {
                         "artist" -> entry.resultName?.let { onNavigateToArtist(it) }
-                        "album" -> if (entry.resultName != null && entry.resultArtist != null) {
-                            onNavigateToAlbum(entry.resultName, entry.resultArtist)
+                        "album" -> {
+                            val name = entry.resultName
+                            val artist = entry.resultArtist
+                            if (name != null && artist != null) {
+                                onNavigateToAlbum(name, artist)
+                            }
                         }
                         else -> {
                             viewModel.onQueryChange(entry.query)

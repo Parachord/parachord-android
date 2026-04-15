@@ -57,7 +57,7 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.em
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.zIndex
-import androidx.hilt.navigation.compose.hiltViewModel
+import org.koin.androidx.compose.koinViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.parachord.android.data.db.entity.PlaylistTrackEntity
 import com.parachord.android.ui.components.AlbumArtCard
@@ -71,7 +71,7 @@ fun EditPlaylistScreen(
     onBack: () -> Unit,
     onPlaylistDeleted: () -> Unit,
     modifier: Modifier = Modifier,
-    viewModel: EditPlaylistViewModel = hiltViewModel(),
+    viewModel: EditPlaylistViewModel = koinViewModel(),
 ) {
     val playlist by viewModel.playlist.collectAsStateWithLifecycle()
     val tracks by viewModel.editableTracks.collectAsStateWithLifecycle()

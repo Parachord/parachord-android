@@ -1,16 +1,6 @@
 package com.parachord.android.data.db.entity
 
-import androidx.room.Entity
+import com.parachord.shared.model.SyncSource
 
-@Entity(
-    tableName = "sync_sources",
-    primaryKeys = ["itemId", "itemType", "providerId"],
-)
-data class SyncSourceEntity(
-    val itemId: String,
-    val itemType: String,
-    val providerId: String,
-    val externalId: String? = null,
-    val addedAt: Long = 0L,
-    val syncedAt: Long = System.currentTimeMillis(),
-)
+/** Typealias so existing code referencing SyncSourceEntity continues to compile. */
+typealias SyncSourceEntity = SyncSource

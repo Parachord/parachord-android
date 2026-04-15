@@ -6,21 +6,17 @@ import android.net.Network
 import android.net.NetworkCapabilities
 import android.net.NetworkRequest
 import android.util.Log
-import dagger.hilt.android.qualifiers.ApplicationContext
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
-import javax.inject.Inject
-import javax.inject.Singleton
 
 /**
  * Monitors device network connectivity via ConnectivityManager callbacks.
  * Exposes a reactive [isOnline] flow that the UI can observe.
  */
-@Singleton
-class NetworkMonitor @Inject constructor(
-    @ApplicationContext private val context: Context,
-) {
+class NetworkMonitor constructor(
+    private val context: Context,
+) : com.parachord.shared.network.NetworkMonitor {
     companion object {
         private const val TAG = "NetworkMonitor"
     }
@@ -30,7 +26,7 @@ class NetworkMonitor @Inject constructor(
 
     private val _isOnline = MutableStateFlow(checkCurrentConnectivity())
     /** True when the device has an internet-capable network connection. */
-    val isOnline: StateFlow<Boolean> = _isOnline.asStateFlow()
+    override val isOnline: StateFlow<Boolean> = _isOnline.asStateFlow()
 
     private val networkCallback = object : ConnectivityManager.NetworkCallback() {
         override fun onAvailable(network: Network) {

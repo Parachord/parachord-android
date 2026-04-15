@@ -5,16 +5,12 @@ import android.util.Log
 import android.widget.Toast
 import androidx.work.*
 import com.parachord.android.data.store.SettingsStore
-import dagger.hilt.android.qualifiers.ApplicationContext
 import kotlinx.coroutines.*
 import kotlinx.coroutines.flow.first
 import java.util.concurrent.TimeUnit
-import javax.inject.Inject
-import javax.inject.Singleton
 
-@Singleton
-class SyncScheduler @Inject constructor(
-    @ApplicationContext private val context: Context,
+class SyncScheduler constructor(
+    private val context: Context,
     private val syncEngine: SyncEngine,
     private val settingsStore: SettingsStore,
 ) {

@@ -10,15 +10,12 @@ import kotlinx.coroutines.flow.firstOrNull
 import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
-import javax.inject.Inject
-import javax.inject.Singleton
 
 /**
  * Gathers current app state and builds the AI system prompt,
  * matching the desktop app's ai-chat.js approach.
  */
-@Singleton
-class ChatContextProvider @Inject constructor(
+class ChatContextProvider constructor(
     private val playbackStateHolder: PlaybackStateHolder,
     private val settingsStore: SettingsStore,
     private val historyRepository: HistoryRepository,

@@ -16,7 +16,6 @@ import com.parachord.android.playback.PlaybackController
 import com.parachord.android.resolver.PlaylistTrackInfo
 import com.parachord.android.resolver.TrackResolverCache
 import com.parachord.android.sync.SpotifySyncProvider
-import dagger.hilt.android.lifecycle.HiltViewModel
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
@@ -24,10 +23,7 @@ import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
-import javax.inject.Inject
-
-@HiltViewModel
-class PlaylistDetailViewModel @Inject constructor(
+class PlaylistDetailViewModel constructor(
     savedStateHandle: SavedStateHandle,
     private val playlistDao: PlaylistDao,
     private val playlistTrackDao: PlaylistTrackDao,

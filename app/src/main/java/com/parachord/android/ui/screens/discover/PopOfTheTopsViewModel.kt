@@ -18,15 +18,11 @@ import com.parachord.android.resolver.ResolverManager
 import com.parachord.android.resolver.ResolverScoring
 import com.parachord.android.resolver.TrackResolverCache
 import com.parachord.android.resolver.trackKey
-import dagger.hilt.android.lifecycle.HiltViewModel
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.launch
-import javax.inject.Inject
-
-@HiltViewModel
-class PopOfTheTopsViewModel @Inject constructor(
+class PopOfTheTopsViewModel constructor(
     private val chartsRepository: ChartsRepository,
     private val resolverManager: ResolverManager,
     private val resolverScoring: ResolverScoring,

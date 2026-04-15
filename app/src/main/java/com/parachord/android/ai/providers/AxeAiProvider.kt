@@ -52,9 +52,10 @@ class AxeAiProvider(
                 add(buildJsonObject {
                     put("role", msg.role.name.lowercase())
                     put("content", msg.content)
-                    if (msg.toolCalls != null) {
+                    val toolCalls = msg.toolCalls
+                    if (toolCalls != null) {
                         put("toolCalls", buildJsonArray {
-                            for (tc in msg.toolCalls) {
+                            for (tc in toolCalls) {
                                 add(buildJsonObject {
                                     put("id", tc.id)
                                     put("name", tc.name)
@@ -78,8 +79,8 @@ class AxeAiProvider(
                 add(buildJsonObject {
                     put("name", tool.name)
                     put("description", tool.description)
-                    if (tool.parameters != null) {
-                        put("parameters", tool.parameters)
+                    tool.parameters?.let { params ->
+                        put("parameters", params)
                     }
                 })
             }

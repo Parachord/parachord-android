@@ -59,7 +59,7 @@ import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.em
 import androidx.compose.ui.unit.sp
-import androidx.hilt.navigation.compose.hiltViewModel
+import org.koin.androidx.compose.koinViewModel
 import coil.compose.SubcomposeAsyncImage
 import com.parachord.android.data.db.entity.FriendEntity
 import com.parachord.android.data.repository.Resource
@@ -81,7 +81,7 @@ fun FriendsScreen(
     onBack: () -> Unit,
     onNavigateToFriend: (String) -> Unit = {},
     modifier: Modifier = Modifier,
-    viewModel: FriendsViewModel = hiltViewModel(),
+    viewModel: FriendsViewModel = koinViewModel(),
 ) {
     val friends by viewModel.friends.collectAsState()
     val showAddDialog by viewModel.showAddDialog.collectAsState()

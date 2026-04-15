@@ -62,7 +62,7 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.em
 import androidx.compose.ui.unit.sp
 import coil.compose.AsyncImage
-import androidx.hilt.navigation.compose.hiltViewModel
+import org.koin.androidx.compose.koinViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.parachord.android.ui.components.AlbumArtCard
 import com.parachord.android.ui.components.ContextMenuItem
@@ -84,7 +84,7 @@ fun PlaylistDetailScreen(
     onNavigateToAlbum: (albumTitle: String, artistName: String) -> Unit = { _, _ -> },
     onNavigateToEdit: () -> Unit = {},
     modifier: Modifier = Modifier,
-    viewModel: PlaylistDetailViewModel = hiltViewModel(),
+    viewModel: PlaylistDetailViewModel = koinViewModel(),
 ) {
     val playlist by viewModel.playlist.collectAsStateWithLifecycle()
     val tracks by viewModel.tracks.collectAsStateWithLifecycle()

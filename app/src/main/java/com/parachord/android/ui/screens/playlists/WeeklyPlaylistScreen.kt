@@ -44,7 +44,7 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.em
 import androidx.compose.ui.unit.sp
 import coil.compose.AsyncImage
-import androidx.hilt.navigation.compose.hiltViewModel
+import org.koin.androidx.compose.koinViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.parachord.android.ui.components.TrackContextInfo
 import com.parachord.android.ui.components.TrackContextMenuHost
@@ -58,7 +58,7 @@ fun WeeklyPlaylistScreen(
     onNavigateToArtist: (String) -> Unit = {},
     onNavigateToAlbum: (albumTitle: String, artistName: String) -> Unit = { _, _ -> },
     modifier: Modifier = Modifier,
-    viewModel: WeeklyPlaylistViewModel = hiltViewModel(),
+    viewModel: WeeklyPlaylistViewModel = koinViewModel(),
 ) {
     val title by viewModel.title.collectAsStateWithLifecycle()
     val weekLabel by viewModel.weekLabel.collectAsStateWithLifecycle()

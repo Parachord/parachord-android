@@ -1,16 +1,6 @@
 package com.parachord.android.data.db.entity
 
-import androidx.room.Entity
-import androidx.room.PrimaryKey
+import com.parachord.shared.model.SearchHistory
 
-@Entity(tableName = "search_history")
-data class SearchHistoryEntity(
-    @PrimaryKey(autoGenerate = true) val id: Long = 0,
-    val query: String,
-    /** "artist", "album", "track" */
-    val resultType: String? = null,
-    val resultName: String? = null,
-    val resultArtist: String? = null,
-    val artworkUrl: String? = null,
-    val timestamp: Long = System.currentTimeMillis(),
-)
+/** Typealias so existing code referencing SearchHistoryEntity continues to compile. */
+typealias SearchHistoryEntity = SearchHistory

@@ -27,7 +27,6 @@ import com.parachord.android.resolver.ResolverScoring
 import com.parachord.android.resolver.TrackResolverCache
 import com.parachord.android.resolver.trackKey
 import com.parachord.android.widget.MiniPlayerWidgetUpdater
-import dagger.hilt.android.qualifiers.ApplicationContext
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
@@ -38,8 +37,6 @@ import kotlinx.coroutines.launch
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withContext
-import javax.inject.Inject
-import javax.inject.Singleton
 
 /**
  * Bridges the UI layer to the PlaybackService via MediaController, and routes
@@ -52,9 +49,8 @@ import javax.inject.Singleton
  * - ExoPlayer: local files, direct streams, SoundCloud (all via MediaController)
  * - External: Spotify Connect via Web API (manages its own playback lifecycle)
  */
-@Singleton
-class PlaybackController @Inject constructor(
-    @ApplicationContext private val context: Context,
+class PlaybackController constructor(
+    private val context: Context,
     private val stateHolder: PlaybackStateHolder,
     private val router: PlaybackRouter,
     private val queueManager: QueueManager,
@@ -1611,14 +1607,15 @@ class PlaybackController @Inject constructor(
 
     private fun enrichArtworkIfMissing(track: TrackEntity) {
         // Obviously missing — go straight to enrichment
-        if (track.artworkUrl.isNullOrBlank()) {
+        val artUrl = track.artworkUrl
+        if (artUrl.isNullOrBlank()) {
             fetchAndApplyArtwork(track)
             return
         }
         // Local albumart content URI — might be broken, validate on IO thread
-        if (track.artworkUrl.startsWith("content://media/external/audio/albumart")) {
+        if (artUrl.startsWith("content://media/external/audio/albumart")) {
             scope.launch(Dispatchers.IO) {
-                if (isStaleLocalArtwork(track.artworkUrl)) {
+                if (isStaleLocalArtwork(artUrl)) {
                     fetchAndApplyArtwork(track)
                 }
             }

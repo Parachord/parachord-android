@@ -91,7 +91,7 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.em
 import androidx.compose.ui.unit.sp
 import coil.compose.SubcomposeAsyncImage
-import androidx.hilt.navigation.compose.hiltViewModel
+import org.koin.androidx.compose.koinViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.parachord.android.data.db.entity.AlbumEntity
 import com.parachord.android.data.db.entity.FriendEntity
@@ -135,7 +135,7 @@ fun HomeScreen(
     onNavigateToPlaylists: () -> Unit = {},
     onNavigateToWeeklyPlaylist: (playlistId: String, contextType: String) -> Unit = { _, _ -> },
     modifier: Modifier = Modifier,
-    viewModel: HomeViewModel = hiltViewModel(),
+    viewModel: HomeViewModel = koinViewModel(),
 ) {
     val recentTracks by viewModel.recentTracks.collectAsStateWithLifecycle()
     val hasLibrary by viewModel.hasLibrary.collectAsStateWithLifecycle()

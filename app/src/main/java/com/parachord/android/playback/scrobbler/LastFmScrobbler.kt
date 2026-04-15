@@ -8,8 +8,6 @@ import okhttp3.FormBody
 import okhttp3.OkHttpClient
 import okhttp3.Request
 import java.security.MessageDigest
-import javax.inject.Inject
-import javax.inject.Singleton
 
 /**
  * Last.fm scrobbler — sends signed POST requests to ws.audioscrobbler.com.
@@ -17,8 +15,7 @@ import javax.inject.Singleton
  * Mirrors the desktop app's lastfm-scrobbler behavior. Uses MD5-signed
  * form POST with sorted key/value pairs + shared secret.
  */
-@Singleton
-class LastFmScrobbler @Inject constructor(
+class LastFmScrobbler constructor(
     private val settingsStore: SettingsStore,
     private val okHttpClient: OkHttpClient,
 ) : Scrobbler {

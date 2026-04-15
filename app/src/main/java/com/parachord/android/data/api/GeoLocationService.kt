@@ -7,8 +7,6 @@ import kotlinx.serialization.Serializable
 import kotlinx.serialization.json.Json
 import okhttp3.OkHttpClient
 import okhttp3.Request
-import javax.inject.Inject
-import javax.inject.Singleton
 
 /**
  * GeoIP + Nominatim geocoding service matching the desktop's location detection.
@@ -18,8 +16,7 @@ import javax.inject.Singleton
  * 2. Reverse geocode with Nominatim to get city name
  * 3. Forward geocode with Nominatim for user-typed location search
  */
-@Singleton
-class GeoLocationService @Inject constructor(
+class GeoLocationService constructor(
     private val okHttpClient: OkHttpClient,
 ) {
     companion object {

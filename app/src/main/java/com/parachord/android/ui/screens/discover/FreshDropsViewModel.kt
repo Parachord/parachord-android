@@ -5,13 +5,10 @@ import androidx.lifecycle.viewModelScope
 import com.parachord.android.data.repository.FreshDrop
 import com.parachord.android.data.repository.FreshDropsRepository
 import com.parachord.android.data.repository.Resource
-import dagger.hilt.android.lifecycle.HiltViewModel
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.launch
-import javax.inject.Inject
-
 /**
  * ViewModel for the Fresh Drops screen.
  *
@@ -20,8 +17,7 @@ import javax.inject.Inject
  * - Filter options: all (default), album, ep, single
  * - Search by release title or artist name
  */
-@HiltViewModel
-class FreshDropsViewModel @Inject constructor(
+class FreshDropsViewModel constructor(
     private val repository: FreshDropsRepository,
 ) : ViewModel() {
 

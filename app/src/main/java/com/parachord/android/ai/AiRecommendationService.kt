@@ -19,10 +19,7 @@ import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.jsonArray
 import kotlinx.serialization.json.jsonObject
 import kotlinx.serialization.json.jsonPrimitive
-import dagger.hilt.android.qualifiers.ApplicationContext
 import java.io.File
-import javax.inject.Inject
-import javax.inject.Singleton
 
 @kotlinx.serialization.Serializable
 data class AiAlbumSuggestion(
@@ -56,9 +53,8 @@ internal data class AiSuggestionsDiskCache(
  * loadAiRecommendations() logic. Uses the first configured AI provider to generate
  * suggestions based on the user's listening history and collection.
  */
-@Singleton
-class AiRecommendationService @Inject constructor(
-    @ApplicationContext private val context: Context,
+class AiRecommendationService constructor(
+    private val context: Context,
     private val settingsStore: SettingsStore,
     private val historyRepository: HistoryRepository,
     private val libraryRepository: LibraryRepository,

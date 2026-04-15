@@ -25,7 +25,7 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
-import androidx.hilt.navigation.compose.hiltViewModel
+import org.koin.androidx.compose.koinViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.parachord.android.sync.SyncEngine
 import com.parachord.android.ui.components.AlbumArtCard
@@ -36,7 +36,7 @@ private val SpotifyGreen = Color(0xFF1DB954)
 @Composable
 fun SyncSetupSheet(
     onDismiss: () -> Unit,
-    viewModel: SyncViewModel = hiltViewModel(),
+    viewModel: SyncViewModel = koinViewModel(),
 ) {
     val currentStep by viewModel.currentStep.collectAsStateWithLifecycle()
     val sheetState = rememberModalBottomSheetState(

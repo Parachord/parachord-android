@@ -12,7 +12,6 @@ import com.parachord.android.playback.PlaybackState
 import com.parachord.android.playback.PlaybackStateHolder
 import com.parachord.android.resolver.TrackResolverCache
 import android.util.Log
-import dagger.hilt.android.lifecycle.HiltViewModel
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
@@ -21,10 +20,7 @@ import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
-import javax.inject.Inject
-
-@HiltViewModel
-class NowPlayingViewModel @Inject constructor(
+class NowPlayingViewModel constructor(
     private val playbackStateHolder: PlaybackStateHolder,
     private val playbackController: PlaybackController,
     private val libraryRepository: LibraryRepository,

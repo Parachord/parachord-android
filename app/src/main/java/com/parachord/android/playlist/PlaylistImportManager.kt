@@ -15,8 +15,6 @@ import okhttp3.OkHttpClient
 import okhttp3.Request
 import retrofit2.HttpException
 import java.util.UUID
-import javax.inject.Inject
-import javax.inject.Singleton
 
 private const val TAG = "PlaylistImportManager"
 
@@ -26,8 +24,7 @@ data class ImportResult(
     val trackCount: Int,
 )
 
-@Singleton
-class PlaylistImportManager @Inject constructor(
+class PlaylistImportManager constructor(
     private val spotifyApi: SpotifyApi,
     private val musicKitBridge: MusicKitWebBridge,
     private val libraryRepository: LibraryRepository,

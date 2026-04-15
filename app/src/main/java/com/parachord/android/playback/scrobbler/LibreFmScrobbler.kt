@@ -4,8 +4,6 @@ import android.util.Log
 import com.parachord.android.data.db.entity.TrackEntity
 import com.parachord.android.data.store.SettingsStore
 import okhttp3.OkHttpClient
-import javax.inject.Inject
-import javax.inject.Singleton
 
 /**
  * Libre.fm scrobbler — uses the same Last.fm-compatible API protocol
@@ -17,8 +15,7 @@ import javax.inject.Singleton
  * The API key and shared secret are both the placeholder value
  * `00000000000000000000000000000000` as per Libre.fm convention.
  */
-@Singleton
-class LibreFmScrobbler @Inject constructor(
+class LibreFmScrobbler constructor(
     private val settingsStore: SettingsStore,
     private val okHttpClient: OkHttpClient,
     private val lastFmScrobbler: LastFmScrobbler, // Reuse signing logic

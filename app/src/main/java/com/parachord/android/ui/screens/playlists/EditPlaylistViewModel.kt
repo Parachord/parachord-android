@@ -7,7 +7,6 @@ import com.parachord.android.data.db.dao.PlaylistDao
 import com.parachord.android.data.db.entity.PlaylistEntity
 import com.parachord.android.data.db.entity.PlaylistTrackEntity
 import com.parachord.android.data.repository.LibraryRepository
-import dagger.hilt.android.lifecycle.HiltViewModel
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
@@ -15,10 +14,7 @@ import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
-import javax.inject.Inject
-
-@HiltViewModel
-class EditPlaylistViewModel @Inject constructor(
+class EditPlaylistViewModel constructor(
     savedStateHandle: SavedStateHandle,
     private val playlistDao: PlaylistDao,
     private val libraryRepository: LibraryRepository,

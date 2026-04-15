@@ -13,7 +13,6 @@ import com.parachord.android.ai.providers.ChatGptProvider
 import com.parachord.android.ai.providers.ClaudeProvider
 import com.parachord.android.ai.providers.GeminiProvider
 import com.parachord.android.data.store.SettingsStore
-import dagger.hilt.android.lifecycle.HiltViewModel
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
@@ -21,10 +20,7 @@ import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
-import javax.inject.Inject
-
-@HiltViewModel
-class ChatViewModel @Inject constructor(
+class ChatViewModel constructor(
     private val chatService: AiChatService,
     private val settingsStore: SettingsStore,
     private val chatGptProvider: ChatGptProvider,

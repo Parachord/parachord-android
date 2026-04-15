@@ -12,16 +12,13 @@ import kotlinx.coroutines.awaitAll
 import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.flow
-import javax.inject.Inject
-import javax.inject.Singleton
 import kotlin.math.abs
 
 /**
  * Repository for listening history data, fetching from Last.fm and ListenBrainz.
  * Mirrors the desktop app's history page data sources.
  */
-@Singleton
-class HistoryRepository @Inject constructor(
+class HistoryRepository constructor(
     private val lastFmApi: LastFmApi,
     private val listenBrainzApi: ListenBrainzApi,
     private val settingsStore: SettingsStore,

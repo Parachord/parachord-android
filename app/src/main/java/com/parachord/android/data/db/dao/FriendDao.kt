@@ -1,46 +1,94 @@
 package com.parachord.android.data.db.dao
 
-import androidx.room.Dao
-import androidx.room.Insert
-import androidx.room.OnConflictStrategy
-import androidx.room.Query
+import app.cash.sqldelight.coroutines.asFlow
+import app.cash.sqldelight.coroutines.mapToList
+import com.parachord.shared.db.Friends
+import com.parachord.shared.db.ParachordDb
 import com.parachord.android.data.db.entity.FriendEntity
+import com.parachord.shared.model.Friend
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.flow.map
+import kotlinx.coroutines.withContext
 
-@Dao
-interface FriendDao {
+/**
+ * Concrete DAO wrapping SQLDelight [FriendQueries].
+ * Drop-in replacement for the former Room @Dao interface.
+ */
+class FriendDao(private val db: ParachordDb) {
 
-    @Query("SELECT * FROM friends ORDER BY addedAt DESC")
-    fun getAllFriends(): Flow<List<FriendEntity>>
+    private val queries get() = db.friendQueries
 
-    @Query("SELECT * FROM friends ORDER BY addedAt DESC")
-    suspend fun getAllFriendsSync(): List<FriendEntity>
+    /* ---- Mapping ---- */
 
-    @Query("SELECT * FROM friends WHERE id = :id")
-    suspend fun getFriendById(id: String): FriendEntity?
-
-    @Insert(onConflict = OnConflictStrategy.REPLACE)
-    suspend fun upsert(friend: FriendEntity)
-
-    @Query("DELETE FROM friends WHERE id = :id")
-    suspend fun delete(id: String)
-
-    @Query("SELECT * FROM friends WHERE pinnedToSidebar = 1 ORDER BY cachedTrackTimestamp DESC")
-    fun getPinnedFriends(): Flow<List<FriendEntity>>
-
-    @Query("UPDATE friends SET pinnedToSidebar = :pinned, autoPinned = :auto WHERE id = :id")
-    suspend fun setPinned(id: String, pinned: Boolean, auto: Boolean = false)
-
-    @Query(
-        """UPDATE friends SET
-            cachedTrackName = :name,
-            cachedTrackArtist = :artist,
-            cachedTrackAlbum = :album,
-            cachedTrackTimestamp = :timestamp,
-            cachedTrackArtworkUrl = :artworkUrl,
-            lastFetchedAt = :fetchedAt
-        WHERE id = :id""",
+    private fun Friends.toFriend() = Friend(
+        id = id,
+        username = username,
+        service = service,
+        displayName = displayName,
+        avatarUrl = avatarUrl,
+        addedAt = addedAt,
+        lastFetchedAt = lastFetchedAt,
+        cachedTrackName = cachedTrackName,
+        cachedTrackArtist = cachedTrackArtist,
+        cachedTrackAlbum = cachedTrackAlbum,
+        cachedTrackTimestamp = cachedTrackTimestamp,
+        cachedTrackArtworkUrl = cachedTrackArtworkUrl,
+        pinnedToSidebar = pinnedToSidebar != 0L,
+        autoPinned = autoPinned != 0L,
     )
+
+    /* ---- Queries returning Flow ---- */
+
+    fun getAllFriends(): Flow<List<FriendEntity>> =
+        queries.getAll().asFlow().mapToList(Dispatchers.IO).map { rows -> rows.map { it.toFriend() } }
+
+    fun getPinnedFriends(): Flow<List<FriendEntity>> =
+        queries.getPinned().asFlow().mapToList(Dispatchers.IO).map { rows -> rows.map { it.toFriend() } }
+
+    /* ---- Suspend one-shot reads ---- */
+
+    suspend fun getAllFriendsSync(): List<FriendEntity> = withContext(Dispatchers.IO) {
+        queries.getAll().executeAsList().map { it.toFriend() }
+    }
+
+    suspend fun getFriendById(id: String): FriendEntity? = withContext(Dispatchers.IO) {
+        queries.getById(id).executeAsOneOrNull()?.toFriend()
+    }
+
+    /* ---- Writes ---- */
+
+    suspend fun upsert(friend: FriendEntity): Unit = withContext(Dispatchers.IO) {
+        queries.upsert(
+            id = friend.id,
+            username = friend.username,
+            service = friend.service,
+            displayName = friend.displayName,
+            avatarUrl = friend.avatarUrl,
+            addedAt = friend.addedAt,
+            lastFetchedAt = friend.lastFetchedAt,
+            cachedTrackName = friend.cachedTrackName,
+            cachedTrackArtist = friend.cachedTrackArtist,
+            cachedTrackAlbum = friend.cachedTrackAlbum,
+            cachedTrackTimestamp = friend.cachedTrackTimestamp,
+            cachedTrackArtworkUrl = friend.cachedTrackArtworkUrl,
+            pinnedToSidebar = if (friend.pinnedToSidebar) 1L else 0L,
+            autoPinned = if (friend.autoPinned) 1L else 0L,
+        )
+    }
+
+    suspend fun delete(id: String): Unit = withContext(Dispatchers.IO) {
+        queries.deleteById(id)
+    }
+
+    suspend fun setPinned(id: String, pinned: Boolean, auto: Boolean = false): Unit = withContext(Dispatchers.IO) {
+        queries.setPinned(
+            pinnedToSidebar = if (pinned) 1L else 0L,
+            autoPinned = if (auto) 1L else 0L,
+            id = id,
+        )
+    }
+
     suspend fun updateCachedTrack(
         id: String,
         name: String?,
@@ -49,5 +97,15 @@ interface FriendDao {
         timestamp: Long,
         artworkUrl: String?,
         fetchedAt: Long,
-    )
+    ): Unit = withContext(Dispatchers.IO) {
+        queries.updateCachedTrack(
+            cachedTrackName = name,
+            cachedTrackArtist = artist,
+            cachedTrackAlbum = album,
+            cachedTrackTimestamp = timestamp,
+            cachedTrackArtworkUrl = artworkUrl,
+            lastFetchedAt = fetchedAt,
+            id = id,
+        )
+    }
 }
