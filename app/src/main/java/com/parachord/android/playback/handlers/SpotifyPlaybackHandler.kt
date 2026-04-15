@@ -209,9 +209,12 @@ class SpotifyPlaybackHandler constructor(
 
         // ── Phase 7: Optimistic warm-path ────────────────────────────
         // When device is already verified and we have a preferred device,
-        // fire startPlayback immediately without any device fetch or polling.
-        // This eliminates the ~800ms delay (and media button broadcast that
-        // causes audio ducking) during warm Spotify→Spotify transitions.
+        // verify it's still present in Spotify's device list (one lightweight
+        // API call), then fire startPlayback directly. Skipping the verification
+        // caused stale device IDs (Spotify restarted since last resolve) to
+        // return 404 from startPlayback and fall through to the slow full flow —
+        // which includes the visible Spotify launch intent. Now we detect
+        // staleness via getDevices and fall through to the proper wake flow.
         val preferredId = settingsStore.getPreferredSpotifyDeviceId()
         val warmDeviceId = when {
             preferredId != null && preferredId != LOCAL_DEVICE_ID -> preferredId
@@ -219,19 +222,27 @@ class SpotifyPlaybackHandler constructor(
             else -> null
         }
         if (deviceVerified && warmDeviceId != null) {
-            Log.d(TAG, "Warm path: firing startPlayback directly on device=$warmDeviceId")
             try {
-                val resp = spotifyApi.startPlayback(auth, SpPlaybackRequest(uris = listOf(uri)), deviceId = warmDeviceId)
-                if (resp.isSuccessful || resp.code() == 204) {
-                    Log.d(TAG, "Warm path succeeded in ${System.currentTimeMillis() - flowStart}ms")
-                    return true
+                val currentDevices = spotifyApi.getDevices(auth).devices
+                val stillAlive = currentDevices.any { it.id == warmDeviceId }
+                if (stillAlive) {
+                    Log.d(TAG, "Warm path: firing startPlayback directly on device=$warmDeviceId")
+                    val resp = spotifyApi.startPlayback(auth, SpPlaybackRequest(uris = listOf(uri)), deviceId = warmDeviceId)
+                    if (resp.isSuccessful || resp.code() == 204) {
+                        Log.d(TAG, "Warm path succeeded in ${System.currentTimeMillis() - flowStart}ms")
+                        return true
+                    }
+                    Log.d(TAG, "Warm path startPlayback failed (${resp.code()}), falling through")
+                } else {
+                    Log.d(TAG, "Warm path: cached device $warmDeviceId no longer in device list — invalidating and falling through")
                 }
-                Log.d(TAG, "Warm path failed (${resp.code()}), falling through to full flow")
             } catch (e: Exception) {
                 Log.d(TAG, "Warm path error: ${e.message}, falling through to full flow")
             }
-            // Fall through: device may have gone offline, do full flow
+            // Fall through: device went offline or Spotify restarted. Clear
+            // the cached resolved ID so resolveLocalDevice re-fetches it.
             lastResolvedLocalId = null
+            deviceVerified = false
         }
 
         // ── Phase 1+3: Ensure device ─────────────────────────────────
