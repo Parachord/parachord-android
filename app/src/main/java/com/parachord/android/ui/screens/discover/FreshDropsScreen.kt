@@ -441,14 +441,17 @@ private fun FreshDropRow(
                 maxLines = 2,
                 overflow = TextOverflow.Ellipsis,
             )
-            // Artist (tappable)
+            // Artist (NOT tappable — the whole row navigates to the album.
+            // Nested clickables combined with progressive list updates can fire
+            // both the row click AND the text click with stale closures,
+            // navigating to one release's album and a different release's
+            // artist. Users can open the artist from the album page.)
             Text(
                 text = release.artist,
                 style = MaterialTheme.typography.bodyMedium,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
                 maxLines = 1,
                 overflow = TextOverflow.Ellipsis,
-                modifier = Modifier.hapticClickable(onClick = onArtistClick),
             )
             Spacer(modifier = Modifier.height(4.dp))
             // Date + type badge row
