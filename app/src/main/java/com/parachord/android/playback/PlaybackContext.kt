@@ -1,14 +1,7 @@
+@file:Suppress("unused")
 package com.parachord.android.playback
 
-import kotlinx.serialization.Serializable
-
 /**
- * Tags a queue with its source collection, matching the desktop's
- * `_playbackContext` pattern (e.g. `{type: 'playlist', id: '...', name: 'My Playlist'}`).
+ * Re-export from shared module for backward compatibility.
  */
-@Serializable
-data class PlaybackContext(
-    val type: String,  // "album", "playlist", "artist", "search", etc.
-    val name: String,  // "Abbey Road", "My Playlist", etc.
-    val id: String? = null,  // Playlist ID, used for navigation back to source
-)
+typealias PlaybackContext = com.parachord.shared.playback.PlaybackContext
