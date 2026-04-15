@@ -251,21 +251,11 @@ class SpotifyPlaybackHandler constructor(
         }
         Log.d(TAG, "Target: '${targetDevice.name}' (type=${targetDevice.type}, active=${targetDevice.isActive})")
 
-        // ── Phase 4: Transfer (no hardcoded delay) ───────────────────
+        // Skip explicit transferPlayback — startPlayback with device_id activates
+        // the device automatically. The separate transfer causes a ~270ms blip where
+        // Spotify auto-resumes its last track before our startPlayback replaces it.
         if (!targetDevice.isActive) {
-            Log.d(TAG, "Transferring playback to '${targetDevice.name}'")
-            try {
-                val transferResp = spotifyApi.transferPlayback(auth, SpTransferRequest(deviceIds = listOf(targetDevice.id)))
-                if (!transferResp.isSuccessful) {
-                    Log.w(TAG, "Transfer returned ${transferResp.code()}: ${transferResp.errorBody()?.string()}")
-                } else {
-                    Log.d(TAG, "Transfer accepted (${transferResp.code()})")
-                }
-            } catch (e: Exception) {
-                Log.w(TAG, "Transfer failed (non-fatal): ${e.message}")
-            }
-            // No hardcoded delay — device_id on startPlayback routes correctly.
-            // On 502 (device not ready), we retry once below.
+            Log.d(TAG, "Device '${targetDevice.name}' inactive — startPlayback with device_id will activate it")
         }
 
         // ── Phase 2: Start playback (single retry on 502) ───────────
@@ -450,7 +440,12 @@ class SpotifyPlaybackHandler constructor(
                 fallbackFired = true
                 Log.d(TAG, "Broadcast didn't wake Spotify after 2s, trying launch intent fallback")
                 launchSpotifyFallback()
-                deadline = System.currentTimeMillis() + 12_000
+                delay(1500)
+                try {
+                    spotifyApi.pausePlayback(auth)
+                    Log.d(TAG, "Sent pausePlayback after launch intent to prevent auto-resume")
+                } catch (_: Exception) {}
+                deadline = System.currentTimeMillis() + 18_000
             }
             delay(WAKE_POLL_INTERVAL_MS)
         }
@@ -513,10 +508,20 @@ class SpotifyPlaybackHandler constructor(
                 fallbackFired = true
                 Log.d(TAG, "Broadcast didn't wake local Spotify after 2s, trying launch intent")
                 launchSpotifyFallback()
-                // Extend deadline — cold-launching Spotify needs ~10-15s to register
+                // Pause immediately after launch to prevent Spotify from auto-resuming
+                // its own last track. This fires even before the device appears in
+                // the Connect API — Spotify's own app process handles the pause.
+                delay(1500) // Give Spotify a moment to start before pausing
+                try {
+                    spotifyApi.pausePlayback(auth)
+                    Log.d(TAG, "Sent pausePlayback after launch intent to prevent auto-resume")
+                } catch (_: Exception) {
+                    Log.d(TAG, "pausePlayback after launch failed (Spotify may not be ready yet)")
+                }
+                // Extend deadline — cold-launching Spotify needs ~15-20s to register
                 // as a Connect device (process start + auth + server registration)
-                deadline = System.currentTimeMillis() + 12_000
-                Log.d(TAG, "Extended timeout to 12s for cold launch")
+                deadline = System.currentTimeMillis() + 18_000
+                Log.d(TAG, "Extended timeout to 18s for cold launch")
             }
             delay(WAKE_POLL_INTERVAL_MS)
         }
