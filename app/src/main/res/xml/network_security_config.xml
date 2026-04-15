@@ -1,0 +1,22 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+    Base network security config: deny all cleartext (HTTP) traffic system-wide.
+    Every service the app talks to (Spotify, Apple Music, Last.fm, ListenBrainz,
+    MusicBrainz, SoundCloud, Ticketmaster, SeatGeek, Discogs, Wikipedia, Cover
+    Art Archive, parachord-plugins GitHub) serves HTTPS — there is no legitimate
+    cleartext request path. A cleartext request now fails loudly rather than
+    silently downgrading.
+
+    Certificate pinning is intentionally NOT enabled here. Pinning adds rotation
+    coordination overhead that's not worth it for a closed-group distribution
+    unless an active MITM threat is known. Revisit if that changes.
+
+    security: H9, M12
+-->
+<network-security-config>
+    <base-config cleartextTrafficPermitted="false">
+        <trust-anchors>
+            <certificates src="system" />
+        </trust-anchors>
+    </base-config>
+</network-security-config>

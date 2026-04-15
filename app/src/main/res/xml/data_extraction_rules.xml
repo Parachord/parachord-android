@@ -1,0 +1,27 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+    Android 12+ (API 31) data extraction rules.
+
+    Both `cloud-backup` (Google Drive auto-backup) and `device-transfer`
+    (new-phone migration) exclude everything by default. This prevents OAuth
+    tokens, API keys, and the plugin cache from leaving the device.
+
+    allowBackup="false" is also set in the <application> tag as a belt-and-
+    suspenders guard for older API levels.
+
+    security: C5
+-->
+<data-extraction-rules>
+    <cloud-backup>
+        <exclude domain="root" />
+        <exclude domain="file" />
+        <exclude domain="database" />
+        <exclude domain="sharedpref" />
+    </cloud-backup>
+    <device-transfer>
+        <exclude domain="root" />
+        <exclude domain="file" />
+        <exclude domain="database" />
+        <exclude domain="sharedpref" />
+    </device-transfer>
+</data-extraction-rules>

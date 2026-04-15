@@ -44,16 +44,21 @@ android {
     }
 
     signingConfigs {
-        // CI builds decode a stable keystore from the CI_KEYSTORE_BASE64
-        // environment variable so that every build produces identically-signed
-        // APKs. Local builds fall back to the default debug keystore.
+        // Release builds require a keystore supplied via environment variables.
+        // If CI_KEYSTORE_PATH is unset, no `ciRelease` config is registered and
+        // the release buildType's signingConfig is null — causing the release
+        // package task to fail with "APK must be signed" rather than silently
+        // using the debug keystore (which would break updates for anyone who
+        // installed a legitimately-signed build).
         val ciKeystorePath = System.getenv("CI_KEYSTORE_PATH")
         if (ciKeystorePath != null) {
+            val ciKeystorePassword = System.getenv("CI_KEYSTORE_PASSWORD")
+                ?: error("CI_KEYSTORE_PASSWORD must be set when CI_KEYSTORE_PATH is set")
             create("ciRelease") {
                 storeFile = file(ciKeystorePath)
-                storePassword = "parachord-ci"
-                keyAlias = "ci-release"
-                keyPassword = "parachord-ci"
+                storePassword = ciKeystorePassword
+                keyAlias = System.getenv("CI_KEYSTORE_ALIAS") ?: "ci-release"
+                keyPassword = ciKeystorePassword
             }
         }
         named("debug")
@@ -66,8 +71,10 @@ android {
             ndk {
                 debugSymbolLevel = "FULL"
             }
+            // No debug-keystore fallback — release builds without CI_KEYSTORE_PATH
+            // fail loudly at package time (security: H8).
             signingConfig = signingConfigs.findByName("ciRelease")
-                ?: signingConfigs.getByName("debug")
+            isDebuggable = false
             proguardFiles(
                 getDefaultProguardFile("proguard-android-optimize.txt"),
                 "proguard-rules.pro"
