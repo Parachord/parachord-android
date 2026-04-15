@@ -80,6 +80,8 @@ class PlaybackController constructor(
      *  Prevents concurrent advances from double-skipping and lets
      *  togglePlayPause() know a transition is still in progress. */
     private var advanceJob: Job? = null
+    /** Guard to prevent togglePlayPause resume-check from looping. */
+    @Volatile private var resumeReplayInFlight = false
 
     /** Serializes all calls to [playTrackInternal] so only one play request
      *  runs at a time. Without this, concurrent launches (e.g. playQueue +
@@ -416,7 +418,7 @@ class PlaybackController constructor(
                     // No active handler — external playback stalled. Re-play the current track.
                     val track = stateHolder.state.value.currentTrack ?: return@launch
                     Log.d(TAG, "togglePlayPause: no active handler, re-playing '${track.title}'")
-                    playTrackInternal(track)
+                    playTrackInternal(track, skipReselect = true)
                     return@launch
                 }
                 val isCurrentlyPlaying = when (handler) {
@@ -453,8 +455,11 @@ class PlaybackController constructor(
                         else -> startSpotifyStatePolling()
                     }
                     // If resume didn't actually start playback (stale session),
-                    // re-play the track from scratch after a brief check.
+                    // re-play the track from scratch — but only once per user
+                    // interaction. The flag prevents the MediaSession/notification
+                    // from re-triggering togglePlayPause in a loop after replay.
                     delay(1500)
+                    if (resumeReplayInFlight) return@launch
                     val stillNotPlaying = when (handler) {
                         is AppleMusicPlaybackHandler -> !handler.isPlaying()
                         else -> !router.getSpotifyHandler().isPlaying()
@@ -462,7 +467,15 @@ class PlaybackController constructor(
                     if (stillNotPlaying) {
                         val replayTrack = stateHolder.state.value.currentTrack ?: return@launch
                         Log.d(TAG, "togglePlayPause: resume failed, re-playing '${replayTrack.title}'")
-                        playTrackInternal(replayTrack)
+                        resumeReplayInFlight = true
+                        // skipReselect: preserve the current resolver so a manual
+                        // source switch (e.g. Spotify→Apple Music) doesn't get
+                        // overridden back to the auto-selected best source.
+                        playTrackInternal(replayTrack, skipReselect = true)
+                        // Keep the flag true for 3s so rapid re-triggers from
+                        // MediaSession/notification don't cause another replay
+                        delay(3000)
+                        resumeReplayInFlight = false
                     }
                 }
             }
@@ -1026,7 +1039,10 @@ class PlaybackController constructor(
                     val playing = handler.isPlaying()
                     val stateName = handler.musicKitBridge.playbackStateName
 
-                    // Build streaming metadata from what MusicKit reports is actually playing
+                    // Build streaming metadata from what MusicKit reports is actually playing.
+                    // During track transitions, MusicKit fires empty "now playing" events
+                    // that clear actualTitle — keep the previous streamingMetadata in that
+                    // case to prevent artwork flicker in the UI.
                     val streamingMeta = buildStreamingMetadata(
                         queuedTrack = stateHolder.state.value.currentTrack,
                         actualTitle = handler.musicKitBridge.actualTitle,
@@ -1042,7 +1058,9 @@ class PlaybackController constructor(
                             isBuffering = isStalled,
                             position = position,
                             duration = duration,
-                            streamingMetadata = streamingMeta,
+                            // Keep previous streaming metadata during transient states
+                            // to prevent artwork resize flicker
+                            streamingMetadata = streamingMeta ?: streamingMetadata,
                         )
                     }
 

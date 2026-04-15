@@ -183,6 +183,10 @@
     async function play(songId) {
         try {
             if (!music) return JSON.stringify({ success: false, error: 'Not configured' });
+            // Stop any previous playback before starting new track.
+            // MusicKit v3 throws "play() called without stop()/pause()" if
+            // there's stale state from a previous session.
+            try { await music.stop(); } catch(e) { /* ignore if nothing was playing */ }
             await music.setQueue({ song: songId, startPlaying: true });
             return JSON.stringify({ success: true });
         } catch (e) {
