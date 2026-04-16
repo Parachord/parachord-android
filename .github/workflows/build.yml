@@ -39,6 +39,7 @@ jobs:
         run: |
           echo "${{ secrets.CI_KEYSTORE_BASE64 }}" | base64 -d > $RUNNER_TEMP/ci-release.keystore
           echo "CI_KEYSTORE_PATH=$RUNNER_TEMP/ci-release.keystore" >> $GITHUB_ENV
+          echo "CI_KEYSTORE_PASSWORD=${{ secrets.CI_KEYSTORE_PASSWORD }}" >> $GITHUB_ENV
 
       - name: Build release APK and AAB
         run: ./gradlew assembleRelease bundleRelease
