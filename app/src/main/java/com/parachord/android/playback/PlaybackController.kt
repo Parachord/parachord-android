@@ -698,10 +698,16 @@ class PlaybackController constructor(
                         upNext = snapshot.upNext,
                         playbackContext = snapshot.playbackContext,
                         shuffleEnabled = snapshot.shuffleEnabled,
-                        // Keep existing artwork visible until streaming source confirms.
-                        // Setting null here causes a flash to placeholder initials
-                        // before the streaming artwork loads.
-                        streamingMetadata = streamingMetadata,
+                        // Keep the previous artwork URL so the album art image stays
+                        // visible (no flash to placeholder) while the new track loads.
+                        // But clear title/artist/album so the UI immediately shows the
+                        // new track's queued metadata instead of stale streaming info
+                        // from the previous song.
+                        streamingMetadata = streamingMetadata?.copy(
+                            title = null,
+                            artist = null,
+                            album = null,
+                        ),
                     )
                 }
 
