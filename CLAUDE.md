@@ -388,7 +388,7 @@ The desktop supports dark/light mode toggle. Android should follow system theme 
 - **UI:** Jetpack Compose + Material 3
 - **Playback:** ExoPlayer (Media3) for local/stream, Spotify Web API (Connect) for Spotify, MusicKit JS WebView for Apple Music
 - **Database:** SQLDelight (KMP, replaced Room in April 2026)
-- **Preferences:** Jetpack DataStore (tokens stored in plaintext — see security issue #101 for EncryptedSharedPreferences migration)
+- **Preferences:** Jetpack DataStore (non-sensitive prefs) + EncryptedSharedPreferences via `SecureTokenStore` (OAuth tokens, API keys — AES-256-GCM backed by Android Keystore)
 - **DI:** Koin (KMP, replaced Hilt in April 2026)
 - **Networking:** OkHttp + Retrofit (APIs), Ktor (shared module API clients, not yet wired into app)
 - **Image loading:** Coil 2
@@ -490,7 +490,9 @@ static let darkAccentPurple = Color(hex: "#a78bfa")
 | .axe scrobbler wrapper | `playback/scrobbler/AxeScrobbler.kt` |
 | Bundled plugins | `assets/plugins/*.axe` (19 files) |
 | OAuth | `auth/OAuthManager.kt`, `auth/OAuthRedirectActivity.kt` |
+| Secure token storage | `data/store/SecureTokenStore.kt` (EncryptedSharedPreferences wrapper) |
 | Activity tracking | `app/CurrentActivityHolder.kt` |
+| Security policy | `SECURITY.md` |
 | KMP shared module | `shared/src/commonMain/kotlin/com/parachord/shared/` (models, API clients, DI, DB, plugins, resolver, metadata, AI, playback, deeplink, config, platform) |
 | DI module | `di/AndroidModule.kt` (Koin — ~200 bindings replacing 4 Hilt modules) |
 | Security configs | `res/xml/network_security_config.xml`, `res/xml/data_extraction_rules.xml` |
@@ -541,15 +543,8 @@ A full security review was completed April 2026. The review plan is at `.claude/
 - M8: Keystore password from env var (not hardcoded)
 - M12: Explicit `usesCleartextTraffic="false"`
 
-**Open (GitHub issues):**
-- #101 C4: Encrypt tokens with EncryptedSharedPreferences
-- #102 C3: Namespace NativeBridge storage per plugin
-- #103 H3: MusicKit WebView URL allowlist
-- #104 H4: AuthRelay postMessage injection fix
-- #105 Medium findings batch
-- #106 Low findings batch
-- #107 Plugin sandbox workstream (C1 signing, C2 fetch allowlist, H1/H7/M1/M2)
-- #108 H6: Document client secret exposure
+**All findings closed** except the deferred plugin sandbox workstream:
+- #107 Plugin sandbox workstream (C1 signing, C2 fetch allowlist, H1/H7/M1/M2) — requires breaking `.axe` SDK changes, deferred to separate design pass
 
 **Key security rules:**
 - **Never add secrets to BuildConfig expecting confidentiality.** The project is open source; BuildConfig values are trivially extractable. Use per-user BYO credentials (like AI providers do) for anything that needs confidentiality.
