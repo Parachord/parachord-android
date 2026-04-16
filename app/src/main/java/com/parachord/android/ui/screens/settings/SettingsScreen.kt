@@ -2783,7 +2783,7 @@ private fun AboutTab() {
                 )
                 Spacer(modifier = Modifier.height(4.dp))
                 Text(
-                    text = "Version 0.1.0",
+                    text = "Version ${com.parachord.android.BuildConfig.VERSION_NAME}",
                     style = MaterialTheme.typography.bodyMedium,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
