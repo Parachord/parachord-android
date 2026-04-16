@@ -116,12 +116,18 @@
                 <data android:scheme="spotify" />
             </intent-filter>
 
-            <!-- Apple Music URLs -->
+            <!-- Apple Music URLs — scoped to supported content types only.
+                 The catch-all "/" prefix caused Parachord to appear in the chooser
+                 for every music.apple.com URL including /browse, /curator, etc.
+                 that we have no handler for. security: M10 -->
             <intent-filter>
                 <action android:name="android.intent.action.VIEW" />
                 <category android:name="android.intent.category.DEFAULT" />
                 <category android:name="android.intent.category.BROWSABLE" />
-                <data android:scheme="https" android:host="music.apple.com" android:pathPrefix="/" />
+                <data android:scheme="https" android:host="music.apple.com" android:pathPattern="/.*/.*/album/.*" />
+                <data android:scheme="https" android:host="music.apple.com" android:pathPattern="/.*/.*/song/.*" />
+                <data android:scheme="https" android:host="music.apple.com" android:pathPattern="/.*/.*/playlist/.*" />
+                <data android:scheme="https" android:host="music.apple.com" android:pathPattern="/.*/.*/artist/.*" />
             </intent-filter>
 
             <!-- Share sheet: accept shared URLs from other apps (Spotify, Apple Music, browsers) -->

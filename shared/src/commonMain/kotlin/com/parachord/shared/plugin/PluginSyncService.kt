@@ -35,6 +35,10 @@ class PluginSyncService constructor(
             "https://raw.githubusercontent.com/Parachord/parachord-plugins/main/"
         /** Minimum interval between automatic syncs (24 hours). */
         private const val SYNC_INTERVAL_MS = 24L * 60 * 60 * 1000
+        /** Max manifest size: 1 MiB (security: M6). */
+        private const val MAX_MANIFEST_SIZE = 1 * 1024 * 1024
+        /** Max .axe plugin size: 5 MiB (security: M6). */
+        private const val MAX_PLUGIN_SIZE = 5 * 1024 * 1024
     }
 
     data class SyncResult(
@@ -142,12 +146,21 @@ class PluginSyncService constructor(
 
     private suspend fun fetchManifest(): PluginManifest {
         val body = httpClient.get(MANIFEST_URL).bodyAsText()
+        // security: M6 — cap manifest size to prevent OOM from hostile CDN
+        if (body.length > MAX_MANIFEST_SIZE) {
+            throw Exception("Manifest too large (${body.length} bytes, max $MAX_MANIFEST_SIZE)")
+        }
         return json.decodeFromString(body)
     }
 
     private suspend fun fetchPlugin(pluginId: String): String {
         val url = "$PLUGINS_BASE_URL$pluginId.axe"
-        return httpClient.get(url).bodyAsText()
+        val body = httpClient.get(url).bodyAsText()
+        // security: M6 — cap .axe file size
+        if (body.length > MAX_PLUGIN_SIZE) {
+            throw Exception("Plugin '$pluginId' too large (${body.length} bytes, max $MAX_PLUGIN_SIZE)")
+        }
+        return body
     }
 
     // ── Manifest model ───────────────────────────────────────────────

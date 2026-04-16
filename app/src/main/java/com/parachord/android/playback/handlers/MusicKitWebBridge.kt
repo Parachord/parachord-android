@@ -499,11 +499,11 @@ class MusicKitWebBridge constructor(
             _signInRequired.tryEmit(Unit)
             return false
         }
-        val escaped = token.replace("'", "\\'")
-        // Pass saved music user token to restore auth without popup
+        // Base64-encode tokens to eliminate injection risk from string
+        // interpolation. security: M4/M5
         val savedMut = settingsStore.getAppleMusicUserToken()
-        val mutArg = if (savedMut != null) "'${savedMut.replace("'", "\\'")}'" else "null"
-        val result = evaluate("configure('$escaped', '$APP_NAME', $mutArg)")
+        val mutArg = if (savedMut != null) "atob('${b64(savedMut)}')" else "null"
+        val result = evaluate("configure(atob('${b64(token)}'), atob('${b64(APP_NAME)}'), $mutArg)")
         Log.d(TAG, "configure() JS result: $result")
         if (result == null) return false
         return try {
@@ -583,8 +583,7 @@ class MusicKitWebBridge constructor(
     suspend fun search(query: String, limit: Int = 10): List<AppleMusicSearchResult> {
         musicKitReady.await()
         val storefront = settingsStore.getAppleMusicStorefront() ?: "us"
-        val escaped = query.replace("'", "\\'")
-        val result = evaluate("search('$escaped', $limit, '$storefront')") ?: return emptyList()
+        val result = evaluate("search(atob('${b64(query)}'), $limit, atob('${b64(storefront)}'))") ?: return emptyList()
         return try {
             val parsed = json.decodeFromString<MusicKitSearchResponse>(cleanJsString(result))
             if (!parsed.success) {
@@ -616,8 +615,7 @@ class MusicKitWebBridge constructor(
     suspend fun getPlaylist(playlistId: String): AppleMusicPlaylistResult? {
         musicKitReady.await()
         val storefront = settingsStore.getAppleMusicStorefront() ?: "us"
-        val escaped = playlistId.replace("'", "\\'")
-        val result = evaluate("getPlaylist('$escaped', '$storefront')") ?: return null
+        val result = evaluate("getPlaylist(atob('${b64(playlistId)}'), atob('${b64(storefront)}'))") ?: return null
         return try {
             val response = json.decodeFromString<GetPlaylistResponse>(cleanJsString(result))
             if (!response.success || response.tracks.isNullOrEmpty()) return null
@@ -651,8 +649,7 @@ class MusicKitWebBridge constructor(
      */
     suspend fun preload(songId: String) {
         if (!musicKitReady.isCompleted) return
-        val escaped = songId.replace("'", "\\'")
-        evaluate("preload('$escaped')")
+        evaluate("preload(atob('${b64(songId)}'))")
     }
 
     /** Play a song by Apple Music catalog ID. Returns true on success. */
@@ -669,8 +666,7 @@ class MusicKitWebBridge constructor(
         actualArtist = null
         actualAlbum = null
         actualArtworkUrl = null
-        val escaped = songId.replace("'", "\\'")
-        val result = evaluate("play('$escaped')") ?: return false
+        val result = evaluate("play(atob('${b64(songId)}'))") ?: return false
         return parseSuccessResponse(result)
     }
 
@@ -898,6 +894,16 @@ class MusicKitWebBridge constructor(
         s = s.replace("\\\\", "\\")
         return s
     }
+
+    /**
+     * Base64-encode a string for safe interpolation into JS expressions.
+     * The JS side decodes with `atob('...')`. This eliminates injection risks
+     * from single quotes, backslashes, newlines, U+2028/U+2029, and any other
+     * special characters in user input, tokens, or song IDs.
+     * security: M4/M5
+     */
+    private fun b64(s: String): String =
+        android.util.Base64.encodeToString(s.toByteArray(), android.util.Base64.NO_WRAP)
 
     private fun parseSuccessResponse(raw: String): Boolean {
         return try {

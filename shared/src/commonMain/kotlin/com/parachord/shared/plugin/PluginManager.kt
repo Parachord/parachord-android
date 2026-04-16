@@ -297,10 +297,25 @@ class PluginManager constructor(
 
     // ── Helpers ───────────────────────────────────────────────────────
 
+    /**
+     * Parse and validate .axe JSON content. Returns null (with a warning log)
+     * if the content isn't valid JSON, doesn't have the expected shape, or
+     * has a suspicious/missing manifest ID.
+     * security: M7
+     */
     private fun parsePluginInfo(axeJson: String): PluginInfo? {
         return try {
             val axe = json.decodeFromString<AxeFile>(axeJson)
             val m = axe.manifest
+            // Validate required fields (security: M7)
+            if (m.id.isBlank()) {
+                Log.w(TAG, "Rejecting .axe with blank manifest.id")
+                return null
+            }
+            if (!Regex("^[A-Za-z0-9_-]+$").matches(m.id)) {
+                Log.w(TAG, "Rejecting .axe with invalid manifest.id: '${m.id}'")
+                return null
+            }
             PluginInfo(
                 id = m.id,
                 name = m.name ?: m.id,

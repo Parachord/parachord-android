@@ -193,8 +193,28 @@ class PlaybackService : MediaSessionService() {
         return super.onStartCommand(intent, flags, startId)
     }
 
-    override fun onGetSession(controllerInfo: MediaSession.ControllerInfo): MediaSession? =
-        mediaSession
+    /**
+     * Gate which apps can connect as media controllers.
+     * Allow system UI (notifications, lockscreen, Bluetooth, Android Auto) and
+     * our own app. Block unknown third-party apps from issuing playback commands.
+     * security: M11
+     */
+    override fun onGetSession(controllerInfo: MediaSession.ControllerInfo): MediaSession? {
+        val pkg = controllerInfo.packageName
+        // Allow system packages (notifications, lockscreen, BT, Android Auto)
+        if (controllerInfo.isTrusted) return mediaSession
+        // Allow our own app
+        if (pkg == packageName) return mediaSession
+        // Allow known system packages that may not have isTrusted set
+        val systemPrefixes = listOf(
+            "com.android.",
+            "com.google.android.",
+            "android",
+        )
+        if (systemPrefixes.any { pkg.startsWith(it) }) return mediaSession
+        Log.w(TAG, "Rejected MediaSession connection from untrusted package: $pkg")
+        return null
+    }
 
     /**
      * Override Media3's auto-foreground management. Without this, MediaSessionService
