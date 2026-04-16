@@ -384,14 +384,15 @@ The desktop supports dark/light mode toggle. Android should follow system theme 
 
 ## Tech Stack (Android)
 
-- **Language:** Kotlin
+- **Language:** Kotlin (KMP shared module for cross-platform business logic)
 - **UI:** Jetpack Compose + Material 3
-- **Playback:** ExoPlayer (Media3) for local/stream, Spotify App Remote SDK for Spotify
-- **Database:** Room
-- **Preferences:** Jetpack DataStore
-- **DI:** Hilt
-- **Networking:** OkHttp + Retrofit
-- **Image loading:** Coil
+- **Playback:** ExoPlayer (Media3) for local/stream, Spotify Web API (Connect) for Spotify, MusicKit JS WebView for Apple Music
+- **Database:** SQLDelight (KMP, replaced Room in April 2026)
+- **Preferences:** Jetpack DataStore (tokens stored in plaintext — see security issue #101 for EncryptedSharedPreferences migration)
+- **DI:** Koin (KMP, replaced Hilt in April 2026)
+- **Networking:** OkHttp + Retrofit (APIs), Ktor (shared module API clients, not yet wired into app)
+- **Image loading:** Coil 2
+- **Spotify:** Web API only — Spotify App Remote SDK and Spotify Auth SDK were removed (April 2026). All Spotify interaction is via the Connect HTTP API.
 
 ## Tech Stack (iOS) — Port Reference
 
@@ -483,11 +484,78 @@ static let darkAccentPurple = Color(hex: "#a78bfa")
 | Shared UI components | `ui/components/AlbumContextMenu.kt`, `ui/components/ArtistContextMenu.kt`, `ui/components/TrackContextMenu.kt`, `ui/components/TrackRow.kt`, `ui/components/ResolverIconRow.kt` |
 | Weekly playlists | `data/repository/WeeklyPlaylistsRepository.kt`, `ui/screens/playlists/WeeklyPlaylistScreen.kt`, `WeeklyPlaylistViewModel.kt` |
 | Concerts / On Tour | `data/repository/ConcertsRepository.kt`, `data/api/TicketmasterApi.kt`, `data/api/SeatGeekApi.kt`, `ui/screens/discover/ConcertsScreen.kt` |
-| .axe plugin system | `plugin/JsRuntime.kt`, `plugin/PluginManager.kt`, `plugin/PluginSyncService.kt` |
+| .axe plugin system | `shared/.../plugin/JsRuntime.kt`, `shared/.../plugin/PluginManager.kt`, `shared/.../plugin/PluginSyncService.kt`, `shared/.../plugin/PluginFileAccess.kt` |
 | JS bridge | `bridge/JsBridge.kt`, `bridge/NativeBridge.kt`, `assets/js/bootstrap.html`, `assets/js/resolver-loader.js` |
 | .axe AI wrapper | `ai/providers/AxeAiProvider.kt` |
 | .axe scrobbler wrapper | `playback/scrobbler/AxeScrobbler.kt` |
 | Bundled plugins | `assets/plugins/*.axe` (19 files) |
+| OAuth | `auth/OAuthManager.kt`, `auth/OAuthRedirectActivity.kt` |
+| Activity tracking | `app/CurrentActivityHolder.kt` |
+| KMP shared module | `shared/src/commonMain/kotlin/com/parachord/shared/` (models, API clients, DI, DB, plugins, resolver, metadata, AI, playback, deeplink, config, platform) |
+| DI module | `di/AndroidModule.kt` (Koin — ~200 bindings replacing 4 Hilt modules) |
+| Security configs | `res/xml/network_security_config.xml`, `res/xml/data_extraction_rules.xml` |
+
+## KMP Shared Module
+
+The `:shared` module (`shared/`) contains Kotlin Multiplatform code shared between Android and a future iOS app. The `:app` module depends on `:shared`.
+
+**What lives in shared/commonMain:**
+- Platform abstractions: `Log`, `randomUUID()`, `currentTimeMillis()` (expect/actual in androidMain/iosMain)
+- Models: `Track`, `Album`, `Artist`, `Playlist`, `PlaylistTrack`, `Friend`, `ChatMessage`, `SearchHistory`, `SyncSource` + charts/history/recommendation models
+- API clients: Ktor-based clients for Spotify, Last.fm, MusicBrainz, Apple Music, Ticketmaster, SeatGeek (infrastructure-ready but app still uses Retrofit — see issue #100)
+- Database: SQLDelight `.sq` files matching the old Room v12 schema (9 tables). SQLDelight is the live database; Room was removed.
+- DI: Koin `sharedModule` with Ktor client bindings
+- Plugin system: `JsRuntime` interface, `PluginManager`, `PluginSyncService`, `PluginFileAccess` (expect/actual)
+- Business logic: `ResolverScoring`, `ResolverModels`, `MetadataService`, `MetadataProvider` interface, `DjToolDefinitions`, `QueueManager`, `DeepLinkAction`, `PlaybackEngine` interface, `AppConfig`
+
+**What stays in :app (Android-only):**
+- All Compose UI (82 files), PlaybackService/MediaSession, PlaybackController, PlaybackRouter
+- SpotifyPlaybackHandler, AppleMusicPlaybackHandler (MusicKitWebBridge), SoundCloudPlaybackHandler
+- JsBridge (WebView), NativeBridge, MediaScanner, NetworkMonitor (Android ConnectivityManager)
+- Room entities → typealiases to shared models, Room DAOs → SQLDelight wrapper classes
+- Retrofit API interfaces (still used, typealiased to shared Ktor clients)
+- OAuthManager, OAuthRedirectActivity, SettingsStore (DataStore-backed)
+
+**Bridge pattern:** App-module files that were moved to shared become thin typealiases (e.g., `typealias TrackEntity = com.parachord.shared.model.Track`). This preserves all existing imports across the app without mass-renaming. The typealiases live in the original packages: `data/db/entity/`, `resolver/`, `data/metadata/`, `ai/`, `plugin/`, `deeplink/`.
+
+## OAuth Architecture
+
+OAuth flows use **PKCE** with a **state parameter** for CSRF protection.
+
+- **OAuthManager** (`auth/OAuthManager.kt`) — launches Chrome Custom Tabs for Spotify, SoundCloud, Last.fm auth flows. Stores per-flow `PendingOAuthFlow(service, codeVerifier, createdAt)` keyed by a 192-bit random `state` parameter. Validates state on callback. 10-minute pruning of abandoned flows.
+- **OAuthRedirectActivity** (`auth/OAuthRedirectActivity.kt`) — dedicated `noHistory="true"` / `Theme.NoDisplay` activity that receives `parachord://auth/callback/*` redirects. Handles the token exchange directly via Koin-injected `OAuthManager`, then brings MainActivity to front and finishes. This causes Chrome to close the Custom Tab automatically.
+- **CurrentActivityHolder** (`app/CurrentActivityHolder.kt`) — tracks the currently-resumed Activity via `ActivityLifecycleCallbacks`. OAuthManager uses it to launch Custom Tabs from an Activity context (not Application context) so Chrome runs in the same task as MainActivity — enabling Android to pop Chrome off the back stack when the redirect fires.
+- **Manifest intent filters** — `parachord://auth` goes ONLY to `OAuthRedirectActivity` (priority 999). All other `parachord://` hosts are enumerated explicitly on MainActivity to avoid disambiguation chooser overlap. Spotify Auth SDK and App Remote SDK were removed (they injected their own `RedirectUriReceiverActivity` that conflicted).
+
+## Security Posture
+
+A full security review was completed April 2026. The review plan is at `.claude/plans/logical-munching-waffle.md`. GitHub issues #101–#108 track remaining work.
+
+**Completed:**
+- C5: `allowBackup="false"` + `data_extraction_rules.xml` (no cloud backup of tokens)
+- H2: Path traversal prevention in `PluginFileAccess.writeCachedPlugin`
+- H5: OAuth state parameter + CSRF protection + per-flow verifier isolation
+- H8: Release build fails if `CI_KEYSTORE_PATH` unset (no debug-keystore fallback)
+- H9: `network_security_config.xml` denying cleartext traffic
+- H10: XSPF SSRF block (HTTPS-only, private-IP rejection) + XXE prevention
+- M8: Keystore password from env var (not hardcoded)
+- M12: Explicit `usesCleartextTraffic="false"`
+
+**Open (GitHub issues):**
+- #101 C4: Encrypt tokens with EncryptedSharedPreferences
+- #102 C3: Namespace NativeBridge storage per plugin
+- #103 H3: MusicKit WebView URL allowlist
+- #104 H4: AuthRelay postMessage injection fix
+- #105 Medium findings batch
+- #106 Low findings batch
+- #107 Plugin sandbox workstream (C1 signing, C2 fetch allowlist, H1/H7/M1/M2)
+- #108 H6: Document client secret exposure
+
+**Key security rules:**
+- **Never add secrets to BuildConfig expecting confidentiality.** The project is open source; BuildConfig values are trivially extractable. Use per-user BYO credentials (like AI providers do) for anything that needs confidentiality.
+- **Plugin signing is defense-in-depth, not critical.** HTTPS transport + GitHub repo access controls are the primary defense against supply chain attacks. Sandboxing (C3 namespaced storage, C2 fetch allowlist) matters more — a signed plugin with unrestricted NativeBridge access is just as dangerous as an unsigned one.
+- **MusicKit v3 `music.volume` has no effect on Android WebView.** DRM audio goes through MediaDrm/MediaCodec, bypassing the JS audio pipeline. Volume normalization between sources can't be solved app-side.
+- **Global OkHttpClient User-Agent is required.** MusicBrainz rate-limits or 403s requests with the default `okhttp/x.y.z` User-Agent. The shared OkHttpClient has a `User-Agent: Parachord/<version> (Android; https://parachord.app)` interceptor. Don't create per-API OkHttp clients without it.
 
 ## Common Mistakes to Avoid
 
@@ -525,6 +593,12 @@ static let darkAccentPurple = Color(hex: "#a78bfa")
 26. **Don't use JS template literals (backticks) to pass .axe JSON to `evaluateJavascript`.** Backticks and `$` in the embedded JS code break the template string. Use Base64-encoding: `atob('${base64}')` in JS to decode.
 27. **Don't use async IIFE with `evaluateJavascript`.** It returns a `Promise` object (`{}`) not the resolved value. Use a callback pattern: store result in `window.__lastPluginResult`, then read it in a second `evaluate()` call.
 28. **Don't manage audio focus explicitly during external playback.** Chromium's WebView has its own `AudioFocusDelegate`. Our explicit `requestAudioFocus()` competed with it, causing `AUDIOFOCUS_LOSS` → we paused MusicKit → stopped playback mid-song. Let Chromium handle it for WebView audio; Spotify handles its own.
+29. **Don't use `catch (e: Exception)` in coroutine loops that should be cancellable.** `CancellationException` extends `Exception` in Kotlin. A generic catch swallows it, letting the loop continue through every iteration after cancellation (20 phantom "failed" logs in microseconds). Always `catch (e: CancellationException) { throw e }` before the generic catch, or use `catch (e: Exception) { if (e is CancellationException) throw e; ... }`.
+30. **Don't call `transferPlayback()` before `startPlayback()` for Spotify.** The separate transfer activates the device, which causes Spotify to auto-resume its last track for ~270ms before our `startPlayback` replaces it. `startPlayback` with `device_id` activates inactive devices automatically — the transfer is redundant and causes an audible blip.
+31. **Don't fire `startPlayback` with a cached Spotify device ID without verifying it first.** Spotify device IDs change when Spotify's process restarts. Call `getDevices()` first, check the cached ID is still in the list. If stale, clear `lastResolvedLocalId` and `deviceVerified` and fall through to the normal wake flow. Without this, stale IDs return 404 and the full flow (including the visible launch intent) fires needlessly.
+32. **Don't create per-API OkHttpClients without the User-Agent interceptor.** The shared `OkHttpClient` in `AndroidModule.kt` has a global `User-Agent: Parachord/<version>` interceptor. MusicBrainz specifically blocks the default `okhttp/4.x.y` UA with HTTP 403. If you need a per-API client (e.g., different timeout), use `client.newBuilder().addInterceptor(...)` to inherit the UA interceptor.
+33. **Don't use JS `if` statements inside `MusicKitWebBridge.evaluate()`.** The `evaluate()` wrapper wraps the script as `var p = $script;` — an `if` statement is not a valid JS expression. Use IIFE: `(function() { if (...) ...; return true; })()` or the Base64 approach from PluginManager.
+34. **Don't use nested `hapticClickable` / `clickable` modifiers in LazyColumn items.** When the list updates progressively (e.g., Fresh Drops emitting new results every 5 artists), closures in LazyColumn items can fire with stale-captured data, navigating to the wrong item. Use a single click target per row.
 
 ### iOS-Specific
 
