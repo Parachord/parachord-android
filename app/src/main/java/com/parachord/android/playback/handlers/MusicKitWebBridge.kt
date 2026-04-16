@@ -57,6 +57,32 @@ class MusicKitWebBridge constructor(
          *  which is required for cross-origin postMessage with Apple's auth page. */
         private const val BRIDGE_URL = "https://appassets.androidplatform.net/assets/js/musickit-bridge.html"
         private const val APP_NAME = "Parachord"
+
+        /**
+         * Hosts allowed to load in the MusicKit WebView and auth popup.
+         * Anything not matching is blocked by shouldOverrideUrlLoading.
+         * security: H3, H4
+         */
+        private val ALLOWED_HOSTS = setOf(
+            "appassets.androidplatform.net",  // Our bridge page
+            "js-cdn.music.apple.com",         // MusicKit JS library CDN
+            "idmsa.apple.com",                // Apple ID sign-in
+            "appleid.apple.com",              // Apple ID auth
+            "music.apple.com",                // Apple Music web
+            "api.music.apple.com",            // MusicKit REST API
+            "buy.itunes.apple.com",           // iTunes auth/purchase (used by MusicKit)
+        )
+
+        /** Suffix match for CDN subdomains (mzstatic serves artwork + MusicKit assets). */
+        private val ALLOWED_HOST_SUFFIXES = listOf(
+            ".mzstatic.com",
+            ".apple.com",
+        )
+
+        fun isAllowedMusicKitHost(host: String): Boolean {
+            if (host in ALLOWED_HOSTS) return true
+            return ALLOWED_HOST_SUFFIXES.any { host.endsWith(it) }
+        }
     }
 
     private var webView: WebView? = null
@@ -190,6 +216,26 @@ class MusicKitWebBridge constructor(
                         ?: super.shouldInterceptRequest(view, request)
                 }
 
+                /**
+                 * URL allowlist for the MusicKit WebView. Only Apple-related
+                 * hosts and our own asset-loader origin are permitted. If
+                 * MusicKit or its auth flow is coerced into navigating to a
+                 * third-party URL, the navigation is blocked — preventing an
+                 * attacker page from gaining access to the MusicKitBridge JS
+                 * interface.
+                 *
+                 * security: H3
+                 */
+                override fun shouldOverrideUrlLoading(
+                    view: WebView?,
+                    request: WebResourceRequest?,
+                ): Boolean {
+                    val host = request?.url?.host?.lowercase() ?: return false
+                    if (isAllowedMusicKitHost(host)) return false // Allow
+                    Log.w(TAG, "Blocked navigation to disallowed host: $host")
+                    return true // Block
+                }
+
                 override fun onPageFinished(view: WebView?, url: String?) {
                     super.onPageFinished(view, url)
                     Log.d(TAG, "Bridge page loaded: $url")
@@ -206,12 +252,18 @@ class MusicKitWebBridge constructor(
                  */
                 override fun onPermissionRequest(request: PermissionRequest?) {
                     request?.let {
-                        Log.d(TAG, "Permission request: ${it.resources.joinToString()}")
-                        if (PermissionRequest.RESOURCE_PROTECTED_MEDIA_ID in it.resources) {
+                        Log.d(TAG, "Permission request from ${it.origin}: ${it.resources.joinToString()}")
+                        // Only grant protected media ID from our own bridge origin.
+                        // security: M3
+                        val origin = it.origin?.host?.lowercase()
+                        if (origin == "appassets.androidplatform.net" &&
+                            PermissionRequest.RESOURCE_PROTECTED_MEDIA_ID in it.resources
+                        ) {
                             Log.d(TAG, "Granting RESOURCE_PROTECTED_MEDIA_ID for DRM")
                             it.grant(it.resources)
                             return
                         }
+                        Log.w(TAG, "Denying permission request from origin: $origin")
                     }
                     super.onPermissionRequest(request)
                 }
@@ -255,16 +307,27 @@ class MusicKitWebBridge constructor(
                         // auth popup back to the bridge WebView. Android WebView
                         // doesn't support window.opener between separate WebViews.
                         addJavascriptInterface(object {
+                            /**
+                             * Relay postMessage from the auth popup to the bridge
+                             * WebView. Both [data] and [origin] come from the
+                             * untrusted popup page, so both must be escaped to
+                             * prevent JS injection. security: H4
+                             */
                             @JavascriptInterface
                             fun relay(data: String, origin: String) {
                                 Log.d(TAG, "Relaying postMessage to bridge: origin=$origin")
                                 bridgeWv?.post {
-                                    val escaped = data
-                                        .replace("\\", "\\\\")
-                                        .replace("'", "\\'")
-                                        .replace("\n", "\\n")
+                                    // Use Base64 encoding for both data and origin
+                                    // to eliminate any injection risk from string
+                                    // interpolation into evaluateJavascript.
+                                    val dataB64 = android.util.Base64.encodeToString(
+                                        data.toByteArray(), android.util.Base64.NO_WRAP,
+                                    )
+                                    val originB64 = android.util.Base64.encodeToString(
+                                        origin.toByteArray(), android.util.Base64.NO_WRAP,
+                                    )
                                     bridgeWv.evaluateJavascript(
-                                        "window.postMessage(JSON.parse('$escaped'), '$origin')",
+                                        "(function(){var d=atob('$dataB64');var o=atob('$originB64');window.postMessage(JSON.parse(d),o);})()",
                                         null,
                                     )
                                 }
@@ -272,6 +335,21 @@ class MusicKitWebBridge constructor(
                         }, "AuthRelay")
 
                         webViewClient = object : WebViewClient() {
+                            /**
+                             * Restrict auth popup navigation to Apple auth domains.
+                             * Prevents a malicious redirect from gaining the AuthRelay
+                             * JS interface. security: H4
+                             */
+                            override fun shouldOverrideUrlLoading(
+                                view: WebView?,
+                                request: WebResourceRequest?,
+                            ): Boolean {
+                                val host = request?.url?.host?.lowercase() ?: return false
+                                if (isAllowedMusicKitHost(host)) return false
+                                Log.w(TAG, "Auth popup: blocked navigation to $host")
+                                return true
+                            }
+
                             override fun onPageFinished(v: WebView?, url: String?) {
                                 super.onPageFinished(v, url)
                                 Log.d(TAG, "Auth WebView page: $url")
