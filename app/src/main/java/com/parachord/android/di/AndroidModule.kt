@@ -212,6 +212,7 @@ val androidModule = module {
 
     // ── Settings & Auth ──────────────────────────────────────────────
 
+    single { com.parachord.android.data.store.SecureTokenStore(androidContext()) }
     singleOf(::SettingsStore)
     singleOf(::OAuthManager)
     singleOf(::NetworkMonitor)

@@ -70,10 +70,27 @@
     window.nativeFetch = window.fetch;
 
     // ── Storage polyfill ─────────────────────────────────────────────
-    // .axe plugins access config (API keys, tokens) via nativeStorage
+    // .axe plugins access config via nativeStorage. All keys are
+    // namespaced under "plugin.<id>." by the resolver-loader before
+    // reaching NativeBridge. Direct calls to NativeBridge.storageGet
+    // with unprefixed keys are rejected by the Kotlin layer (security: C3).
+    //
+    // createPluginStorage(pluginId) returns a scoped {get, set} object
+    // that automatically prefixes keys. The resolver-loader uses this
+    // to give each plugin its own isolated storage namespace.
+    window.createPluginStorage = function(pluginId) {
+        var prefix = 'plugin.' + pluginId + '.';
+        return {
+            get: function(key) { return NativeBridge.storageGet(prefix + key); },
+            set: function(key, value) { NativeBridge.storageSet(prefix + key, value); },
+        };
+    };
+    // Global nativeStorage uses the "plugin._global." namespace for
+    // backward compatibility with any .axe that calls it directly.
+    // It can NOT access app-level keys (tokens, credentials).
     window.nativeStorage = {
-        get: (key) => NativeBridge.storageGet(key),
-        set: (key, value) => NativeBridge.storageSet(key, value),
+        get: function(key) { return NativeBridge.storageGet('plugin._global.' + key); },
+        set: function(key, value) { NativeBridge.storageSet('plugin._global.' + key, value); },
     };
 
     console.log('Parachord JS runtime: polyfills loaded');

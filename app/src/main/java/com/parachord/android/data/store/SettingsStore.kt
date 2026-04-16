@@ -14,10 +14,13 @@ import kotlinx.coroutines.flow.map
 
 /**
  * Preferences store replacing electron-store from the desktop app.
- * Uses Jetpack DataStore for type-safe, async key-value storage.
+ * Uses Jetpack DataStore for non-sensitive preferences and
+ * [SecureTokenStore] (EncryptedSharedPreferences) for OAuth tokens
+ * and BYO API keys. security: C4
  */
 class SettingsStore constructor(
     private val dataStore: DataStore<Preferences>,
+    private val secureStore: SecureTokenStore,
 ) {
     companion object {
         val THEME_MODE = stringPreferencesKey("theme_mode")
@@ -107,35 +110,31 @@ class SettingsStore constructor(
     }
 
     suspend fun setSpotifyTokens(accessToken: String, refreshToken: String) {
-        dataStore.edit {
-            it[SPOTIFY_ACCESS_TOKEN] = accessToken
-            it[SPOTIFY_REFRESH_TOKEN] = refreshToken
-        }
+        secureStore.set("spotify_access_token", accessToken)
+        secureStore.set("spotify_refresh_token", refreshToken)
     }
 
     fun getSpotifyAccessTokenFlow(): Flow<String?> =
-        dataStore.data.map { it[SPOTIFY_ACCESS_TOKEN] }
+        secureStore.observe("spotify_access_token")
 
     fun getLastFmSessionKeyFlow(): Flow<String?> =
-        dataStore.data.map { it[LASTFM_SESSION_KEY] }
+        secureStore.observe("lastfm_session_key")
 
     suspend fun getLastFmSessionKey(): String? =
-        dataStore.data.first()[LASTFM_SESSION_KEY]
+        secureStore.get("lastfm_session_key")
 
     suspend fun clearSpotifyTokens() {
-        dataStore.edit {
-            it.remove(SPOTIFY_ACCESS_TOKEN)
-            it.remove(SPOTIFY_REFRESH_TOKEN)
-        }
+        secureStore.remove("spotify_access_token")
+        secureStore.remove("spotify_refresh_token")
     }
 
     suspend fun setLastFmSession(sessionKey: String) {
-        dataStore.edit { it[LASTFM_SESSION_KEY] = sessionKey }
+        secureStore.set("lastfm_session_key", sessionKey)
     }
 
     suspend fun clearLastFmSession() {
+        secureStore.remove("lastfm_session_key")
         dataStore.edit {
-            it.remove(LASTFM_SESSION_KEY)
             it.remove(LASTFM_USERNAME)
         }
     }
@@ -169,64 +168,56 @@ class SettingsStore constructor(
     }
 
     suspend fun setSoundCloudToken(token: String) {
-        dataStore.edit { it[SOUNDCLOUD_ACCESS_TOKEN] = token }
+        secureStore.set("soundcloud_access_token", token)
     }
 
     suspend fun setSoundCloudTokens(accessToken: String, refreshToken: String) {
-        dataStore.edit {
-            it[SOUNDCLOUD_ACCESS_TOKEN] = accessToken
-            it[SOUNDCLOUD_REFRESH_TOKEN] = refreshToken
-        }
+        secureStore.set("soundcloud_access_token", accessToken)
+        secureStore.set("soundcloud_refresh_token", refreshToken)
     }
 
     fun getSoundCloudTokenFlow(): Flow<String?> =
-        dataStore.data.map { it[SOUNDCLOUD_ACCESS_TOKEN] }
+        secureStore.observe("soundcloud_access_token")
 
     suspend fun getSoundCloudToken(): String? =
-        dataStore.data.first()[SOUNDCLOUD_ACCESS_TOKEN]
+        secureStore.get("soundcloud_access_token")
 
     suspend fun getSoundCloudRefreshToken(): String? =
-        dataStore.data.first()[SOUNDCLOUD_REFRESH_TOKEN]
+        secureStore.get("soundcloud_refresh_token")
 
     suspend fun clearSoundCloudToken() {
-        dataStore.edit {
-            it.remove(SOUNDCLOUD_ACCESS_TOKEN)
-            it.remove(SOUNDCLOUD_REFRESH_TOKEN)
-        }
+        secureStore.remove("soundcloud_access_token")
+        secureStore.remove("soundcloud_refresh_token")
     }
 
     // --- SoundCloud client credentials (user-provided BYOK) ---
 
     suspend fun setSoundCloudCredentials(clientId: String, clientSecret: String) {
-        dataStore.edit {
-            it[SOUNDCLOUD_CLIENT_ID] = clientId
-            it[SOUNDCLOUD_CLIENT_SECRET] = clientSecret
-        }
+        secureStore.set("soundcloud_client_id", clientId)
+        secureStore.set("soundcloud_client_secret", clientSecret)
     }
 
     suspend fun getSoundCloudClientId(): String? =
-        dataStore.data.first()[SOUNDCLOUD_CLIENT_ID]
+        secureStore.get("soundcloud_client_id")
 
     suspend fun getSoundCloudClientSecret(): String? =
-        dataStore.data.first()[SOUNDCLOUD_CLIENT_SECRET]
+        secureStore.get("soundcloud_client_secret")
 
     fun getSoundCloudClientIdFlow(): Flow<String?> =
-        dataStore.data.map { it[SOUNDCLOUD_CLIENT_ID] }
+        secureStore.observe("soundcloud_client_id")
 
     suspend fun clearSoundCloudCredentials() {
-        dataStore.edit {
-            it.remove(SOUNDCLOUD_CLIENT_ID)
-            it.remove(SOUNDCLOUD_CLIENT_SECRET)
-            it.remove(SOUNDCLOUD_ACCESS_TOKEN)
-            it.remove(SOUNDCLOUD_REFRESH_TOKEN)
-        }
+        secureStore.remove("soundcloud_client_id")
+        secureStore.remove("soundcloud_client_secret")
+        secureStore.remove("soundcloud_access_token")
+        secureStore.remove("soundcloud_refresh_token")
     }
 
     suspend fun getSpotifyAccessToken(): String? =
-        dataStore.data.first()[SPOTIFY_ACCESS_TOKEN]
+        secureStore.get("spotify_access_token")
 
     suspend fun getSpotifyRefreshToken(): String? =
-        dataStore.data.first()[SPOTIFY_REFRESH_TOKEN]
+        secureStore.get("spotify_refresh_token")
 
     // --- Resolver order and active resolvers ---
 
@@ -312,66 +303,66 @@ class SettingsStore constructor(
     // --- ListenBrainz ---
 
     suspend fun getListenBrainzToken(): String? =
-        dataStore.data.first()[LISTENBRAINZ_TOKEN]
+        secureStore.get("listenbrainz_token")
 
     fun getListenBrainzTokenFlow(): Flow<String?> =
-        dataStore.data.map { it[LISTENBRAINZ_TOKEN] }
+        secureStore.observe("listenbrainz_token")
 
     suspend fun setListenBrainzToken(token: String) {
-        dataStore.edit { it[LISTENBRAINZ_TOKEN] = token }
+        secureStore.set("listenbrainz_token", token)
     }
 
     suspend fun clearListenBrainzToken() {
-        dataStore.edit { it.remove(LISTENBRAINZ_TOKEN) }
+        secureStore.remove("listenbrainz_token")
     }
 
     // --- Libre.fm ---
 
     suspend fun getLibreFmSessionKey(): String? =
-        dataStore.data.first()[LIBREFM_SESSION_KEY]
+        secureStore.get("librefm_session_key")
 
     fun getLibreFmSessionKeyFlow(): Flow<String?> =
-        dataStore.data.map { it[LIBREFM_SESSION_KEY] }
+        secureStore.observe("librefm_session_key")
 
     suspend fun setLibreFmSession(sessionKey: String) {
-        dataStore.edit { it[LIBREFM_SESSION_KEY] = sessionKey }
+        secureStore.set("librefm_session_key", sessionKey)
     }
 
     suspend fun clearLibreFmSession() {
-        dataStore.edit { it.remove(LIBREFM_SESSION_KEY) }
+        secureStore.remove("librefm_session_key")
     }
 
     // --- Discogs ---
 
     suspend fun getDiscogsToken(): String? =
-        dataStore.data.first()[DISCOGS_TOKEN]?.ifBlank { null }
+        secureStore.get("discogs_personal_token")?.ifBlank { null }
 
     suspend fun setDiscogsToken(token: String) {
-        dataStore.edit { it[DISCOGS_TOKEN] = token }
+        secureStore.set("discogs_personal_token", token)
     }
 
     suspend fun clearDiscogsToken() {
-        dataStore.edit { it.remove(DISCOGS_TOKEN) }
+        secureStore.remove("discogs_personal_token")
     }
 
     // --- Apple Music ---
 
     fun getAppleMusicDeveloperTokenFlow(): Flow<String?> =
-        dataStore.data.map {
-            it[APPLE_MUSIC_DEVELOPER_TOKEN]?.ifBlank { null }
+        secureStore.observe("apple_music_developer_token").map {
+            it?.ifBlank { null }
                 ?: BuildConfig.APPLE_MUSIC_DEVELOPER_TOKEN.ifBlank { null }
         }
 
     suspend fun getAppleMusicDeveloperToken(): String? =
-        dataStore.data.first()[APPLE_MUSIC_DEVELOPER_TOKEN]?.ifBlank { null }
+        secureStore.get("apple_music_developer_token")?.ifBlank { null }
             ?: BuildConfig.APPLE_MUSIC_DEVELOPER_TOKEN.ifBlank { null }
 
     suspend fun setAppleMusicDeveloperToken(token: String) {
-        dataStore.edit { it[APPLE_MUSIC_DEVELOPER_TOKEN] = token }
+        secureStore.set("apple_music_developer_token", token)
     }
 
     suspend fun clearAppleMusicDeveloperToken() {
-        dataStore.edit { it.remove(APPLE_MUSIC_DEVELOPER_TOKEN) }
+        secureStore.remove("apple_music_developer_token")
     }
 
     fun getAppleMusicStorefrontFlow(): Flow<String?> =
@@ -386,14 +377,14 @@ class SettingsStore constructor(
 
     /** Persisted Apple Music user token (MUT) — allows skipping re-auth on relaunch. */
     suspend fun getAppleMusicUserToken(): String? =
-        dataStore.data.first()[APPLE_MUSIC_USER_TOKEN]?.ifBlank { null }
+        secureStore.get("apple_music_user_token")?.ifBlank { null }
 
     suspend fun setAppleMusicUserToken(token: String) {
-        dataStore.edit { it[APPLE_MUSIC_USER_TOKEN] = token }
+        secureStore.set("apple_music_user_token", token)
     }
 
     suspend fun clearAppleMusicUserToken() {
-        dataStore.edit { it.remove(APPLE_MUSIC_USER_TOKEN) }
+        secureStore.remove("apple_music_user_token")
     }
 
     // --- Preferred Spotify Device ---
@@ -473,43 +464,35 @@ class SettingsStore constructor(
     // --- AI Providers ---
 
     suspend fun getAiProviderApiKey(providerId: String): String? {
-        val key = when (providerId) {
-            "chatgpt" -> CHATGPT_API_KEY
-            "claude" -> CLAUDE_API_KEY
-            "gemini" -> GEMINI_API_KEY
+        val secureKey = when (providerId) {
+            "chatgpt", "claude", "gemini" -> "ai_${providerId}_api_key"
             else -> return null
         }
-        return dataStore.data.first()[key]?.ifBlank { null }
+        return secureStore.get(secureKey)?.ifBlank { null }
     }
 
     fun getAiProviderApiKeyFlow(providerId: String): Flow<String?> {
-        val key = when (providerId) {
-            "chatgpt" -> CHATGPT_API_KEY
-            "claude" -> CLAUDE_API_KEY
-            "gemini" -> GEMINI_API_KEY
+        val secureKey = when (providerId) {
+            "chatgpt", "claude", "gemini" -> "ai_${providerId}_api_key"
             else -> return kotlinx.coroutines.flow.flowOf(null)
         }
-        return dataStore.data.map { it[key]?.ifBlank { null } }
+        return secureStore.observe(secureKey).map { it?.ifBlank { null } }
     }
 
     suspend fun setAiProviderApiKey(providerId: String, apiKey: String) {
-        val key = when (providerId) {
-            "chatgpt" -> CHATGPT_API_KEY
-            "claude" -> CLAUDE_API_KEY
-            "gemini" -> GEMINI_API_KEY
+        val secureKey = when (providerId) {
+            "chatgpt", "claude", "gemini" -> "ai_${providerId}_api_key"
             else -> return
         }
-        dataStore.edit { it[key] = apiKey }
+        secureStore.set(secureKey, apiKey)
     }
 
     suspend fun clearAiProviderApiKey(providerId: String) {
-        val key = when (providerId) {
-            "chatgpt" -> CHATGPT_API_KEY
-            "claude" -> CLAUDE_API_KEY
-            "gemini" -> GEMINI_API_KEY
+        val secureKey = when (providerId) {
+            "chatgpt", "claude", "gemini" -> "ai_${providerId}_api_key"
             else -> return
         }
-        dataStore.edit { it.remove(key) }
+        secureStore.remove(secureKey)
     }
 
     suspend fun getAiProviderModel(providerId: String): String {
@@ -707,15 +690,15 @@ class SettingsStore constructor(
 
     // --- Concert API Keys ---
 
-    fun getTicketmasterApiKeyFlow(): Flow<String?> = dataStore.data.map { it[TICKETMASTER_API_KEY] }
-    suspend fun getTicketmasterApiKey(): String? = dataStore.data.first()[TICKETMASTER_API_KEY]
-    suspend fun setTicketmasterApiKey(key: String) { dataStore.edit { it[TICKETMASTER_API_KEY] = key } }
-    suspend fun clearTicketmasterApiKey() { dataStore.edit { it.remove(TICKETMASTER_API_KEY) } }
+    fun getTicketmasterApiKeyFlow(): Flow<String?> = secureStore.observe("ticketmaster_api_key")
+    suspend fun getTicketmasterApiKey(): String? = secureStore.get("ticketmaster_api_key")
+    suspend fun setTicketmasterApiKey(key: String) { secureStore.set("ticketmaster_api_key", key) }
+    suspend fun clearTicketmasterApiKey() { secureStore.remove("ticketmaster_api_key") }
 
-    fun getSeatGeekClientIdFlow(): Flow<String?> = dataStore.data.map { it[SEATGEEK_CLIENT_ID] }
-    suspend fun getSeatGeekClientId(): String? = dataStore.data.first()[SEATGEEK_CLIENT_ID]
-    suspend fun setSeatGeekClientId(id: String) { dataStore.edit { it[SEATGEEK_CLIENT_ID] = id } }
-    suspend fun clearSeatGeekClientId() { dataStore.edit { it.remove(SEATGEEK_CLIENT_ID) } }
+    fun getSeatGeekClientIdFlow(): Flow<String?> = secureStore.observe("seatgeek_client_id")
+    suspend fun getSeatGeekClientId(): String? = secureStore.get("seatgeek_client_id")
+    suspend fun setSeatGeekClientId(id: String) { secureStore.set("seatgeek_client_id", id) }
+    suspend fun clearSeatGeekClientId() { secureStore.remove("seatgeek_client_id") }
 
     private fun defaultVolumeOffsets(): Map<String, Int> = mapOf(
         "spotify" to 0,

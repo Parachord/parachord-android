@@ -178,11 +178,32 @@ class NativeBridge(
     // ── Storage ──────────────────────────────────────────────────────
 
     /**
+     * Allowed key prefix for plugin storage. All keys MUST start with "plugin."
+     * followed by the plugin ID and a dot. This prevents plugins from reading
+     * the app's own DataStore keys (OAuth tokens, AI API keys, session
+     * credentials, etc.) which share the same DataStore instance.
+     *
+     * security: C3 — namespace NativeBridge storage per plugin
+     */
+    private val PLUGIN_KEY_PREFIX = "plugin."
+
+    private fun isAllowedStorageKey(key: String): Boolean =
+        key.startsWith(PLUGIN_KEY_PREFIX) &&
+            key.indexOf('.', PLUGIN_KEY_PREFIX.length) > PLUGIN_KEY_PREFIX.length
+
+    /**
      * Read a value from DataStore. Synchronous (required by @JavascriptInterface).
      * Uses [runBlocking] — acceptable since DataStore reads from memory cache.
+     *
+     * Only keys starting with "plugin.<id>." are allowed. Attempts to read
+     * app-level keys (tokens, credentials) return null.
      */
     @JavascriptInterface
     fun storageGet(key: String): String? {
+        if (!isAllowedStorageKey(key)) {
+            Log.w(TAG, "storageGet blocked: key '$key' is not in the plugin namespace")
+            return null
+        }
         return try {
             runBlocking {
                 val prefs = dataStore.data.first()
@@ -194,9 +215,18 @@ class NativeBridge(
         }
     }
 
-    /** Write a value to DataStore asynchronously. */
+    /**
+     * Write a value to DataStore asynchronously.
+     *
+     * Only keys starting with "plugin.<id>." are allowed. Attempts to write
+     * app-level keys are silently rejected.
+     */
     @JavascriptInterface
     fun storageSet(key: String, value: String) {
+        if (!isAllowedStorageKey(key)) {
+            Log.w(TAG, "storageSet blocked: key '$key' is not in the plugin namespace")
+            return
+        }
         scope.launch {
             try {
                 dataStore.edit { it[stringPreferencesKey(key)] = value }

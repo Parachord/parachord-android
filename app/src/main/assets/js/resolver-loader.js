@@ -105,6 +105,13 @@ class ResolverLoader {
       }
     }
 
+    // Per-plugin scoped storage — keys are prefixed with "plugin.<id>."
+    // so plugins can't read each other's data or the app's tokens.
+    // security: C3
+    const pluginStorage = (typeof window.createPluginStorage === 'function')
+      ? window.createPluginStorage(manifest.id)
+      : window.nativeStorage; // Fallback for desktop (no createPluginStorage)
+
     // Create resolver object
     const resolver = {
       // Metadata
@@ -132,6 +139,9 @@ class ResolverLoader {
       enabled: false,
       weight: 0,
       config: {},
+
+      // Per-plugin isolated storage (security: C3)
+      storage: pluginStorage,
 
       // Implementation (filtered for safety)
       ...safeImplFunctions,
