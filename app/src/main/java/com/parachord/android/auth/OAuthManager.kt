@@ -33,15 +33,43 @@ class OAuthManager constructor(
 
     /**
      * PKCE + CSRF state for in-flight OAuth flows, keyed by the OAuth `state`
-     * parameter. Allowing concurrent flows (e.g. user starts Spotify then
-     * SoundCloud) was previously broken because they shared a single
-     * [codeVerifier] field — and there was no state parameter at all, so a
-     * malicious app registering the `parachord://auth` scheme could feed us
-     * an auth code from a replayed or forged authorization response.
+     * parameter. Persisted to SecureTokenStore so flows survive app-kill between
+     * launching the Custom Tab and receiving the callback.
      *
-     * security: H5
+     * security: H5 (state/CSRF), L4 (persistence across app-kill)
      */
     private val pendingFlows = mutableMapOf<String, PendingOAuthFlow>()
+
+    init {
+        // Restore any pending flows from a previous session (security: L4)
+        restorePendingFlows()
+    }
+
+    private fun restorePendingFlows() {
+        try {
+            val raw = settingsStore.secureStore.get("oauth_pending_flows") ?: return
+            val restored = json.decodeFromString<Map<String, PendingOAuthFlow>>(raw)
+            pendingFlows.putAll(restored)
+            Log.d(TAG, "Restored ${restored.size} pending OAuth flow(s)")
+        } catch (e: Exception) {
+            Log.w(TAG, "Failed to restore pending flows: ${e.message}")
+        }
+    }
+
+    private fun persistPendingFlows() {
+        try {
+            if (pendingFlows.isEmpty()) {
+                settingsStore.secureStore.remove("oauth_pending_flows")
+            } else {
+                settingsStore.secureStore.set(
+                    "oauth_pending_flows",
+                    json.encodeToString(pendingFlows.toMap()),
+                )
+            }
+        } catch (e: Exception) {
+            Log.w(TAG, "Failed to persist pending flows: ${e.message}")
+        }
+    }
 
     /** Mutex to prevent concurrent refresh attempts. */
     private val refreshMutex = Mutex()
@@ -208,6 +236,7 @@ class OAuthManager constructor(
             return false
         }
         val flow = pendingFlows.remove(state)
+        persistPendingFlows()
         if (flow == null || flow.service != "spotify") {
             Log.w(TAG, "Spotify callback state mismatch — possible CSRF; rejecting")
             return false
@@ -254,6 +283,7 @@ class OAuthManager constructor(
             return false
         }
         val flow = pendingFlows.remove(state)
+        persistPendingFlows()
         if (flow == null || flow.service != "soundcloud") {
             Log.w(TAG, "SoundCloud callback state mismatch — possible CSRF; rejecting")
             return false
@@ -449,6 +479,7 @@ class OAuthManager constructor(
     private fun prunePendingFlows() {
         val cutoff = System.currentTimeMillis() - 10 * 60 * 1000L
         pendingFlows.entries.removeAll { it.value.createdAt < cutoff }
+        persistPendingFlows()
     }
 
     private fun generateCodeChallenge(verifier: String): String {
@@ -466,6 +497,7 @@ class OAuthManager constructor(
  * In-flight OAuth flow state keyed by the `state` parameter.
  * security: H5
  */
+@Serializable
 private data class PendingOAuthFlow(
     val service: String,
     val codeVerifier: String,

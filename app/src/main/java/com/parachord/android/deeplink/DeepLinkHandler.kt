@@ -21,6 +21,21 @@ private const val TAG = "DeepLinkHandler"
  */
 class DeepLinkHandler constructor() {
 
+    companion object {
+        /**
+         * Max length for deep-link query parameters. Prevents abuse via
+         * extremely long strings in chat prompts, search queries, artist
+         * names, etc. that could consume excessive memory or be used for
+         * fingerprinting. Normal values are well under 1 KB.
+         * security: L3
+         */
+        private const val MAX_PARAM_LENGTH = 2000
+    }
+
+    /** Clamp a query parameter to [MAX_PARAM_LENGTH]. */
+    private fun Uri.clampedParam(name: String): String? =
+        getQueryParameter(name)?.take(MAX_PARAM_LENGTH)
+
     fun parse(uri: Uri): DeepLinkAction {
         Log.d(TAG, "Parsing URI: $uri")
 
@@ -40,8 +55,8 @@ class DeepLinkHandler constructor() {
             "auth" -> DeepLinkAction.OAuthCallback(uri.toString())
 
             "play" -> {
-                val artist = uri.getQueryParameter("artist") ?: return DeepLinkAction.Unknown(uri.toString())
-                val title = uri.getQueryParameter("title") ?: return DeepLinkAction.Unknown(uri.toString())
+                val artist = uri.clampedParam("artist") ?: return DeepLinkAction.Unknown(uri.toString())
+                val title = uri.clampedParam("title") ?: return DeepLinkAction.Unknown(uri.toString())
                 DeepLinkAction.Play(artist, title)
             }
 
@@ -53,9 +68,9 @@ class DeepLinkHandler constructor() {
             "queue" -> {
                 when (pathSegments.firstOrNull()) {
                     "add" -> {
-                        val artist = uri.getQueryParameter("artist") ?: return DeepLinkAction.Unknown(uri.toString())
-                        val title = uri.getQueryParameter("title") ?: return DeepLinkAction.Unknown(uri.toString())
-                        val album = uri.getQueryParameter("album")
+                        val artist = uri.clampedParam("artist") ?: return DeepLinkAction.Unknown(uri.toString())
+                        val title = uri.clampedParam("title") ?: return DeepLinkAction.Unknown(uri.toString())
+                        val album = uri.clampedParam("album")
                         DeepLinkAction.QueueAdd(artist, title, album)
                     }
                     "clear" -> DeepLinkAction.QueueClear
@@ -94,7 +109,7 @@ class DeepLinkHandler constructor() {
             }
             "history" -> {
                 val tab = pathSegments.firstOrNull()
-                val period = uri.getQueryParameter("period")
+                val period = uri.clampedParam("period")
                 DeepLinkAction.NavigateHistory(tab, period)
             }
             "friend" -> {
@@ -118,16 +133,16 @@ class DeepLinkHandler constructor() {
                 DeepLinkAction.NavigateSettings(tab)
             }
             "search" -> {
-                val query = uri.getQueryParameter("q")
-                val source = uri.getQueryParameter("source")
+                val query = uri.clampedParam("q")
+                val source = uri.clampedParam("source")
                 DeepLinkAction.NavigateSearch(query, source)
             }
             "chat" -> {
-                val prompt = uri.getQueryParameter("prompt")
+                val prompt = uri.clampedParam("prompt")
                 DeepLinkAction.NavigateChat(prompt)
             }
             "import" -> {
-                val url = uri.getQueryParameter("url") ?: return DeepLinkAction.Unknown(uri.toString())
+                val url = uri.clampedParam("url") ?: return DeepLinkAction.Unknown(uri.toString())
                 DeepLinkAction.ImportPlaylist(url)
             }
 
@@ -168,22 +183,30 @@ class DeepLinkHandler constructor() {
      * gzip-compressed, base64-encoded data containing $full_url parameter.
      * Decode it to extract the actual open.spotify.com URL.
      */
-    private fun extractSpotifyUrlFromBranchReferrer(referrer: String): String? = try {
-        val compressed = android.util.Base64.decode(referrer, android.util.Base64.DEFAULT)
-        val decompressed = java.util.zip.GZIPInputStream(compressed.inputStream())
-            .bufferedReader().readText()
-        // Parse the decompressed URL and extract $full_url parameter
-        val refUri = Uri.parse(decompressed)
-        val fullUrl = refUri.getQueryParameter("\$full_url")
-            ?: refUri.getQueryParameter("\$fallback_url")
-        // Strip tracking params to get clean Spotify URL
-        if (fullUrl != null) {
-            val spotifyUri = Uri.parse(fullUrl)
-            "${spotifyUri.scheme}://${spotifyUri.host}${spotifyUri.path}"
-        } else null
-    } catch (e: Exception) {
-        Log.w(TAG, "Failed to decode Branch referrer: ${e.message}")
-        null
+    private fun extractSpotifyUrlFromBranchReferrer(referrer: String): String? {
+        return try {
+            val compressed = android.util.Base64.decode(referrer, android.util.Base64.DEFAULT)
+            // security: L2 — cap decompressed size to defend against gzip bombs.
+            // Normal Branch referrer payloads are ~200 bytes decompressed.
+            val gzipStream = java.util.zip.GZIPInputStream(compressed.inputStream())
+            val buffer = CharArray(64 * 1024) // 64 KB max
+            val reader = gzipStream.bufferedReader()
+            val read = reader.read(buffer)
+            if (read < 0) return null
+            val decompressed = String(buffer, 0, read)
+            // Parse the decompressed URL and extract $full_url parameter
+            val refUri = Uri.parse(decompressed)
+            val fullUrl = refUri.getQueryParameter("\$full_url")
+                ?: refUri.getQueryParameter("\$fallback_url")
+            // Strip tracking params to get clean Spotify URL
+            if (fullUrl != null) {
+                val spotifyUri = Uri.parse(fullUrl)
+                "${spotifyUri.scheme}://${spotifyUri.host}${spotifyUri.path}"
+            } else null
+        } catch (e: Exception) {
+            Log.w(TAG, "Failed to decode Branch referrer: ${e.message}")
+            null
+        }
     }
 
     private fun parseHttpUrl(uri: Uri): DeepLinkAction {

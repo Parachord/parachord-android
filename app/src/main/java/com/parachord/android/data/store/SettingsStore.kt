@@ -20,7 +20,7 @@ import kotlinx.coroutines.flow.map
  */
 class SettingsStore constructor(
     private val dataStore: DataStore<Preferences>,
-    private val secureStore: SecureTokenStore,
+    internal val secureStore: SecureTokenStore,
 ) {
     companion object {
         val THEME_MODE = stringPreferencesKey("theme_mode")

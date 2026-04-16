@@ -145,6 +145,8 @@ class PluginSyncService constructor(
     // ── Private helpers ──────────────────────────────────────────────
 
     private suspend fun fetchManifest(): PluginManifest {
+        // security: L5 — runtime assertion that plugin URLs are HTTPS
+        require(MANIFEST_URL.startsWith("https://")) { "Plugin manifest URL must be HTTPS" }
         val body = httpClient.get(MANIFEST_URL).bodyAsText()
         // security: M6 — cap manifest size to prevent OOM from hostile CDN
         if (body.length > MAX_MANIFEST_SIZE) {
@@ -155,6 +157,7 @@ class PluginSyncService constructor(
 
     private suspend fun fetchPlugin(pluginId: String): String {
         val url = "$PLUGINS_BASE_URL$pluginId.axe"
+        require(url.startsWith("https://")) { "Plugin download URL must be HTTPS" }
         val body = httpClient.get(url).bodyAsText()
         // security: M6 — cap .axe file size
         if (body.length > MAX_PLUGIN_SIZE) {
