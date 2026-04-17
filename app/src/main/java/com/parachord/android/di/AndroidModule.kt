@@ -140,7 +140,27 @@ val androidModule = module {
     single<DataStore<Preferences>> { androidContext().dataStore }
 
     single { DriverFactory(androidContext()).createDriver() }
-    single { com.parachord.shared.db.ParachordDb(get()) }
+    single {
+        val driver = get<app.cash.sqldelight.db.SqlDriver>()
+        // Belt-and-suspenders: existing installs upgraded from the original
+        // Room v12 schema won't pick up new tables through SQLDelight's
+        // version machinery. Every .sq in this project uses CREATE TABLE IF
+        // NOT EXISTS and is safe to re-run; we explicitly run the ones added
+        // after the initial port here so the app never starts with a missing
+        // table.
+        driver.execute(
+            null,
+            """CREATE TABLE IF NOT EXISTS sync_playlist_link (
+                localPlaylistId TEXT NOT NULL,
+                providerId      TEXT NOT NULL,
+                externalId      TEXT NOT NULL,
+                syncedAt        INTEGER NOT NULL,
+                PRIMARY KEY (localPlaylistId, providerId)
+            )""".trimIndent(),
+            0,
+        )
+        com.parachord.shared.db.ParachordDb(driver)
+    }
 
     // ── Retrofit API Clients (kept for backward compatibility during migration) ──
 
@@ -209,6 +229,7 @@ val androidModule = module {
     single { ChatMessageDao(get(), get()) }
     single { SearchHistoryDao(get()) }
     single { SyncSourceDao(get()) }
+    single { SyncPlaylistLinkDao(get()) }
 
     // ── Settings & Auth ──────────────────────────────────────────────
 

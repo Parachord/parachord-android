@@ -39,7 +39,7 @@ class AiChatServiceTest {
 
     private fun sanitizeHistory(history: MutableList<ChatMessage>) {
         while (history.isNotEmpty() && history.first().role == ChatRole.TOOL) {
-            history.removeFirst()
+            history.removeAt(0)
         }
         var i = 0
         while (i < history.size) {

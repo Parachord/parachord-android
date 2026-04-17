@@ -194,6 +194,31 @@ The **ListenBrainz MBID Mapper** (`mapper.listenbrainz.org/mapping/lookup`) reso
 
 This means local files without embedded art get artwork pulled from metadata providers, matching how streaming-resolved tracks get their art.
 
+### Playlist Sync — Duplicate Prevention
+
+Pushing local playlists to Spotify is a prime source of duplicates: `Playlist.spotifyId` is the only link between a local row and its remote, and any save path that forgets to forward it produces a fresh remote duplicate on the next sync. Mirrors desktop's `sync_playlist_links` map and three-layer dedup (desktop commits `40bb2cbf`, `214333ed`, `745e2db8`).
+
+**Durable link table (`sync_playlist_link`):** independent SQLDelight table keyed by `(localPlaylistId, providerId)` → `externalId`. Never touched by playlist writes, so a playlist-save that drops `spotifyId` can't clobber it. Because the schema started as a frozen port of Room v12, the CREATE DDL is also re-executed at DB bind time in `AndroidModule.kt` so existing installs pick up the table without a SQLDelight schema migration.
+
+**Three-layer dedup in `SyncEngine.syncPlaylists` before any `createPlaylistOnSpotify` call:**
+1. **ID link** — look up `sync_playlist_link[localId]["spotify"]`; if the stored `externalId` is still in the remote list and owned, reuse it. If gone, delete the stale link and fall through.
+2. **Playlist field** — defensive re-check of `Playlist.spotifyId` against the same remote list (redundant with the filter but kept for parity with desktop).
+3. **Name match** — case-insensitive, trimmed, owned-only; richest `trackCount` wins if several match.
+
+Only if all three miss does `createPlaylistOnSpotify` run. The link is written **immediately** after create/reuse, before the track push or playlist row update, so partial failures don't leave an unlinked remote.
+
+**Startup link backfill (`migrateLinksFromPlaylists`):** runs at the top of every `syncPlaylists`. For every playlist row with a non-null `spotifyId`, upserts a matching link row. Idempotent — protects against upgrades from pre-link-map installs and older push paths that wrote `spotifyId` without a link.
+
+**Skip-if-held mutex (not wait-if-held):** `SyncEngine.syncAll` uses `syncMutex.tryLock()` and returns early if held. `LibrarySyncWorker` (hourly), `SyncScheduler` (15 min in-app timer), and `SyncViewModel.syncNow` can all fire concurrently — wait-if-held would just queue wasted work behind the in-flight sync. Always use `tryLock` here, never `withLock`.
+
+**Link-table cleanup hooks:** prune the link row when its remote is deleted during duplicate cleanup (`deleteByExternalId`), and clear all provider entries on `stopSyncing` (`deleteForProvider`). Link orphans otherwise accumulate across sync-disconnect / reconnect cycles.
+
+**Invariants to preserve on every playlist save:** `spotifyId`, `snapshotId`, `locallyModified`, `lastModified`. The `.copy(...)` pattern preserves them automatically — fresh `PlaylistEntity(...)` constructors are only safe for genuinely new playlists.
+
+**Out of scope (not ported from desktop):** multi-provider `syncedTo: Map<providerId, ...>` generalization, `localOnly` opt-out, hosted XSPF (`sourceUrl` polling), two-phase `cleanupDuplicatePlaylists` (orphan relink + link-aware keeper selection). If any of these come up, they're separate workstreams, not add-ons to the dedup code.
+
+**Key files:** `shared/src/commonMain/sqldelight/com/parachord/shared/db/SyncPlaylistLink.sq`, `data/db/dao/SyncPlaylistLinkDao.kt`, `sync/SyncEngine.kt` (`migrateLinksFromPlaylists`, push loop), `sync/SpotifySyncProvider.kt`
+
 ### ListenBrainz Weekly Playlists
 
 The desktop fetches `GET /1/user/{username}/playlists/createdfor?count=100` (public, no auth token needed), filters by title containing "weekly jams" or "weekly exploration", sorts by date descending, and takes the most recent 4 of each type. Tracks are loaded lazily per playlist via `GET /1/playlist/{playlistId}`.
@@ -594,6 +619,8 @@ A full security review was completed April 2026. The review plan is at `.claude/
 32. **Don't create per-API OkHttpClients without the User-Agent interceptor.** The shared `OkHttpClient` in `AndroidModule.kt` has a global `User-Agent: Parachord/<version>` interceptor. MusicBrainz specifically blocks the default `okhttp/4.x.y` UA with HTTP 403. If you need a per-API client (e.g., different timeout), use `client.newBuilder().addInterceptor(...)` to inherit the UA interceptor.
 33. **Don't use JS `if` statements inside `MusicKitWebBridge.evaluate()`.** The `evaluate()` wrapper wraps the script as `var p = $script;` — an `if` statement is not a valid JS expression. Use IIFE: `(function() { if (...) ...; return true; })()` or the Base64 approach from PluginManager.
 34. **Don't use nested `hapticClickable` / `clickable` modifiers in LazyColumn items.** When the list updates progressively (e.g., Fresh Drops emitting new results every 5 artists), closures in LazyColumn items can fire with stale-captured data, navigating to the wrong item. Use a single click target per row.
+35. **Don't call `MutableList.removeFirst()` / `removeLast()`.** JDK 21 added native `List.removeFirst()` methods, and Kotlin 2.0+ compiles the call to the JVM method instead of the old stdlib extension. Android's runtime (API ≤ 35) has no such method, so the call throws `NoSuchMethodError` at runtime. Use `removeAt(0)` / `removeAt(lastIndex)` instead. Unit tests catch this on JDK 17 too — the same bytecode resolves through the JDK interface.
+36. **Unit tests need `testOptions.unitTests.isReturnDefaultValues = true`.** Otherwise any production code that calls `Log.d`, `Uri.parse`, or any other `android.*` method from under test throws `RuntimeException: Method ... not mocked`. This is set in `app/build.gradle.kts` — don't remove it. If you legitimately need an Android stub to return something other than the default, mock the specific call in that test.
 
 ### iOS-Specific
 

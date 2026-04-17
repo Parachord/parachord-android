@@ -6,10 +6,12 @@ import com.parachord.android.playback.handlers.ExternalPlaybackHandler
 import com.parachord.android.playback.handlers.PlaybackAction
 import com.parachord.android.playback.handlers.SoundCloudPlaybackHandler
 import com.parachord.android.playback.handlers.SpotifyPlaybackHandler
+import com.parachord.android.plugin.PluginManager
 import io.mockk.coEvery
 import io.mockk.coVerify
 import io.mockk.every
 import io.mockk.mockk
+import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.test.runTest
 import org.junit.Assert.*
 import org.junit.Before
@@ -20,6 +22,7 @@ class PlaybackRouterTest {
     private lateinit var spotifyHandler: SpotifyPlaybackHandler
     private lateinit var appleMusicHandler: AppleMusicPlaybackHandler
     private lateinit var soundCloudHandler: SoundCloudPlaybackHandler
+    private lateinit var pluginManager: PluginManager
     private lateinit var router: PlaybackRouter
 
     @Before
@@ -27,6 +30,10 @@ class PlaybackRouterTest {
         spotifyHandler = mockk(relaxed = true)
         appleMusicHandler = mockk(relaxed = true)
         soundCloudHandler = mockk(relaxed = true)
+        pluginManager = mockk(relaxed = true)
+        // `plugins` is a StateFlow<List<Plugin>>; relaxed mockk can't infer the
+        // generic type so the default iteration fails. Give it an empty list.
+        every { pluginManager.plugins } returns MutableStateFlow(emptyList())
 
         // Default: no handler handles anything
         every { spotifyHandler.canHandle(any()) } returns false
@@ -34,7 +41,7 @@ class PlaybackRouterTest {
         every { soundCloudHandler.canHandle(any()) } returns false
         coEvery { soundCloudHandler.createMediaItem(any()) } returns null
 
-        router = PlaybackRouter(spotifyHandler, appleMusicHandler, soundCloudHandler)
+        router = PlaybackRouter(spotifyHandler, appleMusicHandler, soundCloudHandler, pluginManager)
     }
 
     @Test

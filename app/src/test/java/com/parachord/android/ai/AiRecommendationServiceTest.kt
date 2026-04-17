@@ -153,7 +153,7 @@ class AiRecommendationServiceTest {
             ```
         """.trimIndent()
 
-        val jsonStr = extractJsonObject(response) ?: fail("Should extract JSON")
+        val jsonStr = extractJsonObject(response) ?: error("Should extract JSON")
         val result = parseRecommendations(jsonStr)
         assertEquals(1, result.albums.size)
         assertEquals(1, result.artists.size)

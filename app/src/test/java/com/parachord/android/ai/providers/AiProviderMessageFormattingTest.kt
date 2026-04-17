@@ -24,8 +24,7 @@ class AiProviderMessageFormattingTest {
             "bool" to true,
             "null" to null,
         )
-        val json = mapToJsonElement(map)
-        assertTrue(json is JsonObject)
+        val json = mapToJsonElement(map).jsonObject
         assertEquals("hello", json["string"]?.jsonPrimitive?.content)
         assertEquals(42, json["int"]?.jsonPrimitive?.long?.toInt())
         assertEquals(true, json["bool"]?.jsonPrimitive?.boolean)
@@ -37,7 +36,7 @@ class AiProviderMessageFormattingTest {
         val map = mapOf(
             "outer" to mapOf("inner" to "value")
         )
-        val json = mapToJsonElement(map)
+        val json = mapToJsonElement(map).jsonObject
         val outer = json["outer"]?.jsonObject
         assertNotNull(outer)
         assertEquals("value", outer!!["inner"]?.jsonPrimitive?.content)
@@ -48,7 +47,7 @@ class AiProviderMessageFormattingTest {
         val map = mapOf(
             "items" to listOf("a", "b", "c")
         )
-        val json = mapToJsonElement(map)
+        val json = mapToJsonElement(map).jsonObject
         val items = json["items"]?.jsonArray
         assertNotNull(items)
         assertEquals(3, items!!.size)
@@ -63,7 +62,7 @@ class AiProviderMessageFormattingTest {
                 mapOf("artist" to "Nirvana", "title" to "Smells Like Teen Spirit"),
             )
         )
-        val json = mapToJsonElement(map)
+        val json = mapToJsonElement(map).jsonObject
         val tracks = json["tracks"]?.jsonArray
         assertEquals(2, tracks!!.size)
         assertEquals("Radiohead", tracks[0].jsonObject["artist"]?.jsonPrimitive?.content)

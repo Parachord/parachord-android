@@ -51,13 +51,16 @@ class ResolverScoring constructor(
         preferredResolver: String? = null,
     ): ResolvedSource? {
         if (sources.isEmpty()) return null
-        if (sources.size == 1) {
-            val only = sources.first()
-            return if ((only.confidence ?: 0.0) >= MIN_CONFIDENCE_THRESHOLD) only else null
-        }
 
         val resolverOrder = getResolverOrder()
         val activeResolvers = getActiveResolvers()
+
+        if (sources.size == 1) {
+            val only = sources.first()
+            val passesActive = activeResolvers.isEmpty() || only.resolver in activeResolvers
+            val passesFloor = (only.confidence ?: 0.0) >= MIN_CONFIDENCE_THRESHOLD
+            return if (passesActive && passesFloor) only else null
+        }
 
         return sources
             .filter { activeResolvers.isEmpty() || it.resolver in activeResolvers }

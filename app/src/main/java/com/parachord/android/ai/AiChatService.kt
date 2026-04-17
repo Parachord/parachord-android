@@ -284,7 +284,7 @@ class AiChatService constructor(
     private fun sanitizeHistory(history: MutableList<ChatMessage>) {
         // Drop leading TOOL messages that have no preceding ASSISTANT with tool_calls
         while (history.isNotEmpty() && history.first().role == ChatRole.TOOL) {
-            history.removeFirst()
+            history.removeAt(0)
         }
         // Scan for orphaned TOOL messages in the middle of the history
         var i = 0

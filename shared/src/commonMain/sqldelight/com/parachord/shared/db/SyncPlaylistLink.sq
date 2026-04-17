@@ -1,0 +1,35 @@
+CREATE TABLE IF NOT EXISTS sync_playlist_link (
+    localPlaylistId TEXT NOT NULL,
+    providerId      TEXT NOT NULL,
+    externalId      TEXT NOT NULL,
+    syncedAt        INTEGER NOT NULL,
+    PRIMARY KEY (localPlaylistId, providerId)
+);
+
+selectAll:
+SELECT * FROM sync_playlist_link;
+
+selectForLocal:
+SELECT * FROM sync_playlist_link WHERE localPlaylistId = ?;
+
+selectForLink:
+SELECT * FROM sync_playlist_link WHERE localPlaylistId = ? AND providerId = ?;
+
+selectByExternalId:
+SELECT * FROM sync_playlist_link WHERE providerId = ? AND externalId = ?;
+
+upsert:
+INSERT OR REPLACE INTO sync_playlist_link (localPlaylistId, providerId, externalId, syncedAt)
+VALUES (?, ?, ?, ?);
+
+deleteForLink:
+DELETE FROM sync_playlist_link WHERE localPlaylistId = ? AND providerId = ?;
+
+deleteByExternalId:
+DELETE FROM sync_playlist_link WHERE providerId = ? AND externalId = ?;
+
+deleteForLocal:
+DELETE FROM sync_playlist_link WHERE localPlaylistId = ?;
+
+deleteForProvider:
+DELETE FROM sync_playlist_link WHERE providerId = ?;

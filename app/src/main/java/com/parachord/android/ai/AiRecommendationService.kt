@@ -215,12 +215,12 @@ Variety guidance: $theme Be creative and surprising — avoid defaulting to the 
         previousAlbums.addAll(parsed.albums)
         if (previousAlbums.size > 20) {
             val excess = previousAlbums.size - 20
-            repeat(excess) { previousAlbums.removeFirst() }
+            repeat(excess) { previousAlbums.removeAt(0) }
         }
         previousArtists.addAll(parsed.artists)
         if (previousArtists.size > 50) {
             val excess = previousArtists.size - 50
-            repeat(excess) { previousArtists.removeFirst() }
+            repeat(excess) { previousArtists.removeAt(0) }
         }
 
         // Enrich with artwork, then return up to 5 each

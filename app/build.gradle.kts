@@ -95,6 +95,16 @@ android {
         compose = true
         buildConfig = true
     }
+
+    testOptions {
+        unitTests {
+            // Return defaults instead of throwing for unmocked Android framework
+            // methods (e.g. Log.d, Uri.parse). Without this, any production code
+            // that calls into android.util.Log fails the test — and mocking
+            // every such call-site in every test is not worth the churn.
+            isReturnDefaultValues = true
+        }
+    }
 }
 
 dependencies {

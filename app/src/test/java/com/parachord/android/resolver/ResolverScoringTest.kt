@@ -33,13 +33,13 @@ class ResolverScoringTest {
 
     @Test
     fun `selectBest returns single source directly`() = runTest {
-        val source = makeSource("spotify", confidence = 0.5)
+        val source = makeSource("spotify", confidence = 0.9)
         assertEquals(source, scoring.selectBest(listOf(source)))
     }
 
     @Test
     fun `selectBest picks higher priority resolver over higher confidence`() = runTest {
-        val spotify = makeSource("spotify", confidence = 0.5)
+        val spotify = makeSource("spotify", confidence = 0.7)
         val soundcloud = makeSource("soundcloud", confidence = 0.95)
         val result = scoring.selectBest(listOf(soundcloud, spotify))
         assertEquals("spotify", result?.resolver)
@@ -50,7 +50,7 @@ class ResolverScoringTest {
         // Both at same priority by putting them adjacent in custom order
         coEvery { settingsStore.getResolverOrder() } returns listOf("spotify", "soundcloud")
 
-        val low = makeSource("spotify", confidence = 0.5)
+        val low = makeSource("spotify", confidence = 0.7)
         val high = makeSource("spotify", confidence = 0.95)
         val result = scoring.selectBest(listOf(low, high))
         assertEquals(0.95, result?.confidence)
@@ -59,7 +59,7 @@ class ResolverScoringTest {
     @Test
     fun `selectBest preferred resolver always wins`() = runTest {
         val spotify = makeSource("spotify", confidence = 0.95)
-        val soundcloud = makeSource("soundcloud", confidence = 0.5)
+        val soundcloud = makeSource("soundcloud", confidence = 0.7)
         val result = scoring.selectBest(listOf(spotify, soundcloud), preferredResolver = "soundcloud")
         assertEquals("soundcloud", result?.resolver)
     }
@@ -69,7 +69,7 @@ class ResolverScoringTest {
         coEvery { settingsStore.getActiveResolvers() } returns listOf("soundcloud")
 
         val spotify = makeSource("spotify", confidence = 0.95)
-        val soundcloud = makeSource("soundcloud", confidence = 0.5)
+        val soundcloud = makeSource("soundcloud", confidence = 0.7)
         val result = scoring.selectBest(listOf(spotify, soundcloud))
         assertEquals("soundcloud", result?.resolver)
     }
@@ -85,18 +85,26 @@ class ResolverScoringTest {
 
     @Test
     fun `selectBest unknown resolver gets lowest priority`() = runTest {
-        val spotify = makeSource("spotify", confidence = 0.5)
+        val spotify = makeSource("spotify", confidence = 0.7)
         val unknown = makeSource("newresolver", confidence = 1.0)
         val result = scoring.selectBest(listOf(unknown, spotify))
         assertEquals("spotify", result?.resolver)
     }
 
     @Test
-    fun `selectBest null confidence treated as zero`() = runTest {
-        val withConf = makeSource("spotify", confidence = 0.1)
+    fun `selectBest null confidence filtered by floor when above-floor source present`() = runTest {
+        // Under MIN_CONFIDENCE_THRESHOLD (0.60) filtering, null confidence
+        // (treated as 0.0) is dropped, leaving the above-floor source.
+        val withConf = makeSource("spotify", confidence = 0.75)
         val noConf = makeSource("spotify", confidence = null)
         val result = scoring.selectBest(listOf(noConf, withConf))
-        assertEquals(0.1, result?.confidence)
+        assertEquals(0.75, result?.confidence)
+    }
+
+    @Test
+    fun `selectBest filters below-floor confidence`() = runTest {
+        val source = makeSource("spotify", confidence = 0.5)
+        assertNull(scoring.selectBest(listOf(source)))
     }
 
     // -- insertInCanonicalOrder --

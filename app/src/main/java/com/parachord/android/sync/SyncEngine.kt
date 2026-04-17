@@ -6,7 +6,6 @@ import com.parachord.android.data.db.dao.*
 import com.parachord.android.data.db.entity.*
 import com.parachord.android.data.store.SettingsStore
 import kotlinx.coroutines.sync.Mutex
-import kotlinx.coroutines.sync.withLock
 
 class SyncEngine constructor(
     private val db: ParachordDb,
@@ -16,6 +15,7 @@ class SyncEngine constructor(
     private val playlistDao: PlaylistDao,
     private val playlistTrackDao: PlaylistTrackDao,
     private val syncSourceDao: SyncSourceDao,
+    private val syncPlaylistLinkDao: SyncPlaylistLinkDao,
     private val settingsStore: SettingsStore,
     private val spotifyProvider: SpotifySyncProvider,
 ) {
@@ -62,13 +62,21 @@ class SyncEngine constructor(
 
     suspend fun syncAll(
         onProgress: (SyncProgress) -> Unit = {},
-    ): FullSyncResult = syncMutex.withLock {
+    ): FullSyncResult {
         val settings = settingsStore.getSyncSettings()
         if (!settings.enabled) {
             return FullSyncResult(success = false, error = "Sync not enabled")
         }
 
-        try {
+        // Skip-if-held (not wait-if-held): the in-app timer, WorkManager, and
+        // manual sync can all fire at once. Running them serially would waste
+        // work and — before the three-layer dedup — produce remote duplicates.
+        if (!syncMutex.tryLock()) {
+            Log.i(TAG, "Sync already in progress, skipping")
+            return FullSyncResult(success = false, error = "Sync already in progress")
+        }
+
+        return try {
             var trackResult = TypeSyncResult()
             var albumResult = TypeSyncResult()
             var artistResult = TypeSyncResult()
@@ -108,6 +116,8 @@ class SyncEngine constructor(
         } catch (e: Exception) {
             Log.e(TAG, "Sync failed", e)
             FullSyncResult(success = false, error = e.message)
+        } finally {
+            syncMutex.unlock()
         }
     }
 
@@ -366,6 +376,33 @@ class SyncEngine constructor(
         return TypeSyncResult(added = toAdd.size, removed = toRemove.size, updated = unchanged.size)
     }
 
+    /**
+     * Backfill [syncPlaylistLinkDao] from any playlist rows that already have
+     * a `spotifyId` set. Idempotent — safe to run on every sync. Ensures the
+     * durable link map survives upgrades from pre-link-map installs and stays
+     * in sync if an older push path wrote `spotifyId` without writing a link.
+     */
+    private suspend fun migrateLinksFromPlaylists() {
+        val providerId = SpotifySyncProvider.PROVIDER_ID
+        var added = 0
+        for (playlist in playlistDao.getAllSync()) {
+            val spotifyId = playlist.spotifyId ?: continue
+            val existing = syncPlaylistLinkDao.selectForLink(playlist.id, providerId)
+            if (existing?.externalId == spotifyId) continue
+            syncPlaylistLinkDao.upsert(
+                localPlaylistId = playlist.id,
+                providerId = providerId,
+                externalId = spotifyId,
+                syncedAt = if (playlist.lastModified > 0) playlist.lastModified
+                else System.currentTimeMillis(),
+            )
+            added++
+        }
+        if (added > 0) {
+            Log.d(TAG, "Backfilled $added playlist link(s) from spotifyId into sync_playlist_link")
+        }
+    }
+
     // ── Playlist sync ────────────────────────────────────────────
 
     private suspend fun syncPlaylists(
@@ -377,6 +414,14 @@ class SyncEngine constructor(
         var removed = 0
         var updated = 0
         var unchanged = 0
+
+        // Idempotent startup migration: make sure any playlist that already
+        // has a `spotifyId` set has a matching row in `sync_playlist_link`.
+        // Cheap (single query + conditional upsert) and guarantees the
+        // durable map is populated even if older syncs wrote `spotifyId`
+        // without writing a link. Mirrors desktop's
+        // migrateSyncLinksFromPlaylists (main.js).
+        migrateLinksFromPlaylists()
 
         val remotePlaylists = spotifyProvider.fetchPlaylists { current, total ->
             onProgress(SyncProgress(SyncPhase.PLAYLISTS, current, total, "Fetching playlists..."))
@@ -502,6 +547,10 @@ class SyncEngine constructor(
                             if (orphanSource != null) {
                                 syncSourceDao.deleteByKey(orphanSource.itemId, "playlist", providerId)
                             }
+                            // Prune the durable link map too so the next sync
+                            // doesn't burn a validation round-trip on a
+                            // known-dead externalId.
+                            syncPlaylistLinkDao.deleteByExternalId(providerId, dupe.spotifyId)
                             removed++
                         } catch (e: Exception) {
                             Log.e(TAG, "Failed to remove duplicate playlist ${dupe.spotifyId}", e)
@@ -522,21 +571,69 @@ class SyncEngine constructor(
         if (settings.pushLocalPlaylists) {
             val allPlaylists = playlistDao.getAllSync()
             val localOnly = allPlaylists.filter { it.spotifyId == null && it.id.startsWith("local-") && it.name.isNotBlank() }
-            // Build a lookup of owned remote playlists by name for reuse,
-            // excluding playlists we just deleted during dedup above.
-            val ownedRemoteByName = remotePlaylists.filter { it.isOwned && it.spotifyId !in deletedSpotifyIds }
-                .associateBy { it.entity.name.lowercase() }
+            // Indexes into the single remotePlaylists fetch — reused by all
+            // three dedup layers so we don't hit the Spotify API again.
+            val liveRemote = remotePlaylists.filter { it.spotifyId !in deletedSpotifyIds }
+            val remoteById = liveRemote.associateBy { it.spotifyId }
+            val ownedRemoteByName = liveRemote.filter { it.isOwned }
+                .groupBy { it.entity.name.trim().lowercase() }
 
             for (playlist in localOnly) {
                 try {
-                    // Check if an owned playlist with this name already exists
-                    // on Spotify (e.g. from a previous push before sync_sources
-                    // were cleared). Reuse it instead of creating a duplicate.
-                    val existing = ownedRemoteByName[playlist.name.lowercase()]
+                    // Three-layer dedup — mirrors desktop's sync:create-playlist
+                    // IPC handler. Each layer yields an `existing` remote we
+                    // can link to instead of creating a duplicate. Stop at the
+                    // first hit; fall through to create only if all three miss.
+
+                    // Layer 1: durable sync_playlist_link map. Survives any
+                    // save path that drops `spotifyId` on the local row.
+                    var existing: SpotifySyncProvider.SyncedPlaylist? = null
+                    var matchSource = ""
+                    val link = syncPlaylistLinkDao.selectForLink(playlist.id, providerId)
+                    if (link != null) {
+                        val fromLink = remoteById[link.externalId]
+                        if (fromLink != null && fromLink.isOwned) {
+                            existing = fromLink
+                            matchSource = "id-link"
+                        } else {
+                            // Remote deleted externally — drop the stale link
+                            // and fall through so we don't keep trying to
+                            // reuse a dead ID on every sync.
+                            Log.d(TAG, "Stored link $providerId:${link.externalId} for ${playlist.id} no longer exists remotely; clearing")
+                            syncPlaylistLinkDao.deleteForLink(playlist.id, providerId)
+                        }
+                    }
+
+                    // Layer 2: playlist.spotifyId (redundant here because the
+                    // filter above already excluded non-null spotifyId rows —
+                    // kept for structural parity with desktop, in case the
+                    // filter changes).
+                    if (existing == null && playlist.spotifyId != null) {
+                        val fromField = remoteById[playlist.spotifyId]
+                        if (fromField != null && fromField.isOwned) {
+                            existing = fromField
+                            matchSource = "playlist-field"
+                        }
+                    }
+
+                    // Layer 3: name match (case-insensitive, trimmed, owned).
+                    // If several match, the richest wins so the user's most
+                    // populated playlist becomes the canonical target.
+                    if (existing == null) {
+                        val candidates = ownedRemoteByName[playlist.name.trim().lowercase()]
+                        val pick = candidates?.maxByOrNull { it.trackCount }
+                        if (pick != null) {
+                            existing = pick
+                            matchSource = if ((candidates.size) > 1)
+                                "name-match (${candidates.size} candidates)"
+                            else "name-match"
+                        }
+                    }
+
                     val spotifyId: String
                     val snapshotId: String?
                     if (existing != null) {
-                        Log.d(TAG, "Reusing existing Spotify playlist '${playlist.name}' (${existing.spotifyId})")
+                        Log.d(TAG, "Linked '${playlist.name}' to existing $providerId playlist ${existing.spotifyId} via $matchSource")
                         spotifyId = existing.spotifyId
                         snapshotId = existing.snapshotId
                     } else {
@@ -545,7 +642,19 @@ class SyncEngine constructor(
                         )
                         spotifyId = created.id ?: continue
                         snapshotId = created.snapshotId
+                        Log.d(TAG, "Created $providerId playlist '${playlist.name}' ($spotifyId)")
                     }
+
+                    // Write the durable link IMMEDIATELY — before track push
+                    // and before the playlist row update. If either of those
+                    // fails, the link still protects the next sync from
+                    // creating a fresh duplicate.
+                    syncPlaylistLinkDao.upsert(
+                        localPlaylistId = playlist.id,
+                        providerId = providerId,
+                        externalId = spotifyId,
+                    )
+
                     val tracks = playlistTrackDao.getByPlaylistIdSync(playlist.id)
                     val uris = tracks.mapNotNull { it.trackSpotifyUri }
                     if (uris.isNotEmpty()) {
@@ -700,6 +809,7 @@ class SyncEngine constructor(
         }
 
         syncSourceDao.deleteAllForProvider(providerId)
+        syncPlaylistLinkDao.deleteForProvider(providerId)
         settingsStore.clearSyncSettings()
     }
 }
