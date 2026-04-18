@@ -34,3 +34,9 @@ DELETE FROM playlist_tracks WHERE playlistId = ?;
 
 deleteTrack:
 DELETE FROM playlist_tracks WHERE playlistId = ? AND position = ?;
+
+updateTrackArtwork:
+UPDATE playlist_tracks
+SET trackArtworkUrl = ?
+WHERE playlistId = ? AND position = ?
+  AND (trackArtworkUrl IS NULL OR trackArtworkUrl = '');

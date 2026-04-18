@@ -180,7 +180,37 @@ class ImageEnrichmentService constructor(
 
         val deferred = scope.async {
             try {
-                val tracks = playlistTrackDao.getByPlaylistIdSync(playlistId)
+                var tracks = playlistTrackDao.getByPlaylistIdSync(playlistId)
+
+                // For tracks missing artworkUrl (typical of XSPF imports — the
+                // XSPF spec doesn't carry per-track image data), fan out an
+                // album-art lookup. We dedupe by (album, artist) so we make at
+                // most one network call per album in the playlist.
+                val needsArt = tracks.filter {
+                    it.trackArtworkUrl.isNullOrBlank() && !it.trackAlbum.isNullOrBlank()
+                }
+                if (needsArt.isNotEmpty()) {
+                    val albumKeys = needsArt
+                        .map { (it.trackAlbum ?: "") to it.trackArtist }
+                        .distinct()
+                    val albumArtCache = mutableMapOf<Pair<String, String>, String?>()
+                    for (key in albumKeys) {
+                        val (album, artist) = key
+                        if (album.isBlank()) continue
+                        albumArtCache[key] = try {
+                            metadataService.getAlbumTracks(album, artist)?.artworkUrl
+                        } catch (_: Exception) {
+                            null
+                        }
+                    }
+                    for (track in needsArt) {
+                        val art = albumArtCache[(track.trackAlbum ?: "") to track.trackArtist]
+                            ?: continue
+                        playlistTrackDao.updateTrackArtwork(playlistId, track.position, art)
+                    }
+                    // Re-read so the mosaic builds from the now-enriched rows.
+                    tracks = playlistTrackDao.getByPlaylistIdSync(playlistId)
+                }
 
                 // Collect up to 4 unique artwork URLs
                 val artworkUrls = tracks

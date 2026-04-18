@@ -9,6 +9,7 @@ import com.parachord.android.data.db.dao.PlaylistTrackDao
 import com.parachord.android.data.db.entity.PlaylistEntity
 import com.parachord.android.data.db.entity.PlaylistTrackEntity
 import com.parachord.android.data.db.entity.TrackEntity
+import com.parachord.android.data.metadata.ImageEnrichmentService
 import com.parachord.android.data.repository.LibraryRepository
 import com.parachord.android.data.store.SettingsStore
 import com.parachord.android.playback.PlaybackContext
@@ -33,6 +34,7 @@ class PlaylistDetailViewModel constructor(
     private val settingsStore: SettingsStore,
     private val trackResolverCache: TrackResolverCache,
     private val spotifySyncProvider: SpotifySyncProvider,
+    private val imageEnrichmentService: ImageEnrichmentService,
 ) : ViewModel() {
 
     companion object {
@@ -85,6 +87,20 @@ class PlaylistDetailViewModel constructor(
                             )
                         }
                     )
+                }
+            }
+        }
+
+        // Generate the mosaic / enrich track art when the playlist has no
+        // cover. Required for hosted XSPF imports — XSPF doesn't carry per-
+        // track image data, so without this the detail screen would always
+        // show the gray "QueueMusic" placeholder. Fire-and-forget; the
+        // service deduplicates concurrent calls and the underlying mosaic
+        // file is written once.
+        viewModelScope.launch {
+            playlist.collect { p ->
+                if (p != null && p.artworkUrl.isNullOrBlank()) {
+                    imageEnrichmentService.enrichPlaylistArt(p.id)
                 }
             }
         }

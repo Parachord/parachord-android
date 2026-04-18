@@ -221,39 +221,43 @@ fun PlaylistDetailScreen(
                         .padding(horizontal = 16.dp, vertical = 8.dp),
                     horizontalAlignment = Alignment.CenterHorizontally,
                 ) {
-                    if (!playlist?.artworkUrl.isNullOrBlank()) {
-                        AlbumArtCard(
-                            artworkUrl = playlist?.artworkUrl,
-                            size = 160.dp,
-                            cornerRadius = 8.dp,
-                            elevation = 4.dp,
-                        )
-                    } else {
-                        PlaylistMosaic(
-                            trackArtworkUrls = tracks.mapNotNull { it.trackArtworkUrl },
-                            size = 160.dp,
-                        )
+                    Box {
+                        if (!playlist?.artworkUrl.isNullOrBlank()) {
+                            AlbumArtCard(
+                                artworkUrl = playlist?.artworkUrl,
+                                size = 160.dp,
+                                cornerRadius = 8.dp,
+                                elevation = 4.dp,
+                            )
+                        } else {
+                            PlaylistMosaic(
+                                trackArtworkUrls = tracks.mapNotNull { it.trackArtworkUrl },
+                                size = 160.dp,
+                            )
+                        }
+                        // Hosted chip overlays the artwork's bottom-left corner
+                        // so it's discoverable at a glance — matches how
+                        // streaming apps tag "Live", "Mix", etc. on cover art.
+                        if (playlist?.sourceUrl != null) {
+                            HostedBadge(
+                                modifier = Modifier
+                                    .align(Alignment.BottomStart)
+                                    .padding(6.dp),
+                            )
+                        }
                     }
 
                     Spacer(modifier = Modifier.height(10.dp))
 
-                    Row(
-                        verticalAlignment = Alignment.CenterVertically,
-                        horizontalArrangement = Arrangement.spacedBy(6.dp),
-                    ) {
-                        Text(
-                            text = playlist?.name ?: "",
-                            style = MaterialTheme.typography.titleMedium.copy(
-                                fontWeight = FontWeight.SemiBold,
-                            ),
-                            maxLines = 2,
-                            overflow = TextOverflow.Ellipsis,
-                            modifier = Modifier.weight(1f, fill = false),
-                        )
-                        if (playlist?.sourceUrl != null) {
-                            HostedBadge()
-                        }
-                    }
+                    Text(
+                        text = playlist?.name ?: "",
+                        style = MaterialTheme.typography.titleMedium.copy(
+                            fontWeight = FontWeight.SemiBold,
+                        ),
+                        maxLines = 2,
+                        overflow = TextOverflow.Ellipsis,
+                        textAlign = TextAlign.Center,
+                    )
 
                     // Author and source line
                     val metaParts = buildList {
@@ -283,13 +287,17 @@ fun PlaylistDetailScreen(
                     Spacer(modifier = Modifier.height(12.dp))
 
                     if (tracks.isNotEmpty()) {
-                        Row(verticalAlignment = Alignment.CenterVertically) {
+                        // Button is centered horizontally on the screen; the
+                        // overflow menu floats to the right edge so it stays
+                        // accessible without offsetting Play All.
+                        Box(modifier = Modifier.fillMaxWidth()) {
                             Button(
                                 onClick = { viewModel.playAll() },
                                 shape = RoundedCornerShape(24.dp),
                                 colors = ButtonDefaults.buttonColors(
                                     containerColor = MaterialTheme.colorScheme.primary,
                                 ),
+                                modifier = Modifier.align(Alignment.Center),
                             ) {
                                 Icon(
                                     Icons.Filled.PlayArrow,
@@ -299,8 +307,10 @@ fun PlaylistDetailScreen(
                                 Spacer(modifier = Modifier.width(4.dp))
                                 Text("Play All")
                             }
-                            Spacer(modifier = Modifier.width(8.dp))
-                            IconButton(onClick = { showPlaylistMenu = true }) {
+                            IconButton(
+                                onClick = { showPlaylistMenu = true },
+                                modifier = Modifier.align(Alignment.CenterEnd),
+                            ) {
                                 Icon(
                                     Icons.Default.MoreVert,
                                     contentDescription = "More options",

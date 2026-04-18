@@ -87,6 +87,20 @@ class PlaylistTrackDao(private val db: ParachordDb) {
         queries.deleteTrack(playlistId = playlistId, position = position.toLong())
     }
 
+    /**
+     * Backfill an artwork URL onto a single playlist_track row, but only when
+     * it currently has none — never overwrite art that came from the source
+     * (Spotify / SoundCloud already give us per-track artwork).
+     */
+    suspend fun updateTrackArtwork(playlistId: String, position: Int, artworkUrl: String): Unit =
+        withContext(Dispatchers.IO) {
+            queries.updateTrackArtwork(
+                trackArtworkUrl = artworkUrl,
+                playlistId = playlistId,
+                position = position.toLong(),
+            )
+        }
+
     /** Delete all tracks for a playlist then reinsert — used for reorder. */
     suspend fun replaceAll(playlistId: String, tracks: List<PlaylistTrackEntity>): Unit = withContext(Dispatchers.IO) {
         queries.transaction {

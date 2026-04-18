@@ -19,34 +19,34 @@ import androidx.compose.ui.unit.dp
 import com.parachord.android.ui.theme.ParachordTheme
 
 /**
- * Chip shown alongside a playlist's name when it's a hosted XSPF playlist
- * (mirrors a remote XSPF URL and re-polls every 5 min). Uses the brand
- * purple from the desktop palette so it sits next to the green Spotify chip
- * without clashing.
+ * Chip shown on a hosted XSPF playlist (mirrors a remote XSPF URL and re-polls
+ * every 5 min). Uses the brand purple from the desktop palette as a solid
+ * background so the chip reads well overlaying playlist artwork as well as on
+ * a plain surface. White foreground keeps WCAG contrast on both purple shades.
  */
 @Composable
 fun HostedBadge(modifier: Modifier = Modifier) {
     val accent = if (ParachordTheme.isDark) Color(0xFFA78BFA) else Color(0xFF7C3AED)
     Row(
         verticalAlignment = Alignment.CenterVertically,
-        horizontalArrangement = Arrangement.spacedBy(3.dp),
+        horizontalArrangement = Arrangement.spacedBy(4.dp),
         modifier = modifier
             .background(
-                color = accent.copy(alpha = 0.12f),
-                shape = RoundedCornerShape(4.dp),
+                color = accent,
+                shape = RoundedCornerShape(6.dp),
             )
-            .padding(horizontal = 6.dp, vertical = 1.dp),
+            .padding(horizontal = 8.dp, vertical = 3.dp),
     ) {
         Icon(
             imageVector = Icons.Filled.CloudSync,
             contentDescription = null,
-            tint = accent,
-            modifier = Modifier.size(10.dp),
+            tint = Color.White,
+            modifier = Modifier.size(12.dp),
         )
         Text(
             text = "Hosted",
             style = MaterialTheme.typography.labelSmall,
-            color = accent,
+            color = Color.White,
         )
     }
 }
