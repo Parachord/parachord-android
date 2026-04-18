@@ -215,9 +215,34 @@ Only if all three miss does `createPlaylistOnSpotify` run. The link is written *
 
 **Invariants to preserve on every playlist save:** `spotifyId`, `snapshotId`, `locallyModified`, `lastModified`. The `.copy(...)` pattern preserves them automatically — fresh `PlaylistEntity(...)` constructors are only safe for genuinely new playlists.
 
-**Out of scope (not ported from desktop):** multi-provider `syncedTo: Map<providerId, ...>` generalization, `localOnly` opt-out, hosted XSPF (`sourceUrl` polling), two-phase `cleanupDuplicatePlaylists` (orphan relink + link-aware keeper selection). If any of these come up, they're separate workstreams, not add-ons to the dedup code.
+**Out of scope (not ported from desktop):** multi-provider `syncedTo: Map<providerId, ...>` generalization, `localOnly` opt-out, two-phase `cleanupDuplicatePlaylists` (orphan relink + link-aware keeper selection). If any of these come up, they're separate workstreams, not add-ons to the dedup code.
 
 **Key files:** `shared/src/commonMain/sqldelight/com/parachord/shared/db/SyncPlaylistLink.sq`, `data/db/dao/SyncPlaylistLinkDao.kt`, `sync/SyncEngine.kt` (`migrateLinksFromPlaylists`, push loop), `sync/SpotifySyncProvider.kt`
+
+### Hosted XSPF Playlists
+
+Importing a playlist from an XSPF URL (as opposed to an uploaded `.xspf` file or a Spotify/Apple Music URL) sets `sourceUrl` on the row and records a SHA-256 of the body in `sourceContentHash`. A background poller re-fetches that URL, diffs the hash, and when the content has changed replaces the playlist's tracks and flips `locallyModified = true`. The XSPF is canonical; the next Spotify sync pushes the new state up, overwriting any Spotify-side edits (mirrors desktop's `pollHostedPlaylists`, app.js L32167+).
+
+**Dual-track polling (mirrors [SyncScheduler](app/src/main/java/com/parachord/android/sync/SyncScheduler.kt)):**
+- Foreground coroutine timer every 5 min while the app is running — matches desktop cadence.
+- `HostedPlaylistWorker` via `WorkManager` every 15 min (Android's floor for periodic work) for background updates.
+- Both delegate to `HostedPlaylistPoller.pollAll()`; polling is always-on from `ParachordApplication.onCreate` regardless of Spotify sync state (hosted polling is orthogonal to sync).
+
+**SSRF re-validation on every poll.** `validateXspfUrl` runs at import time AND on every poll tick — a DNS record can change between import and the next fetch, so a previously-safe URL can later resolve to an internal address. Literal-host check only (we don't resolve DNS, which would introduce a TOCTOU race).
+
+**Content hash comparison, not conditional GET.** `sha256Hex(body)` is the change token. HTTP `ETag`/`If-Modified-Since` would be a nice efficiency win but aren't universally honored; hash works regardless. Schema stores the hash in `playlists.sourceContentHash`.
+
+**SyncEngine hooks for hosted playlists (`sourceUrl != null`):**
+1. **Never pull.** The `when` block in `syncPlaylists` takes an `isHosted` early branch: push when `locallyModified`, otherwise no-op. Pulling from Spotify would just get reverted by the next poll tick 5 min later — confusing churn that also risks losing the XSPF state if the next poll is delayed.
+2. **Include in auto-push.** The local→Spotify push loop filter was broadened from `id.startsWith("local-")` to `id.startsWith("local-") || sourceUrl != null`. Hosted playlists thus appear on Spotify and stay in lockstep with the XSPF URL via the same three-layer dedup as any other local playlist.
+
+**Schema migration for existing installs.** SQLite has no `ADD COLUMN IF NOT EXISTS`, so `ALTER TABLE playlists ADD COLUMN sourceUrl TEXT` is wrapped in a try/catch inside `AndroidModule.kt` (duplicate-column error on second launch is the only expected failure and is safe to swallow). Same pattern as the `sync_playlist_link` bootstrap. **Pre-migration `hosted-xspf-*` rows have `null sourceUrl` and are ignored by the poller** — users re-import to enable polling on existing rows.
+
+**UI indicator.** Purple `Hosted` chip with `Icons.Filled.CloudSync` via `ui/components/HostedBadge.kt`. Color uses the brand purple (`#7C3AED` light / `#A78BFA` dark) directly — not `MaterialTheme.colorScheme.primary`, which would be tinted by the theme toggle. Appears next to the Spotify chip on `PlaylistsScreen` list rows and alongside the title on `PlaylistDetailScreen`. The detail screen also shows "Mirrors <url> · updates every 5 min" under the metadata line.
+
+**Don't call `poller.pollAll()` on a hot path.** It iterates every hosted row and issues one HTTP fetch per row. The scheduler's 5-minute interval is already tight; don't wire additional ad-hoc triggers without thinking about rate limits on the XSPF host.
+
+**Key files:** `playlist/HostedPlaylistPoller.kt`, `playlist/HostedPlaylistScheduler.kt`, `playlist/HostedPlaylistWorker.kt`, `playlist/XspfHashing.kt` (shared SSRF + SHA-256 helpers), `playlist/PlaylistImportManager.kt` (persists `sourceUrl` + hash), `sync/SyncEngine.kt` (hosted skip-pull + include-in-push), `ui/components/HostedBadge.kt`
 
 ### ListenBrainz Weekly Playlists
 

@@ -10,7 +10,9 @@ CREATE TABLE IF NOT EXISTS playlists (
     snapshotId TEXT,
     lastModified INTEGER NOT NULL DEFAULT 0,
     locallyModified INTEGER NOT NULL DEFAULT 0,
-    ownerName TEXT
+    ownerName TEXT,
+    sourceUrl TEXT,
+    sourceContentHash TEXT
 );
 
 getAll:
@@ -22,12 +24,24 @@ SELECT * FROM playlists WHERE id = ?;
 getBySpotifyId:
 SELECT * FROM playlists WHERE spotifyId = ? LIMIT 1;
 
+getHosted:
+SELECT * FROM playlists WHERE sourceUrl IS NOT NULL;
+
 insert:
-INSERT OR REPLACE INTO playlists (id, name, description, artworkUrl, trackCount, createdAt, updatedAt, spotifyId, snapshotId, lastModified, locallyModified, ownerName)
-VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?);
+INSERT OR REPLACE INTO playlists (id, name, description, artworkUrl, trackCount, createdAt, updatedAt, spotifyId, snapshotId, lastModified, locallyModified, ownerName, sourceUrl, sourceContentHash)
+VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?);
 
 updateArtworkById:
 UPDATE playlists SET artworkUrl = ? WHERE id = ? AND (artworkUrl IS NULL OR artworkUrl = '');
+
+updateHostedSnapshot:
+UPDATE playlists
+SET sourceContentHash = ?,
+    trackCount = ?,
+    lastModified = ?,
+    updatedAt = ?,
+    locallyModified = 1
+WHERE id = ?;
 
 backfillLastModified:
 UPDATE playlists SET lastModified = COALESCE(

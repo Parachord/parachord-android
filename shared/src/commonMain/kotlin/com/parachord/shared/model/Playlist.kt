@@ -13,4 +13,6 @@ data class Playlist(
     val lastModified: Long = 0L,
     val locallyModified: Boolean = false,
     val ownerName: String? = null,
+    val sourceUrl: String? = null,
+    val sourceContentHash: String? = null,
 )

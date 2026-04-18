@@ -493,8 +493,21 @@ class SyncEngine constructor(
                 val remoteSnapshotId = remote.snapshotId
                 val localSnapshotId = localPlaylist.snapshotId
                 val localModified = localPlaylist.locallyModified
+                val isHosted = localPlaylist.sourceUrl != null
 
                 when {
+                    // Hosted XSPF: XSPF is canonical. Only push (when the
+                    // poller flipped locallyModified); never pull, because the
+                    // next poll tick would revert any pulled Spotify state
+                    // within 5 minutes anyway. Desktop parity.
+                    isHosted && localModified -> {
+                        pushPlaylist(localPlaylist)
+                        updated++
+                    }
+                    isHosted -> {
+                        syncSourceDao.insert(existingSource.copy(syncedAt = System.currentTimeMillis()))
+                        unchanged++
+                    }
                     localModified && remoteSnapshotId != localSnapshotId -> {
                         val localIsNewer = localPlaylist.lastModified > existingSource.syncedAt
                         if (localIsNewer) {
@@ -565,12 +578,18 @@ class SyncEngine constructor(
 
         // Push local-only playlists to Spotify.
         // Only push playlists the user explicitly created in the app (id starts
-        // with "local-"). Playlists from other sources (ListenBrainz weekly,
-        // DJ chat, imports) should not be auto-pushed — they'd create unwanted
-        // duplicates and potentially empty-named playlists on Spotify.
+        // with "local-") and hosted XSPF playlists (desktop parity — the XSPF
+        // is canonical, Spotify is a passive mirror). Other sources
+        // (ListenBrainz weekly, DJ chat, spotify-import, applemusic-import)
+        // should not be auto-pushed — they'd create unwanted duplicates and
+        // potentially empty-named playlists on Spotify.
         if (settings.pushLocalPlaylists) {
             val allPlaylists = playlistDao.getAllSync()
-            val localOnly = allPlaylists.filter { it.spotifyId == null && it.id.startsWith("local-") && it.name.isNotBlank() }
+            val localOnly = allPlaylists.filter {
+                it.spotifyId == null &&
+                    (it.id.startsWith("local-") || it.sourceUrl != null) &&
+                    it.name.isNotBlank()
+            }
             // Indexes into the single remotePlaylists fetch — reused by all
             // three dedup layers so we don't hit the Spotify API again.
             val liveRemote = remotePlaylists.filter { it.spotifyId !in deletedSpotifyIds }

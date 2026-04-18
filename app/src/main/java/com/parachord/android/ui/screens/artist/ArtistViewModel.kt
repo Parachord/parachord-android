@@ -208,41 +208,70 @@ class ArtistViewModel constructor(
      * otherwise resolves on-the-fly. Follows the same pattern as
      * HistoryViewModel and FriendDetailViewModel.
      */
-    fun playTrack(track: TrackSearchResult) {
+    /**
+     * Tap-to-play on a Top Tracks row. Resolves the entire visible Top Tracks
+     * list and starts playback at the tapped index — the rest of the list
+     * becomes the queue, matching the album / playlist tap behavior.
+     *
+     * The original `playTrack(TrackSearchResult)` overload is kept for legacy
+     * call sites that don't know an index (e.g. context menus that play a
+     * single track without queue context).
+     */
+    fun playTopTrack(index: Int) {
+        val tracks = _topTracks.value
+        if (index !in tracks.indices) return
+        val tappedKey = trackKey(tracks[index].title, tracks[index].artist)
         viewModelScope.launch {
             try {
-                val key = trackKey(track.title, track.artist)
-                val sources = _trackSources.value[key]
-                    ?: resolverManager.resolveWithHints(
-                        query = "${track.artist} - ${track.title}",
-                        spotifyId = track.spotifyId,
-                        targetTitle = track.title,
-                        targetArtist = track.artist,
-                    )
-                val best = resolverScoring.selectBest(sources)
-                if (best == null) {
-                    Log.w("ArtistVM", "No playable source for '${track.title}'")
+                val entities = tracks.mapNotNull { track -> resolveToEntity(track) }
+                if (entities.isEmpty()) {
+                    Log.w("ArtistVM", "No playable sources in top tracks list")
                     return@launch
                 }
-                val entity = TrackEntity(
-                    id = "artist-${track.title.hashCode()}-${track.artist.hashCode()}",
-                    title = track.title,
-                    artist = track.artist,
-                    album = track.album,
-                    duration = track.duration,
-                    artworkUrl = track.artworkUrl,
-                    sourceType = best.sourceType,
-                    sourceUrl = best.url,
-                    resolver = best.resolver,
-                    spotifyUri = best.spotifyUri,
-                    soundcloudId = best.soundcloudId,
-                    appleMusicId = best.appleMusicId,
+                // The tapped track may have shifted in `entities` if earlier
+                // tracks failed to resolve. Look it up by key; fall back to 0.
+                val startIndex = entities.indexOfFirst {
+                    trackKey(it.title, it.artist) == tappedKey
+                }.coerceAtLeast(0)
+                playbackController.playQueue(
+                    entities,
+                    startIndex = startIndex,
+                    context = com.parachord.android.playback.PlaybackContext(
+                        type = "artist",
+                        name = tracks[index].artist,
+                    ),
                 )
-                playbackController.playTrack(entity)
             } catch (e: Exception) {
-                Log.e("ArtistVM", "Failed to play '${track.title}'", e)
+                Log.e("ArtistVM", "Failed to play top track at index $index", e)
             }
         }
+    }
+
+    /** Resolve a single TrackSearchResult to a playable TrackEntity, or null. */
+    private suspend fun resolveToEntity(track: TrackSearchResult): TrackEntity? {
+        val key = trackKey(track.title, track.artist)
+        val sources = _trackSources.value[key]
+            ?: resolverManager.resolveWithHints(
+                query = "${track.artist} - ${track.title}",
+                spotifyId = track.spotifyId,
+                targetTitle = track.title,
+                targetArtist = track.artist,
+            )
+        val best = resolverScoring.selectBest(sources) ?: return null
+        return TrackEntity(
+            id = "artist-${track.title.hashCode()}-${track.artist.hashCode()}",
+            title = track.title,
+            artist = track.artist,
+            album = track.album,
+            duration = track.duration,
+            artworkUrl = track.artworkUrl,
+            sourceType = best.sourceType,
+            sourceUrl = best.url,
+            resolver = best.resolver,
+            spotifyUri = best.spotifyUri,
+            soundcloudId = best.soundcloudId,
+            appleMusicId = best.appleMusicId,
+        )
     }
 
     /** Get all playlists for the playlist picker. */

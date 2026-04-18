@@ -35,6 +35,8 @@ class PlaylistDao(private val db: ParachordDb) {
         lastModified = lastModified,
         locallyModified = locallyModified != 0L,
         ownerName = ownerName,
+        sourceUrl = sourceUrl,
+        sourceContentHash = sourceContentHash,
     )
 
     /* ---- Queries returning Flow ---- */
@@ -75,6 +77,44 @@ class PlaylistDao(private val db: ParachordDb) {
             lastModified = playlist.lastModified,
             locallyModified = if (playlist.locallyModified) 1L else 0L,
             ownerName = playlist.ownerName,
+            sourceUrl = playlist.sourceUrl,
+            sourceContentHash = playlist.sourceContentHash,
+        )
+    }
+
+    suspend fun getHosted(): List<PlaylistEntity> = withContext(Dispatchers.IO) {
+        queries.getHosted().executeAsList().map { row ->
+            Playlist(
+                id = row.id,
+                name = row.name,
+                description = row.description,
+                artworkUrl = row.artworkUrl,
+                trackCount = row.trackCount.toInt(),
+                createdAt = row.createdAt,
+                updatedAt = row.updatedAt,
+                spotifyId = row.spotifyId,
+                snapshotId = row.snapshotId,
+                lastModified = row.lastModified,
+                locallyModified = row.locallyModified != 0L,
+                ownerName = row.ownerName,
+                sourceUrl = row.sourceUrl,
+                sourceContentHash = row.sourceContentHash,
+            )
+        }
+    }
+
+    suspend fun updateHostedSnapshot(
+        playlistId: String,
+        contentHash: String,
+        trackCount: Int,
+        lastModified: Long = System.currentTimeMillis(),
+    ): Unit = withContext(Dispatchers.IO) {
+        queries.updateHostedSnapshot(
+            sourceContentHash = contentHash,
+            trackCount = trackCount.toLong(),
+            lastModified = lastModified,
+            updatedAt = lastModified,
+            id = playlistId,
         )
     }
 

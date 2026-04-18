@@ -30,6 +30,7 @@ import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.WindowInsets
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.CalendarToday
@@ -277,6 +278,7 @@ fun ArtistScreen(
                 val tabs = remember(isOnTour) {
                     buildList {
                         add("Discography")
+                        add("Top Tracks")
                         add("Biography")
                         add("Related Artists")
                         if (isOnTour) add("On Tour")
@@ -296,13 +298,9 @@ fun ArtistScreen(
                     when (tabName) {
                         "Discography" -> DiscographyTab(
                             albums = albums,
-                            topTracks = topTracks,
                             isLoading = isLoading,
                             onNavigateToAlbum = onNavigateToAlbum,
                             onNavigateToArtist = onNavigateToArtist,
-                            onPlayTrack = viewModel::playTrack,
-                            trackResolvers = trackResolvers,
-                            trackResolverConfidences = trackResolverConfidences,
                             onQueueAlbum = { title, artist -> viewModel.queueAlbumByName(title, artist) },
                             onAddAlbumToCollection = { title, artist, artworkUrl, year ->
                                 viewModel.addAlbumToCollection(title, artist, artworkUrl, year)
@@ -310,6 +308,13 @@ fun ArtistScreen(
                             onRemoveAlbumFromCollection = { title, artist ->
                                 viewModel.removeAlbumFromCollection(title, artist)
                             },
+                        )
+                        "Top Tracks" -> TopTracksTab(
+                            topTracks = topTracks,
+                            isLoading = isLoading,
+                            trackResolvers = trackResolvers,
+                            trackResolverConfidences = trackResolverConfidences,
+                            onPlayTopTrack = { index -> viewModel.playTopTrack(index) },
                             onTrackLongClick = { track ->
                                 val entity = viewModel.trackSearchResultToEntity(track)
                                 contextMenuState.show(
@@ -375,14 +380,9 @@ private fun releaseTypeBadgeColor(type: String?): Color = when (type?.lowercase(
 @Composable
 private fun DiscographyTab(
     albums: List<AlbumSearchResult>,
-    topTracks: List<TrackSearchResult>,
     isLoading: Boolean = false,
     onNavigateToAlbum: (albumTitle: String, artistName: String) -> Unit,
     onNavigateToArtist: (String) -> Unit = {},
-    onPlayTrack: (TrackSearchResult) -> Unit = {},
-    trackResolvers: Map<String, List<String>> = emptyMap(),
-    trackResolverConfidences: Map<String, Map<String, Float>> = emptyMap(),
-    onTrackLongClick: (TrackSearchResult) -> Unit = {},
     onQueueAlbum: (title: String, artist: String) -> Unit = { _, _ -> },
     onAddAlbumToCollection: (title: String, artist: String, artworkUrl: String?, year: Int?) -> Unit = { _, _, _, _ -> },
     onRemoveAlbumFromCollection: (title: String, artist: String) -> Unit = { _, _ -> },
@@ -408,9 +408,8 @@ private fun DiscographyTab(
 
     val cardBg = MaterialTheme.colorScheme.surfaceVariant
 
-    // Show shimmer skeletons while albums + tracks are still loading
+    // Show shimmer skeletons while albums are still loading
     val showAlbumSkeletons = albums.isEmpty() && isLoading
-    val showTrackSkeletons = topTracks.isEmpty() && isLoading
 
     LazyColumn(modifier = Modifier.fillMaxSize()) {
         // Filter chips row (only show if we have more than one filter available)
@@ -568,35 +567,8 @@ private fun DiscographyTab(
             }
         }
 
-        if (topTracks.isNotEmpty() && selectedFilter == "all") {
-            item {
-                if (filteredAlbums.isNotEmpty()) HorizontalDivider()
-                SectionHeader("TOP TRACKS")
-            }
-            items(topTracks) { track ->
-                TrackRow(
-                    title = track.title,
-                    artist = track.album ?: "",
-                    artworkUrl = track.artworkUrl,
-                    resolvers = trackResolvers[trackKey(track.title, track.artist)]?.ifEmpty { null },
-                    resolverConfidences = trackResolverConfidences[trackKey(track.title, track.artist)],
-                    onClick = { onPlayTrack(track) },
-                    onLongClick = { onTrackLongClick(track) },
-                )
-            }
-        }
-
-        // Skeleton top tracks while loading
-        if (showTrackSkeletons && selectedFilter == "all") {
-            item {
-                if (filteredAlbums.isNotEmpty() || showAlbumSkeletons) HorizontalDivider()
-                SectionHeader("TOP TRACKS")
-            }
-            items(5) { ShimmerTrackRow() }
-        }
-
         // Only show "no discography" when loading is done and there's truly nothing
-        if (!isLoading && filteredAlbums.isEmpty() && (topTracks.isEmpty() || selectedFilter != "all")) {
+        if (!isLoading && filteredAlbums.isEmpty()) {
             item {
                 Box(
                     modifier = Modifier.fillMaxWidth().padding(32.dp),
@@ -604,6 +576,54 @@ private fun DiscographyTab(
                 ) {
                     Text(
                         text = "No discography available",
+                        style = MaterialTheme.typography.bodyMedium,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                }
+            }
+        }
+    }
+}
+
+/**
+ * Dedicated tab for the artist's top tracks (matches desktop's "Top Tracks"
+ * section). Tapping a row plays that track and queues the rest of the list,
+ * so Next plays the track below it — same UX as album / playlist tap.
+ */
+@Composable
+private fun TopTracksTab(
+    topTracks: List<TrackSearchResult>,
+    isLoading: Boolean = false,
+    trackResolvers: Map<String, List<String>> = emptyMap(),
+    trackResolverConfidences: Map<String, Map<String, Float>> = emptyMap(),
+    onPlayTopTrack: (Int) -> Unit = {},
+    onTrackLongClick: (TrackSearchResult) -> Unit = {},
+) {
+    val showSkeletons = topTracks.isEmpty() && isLoading
+
+    LazyColumn(modifier = Modifier.fillMaxSize()) {
+        if (topTracks.isNotEmpty()) {
+            itemsIndexed(topTracks) { index, track ->
+                TrackRow(
+                    title = track.title,
+                    artist = track.album ?: "",
+                    artworkUrl = track.artworkUrl,
+                    resolvers = trackResolvers[trackKey(track.title, track.artist)]?.ifEmpty { null },
+                    resolverConfidences = trackResolverConfidences[trackKey(track.title, track.artist)],
+                    onClick = { onPlayTopTrack(index) },
+                    onLongClick = { onTrackLongClick(track) },
+                )
+            }
+        } else if (showSkeletons) {
+            items(8) { ShimmerTrackRow() }
+        } else {
+            item {
+                Box(
+                    modifier = Modifier.fillMaxWidth().padding(32.dp),
+                    contentAlignment = Alignment.Center,
+                ) {
+                    Text(
+                        text = "No top tracks available",
                         style = MaterialTheme.typography.bodyMedium,
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                     )

@@ -30,6 +30,21 @@ class LibraryRepository constructor(
     fun getAllArtists(): Flow<List<ArtistEntity>> = artistDao.getAll()
     fun getAllPlaylists(): Flow<List<PlaylistEntity>> = playlistDao.getAll()
 
+    /**
+     * Fill in [createdAt] / [updatedAt] / [lastModified] when the caller left
+     * them at the default `0L` (Playlists sort by these, so rows with 0 sink
+     * to the bottom of "Recently Added" forever). Callers can still pass
+     * explicit values to override; only the zero case is patched.
+     */
+    private fun PlaylistEntity.withInsertTimestamps(): PlaylistEntity {
+        val now = System.currentTimeMillis()
+        return copy(
+            createdAt = if (createdAt == 0L) now else createdAt,
+            updatedAt = if (updatedAt == 0L) now else updatedAt,
+            lastModified = if (lastModified == 0L) now else lastModified,
+        )
+    }
+
     fun searchTracks(query: String): Flow<List<TrackEntity>> = trackDao.search(query)
     fun searchAlbums(query: String): Flow<List<AlbumEntity>> = albumDao.search(query)
 
@@ -56,7 +71,8 @@ class LibraryRepository constructor(
     suspend fun addAlbums(albums: List<AlbumEntity>) = albumDao.insertAll(albums)
     suspend fun addArtist(artist: ArtistEntity) = artistDao.insert(artist)
     suspend fun addArtists(artists: List<ArtistEntity>) = artistDao.insertAll(artists)
-    suspend fun addPlaylist(playlist: PlaylistEntity) = playlistDao.insert(playlist)
+    suspend fun addPlaylist(playlist: PlaylistEntity) =
+        playlistDao.insert(playlist.withInsertTimestamps())
 
     /** Backfill lastModified from updatedAt for playlists synced before tracking. */
     suspend fun backfillPlaylistLastModified() = playlistDao.backfillLastModified()
@@ -110,7 +126,7 @@ class LibraryRepository constructor(
         playlist: PlaylistEntity,
         tracks: List<TrackEntity>,
     ) {
-        playlistDao.insert(playlist)
+        playlistDao.insert(playlist.withInsertTimestamps())
         val playlistTracks = tracks.mapIndexed { index, track ->
             PlaylistTrackEntity(
                 playlistId = playlist.id,

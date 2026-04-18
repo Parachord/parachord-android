@@ -58,6 +58,7 @@ import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import kotlinx.coroutines.launch
 import com.parachord.android.ui.components.AlbumArtCard
 import com.parachord.android.ui.components.ContextMenuItem
+import com.parachord.android.ui.components.HostedBadge
 import com.parachord.android.ui.components.ModalBg
 import com.parachord.android.ui.components.ModalBgDarker
 import com.parachord.android.ui.components.ModalDivider
@@ -273,6 +274,9 @@ fun PlaylistsScreen(
                                             overflow = TextOverflow.Ellipsis,
                                             modifier = Modifier.weight(1f, fill = false),
                                         )
+                                        if (playlist.sourceUrl != null) {
+                                            HostedBadge()
+                                        }
                                         if (playlist.spotifyId != null) {
                                             Text(
                                                 text = "Spotify",

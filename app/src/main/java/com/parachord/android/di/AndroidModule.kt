@@ -43,6 +43,8 @@ import com.parachord.android.deeplink.ExternalLinkResolver
 import com.parachord.android.playback.*
 import com.parachord.android.playback.handlers.*
 import com.parachord.android.playback.scrobbler.*
+import com.parachord.android.playlist.HostedPlaylistPoller
+import com.parachord.android.playlist.HostedPlaylistScheduler
 import com.parachord.android.playlist.PlaylistImportManager
 import com.parachord.android.plugin.PluginManager
 import com.parachord.android.plugin.PluginSyncService
@@ -159,6 +161,15 @@ val androidModule = module {
             )""".trimIndent(),
             0,
         )
+        // Hosted XSPF polling columns. SQLite has no ADD COLUMN IF NOT EXISTS,
+        // so a second run throws "duplicate column name" — harmless, swallow it.
+        for (col in listOf("sourceUrl", "sourceContentHash")) {
+            try {
+                driver.execute(null, "ALTER TABLE playlists ADD COLUMN $col TEXT", 0)
+            } catch (_: Exception) {
+                // Column already present (idempotent on repeat launches).
+            }
+        }
         com.parachord.shared.db.ParachordDb(driver)
     }
 
@@ -326,6 +337,8 @@ val androidModule = module {
     singleOf(::SyncEngine)
     singleOf(::SpotifySyncProvider)
     singleOf(::SyncScheduler)
+    singleOf(::HostedPlaylistPoller)
+    single { HostedPlaylistScheduler(androidContext(), get()) }
     singleOf(::MediaScanner)
     singleOf(::PlaylistImportManager)
     singleOf(::GeoLocationService)
