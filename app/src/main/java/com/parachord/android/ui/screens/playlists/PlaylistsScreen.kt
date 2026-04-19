@@ -22,6 +22,7 @@ import androidx.compose.material.icons.automirrored.filled.QueueMusic
 import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.Menu
 import androidx.compose.material.icons.filled.PlayArrow
+import androidx.compose.material.icons.filled.Share
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
@@ -75,6 +76,7 @@ fun PlaylistsScreen(
     viewModel: PlaylistsViewModel = koinViewModel(),
 ) {
     val playlists by viewModel.playlists.collectAsStateWithLifecycle()
+    val sharePlaylistById = com.parachord.android.share.rememberSharePlaylistById()
     val sortedPlaylists by viewModel.sortedPlaylists.collectAsStateWithLifecycle()
     val currentSort by viewModel.sort.collectAsStateWithLifecycle()
     val searchQuery by viewModel.searchQuery.collectAsStateWithLifecycle()
@@ -309,6 +311,7 @@ fun PlaylistsScreen(
                                     showMenu = false
                                     pendingDeletePlaylist = playlist
                                 },
+                                onShare = { sharePlaylistById(playlist.id) },
                             )
                         }
                     }
@@ -329,6 +332,7 @@ private fun PlaylistContextMenu(
     onDismiss: () -> Unit,
     onPlayPlaylist: () -> Unit,
     onDeletePlaylist: () -> Unit,
+    onShare: (() -> Unit)? = null,
 ) {
     ModalBottomSheet(
         onDismissRequest = onDismiss,
@@ -390,6 +394,15 @@ private fun PlaylistContextMenu(
                 label = "Play Playlist",
                 onClick = onPlayPlaylist,
             )
+
+            if (onShare != null) {
+                HorizontalDivider(color = ModalDivider, modifier = Modifier.padding(vertical = 4.dp))
+                ContextMenuItem(
+                    icon = Icons.Filled.Share,
+                    label = "Share",
+                    onClick = { onShare(); onDismiss() },
+                )
+            }
 
             HorizontalDivider(color = ModalDivider, modifier = Modifier.padding(vertical = 4.dp))
 

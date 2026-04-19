@@ -283,6 +283,7 @@ private fun RecommendedArtistItem(
     onToggleCollection: () -> Unit = {},
 ) {
     var showMenu by remember { mutableStateOf(false) }
+    val shareArtist = com.parachord.android.share.rememberShareArtist()
 
     Column(
         horizontalAlignment = Alignment.CenterHorizontally,
@@ -331,6 +332,7 @@ private fun RecommendedArtistItem(
             onQueueTopSongs = onQueueTopSongs,
             onGoToArtist = onGoToArtist,
             onToggleCollection = onToggleCollection,
+            onShare = { shareArtist(artist.name, artist.imageUrl) },
         )
     }
 }

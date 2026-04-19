@@ -244,6 +244,20 @@ Importing a playlist from an XSPF URL (as opposed to an uploaded `.xspf` file or
 
 **Key files:** `playlist/HostedPlaylistPoller.kt`, `playlist/HostedPlaylistScheduler.kt`, `playlist/HostedPlaylistWorker.kt`, `playlist/XspfHashing.kt` (shared SSRF + SHA-256 helpers), `playlist/PlaylistImportManager.kt` (persists `sourceUrl` + hash), `sync/SyncEngine.kt` (hosted skip-pull + include-in-push), `ui/components/HostedBadge.kt`
 
+### Outbound Sharing (Smart Links)
+
+Long-press / overflow → Share fires the Android share sheet with a `https://go.parachord.com/<id>` smart-link minted by desktop's Cloudflare Pages backend (same `/api/create` endpoint, same payload shape, same short URLs that desktop produces). Recipients on Slack / Discord / iMessage get a rich Open Graph preview with title, art, and per-service "Listen on Spotify/Apple Music/SoundCloud" buttons.
+
+**Base URL trap.** The smart-links README documents `links.parachord.app` as the "optional custom domain" and the Cloudflare Pages default `parachord-links.pages.dev` as the canonical deploy. Neither matches what desktop actually uses — production short URLs land on `go.parachord.com`. Always use `https://go.parachord.com/` as the Retrofit base URL so Android shares stay brand-consistent with desktop. (`links.parachord.app` doesn't even resolve.)
+
+**Fallback chain order matters.** If smart-link creation fails (timeout / 5xx / no metadata), fall through to the `https://parachord.com/go?uri=parachord://...` deeplink wrapper — never to a raw source URL like `open.spotify.com/playlist/<id>`. Even synced playlists should keep Parachord branding on the share; recipients can still get to Spotify via the smart-link page's per-service buttons when the API is reachable. The wrapper at `parachord.com/go` is a separate static GitHub Pages redirect — different service from the smart-link backend at `go.parachord.com`.
+
+**Wiring:** `TrackContextMenuHost` auto-wires share for tracks (every screen that uses the host gets it for free). Album / Artist / Playlist context menus take an optional `onShare: (() -> Unit)?` parameter — every callsite passes it explicitly via `rememberShareAlbumLite`, `rememberShareArtist`, `rememberSharePlaylist`, or `rememberSharePlaylistById`. The "lite" variants skip the per-track URL map (deeplink fallback only) for screens like the artist discography where tracks aren't in scope; the rich variant is used on detail screens (`PlaylistDetailScreen`) where the full tracklist is available.
+
+**Smart-link payload requirements (from `smart-links/functions/api/create.js`):** `title` is required; `tracks` array must be non-empty for `type=album|playlist`; `urls` map must be non-empty for `type=track`. Build the payload defensively — if there are no per-service URLs at all, skip the API and go straight to the deeplink wrapper rather than POSTing a guaranteed 400.
+
+**Key files:** `share/SmartLinkApi.kt` (Retrofit interface), `share/ShareManager.kt` (orchestration + fallback), `share/ShareSheet.kt` (`openShareSheet` + `rememberShareXxx` Composable helpers), `ui/components/{Track,Album,Artist}ContextMenu.kt`, `ui/screens/playlists/PlaylistsScreen.kt` (PlaylistContextMenu)
+
 ### ListenBrainz Weekly Playlists
 
 The desktop fetches `GET /1/user/{username}/playlists/createdfor?count=100` (public, no auth token needed), filters by title containing "weekly jams" or "weekly exploration", sorts by date descending, and takes the most recent 4 of each type. Tracks are loaded lazily per playlist via `GET /1/playlist/{playlistId}`.
@@ -427,7 +441,7 @@ The desktop supports dark/light mode toggle. Android should follow system theme 
 ## Build & Deploy
 
 - **Build + install to device:** `./gradlew installDebug` (NOT `assembleDebug`, which only builds the APK without installing)
-- **After installing, force-stop the app** — Android keeps the old process alive with old code in memory. Either swipe away from recents or run: `adb shell am force-stop com.parachord.android`
+- **After installing, force-stop the app** — Android keeps the old process alive with old code in memory. Either swipe away from recents or run: `adb shell am force-stop com.parachord.android.debug` (debug builds get a `.debug` suffix per the `applicationIdSuffix` in `app/build.gradle.kts`; targeting `com.parachord.android` silently no-ops on a debug install and you'll keep seeing the old code)
 - **If code changes aren't reflected on device**, Android may cache optimized dex from a prior install. Do a full uninstall/reinstall: `adb uninstall com.parachord.android && adb install app/build/outputs/apk/debug/app-debug.apk` (clears app data)
 - **Clean build if all else fails:** `./gradlew clean installDebug`
 - **adb path** (not in shell PATH by default): `/Users/jherskowitz/Library/Android/sdk/platform-tools/adb`

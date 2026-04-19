@@ -27,6 +27,7 @@ import androidx.compose.material.icons.filled.HeartBroken
 import androidx.compose.material.icons.filled.MoreVert
 import androidx.compose.material.icons.filled.Person
 import androidx.compose.material.icons.filled.PlayArrow
+import androidx.compose.material.icons.filled.Share
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.ExperimentalMaterial3Api
@@ -88,6 +89,7 @@ fun AlbumScreen(
     val nowPlayingTitle by viewModel.nowPlayingTitle.collectAsStateWithLifecycle()
     val isAlbumInCollection by viewModel.isAlbumInCollection.collectAsStateWithLifecycle()
     val contextMenuState = rememberTrackContextMenuState()
+    val shareAlbumLite = com.parachord.android.share.rememberShareAlbumLite()
     var showAlbumMenu by remember { mutableStateOf(false) }
 
     // Context menu host
@@ -374,6 +376,7 @@ fun AlbumScreen(
                         if (isAlbumInCollection) viewModel.removeAlbumFromCollection()
                         else viewModel.addAlbumToCollection()
                     },
+                    onShare = { shareAlbumLite(detail.title, detail.artist, detail.artworkUrl) },
                 )
             }
         }
@@ -391,6 +394,7 @@ private fun AlbumOptionsSheet(
     onQueueAlbum: () -> Unit,
     onGoToArtist: () -> Unit,
     onToggleCollection: () -> Unit,
+    onShare: (() -> Unit)? = null,
 ) {
     ModalBottomSheet(
         onDismissRequest = onDismiss,
@@ -468,6 +472,15 @@ private fun AlbumOptionsSheet(
                 label = if (isInCollection) "Remove from Collection" else "Add to Collection",
                 onClick = onToggleCollection,
             )
+
+            if (onShare != null) {
+                HorizontalDivider(color = ModalDivider, modifier = Modifier.padding(vertical = 4.dp))
+                ContextMenuItem(
+                    icon = Icons.Filled.Share,
+                    label = "Share",
+                    onClick = { onShare(); onDismiss() },
+                )
+            }
         }
     }
 }

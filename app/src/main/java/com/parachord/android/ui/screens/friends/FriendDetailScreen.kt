@@ -389,6 +389,7 @@ private fun FriendTopAlbumsTab(
     onQueueAlbum: (albumTitle: String, albumArtist: String) -> Unit = { _, _ -> },
     onAddAlbumToCollection: (title: String, artist: String, artworkUrl: String?) -> Unit = { _, _, _ -> },
 ) {
+    val shareAlbumLite = com.parachord.android.share.rememberShareAlbumLite()
     Column(modifier = Modifier.fillMaxSize()) {
         PeriodFilter(selectedPeriod = selectedPeriod, onPeriodChanged = onPeriodChanged)
         when (albums) {
@@ -429,6 +430,7 @@ private fun FriendTopAlbumsTab(
                                     onToggleCollection = {
                                         onAddAlbumToCollection(album.name, album.artist, album.artworkUrl)
                                     },
+                                    onShare = { shareAlbumLite(album.name, album.artist, album.artworkUrl) },
                                 )
                             }
                         }
@@ -573,6 +575,7 @@ private fun ArtistGridItem(
     onToggleCollection: () -> Unit = {},
 ) {
     var showMenu by remember { mutableStateOf(false) }
+    val shareArtist = com.parachord.android.share.rememberShareArtist()
 
     Column(
         horizontalAlignment = Alignment.CenterHorizontally,
@@ -617,6 +620,7 @@ private fun ArtistGridItem(
             onQueueTopSongs = onQueueTopSongs,
             onGoToArtist = onGoToArtist,
             onToggleCollection = onToggleCollection,
+            onShare = { shareArtist(artist.name, artist.imageUrl) },
         )
     }
 }

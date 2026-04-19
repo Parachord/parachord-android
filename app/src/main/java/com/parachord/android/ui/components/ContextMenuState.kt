@@ -9,6 +9,7 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.platform.LocalContext
 import com.parachord.android.data.db.entity.PlaylistEntity
 import com.parachord.android.data.db.entity.TrackEntity
+import com.parachord.android.share.rememberShareTrack
 
 /**
  * Composable state holder for track context menu + playlist picker.
@@ -81,6 +82,7 @@ fun TrackContextMenuHost(
     onCreateNewPlaylist: (() -> Unit)? = null,
 ) {
     val context = LocalContext.current
+    val shareTrack = rememberShareTrack()
     val track = state.contextTrack
     val entity = state.contextTrackEntity
 
@@ -88,6 +90,7 @@ fun TrackContextMenuHost(
         TrackContextMenu(
             track = track,
             onDismiss = { state.dismiss() },
+            onShare = { shareTrack(entity) },
             onPlayNext = {
                 onPlayNext(entity)
                 Toast.makeText(context, "Playing next: ${entity.title}", Toast.LENGTH_SHORT).show()

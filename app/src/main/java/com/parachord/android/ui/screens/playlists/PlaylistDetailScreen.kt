@@ -29,6 +29,7 @@ import androidx.compose.material.icons.filled.Edit
 import androidx.compose.material.icons.filled.MoreVert
 import androidx.compose.material.icons.filled.PlayArrow
 import androidx.compose.material.icons.filled.Refresh
+import androidx.compose.material.icons.filled.Share
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
@@ -105,6 +106,7 @@ fun PlaylistDetailScreen(
     val hasRemoteUpdate by viewModel.hasRemoteUpdate.collectAsStateWithLifecycle()
     val isPulling by viewModel.isPulling.collectAsStateWithLifecycle()
     val contextMenuState = rememberTrackContextMenuState()
+    val sharePlaylist = com.parachord.android.share.rememberSharePlaylist()
     var showPlaylistMenu by remember { mutableStateOf(false) }
     var showDeleteConfirm by remember { mutableStateOf(false) }
 
@@ -378,6 +380,10 @@ fun PlaylistDetailScreen(
                         showPlaylistMenu = false
                         showDeleteConfirm = true
                     },
+                    // Detail screen has the full tracklist already in scope
+                    // → use the rich smart-link variant (per-track service URLs)
+                    // rather than the lite deeplink fallback.
+                    onShare = { sharePlaylist(pl, tracks) },
                 )
             }
         }
@@ -463,6 +469,7 @@ private fun PlaylistOptionsSheet(
     onEditPlaylist: () -> Unit,
     onQueuePlaylist: () -> Unit,
     onDeletePlaylist: () -> Unit,
+    onShare: (() -> Unit)? = null,
 ) {
     ModalBottomSheet(
         onDismissRequest = onDismiss,
@@ -532,6 +539,15 @@ private fun PlaylistOptionsSheet(
                 label = "Queue Playlist",
                 onClick = onQueuePlaylist,
             )
+
+            if (onShare != null) {
+                HorizontalDivider(color = ModalDivider, modifier = Modifier.padding(vertical = 4.dp))
+                ContextMenuItem(
+                    icon = Icons.Filled.Share,
+                    label = "Share",
+                    onClick = { onShare(); onDismiss() },
+                )
+            }
 
             HorizontalDivider(color = ModalDivider, modifier = Modifier.padding(vertical = 4.dp))
 

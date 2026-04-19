@@ -18,6 +18,7 @@ import androidx.compose.material.icons.filled.Favorite
 import androidx.compose.material.icons.filled.FavoriteBorder
 import androidx.compose.material.icons.filled.Person
 import androidx.compose.material.icons.filled.PlaylistRemove
+import androidx.compose.material.icons.filled.Share
 import androidx.compose.material.icons.filled.SkipNext
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.HorizontalDivider
@@ -91,6 +92,7 @@ fun TrackContextMenu(
     onGoToAlbum: (() -> Unit)? = null,
     onToggleCollection: () -> Unit,
     onRemoveFromPlaylist: (() -> Unit)? = null,
+    onShare: (() -> Unit)? = null,
 ) {
     val sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
 
@@ -203,6 +205,15 @@ fun TrackContextMenu(
                     icon = Icons.Filled.Album,
                     label = "Go to Album",
                     onClick = { onGoToAlbum(); onDismiss() },
+                )
+            }
+
+            if (onShare != null) {
+                HorizontalDivider(color = ModalDivider, modifier = Modifier.padding(vertical = 4.dp))
+                ContextMenuItem(
+                    icon = Icons.Filled.Share,
+                    label = "Share",
+                    onClick = { onShare(); onDismiss() },
                 )
             }
 

@@ -17,6 +17,7 @@ import androidx.compose.material.icons.filled.Favorite
 import androidx.compose.material.icons.filled.HeartBroken
 import androidx.compose.material.icons.filled.Person
 import androidx.compose.material.icons.filled.PlayArrow
+import androidx.compose.material.icons.filled.Share
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.ModalBottomSheet
@@ -45,6 +46,7 @@ fun AlbumContextMenu(
     onGoToAlbum: (() -> Unit)? = null,
     onGoToArtist: (() -> Unit)? = null,
     onToggleCollection: () -> Unit,
+    onShare: (() -> Unit)? = null,
 ) {
     ModalBottomSheet(
         onDismissRequest = onDismiss,
@@ -140,6 +142,15 @@ fun AlbumContextMenu(
                 label = if (isInCollection) "Remove from Collection" else "Add to Collection",
                 onClick = onToggleCollection,
             )
+
+            if (onShare != null) {
+                HorizontalDivider(color = ModalDivider, modifier = Modifier.padding(vertical = 4.dp))
+                ContextMenuItem(
+                    icon = Icons.Filled.Share,
+                    label = "Share",
+                    onClick = { onShare(); onDismiss() },
+                )
+            }
         }
     }
 }

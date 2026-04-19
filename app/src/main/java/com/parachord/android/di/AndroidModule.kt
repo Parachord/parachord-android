@@ -175,6 +175,22 @@ val androidModule = module {
 
     // ── Retrofit API Clients (kept for backward compatibility during migration) ──
 
+    // Smart Links — desktop's Cloudflare Pages backend that mints rich
+    // share landing pages. Public, CORS-open, no auth. The production custom
+    // domain is `go.parachord.com` (the smart-links README documents
+    // `links.parachord.app` and the Pages default `parachord-links.pages.dev`,
+    // but desktop's actual short URLs land on `go.parachord.com/<id>`, so
+    // matching that here keeps Android shares brand-consistent with desktop).
+    single<com.parachord.android.share.SmartLinkApi> {
+        Retrofit.Builder()
+            .baseUrl("https://go.parachord.com/")
+            .client(get())
+            .addConverterFactory(get<Json>().asConverterFactory("application/json".toMediaType()))
+            .build()
+            .create(com.parachord.android.share.SmartLinkApi::class.java)
+    }
+    single { com.parachord.android.share.ShareManager(get(), get(), get()) }
+
     single<SpotifyApi> {
         Retrofit.Builder()
             .baseUrl("https://api.spotify.com/")

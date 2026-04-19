@@ -137,6 +137,7 @@ fun HomeScreen(
     modifier: Modifier = Modifier,
     viewModel: HomeViewModel = koinViewModel(),
 ) {
+    val shareAlbumLite = com.parachord.android.share.rememberShareAlbumLite()
     val recentTracks by viewModel.recentTracks.collectAsStateWithLifecycle()
     val hasLibrary by viewModel.hasLibrary.collectAsStateWithLifecycle()
     val scanProgress by viewModel.scanProgress.collectAsStateWithLifecycle()
@@ -320,6 +321,7 @@ fun HomeScreen(
                                             showAlbumMenu = false
                                             viewModel.removeAlbumFromCollection(album.title, album.artist)
                                         },
+                                        onShare = { shareAlbumLite(album.title, album.artist, album.artworkUrl) },
                                     )
                                 }
                             }
@@ -1468,6 +1470,7 @@ private fun AiSuggestionsSection(
     onToggleArtistCollection: (name: String, imageUrl: String?, isInCollection: Boolean) -> Unit = { _, _, _ -> },
     modifier: Modifier = Modifier,
 ) {
+    val shareAlbumLite = com.parachord.android.share.rememberShareAlbumLite()
     Column(modifier = modifier) {
         if (isLoading && recommendations == null) {
             // Loading shimmer
@@ -1559,6 +1562,7 @@ private fun AiSuggestionsSection(
                                     showAlbumMenu = false
                                     onAddAlbumToCollection(album.title, album.artist, album.artworkUrl)
                                 },
+                                onShare = { shareAlbumLite(album.title, album.artist, album.artworkUrl) },
                             )
                         }
                     }
@@ -1688,6 +1692,7 @@ private fun AiArtistCard(
     onToggleCollection: () -> Unit = {},
 ) {
     var showMenu by remember { mutableStateOf(false) }
+    val shareArtist = com.parachord.android.share.rememberShareArtist()
 
     Column(
         modifier = Modifier
@@ -1726,6 +1731,7 @@ private fun AiArtistCard(
             onQueueTopSongs = onQueueTopSongs,
             onGoToArtist = onGoToArtist,
             onToggleCollection = onToggleCollection,
+            onShare = { shareArtist(artist.name, artist.imageUrl) },
         )
     }
 }

@@ -419,6 +419,7 @@ private fun AlbumsTab(
     onQueueAlbum: (albumTitle: String, albumArtist: String) -> Unit = { _, _ -> },
     onAddAlbumToCollection: (title: String, artist: String, artworkUrl: String?) -> Unit = { _, _, _ -> },
 ) {
+    val shareAlbumLite = com.parachord.android.share.rememberShareAlbumLite()
     Column(modifier = Modifier.fillMaxSize()) {
         ChartsFilterBar(
             selectedCountry = selectedCountry,
@@ -467,6 +468,7 @@ private fun AlbumsTab(
                             onToggleCollection = {
                                 onAddAlbumToCollection(album.title, album.artist, album.artworkUrl)
                             },
+                            onShare = { shareAlbumLite(album.title, album.artist, album.artworkUrl) },
                         )
                     }
                 }

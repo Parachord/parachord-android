@@ -115,6 +115,8 @@ fun CollectionScreen(
     viewModel: LibraryViewModel = koinViewModel(),
     friendsViewModel: FriendsViewModel = koinViewModel(),
 ) {
+    val shareAlbumLite = com.parachord.android.share.rememberShareAlbumLite()
+    val shareArtist = com.parachord.android.share.rememberShareArtist()
     val sortedArtists by viewModel.sortedArtists.collectAsStateWithLifecycle()
     val sortedAlbums by viewModel.sortedAlbums.collectAsStateWithLifecycle()
     val sortedTracks by viewModel.sortedTracks.collectAsStateWithLifecycle()
@@ -272,6 +274,7 @@ fun CollectionScreen(
                                             onToggleCollection = {
                                                 viewModel.removeArtistFromCollection(artist)
                                             },
+                                            onShare = { shareArtist(artist.name, artist.imageUrl) },
                                         )
                                     }
                                 }
@@ -383,6 +386,7 @@ fun CollectionScreen(
                                                 showMenu = false
                                                 viewModel.removeAlbumFromCollection(album)
                                             },
+                                            onShare = { shareAlbumLite(album.title, album.artist, album.artworkUrl) },
                                         )
                                     }
                                 }

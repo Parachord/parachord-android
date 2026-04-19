@@ -388,6 +388,7 @@ private fun DiscographyTab(
     onRemoveAlbumFromCollection: (title: String, artist: String) -> Unit = { _, _ -> },
 ) {
     var selectedFilter by remember { mutableStateOf("all") }
+    val shareAlbumLite = com.parachord.android.share.rememberShareAlbumLite()
 
     // Calculate counts per type — only count albums with an explicit releaseType
     val typeCounts = remember(albums) {
@@ -552,6 +553,9 @@ private fun DiscographyTab(
                                             onToggleCollection = {
                                                 showAlbumMenu = false
                                                 onAddAlbumToCollection(album.title, album.artist, album.artworkUrl, album.year)
+                                            },
+                                            onShare = {
+                                                shareAlbumLite(album.title, album.artist, album.artworkUrl)
                                             },
                                         )
                                     }
@@ -746,6 +750,7 @@ private fun RelatedArtistsTab(
     onQueueTopSongs: (String) -> Unit = {},
     onToggleCollection: (name: String, imageUrl: String?, isInCollection: Boolean) -> Unit = { _, _, _ -> },
 ) {
+    val shareArtist = com.parachord.android.share.rememberShareArtist()
 
     if (similarArtists.isEmpty()) {
         Box(
@@ -828,6 +833,7 @@ private fun RelatedArtistsTab(
                         onQueueTopSongs = { onQueueTopSongs(artist.name) },
                         onGoToArtist = { onNavigateToArtist(artist.name) },
                         onToggleCollection = { onToggleCollection(artist.name, artist.imageUrl, false) },
+                        onShare = { shareArtist(artist.name, artist.imageUrl) },
                     )
                 }
             }
