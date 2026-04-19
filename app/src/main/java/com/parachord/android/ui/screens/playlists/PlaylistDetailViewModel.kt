@@ -119,6 +119,14 @@ class PlaylistDetailViewModel constructor(
     fun checkForRemoteUpdate() {
         viewModelScope.launch {
             val pl = playlistDao.getById(playlistId) ?: return@launch
+            // Hosted XSPF playlists are canonical via their `sourceUrl` — the
+            // 5-minute poller is the single source of truth, and SyncEngine
+            // only ever pushes them upstream, never pulls. A "pull from
+            // Spotify" banner here would offer the user a destructive no-op
+            // (the next poll tick would overwrite it), so the flag is
+            // suppressed entirely. Mirrors desktop's pull-banner behavior
+            // for hosted rows (CLAUDE.md "Hosted XSPF Playlists").
+            if (pl.sourceUrl != null) return@launch
             val spotifyId = pl.spotifyId ?: return@launch
             val localSnapshot = pl.snapshotId ?: return@launch
 
