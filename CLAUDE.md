@@ -242,6 +242,10 @@ Importing a playlist from an XSPF URL (as opposed to an uploaded `.xspf` file or
 
 **Don't call `poller.pollAll()` on a hot path.** It iterates every hosted row and issues one HTTP fetch per row. The scheduler's 5-minute interval is already tight; don't wire additional ad-hoc triggers without thinking about rate limits on the XSPF host.
 
+**Cross-device behavior — the polling agent is whichever device imported the URL.** Spotify's API doesn't carry a `sourceUrl` field, so when a hosted-XSPF playlist gets pulled down on a *second* device via normal Spotify sync, it lands as `id="spotify-<id>"` with `sourceUrl=null`. That row is invisible to `playlistDao.getHosted()`, so `HostedPlaylistPoller` never polls it; it gets no `🌐 Hosted` chip, no "Mirrors `<url>`" subtitle, and the "Updated on Spotify · Pull" banner *will* show normally because `checkForRemoteUpdate`'s hosted-suppression keys off `sourceUrl`. Functionally it works — the second device just receives XSPF updates indirectly via Spotify pull when the polling device pushes.
+
+**Recommendation: import each URL on exactly one device, and prefer the phone.** Two reasons: (1) WorkManager runs the poller every 15 min in the background even when the app isn't open — a laptop that sleeps overnight gets zero polls, a phone in your pocket gets dozens; (2) Android-as-polling-agent works regardless of desktop uptime, while desktop-as-polling-agent freezes the playlist whenever the laptop's offline. **Don't import the same URL on both devices** — local IDs are random UUIDs (`hosted-xspf-<uuid>`), so two imports produce two distinct local rows. Three-layer dedup catches the name match on push, but you still end up with a duplicate local row on whichever device imported second.
+
 **Key files:** `playlist/HostedPlaylistPoller.kt`, `playlist/HostedPlaylistScheduler.kt`, `playlist/HostedPlaylistWorker.kt`, `playlist/XspfHashing.kt` (shared SSRF + SHA-256 helpers), `playlist/PlaylistImportManager.kt` (persists `sourceUrl` + hash), `sync/SyncEngine.kt` (hosted skip-pull + include-in-push), `ui/components/HostedBadge.kt`
 
 ### Outbound Sharing (Smart Links)
