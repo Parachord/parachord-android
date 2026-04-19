@@ -101,6 +101,33 @@ class PlaylistTrackDao(private val db: ParachordDb) {
             )
         }
 
+    /**
+     * Backfill resolver IDs onto a playlist_track row. Each parameter is
+     * `COALESCE`-merged with the existing column, so a non-null source ID
+     * (e.g. Spotify's canonical sync ID) is never overwritten — only NULL
+     * slots get filled. Pass `null` for IDs that weren't discovered.
+     */
+    suspend fun backfillResolverIds(
+        playlistId: String,
+        position: Int,
+        spotifyId: String?,
+        spotifyUri: String?,
+        appleMusicId: String?,
+        soundcloudId: String?,
+    ): Unit = withContext(Dispatchers.IO) {
+        // SQLDelight generates positional `value`, `value_`, `value__`, `value___`
+        // for the four COALESCE params; keep the order matching the SQL
+        // (Spotify ID, Spotify URI, Apple Music ID, SoundCloud ID).
+        queries.backfillResolverIds(
+            value = spotifyId,
+            value_ = spotifyUri,
+            value__ = appleMusicId,
+            value___ = soundcloudId,
+            playlistId = playlistId,
+            position = position.toLong(),
+        )
+    }
+
     /** Delete all tracks for a playlist then reinsert — used for reorder. */
     suspend fun replaceAll(playlistId: String, tracks: List<PlaylistTrackEntity>): Unit = withContext(Dispatchers.IO) {
         queries.transaction {

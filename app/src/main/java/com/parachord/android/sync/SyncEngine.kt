@@ -702,10 +702,23 @@ class SyncEngine constructor(
         val remoteIds = selectedRemote.map { it.spotifyId }.toSet()
         val removedSources = localSources.filter { it.externalId != null && it.externalId !in remoteIds }
         removedSources.forEach { source ->
+            val localPlaylist = playlistDao.getById(source.itemId)
+            // Locally-owned playlists (hosted XSPF — canonical via `sourceUrl`
+            // — and user-created `local-*` playlists) must NEVER be deleted by
+            // sync cleanup. Spotify is just a downstream mirror for these:
+            // a missing remote means "deselected from sync" or "deleted on
+            // Spotify externally", neither of which should wipe the user's
+            // local row. Skip the entire cleanup so the next push (or next
+            // hosted-XSPF poll) can recover the remote if needed.
+            if (localPlaylist?.sourceUrl != null ||
+                localPlaylist?.id?.startsWith("local-") == true
+            ) {
+                return@forEach
+            }
             syncSourceDao.deleteByKey(source.itemId, "playlist", providerId)
             val remaining = syncSourceDao.getByItem(source.itemId, "playlist")
             if (remaining.isEmpty()) {
-                playlistDao.getById(source.itemId)?.let { playlistDao.delete(it) }
+                localPlaylist?.let { playlistDao.delete(it) }
                 playlistTrackDao.deleteByPlaylistId(source.itemId)
             }
             removed++

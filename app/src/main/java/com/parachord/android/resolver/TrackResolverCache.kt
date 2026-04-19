@@ -38,6 +38,7 @@ class TrackResolverCache constructor(
     private val libraryRepository: LibraryRepository,
     private val settingsStore: SettingsStore,
     private val mbidEnrichment: MbidEnrichmentService,
+    private val playlistTrackDao: com.parachord.android.data.db.dao.PlaylistTrackDao,
 ) {
     companion object {
         private const val TAG = "TrackResolverCache"
@@ -171,6 +172,7 @@ class TrackResolverCache constructor(
                         )
                         if (sources.isNotEmpty()) {
                             _trackSources.update { it + (key to sources) }
+                            backfillPlaylistTrackResolverIds(track, sources)
                         }
                     }
                 } catch (e: Exception) {
@@ -179,6 +181,48 @@ class TrackResolverCache constructor(
                     synchronized(inFlight) { inFlight.remove(key) }
                 }
             }
+        }
+    }
+
+    /**
+     * Persist resolver IDs from the in-memory cache back onto the
+     * `playlist_tracks` row so a fresh app start (or process kill) doesn't
+     * have to wait for the resolver pipeline to repopulate the badges. The
+     * SQL uses COALESCE so source-provided IDs (e.g. Spotify's canonical
+     * sync ID) are never overwritten — only currently-NULL slots are filled.
+     *
+     * No-ops if [PlaylistTrackInfo.playlistId] / [PlaylistTrackInfo.position]
+     * weren't supplied (ephemeral playlists like ListenBrainz weekly that
+     * don't have a stable row in the DB).
+     */
+    private suspend fun backfillPlaylistTrackResolverIds(
+        track: PlaylistTrackInfo,
+        sources: List<ResolvedSource>,
+    ) {
+        val playlistId = track.playlistId ?: return
+        val position = track.position ?: return
+        // Wrong-song results (0.50 confidence) must not pollute the row;
+        // mirror the threshold filter from the TrackEntity backfill path.
+        val valid = sources.filter {
+            (it.confidence ?: 0.0) >= ResolverScoring.MIN_CONFIDENCE_THRESHOLD
+        }
+        val spotifyId = valid.firstOrNull { it.resolver == "spotify" }?.spotifyId
+        val spotifyUri = valid.firstOrNull { it.resolver == "spotify" }?.spotifyUri
+        val appleMusicId = valid.firstOrNull { it.resolver == "applemusic" }?.appleMusicId
+        val soundcloudId = valid.firstOrNull { it.resolver == "soundcloud" }?.soundcloudId
+        // Skip the DB write entirely when there's nothing new to fill.
+        if (spotifyId == null && spotifyUri == null && appleMusicId == null && soundcloudId == null) return
+        try {
+            playlistTrackDao.backfillResolverIds(
+                playlistId = playlistId,
+                position = position,
+                spotifyId = spotifyId,
+                spotifyUri = spotifyUri,
+                appleMusicId = appleMusicId,
+                soundcloudId = soundcloudId,
+            )
+        } catch (e: Exception) {
+            Log.w(TAG, "Failed to backfill playlist_track resolver IDs for '${track.title}': ${e.message}")
         }
     }
 
@@ -245,13 +289,20 @@ class TrackResolverCache constructor(
     }
 }
 
-/** Lightweight data holder for playlist track resolution (avoids coupling to entity). */
+/**
+ * Lightweight data holder for playlist track resolution (avoids coupling to
+ * entity). [playlistId] + [position] identify the row so freshly-discovered
+ * resolver IDs can be backfilled — leave them null on call sites where you
+ * don't want the backfill (e.g. ephemeral / weekly playlists).
+ */
 data class PlaylistTrackInfo(
     val title: String,
     val artist: String,
     val spotifyId: String? = null,
     val appleMusicId: String? = null,
     val soundcloudId: String? = null,
+    val playlistId: String? = null,
+    val position: Int? = null,
 )
 
 /** Canonical key format for track resolver lookups. */

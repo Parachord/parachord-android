@@ -16,6 +16,10 @@ import kotlinx.coroutines.Deferred
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.async
+import kotlinx.coroutines.awaitAll
+import kotlinx.coroutines.coroutineScope
+import kotlinx.coroutines.sync.Semaphore
+import kotlinx.coroutines.sync.withPermit
 import java.io.File
 import java.io.FileOutputStream
 import java.util.concurrent.ConcurrentHashMap
@@ -41,6 +45,13 @@ class ImageEnrichmentService constructor(
     private val playlistTrackDao: PlaylistTrackDao,
 ) {
     private val scope = CoroutineScope(Dispatchers.IO + SupervisorJob())
+
+    private companion object {
+        /** Bounded concurrency for the per-track search fallback in
+         *  [enrichPlaylistArt] — keeps a 200-track XSPF from slamming
+         *  Last.fm / MusicBrainz with simultaneous requests. */
+        const val MAX_TRACK_SEARCH_CONCURRENCY = 4
+    }
 
     // In-flight deduplication maps
     private val artistFetches = ConcurrentHashMap<String, Deferred<String?>>()
@@ -182,32 +193,76 @@ class ImageEnrichmentService constructor(
             try {
                 var tracks = playlistTrackDao.getByPlaylistIdSync(playlistId)
 
-                // For tracks missing artworkUrl (typical of XSPF imports — the
-                // XSPF spec doesn't carry per-track image data), fan out an
-                // album-art lookup. We dedupe by (album, artist) so we make at
-                // most one network call per album in the playlist.
-                val needsArt = tracks.filter {
-                    it.trackArtworkUrl.isNullOrBlank() && !it.trackAlbum.isNullOrBlank()
-                }
-                if (needsArt.isNotEmpty()) {
-                    val albumKeys = needsArt
-                        .map { (it.trackAlbum ?: "") to it.trackArtist }
-                        .distinct()
-                    val albumArtCache = mutableMapOf<Pair<String, String>, String?>()
-                    for (key in albumKeys) {
-                        val (album, artist) = key
-                        if (album.isBlank()) continue
-                        albumArtCache[key] = try {
-                            metadataService.getAlbumTracks(album, artist)?.artworkUrl
-                        } catch (_: Exception) {
-                            null
+                // XSPF imports don't carry per-track image data, so most rows
+                // come in with `trackArtworkUrl = null`. Two-pass enrichment:
+                //
+                //   1. Album-art lookup (cheap — one call per unique
+                //      `(album, artist)` pair) for tracks that have an
+                //      `<album>` tag.
+                //   2. Per-track search fallback for the remainder. Some XSPFs
+                //      (e.g. radio-station rewinds) ship without `<album>`
+                //      tags at all; without this pass the mosaic stays empty
+                //      forever and every row shows the placeholder.
+                //
+                // Both passes persist into `playlist_tracks.trackArtworkUrl`
+                // via the COALESCE-style `updateTrackArtwork` query, so
+                // subsequent loads skip the network entirely. Bounded
+                // concurrency (4) keeps us from hammering Last.fm /
+                // MusicBrainz on a 200-track playlist.
+
+                val needsAnyArt = tracks.filter { it.trackArtworkUrl.isNullOrBlank() }
+                if (needsAnyArt.isNotEmpty()) {
+                    // Pass 1: album-based enrichment (deduped by album+artist)
+                    val withAlbum = needsAnyArt.filter { !it.trackAlbum.isNullOrBlank() }
+                    if (withAlbum.isNotEmpty()) {
+                        val albumArtCache = mutableMapOf<Pair<String, String>, String?>()
+                        for (key in withAlbum.map { (it.trackAlbum ?: "") to it.trackArtist }.distinct()) {
+                            val (album, artist) = key
+                            albumArtCache[key] = try {
+                                metadataService.getAlbumTracks(album, artist)?.artworkUrl
+                            } catch (_: Exception) {
+                                null
+                            }
+                        }
+                        for (track in withAlbum) {
+                            val art = albumArtCache[(track.trackAlbum ?: "") to track.trackArtist]
+                                ?: continue
+                            playlistTrackDao.updateTrackArtwork(playlistId, track.position, art)
                         }
                     }
-                    for (track in needsArt) {
-                        val art = albumArtCache[(track.trackAlbum ?: "") to track.trackArtist]
-                            ?: continue
-                        playlistTrackDao.updateTrackArtwork(playlistId, track.position, art)
+
+                    // Pass 2: track-search fallback for rows still missing art.
+                    // Re-read first so we don't re-enrich rows the album pass
+                    // already filled.
+                    val stillMissing = playlistTrackDao.getByPlaylistIdSync(playlistId)
+                        .filter { it.trackArtworkUrl.isNullOrBlank() }
+                    if (stillMissing.isNotEmpty()) {
+                        val sem = Semaphore(MAX_TRACK_SEARCH_CONCURRENCY)
+                        coroutineScope {
+                            stillMissing.map { track ->
+                                async {
+                                    sem.withPermit {
+                                        val art = try {
+                                            val results = metadataService.searchTracks(
+                                                "${track.trackArtist} ${track.trackTitle}",
+                                                limit = 5,
+                                            )
+                                            results.firstOrNull {
+                                                it.title.equals(track.trackTitle, ignoreCase = true) &&
+                                                    it.artist.equals(track.trackArtist, ignoreCase = true)
+                                            }?.artworkUrl ?: results.firstOrNull()?.artworkUrl
+                                        } catch (_: Exception) {
+                                            null
+                                        }
+                                        if (art != null) {
+                                            playlistTrackDao.updateTrackArtwork(playlistId, track.position, art)
+                                        }
+                                    }
+                                }
+                            }.awaitAll()
+                        }
                     }
+
                     // Re-read so the mosaic builds from the now-enriched rows.
                     tracks = playlistTrackDao.getByPlaylistIdSync(playlistId)
                 }

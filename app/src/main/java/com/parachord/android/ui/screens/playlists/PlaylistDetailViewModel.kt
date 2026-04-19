@@ -84,6 +84,13 @@ class PlaylistDetailViewModel constructor(
                                 spotifyId = pt.trackSpotifyId,
                                 appleMusicId = pt.trackAppleMusicId,
                                 soundcloudId = pt.trackSoundcloudId,
+                                // Pass row coords so TrackResolverCache can
+                                // backfill resolver IDs onto the DB row —
+                                // subsequent opens of a Spotify-synced
+                                // playlist show all resolver badges from
+                                // the first render, not just the Spotify one.
+                                playlistId = pt.playlistId,
+                                position = pt.position,
                             )
                         }
                     )

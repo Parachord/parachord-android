@@ -40,3 +40,15 @@ UPDATE playlist_tracks
 SET trackArtworkUrl = ?
 WHERE playlistId = ? AND position = ?
   AND (trackArtworkUrl IS NULL OR trackArtworkUrl = '');
+
+-- Backfill resolver IDs that the in-memory resolver cache discovered but
+-- weren't on the source row. COALESCE keeps any source-provided IDs
+-- (e.g. Spotify's canonical track ID from the sync API) intact and only
+-- fills in slots that were null.
+backfillResolverIds:
+UPDATE playlist_tracks
+SET trackSpotifyId    = COALESCE(trackSpotifyId, ?),
+    trackSpotifyUri   = COALESCE(trackSpotifyUri, ?),
+    trackAppleMusicId = COALESCE(trackAppleMusicId, ?),
+    trackSoundcloudId = COALESCE(trackSoundcloudId, ?)
+WHERE playlistId = ? AND position = ?;
