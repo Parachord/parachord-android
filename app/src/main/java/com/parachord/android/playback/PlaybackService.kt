@@ -84,8 +84,14 @@ class PlaybackService : MediaSessionService() {
     private val becomingNoisyReceiver = object : BroadcastReceiver() {
         override fun onReceive(context: Context?, intent: Intent?) {
             if (intent?.action == AudioManager.ACTION_AUDIO_BECOMING_NOISY) {
+                // Use pause() — never togglePlayPause() — because the noisy
+                // broadcast fires on every output-route change (BT off, wired
+                // unplug), even when the user already paused. A toggle here
+                // would resume playback through the phone speaker as soon as
+                // the Bluetooth speaker disconnected. pause() no-ops when
+                // already paused, which is the correct behavior.
                 Log.d(TAG, "Audio becoming noisy (device disconnected) — pausing playback")
-                playbackController.togglePlayPause()
+                playbackController.pause()
             }
         }
     }

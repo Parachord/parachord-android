@@ -392,6 +392,17 @@ class PlaybackController constructor(
         syncQueueState()
     }
 
+    /**
+     * Pause playback if currently playing; no-op if already paused. Use this
+     * (instead of [togglePlayPause]) for system-driven events like
+     * `ACTION_AUDIO_BECOMING_NOISY` (Bluetooth / wired-headset disconnect)
+     * where a symmetric toggle would unexpectedly RESUME a user-paused
+     * track when the audio output went away.
+     */
+    fun pause() {
+        if (stateHolder.state.value.isPlaying) togglePlayPause()
+    }
+
     fun togglePlayPause() {
         if (isExternalPlayback) {
             scope.launch {
