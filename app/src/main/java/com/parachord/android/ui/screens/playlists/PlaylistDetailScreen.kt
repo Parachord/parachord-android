@@ -568,22 +568,37 @@ private fun PlaylistOptionsSheet(
 }
 
 /**
- * Derive a short human label from a hosted-XSPF source URL. Strips
- * protocol + `www.`, drops the TLD, and title-cases the first remaining
- * label — so `https://spinitron.com/station/xyz/playlist/...` reads as
- * "Spinitron". Returns null if the URL can't be parsed into a host.
+ * Derive a short human label from a hosted-XSPF source URL. Standard
+ * hosts use the first hostname label (`spinitron.com/...` → "Spinitron").
+ * Project-hosting domains like GitHub Pages bury the meaningful name in
+ * the path — `https://jherskowitz.github.io/spinbin/...` is "Spinbin",
+ * not "Jherskowitz" — so those are special-cased to use the first path
+ * segment instead. Returns null if the URL can't be parsed.
  */
 private fun hostLabelFromUrl(url: String): String? {
-    val host = try {
-        android.net.Uri.parse(url).host
+    val uri = try {
+        android.net.Uri.parse(url)
     } catch (_: Exception) {
         null
     } ?: return null
-    val stripped = host.removePrefix("www.")
-    // First label wins — "radio.example.co.uk" → "radio".
-    val first = stripped.substringBefore('.').ifBlank { return null }
-    return first.replaceFirstChar { if (it.isLowerCase()) it.titlecase(java.util.Locale.ROOT) else it.toString() }
+    val host = uri.host?.removePrefix("www.") ?: return null
+
+    // Project-hosting domains where the user/org is the subdomain and
+    // the project name is the first path segment. Add new suffixes here
+    // as they come up (gitlab.io, netlify.app, vercel.app, etc).
+    val projectHostSuffixes = listOf(".github.io", ".gitlab.io", ".netlify.app", ".vercel.app", ".pages.dev")
+    if (projectHostSuffixes.any { host.endsWith(it) }) {
+        val firstSegment = uri.pathSegments?.firstOrNull()?.trim('/')?.ifBlank { null }
+        if (firstSegment != null) return firstSegment.titlecase()
+    }
+
+    // Standard path — first hostname label. `radio.example.co.uk` → "radio".
+    val first = host.substringBefore('.').ifBlank { return null }
+    return first.titlecase()
 }
+
+private fun String.titlecase(): String =
+    replaceFirstChar { if (it.isLowerCase()) it.titlecase(java.util.Locale.ROOT) else it.toString() }
 
 /**
  * "X ago" style relative-time formatter for the playlist detail header.
