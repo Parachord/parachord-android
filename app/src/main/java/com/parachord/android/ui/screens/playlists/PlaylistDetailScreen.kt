@@ -264,7 +264,11 @@ fun PlaylistDetailScreen(
                     // Author and source line
                     val metaParts = buildList {
                         playlist?.ownerName?.let { add("by $it") }
-                        if (playlist?.spotifyId != null) add("Spotify")
+                        // Hosted XSPFs are canonical via their sourceUrl even
+                        // when mirrored to Spotify — the "Mirrors <url>" line
+                        // below names the real source, so suppress the
+                        // "Spotify" chip here to avoid mislabelling the origin.
+                        if (playlist?.spotifyId != null && playlist?.sourceUrl == null) add("Spotify")
                         add("${tracks.size} tracks")
                     }
                     Text(
