@@ -2,7 +2,7 @@
 
 A unified music player that brings Spotify, Apple Music, SoundCloud, Bandcamp, and your local files into one queue. Parachord resolves every track across your available sources and plays from the best match based on a configurable resolver priority.
 
-Android companion to the [Parachord desktop app](https://github.com/Parachord/parachord) — same resolver pipeline, same plugin system, same playlist sync.
+Android companion to the [Parachord desktop app](https://github.com/Parachord/parachord) — same resolver pipeline, same plugin system, same playlist sync and very close to feature parity. 
 
 ## Install
 
