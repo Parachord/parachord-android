@@ -264,11 +264,14 @@ fun PlaylistDetailScreen(
                     // Author and source line
                     val metaParts = buildList {
                         playlist?.ownerName?.let { add("by $it") }
-                        // Hosted XSPFs are canonical via their sourceUrl even
-                        // when mirrored to Spotify — the "Mirrors <url>" line
-                        // below names the real source, so suppress the
-                        // "Spotify" chip here to avoid mislabelling the origin.
-                        if (playlist?.spotifyId != null && playlist?.sourceUrl == null) add("Spotify")
+                        // Source chip: hosted XSPFs are canonical via their
+                        // sourceUrl even when mirrored to Spotify, so derive
+                        // the label from the hostname (spinitron.com →
+                        // "Spinitron"). Only fall back to "Spotify" for
+                        // non-hosted playlists that carry a spotifyId.
+                        val sourceLabel = playlist?.sourceUrl?.let { hostLabelFromUrl(it) }
+                            ?: playlist?.spotifyId?.let { "Spotify" }
+                        sourceLabel?.let { add(it) }
                         add("${tracks.size} tracks")
                     }
                     Text(
@@ -562,6 +565,24 @@ private fun PlaylistOptionsSheet(
             )
         }
     }
+}
+
+/**
+ * Derive a short human label from a hosted-XSPF source URL. Strips
+ * protocol + `www.`, drops the TLD, and title-cases the first remaining
+ * label — so `https://spinitron.com/station/xyz/playlist/...` reads as
+ * "Spinitron". Returns null if the URL can't be parsed into a host.
+ */
+private fun hostLabelFromUrl(url: String): String? {
+    val host = try {
+        android.net.Uri.parse(url).host
+    } catch (_: Exception) {
+        null
+    } ?: return null
+    val stripped = host.removePrefix("www.")
+    // First label wins — "radio.example.co.uk" → "radio".
+    val first = stripped.substringBefore('.').ifBlank { return null }
+    return first.replaceFirstChar { if (it.isLowerCase()) it.titlecase(java.util.Locale.ROOT) else it.toString() }
 }
 
 /**
