@@ -6,7 +6,7 @@ Android companion to the [Parachord desktop app](https://github.com/Parachord/pa
 
 ## Install
 
-**Beta testers** — join the [internal testing track](https://groups.google.com/g/parachord-testers)) to get automatic updates through the Play Store.
+**Beta testers** — join the [internal testing track](https://groups.google.com/g/parachord-testers) to get automatic updates through the Play Store.
 
 or
 
