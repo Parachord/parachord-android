@@ -1,31 +1,84 @@
 # Parachord for Android
 
-A multi-source music player and discovery app for Android. Parachord resolves tracks across Spotify, Apple Music, SoundCloud, Bandcamp, YouTube, and local files — then plays them through the best available source based on user-configured priority.
+A unified music player that brings Spotify, Apple Music, SoundCloud, Bandcamp, and your local files into one queue. Parachord resolves every track across your available sources and plays from the best match based on a configurable resolver priority.
 
-This is the Android companion to the [Parachord desktop app](https://github.com/Parachord/parachord).
+Android companion to the [Parachord desktop app](https://github.com/Parachord/parachord) — same resolver pipeline, same plugin system, same playlist sync.
+
+## Install
+
+**Beta testers** — join the internal testing track (invite link shared separately) to get automatic updates through the Play Store.
+
+**Sideload** — grab the signed APK from the [latest release](https://github.com/Parachord/parachord-android/releases/latest) and install directly. Requires "Install unknown apps" permission for your browser or Files app.
 
 ## Features
 
-- **Multi-source playback** — Resolves and plays music from Spotify (App Remote), Apple Music (MusicKit), SoundCloud, local files, and direct streams via ExoPlayer
-- **Resolver priority system** — Two-tier scoring (priority-first, confidence-second) lets you rank sources. A Spotify result always beats YouTube when Spotify is ranked higher, regardless of match confidence
-- **Music discovery** — Recommendations (Last.fm + ListenBrainz), Fresh Drops, Pop of the Tops, Critical Darlings, and upcoming concerts
-- **AI DJ (Shuffleupagus)** — Conversational music assistant powered by ChatGPT, Claude, or Gemini with tool-use for queue control, recommendations, and blocking
-- **Spinoff mode** — Find similar tracks to what's playing (via Last.fm) and spin off into a radio-like session
-- **Scrobbling** — Last.fm and ListenBrainz scrobble support
-- **Collection sync** — Import and sync playlists from Spotify and Apple Music
-- **Deep linking** — Open Spotify and Apple Music links directly in Parachord
-- **Friends** — See what your Last.fm/ListenBrainz friends are listening to
+### Unified playback
+- **Spotify Connect** — controls Spotify on your phone or any Connect-capable device (Premium required). Uses the Web API directly; no Spotify App Remote SDK.
+- **Apple Music** — via MusicKit JS inside a hidden WebView. Subscription required.
+- **SoundCloud** — native ExoPlayer streaming, no browser redirect.
+- **Local files** — with automatic artwork extraction and online enrichment for tracks missing embedded art.
+- **Bandcamp** — resolves tracks and opens in the browser for playback (matches desktop).
+- **Direct HTTP streams** — anything with a URL, via ExoPlayer.
 
-## Setup
+One queue across all sources. Tap any track and Parachord figures out where to play it from.
+
+### Resolver pipeline
+Two-tier scoring — priority-first, confidence-second. A Spotify result at 70% confidence beats SoundCloud at 95% when Spotify is ranked higher. Sub-threshold matches (< 60% confidence) are filtered so wrong-song results never play.
+
+Default order: `spotify > applemusic > bandcamp > soundcloud > localfiles > youtube`. User-configurable.
+
+### Playlist sync
+- **Spotify bi-directional sync** — import your playlists, saved tracks, albums, and followed artists. Locally-created playlists push up.
+- **Hosted XSPF** — import any `.xspf` URL (e.g. a radio station's "recently played" feed) and Parachord polls every 5 minutes to keep local + Spotify in lockstep.
+- **Three-layer dedup** prevents duplicate remote playlists on re-sync.
+
+Apple Music sync is on the roadmap ([#15](https://github.com/Parachord/parachord-android/issues/15)); playback works today.
+
+### Discovery
+- **Recommendations** — personalized albums and artists from Last.fm + ListenBrainz, plus an AI-generated feed (your own ChatGPT/Claude/Gemini key).
+- **Fresh Drops** and **Critical Darlings** — curated new releases.
+- **Pop of the Tops** — global chart albums.
+- **Weekly Jams** and **Weekly Exploration** — the last four weeks of each, pulled automatically from ListenBrainz.
+- **On Tour** — teal dot next to the artist name when they're playing near you. Filter radius configurable.
+- **Friends** — see what your Last.fm / ListenBrainz contacts have been playing.
+- **Concerts** — Ticketmaster + SeatGeek search, location-filtered.
+
+### AI features (BYOK)
+- **DJ chat (Shuffleupagus)** — natural-language control: "play something like Beach House but more upbeat", "queue the new Waxahatchee album", "skip to Sugar".
+- **Album and artist recommendations** grounded in your actual listening history.
+- **Providers** — ChatGPT, Claude, Gemini. Ollama is .axe-pluggable but disabled on mobile (needs a local server).
+
+### Scrobbling
+- **ListenBrainz**, **Last.fm**, and **Libre.fm**.
+- **MBID enrichment** — every track gets MusicBrainz identifiers in the background via ListenBrainz's MBID Mapper (~4ms lookup, 90-day disk cache). Scrobble payloads include `recording_mbid`, `artist_mbids`, `release_mbid`.
+
+### Sharing
+- **Smart links** via `go.parachord.com` — share a track, album, playlist, or artist and recipients get a rich Open Graph preview with per-service listen buttons (Spotify, Apple Music, SoundCloud). Works regardless of the recipient's platform.
+- Deeplink fallback to `parachord.com/go` when the smart-link API is unreachable.
+
+### .axe plugin system
+Parachord Android runs the same 19 plugins as desktop — bundled as `.axe` files, hot-reloadable from the `parachord-plugins` GitHub repo over a 24-hour debounce. Plugin types: content resolvers, AI providers, meta-services (Last.fm, MusicBrainz, Discogs, Wikipedia), scrobblers, concert services. YouTube and Ollama are filtered out on mobile via `capabilities.mobile: false`.
+
+Native Kotlin resolvers (Spotify, Apple Music, SoundCloud, local files) take priority over the `.axe` equivalents for speed.
+
+### Background resilience
+External playback (Apple Music, Spotify Connect) survives screen-off, Doze mode, and Android's foreground-service killer. Silent 1s WAV loops on ExoPlayer keep `MediaSessionService` happy while DRM audio flows through MusicKit or Spotify. See CLAUDE.md "External Playback Background Survival" for the rationale.
+
+## Requirements
+
+- Android 8.0+ (API 26)
+- **Spotify Premium** for Spotify playback (free tier can browse but can't stream via Web API)
+- **Apple Music subscription** for Apple Music playback
+- Your own API keys for AI features (ChatGPT / Claude / Gemini) — set in Settings
+
+## Setup (development)
 
 ### Prerequisites
-
 - Android Studio Ladybug (2024.2) or newer
 - JDK 17
 - Android SDK 35
 
 ### API keys
-
 Copy the example config and fill in your keys:
 
 ```bash
@@ -37,93 +90,132 @@ cp local.properties.example local.properties
 | `LASTFM_API_KEY` | Yes | https://www.last.fm/api/account/create |
 | `LASTFM_SHARED_SECRET` | Yes | Same as above |
 | `SPOTIFY_CLIENT_ID` | Yes | https://developer.spotify.com/dashboard |
-| `SOUNDCLOUD_CLIENT_ID` | No | https://soundcloud.com/you/apps |
-| `SOUNDCLOUD_CLIENT_SECRET` | No | Same as above |
-| `APPLE_MUSIC_DEVELOPER_TOKEN` | No | Apple Developer Account (MusicKit) |
+| `SOUNDCLOUD_CLIENT_ID` | Optional | https://soundcloud.com/you/apps |
+| `SOUNDCLOUD_CLIENT_SECRET` | Optional | Same as above |
+| `APPLE_MUSIC_DEVELOPER_TOKEN` | Optional | Apple Developer Account (MusicKit JS) |
 
-### Build
+AI provider keys (ChatGPT / Claude / Gemini / Ticketmaster / SeatGeek) are configured per-user in Settings, not at build time — keeping them out of the open-source build config.
+
+### Build and install
 
 ```bash
-# Debug build (for development, requires ADB install)
-./gradlew assembleDebug
+# Build + install debug APK on connected device
+./gradlew installDebug
 
-# Release build (sideload-safe, signed with debug key)
-./gradlew assembleRelease
+# Force-stop the old process so Android picks up the new code
+adb shell am force-stop com.parachord.android.debug
+
+# Run unit tests
+./gradlew :app:testDebugUnitTest
 ```
 
-The release build is signed with the debug keystore by default so it can be distributed without a release keystore. CI uses this for artifact builds.
+Release builds require a keystore — the CI workflow handles signing and publishing. See [docs/play-store-publishing.md](docs/play-store-publishing.md) for details.
+
+### Cutting a release
+
+```bash
+./scripts/release-version.sh 0.4.0-beta.3
+git push && git push origin v0.4.0-beta.3
+```
+
+Tag-driven: the `v*` push triggers the release workflow, which signs the APK + AAB, attaches both to a GitHub Release, and uploads the AAB to the Play Console internal track. Prerelease version names (hyphen in the semver) auto-route to `internal` regardless of the track flag.
 
 ## Architecture
 
-The app mirrors the [desktop Parachord app's](https://github.com/Parachord/parachord) architecture, adapted for Android idioms.
+The app mirrors the [desktop Parachord app's](https://github.com/Parachord/parachord) architecture, adapted for Android idioms. Detailed design notes live in [CLAUDE.md](CLAUDE.md).
 
 ### Tech stack
 
 | Layer | Technology |
 |-------|-----------|
-| Language | Kotlin |
+| Language | Kotlin (Multiplatform-ready — `:shared` module) |
 | UI | Jetpack Compose + Material 3 |
-| Playback | Media3 / ExoPlayer, Spotify App Remote SDK, MusicKit JS bridge |
-| Database | Room (11 migrations) |
-| DI | Hilt |
-| Networking | OkHttp + Retrofit |
+| Playback | Media3 / ExoPlayer, Spotify Web API (Connect), MusicKit JS (WebView) |
+| Database | SQLDelight (replaced Room, April 2026) |
+| DI | Koin (replaced Hilt, April 2026) |
+| Networking | OkHttp + Retrofit (app), Ktor (shared module) |
 | Images | Coil |
-| Preferences | DataStore |
+| Preferences | DataStore (non-sensitive), EncryptedSharedPreferences via `SecureTokenStore` (OAuth tokens, API keys — AES-256-GCM backed by Android Keystore) |
+| Plugins | WebView-hosted JS via `JsBridge` → `resolver-loader.js` (shared with desktop) |
 
-### Project structure
+### Project layout
 
 ```
 app/src/main/java/com/parachord/android/
-├── ai/              # AI DJ service (ChatGPT, Claude, Gemini) and tool definitions
-├── auth/            # OAuth flows (Spotify, Last.fm, Apple Music)
-├── bridge/          # JS bridge for .axe resolver plugins
+├── ai/              # AI DJ service (ChatGPT, Claude, Gemini, Ollama wrapper)
+├── auth/            # OAuth flows (Spotify, Last.fm, Apple Music, SoundCloud)
+├── bridge/          # JS runtime wrapper for .axe plugins
 ├── data/
-│   ├── api/         # Retrofit API clients (Spotify, Last.fm, MusicBrainz, ListenBrainz)
-│   ├── db/          # Room database, entities, DAOs, migrations
-│   ├── metadata/    # Cascading metadata providers
-│   ├── repository/  # Data access layer
+│   ├── api/         # Retrofit clients (Spotify, Last.fm, MusicBrainz, ListenBrainz, Ticketmaster, SeatGeek)
+│   ├── db/          # SQLDelight-backed DAOs + bridge typealiases to shared models
+│   ├── metadata/    # Cascading metadata providers, MBID enrichment, image enrichment
+│   ├── repository/  # Library, concerts, recommendations, weekly playlists
 │   ├── scanner/     # Local media file scanner
-│   └── store/       # DataStore preferences
-├── deeplink/        # Deep link handling for Spotify/Apple Music URLs
+│   └── store/       # DataStore prefs, EncryptedSharedPreferences wrapper
+├── deeplink/        # Spotify / Apple Music / parachord:// URL routing
 ├── playback/
-│   ├── handlers/    # Per-source playback handlers
-│   ├── PlaybackController.kt   # High-level playback API
-│   ├── PlaybackService.kt      # MediaSessionService (foreground service)
-│   └── QueueManager.kt         # Queue logic (mirrors desktop)
+│   ├── handlers/    # SpotifyPlaybackHandler, AppleMusicPlaybackHandler, SoundCloudPlaybackHandler, MusicKitWebBridge
+│   ├── scrobbler/   # ListenBrainz, Last.fm, Libre.fm, .axe scrobbler wrapper
+│   ├── PlaybackController.kt
+│   ├── PlaybackService.kt
+│   └── QueueManager.kt
+├── playlist/        # Hosted XSPF poller + scheduler
 ├── resolver/        # Track resolution pipeline and scoring
-├── sync/            # Collection sync with external services
-├── ui/
-│   ├── components/  # Shared composables (MiniPlayer, TrackRow, etc.)
-│   ├── navigation/  # Routes and NavHost
-│   ├── screens/     # Feature screens
-│   └── theme/       # Parachord color scheme and typography
+├── share/           # Smart links + share sheet
+├── sync/            # Playlist / library sync (Spotify; Apple Music planned)
+├── ui/              # Compose UI — screens, components, navigation, theme
 └── widget/          # Home screen mini player widget
+
+shared/src/commonMain/kotlin/com/parachord/shared/
+├── model/           # Track, Album, Artist, Playlist, etc.
+├── api/             # Ktor clients for cross-platform use
+├── db/              # SQLDelight-generated entities + queries
+├── plugin/          # PluginManager, JsRuntime interface
+└── platform/        # expect/actual (Log, randomUUID, time)
 ```
 
-### Key patterns
+### Key design patterns
 
-**Metadata providers** cascade in priority order — MusicBrainz (discography, tracklists), Last.fm (images, bios, tags), Spotify (album art, IDs). Results are merged; later providers fill gaps from earlier ones.
+- **Metadata cascade** — MusicBrainz (IDs, discography, tracklists) → Last.fm (images, bios, tags) → Spotify (album art, preview URLs). Later providers fill gaps from earlier.
+- **Resolver scoring** — priority-first (user-configurable), confidence-second (0.0–1.0 tiebreaker), with a 0.60 confidence floor to filter wrong-song matches.
+- **On-the-fly resolution** — tracks from external sources (AI recommendations, weekly playlists, DJ chat) carry only title/artist/album. Resolved in the background via `TrackResolverCache`; `PlaybackController` falls back to inline resolution for tracks that weren't pre-resolved.
+- **Three-layer playlist dedup** on sync — ID link, `spotifyId` field, name match. Prevents duplicate remote playlists across reconnect cycles.
+- **Background playback survival** — ExoPlayer plays silent audio on loop during external playback so `MediaSessionService` never demotes from foreground. Overrides `onUpdateNotification` and `pauseAllPlayersAndStopSelf` to keep Media3 from fighting us.
 
-**Resolver scoring** uses the desktop's two-tier system: resolver priority first (user-configurable), then match confidence (0.0-1.0) as a tiebreaker within the same priority level.
+For the full list of "lessons learned the hard way," see [CLAUDE.md](CLAUDE.md).
 
-**Playback routing** maps each resolver to a playback mechanism:
-- Spotify → App Remote SDK (external, controls Spotify on-device)
-- Apple Music → MusicKit JS bridge (WebView)
-- SoundCloud / local files / direct streams → ExoPlayer
+## KMP shared module
 
-### Default resolver order
+The `:shared` module holds platform-agnostic code destined for a future iOS port: models, business logic (resolver scoring, metadata service, queue manager), Ktor API clients, SQLDelight schema, plugin runtime interface. iOS-specific playback, UI, and platform glue will live in a future `iosApp/` target.
 
-```
-spotify > applemusic > bandcamp > soundcloud > localfiles > youtube
-```
+Android-side files that moved to shared become typealiases in their original packages so imports keep working across the app — see `data/db/entity/`, `resolver/`, `data/metadata/`, etc.
+
+## Security
+
+Full security review completed April 2026; see [SECURITY.md](SECURITY.md) and `.claude/plans/logical-munching-waffle.md`. Highlights:
+- Network security config rejects cleartext traffic app-wide.
+- Release builds fail if `CI_KEYSTORE_PATH` is unset — no debug-keystore fallback.
+- XSPF imports block SSRF via HTTPS-only + literal-host check on every poll (not just at import, in case DNS changes).
+- OAuth flows use PKCE + state parameter; per-flow verifier isolation.
+- OAuth tokens and API keys stored in `EncryptedSharedPreferences` (AES-256-GCM, Android Keystore backed) — never in plain DataStore.
+- `.claude/` and `play-service-account.json` are gitignored.
+
+Plugin sandboxing ([#107](https://github.com/Parachord/parachord-android/issues/107)) — the `.axe` fetch allowlist and storage namespacing — is deferred pending a broader plugin SDK revision shared with desktop.
 
 ## CI
 
-GitHub Actions builds a release APK on every push/PR to `main`, and supports manual dispatch from the Actions tab. Artifacts are retained for 14 days.
+GitHub Actions runs on every push / PR / tag. See [`.github/workflows/build.yml`](.github/workflows/build.yml).
 
-Required repository secrets: `LASTFM_API_KEY`, `LASTFM_SHARED_SECRET`, `SPOTIFY_CLIENT_ID`, `SOUNDCLOUD_CLIENT_ID`, `SOUNDCLOUD_CLIENT_SECRET`, `APPLE_MUSIC_DEVELOPER_TOKEN`.
+- **Branch push** → build signed release APK + AAB, upload as 14-day artifacts.
+- **Tag push (`v*`)** → everything above, plus:
+  - Publish a GitHub Release with the APK + AAB attached.
+  - Upload the AAB to Play Console internal testing track (when `PLAY_SERVICE_ACCOUNT_JSON` secret is present).
 
-## Requirements
+Required repository secrets:
+- Build: `LASTFM_API_KEY`, `LASTFM_SHARED_SECRET`, `SPOTIFY_CLIENT_ID`, `SOUNDCLOUD_CLIENT_ID`, `SOUNDCLOUD_CLIENT_SECRET`, `APPLE_MUSIC_DEVELOPER_TOKEN`
+- Signing: `CI_KEYSTORE_BASE64`, `CI_KEYSTORE_PASSWORD`
+- Play Store upload: `PLAY_SERVICE_ACCOUNT_JSON`
 
-- Android 8.0+ (API 26)
-- Spotify app installed for Spotify playback (App Remote SDK)
+## License
+
+See LICENSE. Parachord for Android is a companion to the [desktop app](https://github.com/Parachord/parachord).
