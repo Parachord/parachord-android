@@ -122,6 +122,20 @@ class MusicKitWebBridge constructor(
     /** Callback invoked when the current track finishes playing (for auto-advance). */
     var onTrackEnded: (() -> Unit)? = null
 
+    /**
+     * Called from [onPlaybackStateChange] whenever MusicKit transitions
+     * to an `isPlaying = true` state from any non-playing state (paused,
+     * stopped, loading, etc.) — including the auto-resume-on-audio-session-
+     * interruption-recovery behavior that fires when a Bluetooth speaker
+     * powers off while we're paused.
+     *
+     * PlaybackController wires this to force-pause via [pause] whenever the
+     * resume happens inside the user-pause suppression window. The push
+     * event runs even when our polling loop has been stopped (which it has,
+     * during a user pause), so this is the only reliable signal.
+     */
+    var onResumedToPlaying: (() -> Unit)? = null
+
     // Actual track metadata from MusicKit JS (what's REALLY playing)
     /** Title of the track MusicKit reports as currently playing. */
     var actualTitle: String? = null; private set
@@ -739,11 +753,18 @@ class MusicKitWebBridge constructor(
             Log.d(TAG, "Playback state change: $jsonStr")
             try {
                 val state = json.decodeFromString<MusicKitPlaybackState>(jsonStr)
+                val prevPlaying = _isPlaying.value
                 _isPlaying.value = state.isPlaying
                 // JS bridge already sends values in milliseconds
                 _position.value = state.position.toLong()
                 _duration.value = state.duration.toLong()
                 playbackStateName = state.state ?: "unknown"
+                // Fire whenever MusicKit transitions into playing — the
+                // listener decides whether to override (e.g. force-pause
+                // when the user just paused). See [onResumedToPlaying] doc.
+                if (!prevPlaying && state.isPlaying) {
+                    onResumedToPlaying?.invoke()
+                }
                 // Detect ended state as a safety net — the JS side also fires
                 // onTrackEnded for this, but duplicates are harmless and this
                 // ensures we catch it even if the JS callback is missed.

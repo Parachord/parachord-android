@@ -187,6 +187,24 @@ class PlaybackController constructor(
                 // Eagerly warm the MusicKit WebView + JS bridge so the first
                 // Apple Music play doesn't pay the ~500ms initialization cost.
                 router.getAppleMusicHandler().warmUp()
+                // Watch for unwanted MusicKit auto-resumes during a user-pause
+                // window. MusicKit's audio session interruption recovery
+                // (e.g. BT speaker powered off while paused) flips to playing
+                // independently of any app command — our wrapper.play()
+                // suppression catches the cascading MediaSession command,
+                // but MusicKit's own state machine sustains audio. Force-pause
+                // it back. The push event runs even when our polling loop
+                // is stopped (which it is during a user pause).
+                router.getAppleMusicHandler().musicKitBridge.onResumedToPlaying = {
+                    if (wasRecentlyUserPaused()) {
+                        Log.w(TAG, "MusicKit auto-resumed during user-pause window — force-pausing (sincePauseMs=${msSinceLastUserPause()})")
+                        scope.launch(Dispatchers.Main) {
+                            try { router.getAppleMusicHandler().pause() } catch (e: Exception) {
+                                Log.w(TAG, "Force-pause after MusicKit auto-resume failed", e)
+                            }
+                        }
+                    }
+                }
             }
         }, MoreExecutors.directExecutor())
     }
@@ -206,6 +224,7 @@ class PlaybackController constructor(
     /** Play a single track immediately (clears the queue). */
     fun playTrack(track: TrackEntity, context: PlaybackContext? = null) {
         onUserPlaybackActionListener?.invoke()
+        clearUserPauseMark()
         queueManager.clearQueue()
         if (context != null) queueManager.setContext(context)
         scope.launch { playTrackInternal(track) }
@@ -222,6 +241,7 @@ class PlaybackController constructor(
         shuffle: Boolean = queueManager.shuffleEnabled,
     ) {
         onUserPlaybackActionListener?.invoke()
+        clearUserPauseMark()
         val track = queueManager.setQueue(tracks, startIndex, context, shuffle) ?: return
         scope.launch { playTrackInternal(track) }
     }
@@ -403,6 +423,50 @@ class PlaybackController constructor(
         if (stateHolder.state.value.isPlaying) togglePlayPause()
     }
 
+    /**
+     * Wall-clock time of the most recent transition INTO a paused state via
+     * [togglePlayPause] (either branch — external or local ExoPlayer). Used by
+     * [ExternalPlaybackForwardingPlayer.play] to suppress spurious play
+     * commands that arrive shortly after a user pause — specifically the
+     * MusicKit-auto-resume-after-BT-interrupt cascade where the WebView's
+     * MusicKit briefly state-flickers paused→playing→loading on output route
+     * change, Media3 sees a state event and re-issues PLAY through the
+     * MediaSession, and `togglePlayPause` interprets it as a resume.
+     *
+     * Set to a positive timestamp on user pause; cleared (set to 0) on user
+     * resume / playTrack / playQueue. Read via [wasRecentlyUserPaused].
+     */
+    @Volatile
+    private var lastUserPauseTimeMs: Long = 0
+
+    /** Window after a user pause during which we suppress spurious external
+     *  play commands (see [lastUserPauseTimeMs]). 5s comfortably absorbs the
+     *  MusicKit interrupt-recovery flicker (~50–500ms in observed traces) and
+     *  is short enough that "I paused by mistake, let me tap play again"
+     *  still works without an artificial delay. */
+    private val pauseSuppressionWindowMs: Long = 5_000
+
+    /** True while [pauseSuppressionWindowMs] hasn't elapsed since the last
+     *  user pause. */
+    fun wasRecentlyUserPaused(): Boolean {
+        val pauseTime = lastUserPauseTimeMs
+        return pauseTime > 0 && (System.currentTimeMillis() - pauseTime) < pauseSuppressionWindowMs
+    }
+
+    /** Diagnostic: ms since the last user pause, or -1 if none in this
+     *  process lifetime. */
+    fun msSinceLastUserPause(): Long {
+        val pauseTime = lastUserPauseTimeMs
+        return if (pauseTime > 0) System.currentTimeMillis() - pauseTime else -1
+    }
+
+    private fun markUserPaused() {
+        lastUserPauseTimeMs = System.currentTimeMillis()
+    }
+    private fun clearUserPauseMark() {
+        lastUserPauseTimeMs = 0
+    }
+
     fun togglePlayPause() {
         if (isExternalPlayback) {
             scope.launch {
@@ -437,6 +501,7 @@ class PlaybackController constructor(
                     else -> router.getSpotifyHandler().isPlaying()
                 }
                 if (isCurrentlyPlaying) {
+                    markUserPaused()
                     handler.pause()
                     stateHolder.update { copy(isPlaying = false) }
                     // Stop polling and release WakeLock — no need to keep the CPU
@@ -454,6 +519,7 @@ class PlaybackController constructor(
                 } else {
                     // Cancel idle timeout — user is resuming
                     cancelIdleTimeout()
+                    clearUserPauseMark()
                     handler.resume()
                     stateHolder.update { copy(isPlaying = true) }
                     // Resume ExoPlayer's silence so MediaSession reports "playing"
@@ -505,7 +571,13 @@ class PlaybackController constructor(
         }
 
         val ctrl = controller ?: return
-        if (ctrl.isPlaying) ctrl.pause() else ctrl.play()
+        if (ctrl.isPlaying) {
+            markUserPaused()
+            ctrl.pause()
+        } else {
+            clearUserPauseMark()
+            ctrl.play()
+        }
     }
 
     fun toggleShuffle() {

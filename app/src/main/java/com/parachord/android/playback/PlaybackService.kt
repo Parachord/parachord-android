@@ -602,11 +602,32 @@ class PlaybackService : MediaSessionService() {
         }
 
         override fun play() {
+            // Suppress spurious external-playback resumes that arrive shortly
+            // after a user pause. Specifically catches the
+            // MusicKit-auto-resume-after-BT-disconnect cascade: when a
+            // Bluetooth speaker (e.g. Spark Mini) powers off while Apple Music
+            // is paused, the WebView's MusicKit briefly state-flickers
+            // paused→playing→loading on audio session interruption recovery,
+            // Media3 sees the playing state event and re-issues PLAY through
+            // the MediaSession, which lands here. Without the guard, our
+            // togglePlayPause's resume branch would re-start playback.
+            if (externalMode && playbackController.wasRecentlyUserPaused()) {
+                Log.w(TAG, "Suppressing wrapper.play() — recent user pause (sincePauseMs=${playbackController.msSinceLastUserPause()})")
+                return
+            }
             if (externalMode) { playbackController.togglePlayPause(); return }
             super.play()
         }
 
         override fun pause() {
+            // External-mode togglePlayPause is SYMMETRIC: pause-when-playing,
+            // resume-when-paused. So a wrapper.pause() that arrives while
+            // we're already paused (e.g. spurious MediaSession command during
+            // a BT route change) would flip us to PLAYING. Suppress it.
+            if (externalMode && !stateHolder.state.value.isPlaying) {
+                Log.w(TAG, "Suppressing wrapper.pause() — already paused (toggle would resume)")
+                return
+            }
             if (externalMode) { playbackController.togglePlayPause(); return }
             super.pause()
         }
