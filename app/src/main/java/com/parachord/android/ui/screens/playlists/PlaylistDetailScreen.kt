@@ -273,6 +273,19 @@ fun PlaylistDetailScreen(
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                     )
 
+                    // "Last updated" line. Uses `lastModified` (set on every
+                    // content change — hosted-XSPF refresh, manual edit, or
+                    // Spotify pull) rather than `updatedAt` (which tracks
+                    // any row write including metadata-only touches).
+                    playlist?.lastModified?.takeIf { it > 0 }?.let { ts ->
+                        Spacer(modifier = Modifier.height(2.dp))
+                        Text(
+                            text = "Last updated ${formatPlaylistRelativeTime(ts)}",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        )
+                    }
+
                     playlist?.sourceUrl?.let { url ->
                         Spacer(modifier = Modifier.height(4.dp))
                         Text(
@@ -556,6 +569,34 @@ private fun PlaylistOptionsSheet(
                 label = "Delete Playlist",
                 onClick = onDeletePlaylist,
             )
+        }
+    }
+}
+
+/**
+ * "X ago" style relative-time formatter for the playlist detail header.
+ * Mirrors the settings screen's sync-status formatter but kept local
+ * to avoid dragging the helper across modules.
+ */
+private fun formatPlaylistRelativeTime(timestamp: Long): String {
+    val diff = System.currentTimeMillis() - timestamp
+    return when {
+        diff < 60_000 -> "just now"
+        diff < 3_600_000 -> {
+            val m = diff / 60_000
+            if (m == 1L) "1 minute ago" else "$m minutes ago"
+        }
+        diff < 86_400_000 -> {
+            val h = diff / 3_600_000
+            if (h == 1L) "1 hour ago" else "$h hours ago"
+        }
+        diff < 7 * 86_400_000L -> {
+            val d = diff / 86_400_000
+            if (d == 1L) "yesterday" else "$d days ago"
+        }
+        else -> {
+            val fmt = java.text.SimpleDateFormat("MMM d, yyyy", java.util.Locale.getDefault())
+            "on ${fmt.format(java.util.Date(timestamp))}"
         }
     }
 }
