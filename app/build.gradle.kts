@@ -5,6 +5,7 @@ plugins {
     alias(libs.plugins.kotlin.android)
     alias(libs.plugins.kotlin.compose)
     alias(libs.plugins.kotlin.serialization)
+    alias(libs.plugins.play.publisher)
 }
 
 val localProps = Properties().apply {
@@ -180,4 +181,34 @@ dependencies {
     androidTestImplementation(libs.androidx.espresso.core)
     androidTestImplementation(platform(libs.androidx.compose.bom))
     androidTestImplementation(libs.androidx.compose.ui.test.junit4)
+}
+
+// ── Play Store publishing (Triple-T gradle-play-publisher) ────────────
+// Only usable when the service-account JSON is available via the
+// ANDROID_PUBLISHER_CREDENTIALS env var (set in CI). Local dev builds
+// don't need this — tasks simply fail with "missing credentials" if
+// run without the env var pointing at a readable JSON.
+//
+// Upload track is `internal` by default — safest for beta testing.
+// Promote internal → closed → open → production via the Play Console
+// web UI, or override per-build with `-Pplay.track=beta`.
+//
+// Prerelease version names (anything containing a hyphen, e.g.
+// 0.4.0-beta.1) auto-route to `internal` even if the flag says
+// `production`, so stable CLI invocations can't accidentally push a
+// beta to prod.
+//
+// resolutionStrategy = IGNORE makes re-pushing the same tag a no-op
+// instead of an error when the versionCode is already live on Play.
+play {
+    serviceAccountCredentials.set(
+        System.getenv("ANDROID_PUBLISHER_CREDENTIALS")?.let { rootProject.file(it) }
+            ?: rootProject.file("play-service-account.json"),
+    )
+    defaultToAppBundles.set(true)
+    releaseStatus.set(com.github.triplet.gradle.androidpublisher.ReleaseStatus.COMPLETED)
+    resolutionStrategy.set(com.github.triplet.gradle.androidpublisher.ResolutionStrategy.IGNORE)
+    val isPrerelease = android.defaultConfig.versionName?.contains("-") == true
+    val requested = project.findProperty("play.track")?.toString() ?: "internal"
+    track.set(if (isPrerelease) "internal" else requested)
 }

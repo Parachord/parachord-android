@@ -21,6 +21,10 @@ concurrency:
 jobs:
   build:
     runs-on: ubuntu-latest
+    env:
+      # Gates the Play Store upload step. Evaluated at job-init time so
+      # the `if:` guards on downstream steps are allowed to reference it.
+      HAS_PLAY_CREDS: ${{ secrets.PLAY_SERVICE_ACCOUNT_JSON != '' }}
 
     steps:
       - name: Checkout repository
@@ -93,3 +97,20 @@ jobs:
           generate_release_notes: true
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      # ── Play Store upload (gated on secret presence) ────────────────
+      # Triple-T `gradle-play-publisher` uploads the AAB to the Play
+      # Console release track. Prerelease tags (v0.4.0-beta.1) route to
+      # `internal`; stable tags default to `internal` too and must be
+      # promoted through the Play Console UI. Gated on PLAY_SERVICE_
+      # ACCOUNT_JSON being present so forks and tag pushes from pre-
+      # setup states don't fail this step.
+      - name: Write Play service account JSON
+        if: startsWith(github.ref, 'refs/tags/v') && env.HAS_PLAY_CREDS == 'true'
+        run: |
+          printf '%s' '${{ secrets.PLAY_SERVICE_ACCOUNT_JSON }}' > "$RUNNER_TEMP/play-service-account.json"
+          echo "ANDROID_PUBLISHER_CREDENTIALS=$RUNNER_TEMP/play-service-account.json" >> "$GITHUB_ENV"
+
+      - name: Upload AAB to Play Console
+        if: startsWith(github.ref, 'refs/tags/v') && env.HAS_PLAY_CREDS == 'true'
+        run: ./gradlew publishBundle --stacktrace
