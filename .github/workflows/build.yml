@@ -3,9 +3,20 @@ name: Build Release
 on:
   push:
     branches: [main]
+    tags:
+      - 'v*'
   pull_request:
     branches: [main]
   workflow_dispatch:
+
+permissions:
+  contents: write
+
+# Mirror desktop's concurrency rule: tagged release builds always run to
+# completion; branch pushes cancel in-progress runs.
+concurrency:
+  group: build-${{ github.ref }}
+  cancel-in-progress: ${{ !startsWith(github.ref, 'refs/tags/') }}
 
 jobs:
   build:
@@ -57,3 +68,28 @@ jobs:
           name: parachord-release-aab
           path: app/build/outputs/bundle/release/*.aab
           retention-days: 14
+
+      # ── Tag-triggered GitHub Release (mirrors desktop's pattern) ────
+      # When pushed tag matches v* we publish the signed APK + AAB to a
+      # GitHub Release so external testers can download a persistent
+      # link instead of juggling 14-day artifact URLs. Branch pushes
+      # skip this step.
+      - name: Stage release artifacts
+        if: startsWith(github.ref, 'refs/tags/v')
+        run: |
+          mkdir -p release-artifacts
+          TAG="${GITHUB_REF##refs/tags/}"
+          cp app/build/outputs/apk/release/*.apk "release-artifacts/parachord-${TAG}.apk"
+          cp app/build/outputs/bundle/release/*.aab "release-artifacts/parachord-${TAG}.aab"
+          ls -la release-artifacts
+
+      - name: Publish GitHub Release
+        if: startsWith(github.ref, 'refs/tags/v')
+        uses: softprops/action-gh-release@v2
+        with:
+          files: release-artifacts/*
+          draft: false
+          prerelease: ${{ contains(github.ref_name, '-') }}
+          generate_release_notes: true
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
