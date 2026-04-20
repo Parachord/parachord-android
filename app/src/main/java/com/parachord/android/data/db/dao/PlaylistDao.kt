@@ -125,6 +125,10 @@ class PlaylistDao(private val db: ParachordDb) {
         queries.updateArtworkById(artworkUrl = artworkUrl, id = id)
     }
 
+    suspend fun clearArtworkById(id: String): Unit = withContext(Dispatchers.IO) {
+        queries.clearArtworkById(id = id)
+    }
+
     suspend fun backfillLastModified(): Unit = withContext(Dispatchers.IO) {
         queries.backfillLastModified()
     }

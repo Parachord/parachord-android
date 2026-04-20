@@ -34,6 +34,14 @@ VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?);
 updateArtworkById:
 UPDATE playlists SET artworkUrl = ? WHERE id = ? AND (artworkUrl IS NULL OR artworkUrl = '');
 
+-- Unconditionally clear the stored artwork URL. Used by the hosted-XSPF
+-- poller when source content changes: the existing mosaic was built from
+-- the old tracklist and is stale. Clearing lets the subsequent
+-- `enrichPlaylistArt` call's `updateArtworkById` (guarded by blank-check)
+-- fire and store the freshly-regenerated mosaic URL.
+clearArtworkById:
+UPDATE playlists SET artworkUrl = NULL WHERE id = ?;
+
 updateHostedSnapshot:
 UPDATE playlists
 SET sourceContentHash = ?,

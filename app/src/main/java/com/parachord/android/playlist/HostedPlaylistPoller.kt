@@ -5,6 +5,7 @@ import com.parachord.android.data.db.dao.PlaylistDao
 import com.parachord.android.data.db.dao.PlaylistTrackDao
 import com.parachord.android.data.db.entity.PlaylistEntity
 import com.parachord.android.data.db.entity.PlaylistTrackEntity
+import com.parachord.android.data.metadata.ImageEnrichmentService
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import okhttp3.OkHttpClient
@@ -26,6 +27,7 @@ class HostedPlaylistPoller constructor(
     private val httpClient: OkHttpClient,
     private val playlistDao: PlaylistDao,
     private val playlistTrackDao: PlaylistTrackDao,
+    private val imageEnrichmentService: ImageEnrichmentService,
 ) {
     companion object {
         private const val TAG = "HostedPlaylistPoller"
@@ -126,6 +128,17 @@ class HostedPlaylistPoller constructor(
             trackCount = trackRows.size,
             lastModified = now,
         )
+        // Content changed → the prior mosaic is now stale (it was built
+        // from the old tracklist). Clear `artworkUrl` so the enrichment
+        // service's cache-by-URL check forces a fresh build, then
+        // regenerate. `enrichPlaylistArt` rewrites the mosaic file at
+        // `playlist_mosaics/{id}.jpg` and stores the new file:// URL.
+        playlistDao.clearArtworkById(playlist.id)
+        try {
+            imageEnrichmentService.enrichPlaylistArt(playlist.id)
+        } catch (e: Exception) {
+            Log.w(TAG, "Mosaic re-enrichment failed for '${playlist.name}': ${e.message}")
+        }
         Log.d(TAG, "Hosted playlist '${playlist.name}' updated (${trackRows.size} tracks)")
         true
     }
