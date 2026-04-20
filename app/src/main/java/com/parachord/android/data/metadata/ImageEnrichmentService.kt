@@ -185,7 +185,7 @@ class ImageEnrichmentService constructor(
      *
      * Returns the local file URI or null if not enough artwork is available.
      */
-    suspend fun enrichPlaylistArt(playlistId: String): String? {
+    suspend fun enrichPlaylistArt(playlistId: String, cacheBustToken: String? = null): String? {
         val existing = playlistFetches[playlistId]
         if (existing != null && existing.isActive) return existing.await()
 
@@ -288,10 +288,22 @@ class ImageEnrichmentService constructor(
                     generateMosaic(playlistId, paddedUrls)
                 }
 
-                if (resultUrl != null) {
-                    playlistDao.updateArtworkById(playlistId, resultUrl)
+                // Append cache-buster so Coil's URL-keyed memory + disk
+                // cache treats a rewritten mosaic (same file path, new
+                // content) as a new image. `file://` fetchers ignore
+                // query params when reading the underlying File, so the
+                // path still resolves. Callers that don't care about
+                // invalidation (first-time enrichment) pass null and
+                // get the plain URL.
+                val finalUrl = if (resultUrl != null && cacheBustToken != null) {
+                    val sep = if (resultUrl.contains('?')) '&' else '?'
+                    "$resultUrl${sep}v=$cacheBustToken"
+                } else resultUrl
+
+                if (finalUrl != null) {
+                    playlistDao.updateArtworkById(playlistId, finalUrl)
                 }
-                resultUrl
+                finalUrl
             } catch (_: Exception) {
                 null
             } finally {

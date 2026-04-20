@@ -135,7 +135,14 @@ class HostedPlaylistPoller constructor(
         // `playlist_mosaics/{id}.jpg` and stores the new file:// URL.
         playlistDao.clearArtworkById(playlist.id)
         try {
-            imageEnrichmentService.enrichPlaylistArt(playlist.id)
+            // Pass the first 8 chars of the content hash as the cache-bust
+            // token — ensures Coil treats the rewritten mosaic file
+            // (same path) as a new URL and reloads instead of serving a
+            // stale cached bitmap.
+            imageEnrichmentService.enrichPlaylistArt(
+                playlistId = playlist.id,
+                cacheBustToken = hash.take(8),
+            )
         } catch (e: Exception) {
             Log.w(TAG, "Mosaic re-enrichment failed for '${playlist.name}': ${e.message}")
         }
