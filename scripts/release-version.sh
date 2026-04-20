@@ -46,7 +46,7 @@ fi
 # to strictly increase across every uploaded build, so auto-increment
 # regardless of whether the semver went up or down (hotfix demotions
 # still need a higher versionCode).
-CURRENT_CODE="$(grep -E '^\s*versionCode = ' "$BUILD_FILE" | head -1 | sed -E 's/.*versionCode = ([0-9]+).*/\1/')"
+CURRENT_CODE="$(grep -E '^[[:space:]]*versionCode = ' "$BUILD_FILE" | head -1 | sed -E 's/.*versionCode = ([0-9]+).*/\1/')"
 if ! [[ "$CURRENT_CODE" =~ ^[0-9]+$ ]]; then
     echo "error: couldn't parse versionCode from $BUILD_FILE" >&2
     exit 1
@@ -55,8 +55,11 @@ NEW_CODE=$((CURRENT_CODE + 1))
 
 # In-place edits. `sed -i ''` is macOS BSD; `sed -i` alone is GNU. Use
 # the portable two-arg form.
-sed -i.bak -E "s/^(\s*versionCode = )[0-9]+/\1${NEW_CODE}/" "$BUILD_FILE"
-sed -i.bak -E "s/^(\s*versionName = )\"[^\"]+\"/\1\"${NEW_VERSION}\"/" "$BUILD_FILE"
+# BSD/macOS sed doesn't recognize `\s`; `[[:space:]]` is portable
+# between BSD and GNU so the script works on both the dev's laptop
+# and the Linux CI runner.
+sed -i.bak -E "s/^([[:space:]]*versionCode = )[0-9]+/\1${NEW_CODE}/" "$BUILD_FILE"
+sed -i.bak -E "s/^([[:space:]]*versionName = )\"[^\"]+\"/\1\"${NEW_VERSION}\"/" "$BUILD_FILE"
 rm -f "${BUILD_FILE}.bak"
 
 echo "Bumped versionCode $CURRENT_CODE → $NEW_CODE, versionName → $NEW_VERSION"
