@@ -6,7 +6,9 @@ Android companion to the [Parachord desktop app](https://github.com/Parachord/pa
 
 ## Install
 
-**Beta testers** — join the internal testing track (invite link shared separately) to get automatic updates through the Play Store.
+**Beta testers** — join the [internal testing track](https://groups.google.com/g/parachord-testers)) to get automatic updates through the Play Store.
+
+or
 
 **Sideload** — grab the signed APK from the [latest release](https://github.com/Parachord/parachord-android/releases/latest) and install directly. Requires "Install unknown apps" permission for your browser or Files app.
 
