@@ -12,6 +12,81 @@ or
 
 **Sideload** — grab the signed APK from the [latest release](https://github.com/Parachord/parachord-android/releases/latest) and install directly. Requires "Install unknown apps" permission for your browser or Files app.
 
+## Screenshots
+
+<table>
+  <tr>
+    <td align="center" valign="top" width="33%">
+      <img src="docs/screenshots/home.png" alt="Home screen" width="240"><br>
+      <sub><b>Home</b> — playlists, recent listens, Discover tiles</sub>
+    </td>
+    <td align="center" valign="top" width="33%">
+      <img src="docs/screenshots/sidebar.png" alt="Sidebar" width="240"><br>
+      <sub><b>Sidebar</b> — friends with live listening status</sub>
+    </td>
+    <td align="center" valign="top" width="33%">
+      <img src="docs/screenshots/fab.png" alt="FAB menu" width="240"><br>
+      <sub><b>Quick actions</b> — DJ chat, create/import playlist, add friend</sub>
+    </td>
+  </tr>
+  <tr>
+    <td align="center" valign="top" width="33%">
+      <img src="docs/screenshots/now-playing.png" alt="Now Playing" width="240"><br>
+      <sub><b>Now Playing</b> — resolver chip shows active source</sub>
+    </td>
+    <td align="center" valign="top" width="33%">
+      <img src="docs/screenshots/queue.png" alt="Up Next queue" width="240"><br>
+      <sub><b>Queue</b> — mixed Spotify + Apple Music rows</sub>
+    </td>
+    <td align="center" valign="top" width="33%">
+      <img src="docs/screenshots/shuffleupagus.png" alt="Shuffleupagus AI DJ" width="240"><br>
+      <sub><b>Shuffleupagus</b> — natural-language DJ (ChatGPT / Claude / Gemini)</sub>
+    </td>
+  </tr>
+  <tr>
+    <td align="center" valign="top" width="33%">
+      <img src="docs/screenshots/fresh-drops.png" alt="Fresh Drops" width="240"><br>
+      <sub><b>Fresh Drops</b> — new releases from artists you follow</sub>
+    </td>
+    <td align="center" valign="top" width="33%">
+      <img src="docs/screenshots/critical-darlings.png" alt="Critical Darlings" width="240"><br>
+      <sub><b>Critical Darlings</b> — top-rated albums with AI blurbs</sub>
+    </td>
+    <td align="center" valign="top" width="33%">
+      <img src="docs/screenshots/recommendations.png" alt="Recommendations" width="240"><br>
+      <sub><b>Recommendations</b> — ListenBrainz + Last.fm blended feed</sub>
+    </td>
+  </tr>
+  <tr>
+    <td align="center" valign="top" width="33%">
+      <img src="docs/screenshots/charts.png" alt="Pop of the Tops charts" width="240"><br>
+      <sub><b>Pop of the Tops</b> — global charts</sub>
+    </td>
+    <td align="center" valign="top" width="33%">
+      <img src="docs/screenshots/concerts.png" alt="Concerts" width="240"><br>
+      <sub><b>Concerts</b> — Ticketmaster + SeatGeek, library-aware</sub>
+    </td>
+    <td align="center" valign="top" width="33%">
+      <img src="docs/screenshots/friend-history.png" alt="Friend history" width="240"><br>
+      <sub><b>Friends</b> — their Last.fm top albums at a glance</sub>
+    </td>
+  </tr>
+  <tr>
+    <td align="center" valign="top" width="33%">
+      <img src="docs/screenshots/playlists.png" alt="Playlists" width="240"><br>
+      <sub><b>Playlists</b> — hosted XSPF + Spotify-synced side by side</sub>
+    </td>
+    <td align="center" valign="top" width="33%">
+      <img src="docs/screenshots/artist.png" alt="Artist page" width="240"><br>
+      <sub><b>Artist</b> — discography with release-type filter</sub>
+    </td>
+    <td align="center" valign="top" width="33%">
+      <img src="docs/screenshots/sync.png" alt="Sync wizard" width="240"><br>
+      <sub><b>Sync wizard</b> — pick what to pull from Spotify</sub>
+    </td>
+  </tr>
+</table>
+
 ## Features
 
 ### Unified playback
