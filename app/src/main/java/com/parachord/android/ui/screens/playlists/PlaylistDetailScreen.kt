@@ -264,13 +264,17 @@ fun PlaylistDetailScreen(
                     // Author and source line
                     val metaParts = buildList {
                         playlist?.ownerName?.let { add("by $it") }
-                        // Source chip: hosted XSPFs are canonical via their
-                        // sourceUrl even when mirrored to Spotify, so derive
-                        // the label from the hostname (spinitron.com →
-                        // "Spinitron"). Only fall back to "Spotify" for
-                        // non-hosted playlists that carry a spotifyId.
+                        // Source chip:
+                        //   - Hosted XSPF → hostname-derived label
+                        //     (spinitron.com → "Spinitron").
+                        //   - Local playlist (id starts with "local-") →
+                        //     no source chip even if mirrored to Spotify.
+                        //     The `spotifyId` on these rows is an outbound
+                        //     sync link, not the origin.
+                        //   - Spotify-imported playlist → "Spotify".
+                        val isLocal = playlist?.id?.startsWith("local-") == true
                         val sourceLabel = playlist?.sourceUrl?.let { hostLabelFromUrl(it) }
-                            ?: playlist?.spotifyId?.let { "Spotify" }
+                            ?: playlist?.spotifyId?.takeIf { !isLocal }?.let { "Spotify" }
                         sourceLabel?.let { add(it) }
                         add("${tracks.size} tracks")
                     }
