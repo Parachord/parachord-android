@@ -220,4 +220,4 @@ Required repository secrets:
 
 ## License
 
-See LICENSE. Parachord for Android is a companion to the [desktop app](https://github.com/Parachord/parachord).
+[MIT](LICENSE) — same license as the [desktop app](https://github.com/Parachord/parachord).
