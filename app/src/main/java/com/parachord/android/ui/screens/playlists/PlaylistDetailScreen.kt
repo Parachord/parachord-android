@@ -290,19 +290,6 @@ fun PlaylistDetailScreen(
                         )
                     }
 
-                    playlist?.sourceUrl?.let { url ->
-                        Spacer(modifier = Modifier.height(4.dp))
-                        Text(
-                            text = "Mirrors $url · updates every 5 min",
-                            style = MaterialTheme.typography.bodySmall,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant,
-                            maxLines = 2,
-                            overflow = TextOverflow.Ellipsis,
-                            textAlign = TextAlign.Center,
-                            modifier = Modifier.padding(horizontal = 16.dp),
-                        )
-                    }
-
                     Spacer(modifier = Modifier.height(12.dp))
 
                     if (tracks.isNotEmpty()) {
