@@ -41,6 +41,13 @@ class HostedPlaylistScheduler constructor(
     fun startInAppTimer() {
         timerJob?.cancel()
         timerJob = scope.launch {
+            // One-shot repair for pre-cache-bust-fix mosaics. Idempotent —
+            // only touches rows whose stored artworkUrl lacks `?v=`.
+            try {
+                poller.repairHostedArt()
+            } catch (e: Exception) {
+                Log.w(TAG, "repairHostedArt threw: ${e.message}")
+            }
             while (isActive) {
                 try {
                     poller.pollAll()

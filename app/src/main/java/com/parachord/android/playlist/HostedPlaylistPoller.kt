@@ -34,6 +34,35 @@ class HostedPlaylistPoller constructor(
     }
 
     /**
+     * One-shot self-heal for hosted playlists whose mosaic was generated
+     * before the cache-bust fix landed. These rows' `artworkUrl` lacks
+     * the `?v=` marker and may point to a stale mosaic file (the poller
+     * used to replace tracks without regenerating art, and the ViewModel
+     * only regenerates when `artworkUrl` is blank). Clearing + re-running
+     * enrichment is idempotent — subsequent calls skip rows that already
+     * carry the cache-bust marker. Safe to call repeatedly.
+     */
+    suspend fun repairHostedArt() {
+        val hosted = playlistDao.getHosted()
+        if (hosted.isEmpty()) return
+        for (p in hosted) {
+            val art = p.artworkUrl
+            if (art != null && !art.contains("?v=")) {
+                try {
+                    playlistDao.clearArtworkById(p.id)
+                    imageEnrichmentService.enrichPlaylistArt(
+                        playlistId = p.id,
+                        cacheBustToken = (p.sourceContentHash ?: System.currentTimeMillis().toString()).take(8),
+                    )
+                    Log.d(TAG, "Repaired mosaic for hosted playlist '${p.name}'")
+                } catch (e: Exception) {
+                    Log.w(TAG, "Mosaic repair failed for '${p.name}': ${e.message}")
+                }
+            }
+        }
+    }
+
+    /**
      * Poll every hosted playlist currently in the DB. Safe to call concurrently
      * with itself — each playlist is fetched and updated in isolation.
      */
