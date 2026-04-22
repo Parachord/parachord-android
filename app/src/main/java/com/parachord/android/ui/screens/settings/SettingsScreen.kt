@@ -77,6 +77,7 @@ import androidx.compose.ui.draw.shadow
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.foundation.text.ClickableText
 import androidx.compose.ui.platform.LocalUriHandler
 import androidx.compose.ui.text.LinkAnnotation
 import androidx.compose.ui.text.SpanStyle
@@ -2761,6 +2762,10 @@ private fun formatRelativeTime(timestamp: Long): String {
 
 @Composable
 private fun AboutTab() {
+    val uriHandler = LocalUriHandler.current
+    val accent = MaterialTheme.colorScheme.primary
+    val tertiary = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.6f)
+
     LazyColumn(modifier = Modifier.fillMaxSize()) {
         item {
             Column(
@@ -2788,12 +2793,87 @@ private fun AboutTab() {
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
                 Spacer(modifier = Modifier.height(24.dp))
-                Text(
-                    text = "A universal music player that connects all your music sources in one place.",
-                    style = MaterialTheme.typography.bodySmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.6f),
-                    textAlign = TextAlign.Center,
+
+                // Tagline + Tomahawk link — mirrors desktop exactly. Built
+                // with AnnotatedString so the inline link gets the accent
+                // color and click target without dropping out of a single
+                // centered paragraph.
+                val tomahawkUrl = "https://github.com/tomahawk-player/tomahawk"
+                val tagline = buildAnnotatedString {
+                    append("A modern multi-source music player inspired by ")
+                    pushStringAnnotation(tag = "URL", annotation = tomahawkUrl)
+                    withStyle(SpanStyle(color = accent, fontWeight = FontWeight.Medium)) {
+                        append("Tomahawk")
+                    }
+                    pop()
+                    append(".")
+                }
+                ClickableText(
+                    text = tagline,
+                    style = MaterialTheme.typography.bodySmall.copy(
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        textAlign = TextAlign.Center,
+                    ),
                     modifier = Modifier.padding(horizontal = 32.dp),
+                    onClick = { offset ->
+                        tagline.getStringAnnotations("URL", offset, offset)
+                            .firstOrNull()?.let { uriHandler.openUri(it.item) }
+                    },
+                )
+
+                Spacer(modifier = Modifier.height(32.dp))
+                Box(
+                    modifier = Modifier
+                        .width(64.dp)
+                        .height(1.dp)
+                        .background(MaterialTheme.colorScheme.outlineVariant),
+                )
+                Spacer(modifier = Modifier.height(32.dp))
+
+                // Open Source section — same copy as desktop, retargeted
+                // for the Android stack and repo.
+                Text(
+                    text = "OPEN SOURCE SOFTWARE",
+                    style = MaterialTheme.typography.labelSmall,
+                    fontWeight = FontWeight.SemiBold,
+                    color = tertiary,
+                    letterSpacing = 1.2.sp,
+                )
+                Spacer(modifier = Modifier.height(8.dp))
+                Text(
+                    text = "Built with Kotlin, Jetpack Compose, and Material 3",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    textAlign = TextAlign.Center,
+                )
+                Spacer(modifier = Modifier.height(12.dp))
+                Text(
+                    text = "View on GitHub →",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = accent,
+                    fontWeight = FontWeight.Medium,
+                    modifier = Modifier.clickable {
+                        uriHandler.openUri("https://github.com/Parachord/parachord-android")
+                    },
+                )
+
+                Spacer(modifier = Modifier.height(24.dp))
+
+                // Copyright + license — auto-updates the year so we don't
+                // ship a stale `© 2026` past New Year's.
+                val year = remember { java.util.Calendar.getInstance().get(java.util.Calendar.YEAR) }
+                Text(
+                    text = "© $year Jason Herskowitz. All rights reserved.",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = tertiary,
+                    textAlign = TextAlign.Center,
+                )
+                Spacer(modifier = Modifier.height(4.dp))
+                Text(
+                    text = "Licensed under the MIT License",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = tertiary,
+                    textAlign = TextAlign.Center,
                 )
             }
         }
