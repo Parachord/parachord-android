@@ -1,12 +1,17 @@
 package com.parachord.android.ui
 
+import android.Manifest
 import android.content.Intent
+import android.content.pm.PackageManager
 import android.net.Uri
+import android.os.Build
 import android.os.Bundle
 import android.widget.Toast
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
+import androidx.activity.result.contract.ActivityResultContracts
+import androidx.core.content.ContextCompat
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.gestures.detectHorizontalDragGestures
@@ -93,12 +98,45 @@ class MainActivity : ComponentActivity() {
     /** Pending deep link URI stored for the composable to process. */
     internal val pendingDeepLink = MutableStateFlow<Uri?>(null)
 
+    /**
+     * Runtime POST_NOTIFICATIONS request, registered as an Activity Result
+     * launcher so it can be invoked from [onCreate]. The result is
+     * intentionally ignored — granted means the next playback notification
+     * will surface as expected; denied means the user can grant later via
+     * Settings → Apps → Parachord → Notifications. The OS rate-limits
+     * repeat prompts on its own, so we don't add app-side gating.
+     */
+    private val notificationPermissionLauncher = registerForActivityResult(
+        ActivityResultContracts.RequestPermission()
+    ) { /* no-op */ }
+
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         enableEdgeToEdge()
         handleDeepLink(intent)
+        requestNotificationPermissionIfNeeded()
         setContent {
             ParachordApp()
+        }
+    }
+
+    /**
+     * Android 13+ (API 33) made POST_NOTIFICATIONS a runtime permission.
+     * Until the user grants it, the OS silently drops every notification
+     * the app posts — including the MediaSession transport notification
+     * that shows playback controls on the lockscreen. Without this prompt,
+     * users see nothing on the lockscreen even while music is playing.
+     * Older Android versions get the permission at install time, so this
+     * is a no-op there.
+     */
+    private fun requestNotificationPermissionIfNeeded() {
+        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.TIRAMISU) return
+        val granted = ContextCompat.checkSelfPermission(
+            this,
+            Manifest.permission.POST_NOTIFICATIONS,
+        ) == PackageManager.PERMISSION_GRANTED
+        if (!granted) {
+            notificationPermissionLauncher.launch(Manifest.permission.POST_NOTIFICATIONS)
         }
     }
 
