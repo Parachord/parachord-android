@@ -24,6 +24,15 @@
         android:networkSecurityConfig="@xml/network_security_config">
 
         <!--
+            Android Auto media app descriptor. Declares Parachord as a media
+            app so it appears in Android Auto's app list. See
+            res/xml/automotive_app_desc.xml.
+        -->
+        <meta-data
+            android:name="com.google.android.gms.car.application"
+            android:resource="@xml/automotive_app_desc" />
+
+        <!--
             OAuth redirect receiver. Dedicated activity with noHistory="true"
             and Theme.NoDisplay so Chrome Custom Tabs auto-close when the
             callback fires. Forwards the redirect URI to MainActivity.
@@ -143,7 +152,8 @@
             android:exported="true"
             android:foregroundServiceType="mediaPlayback">
             <intent-filter>
-                <action android:name="androidx.media3.session.MediaSessionService" />
+                <action android:name="androidx.media3.session.MediaLibraryService" />
+                <action android:name="android.media.browse.MediaBrowserService" />
             </intent-filter>
         </service>
 

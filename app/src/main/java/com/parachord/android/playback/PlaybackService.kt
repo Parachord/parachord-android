@@ -19,16 +19,22 @@ import androidx.core.app.NotificationCompat
 import androidx.core.app.ServiceCompat
 import androidx.media3.common.AudioAttributes
 import androidx.media3.common.C
+import androidx.media3.common.MediaItem
 import androidx.media3.common.MediaMetadata
 import androidx.media3.common.Player
 import androidx.media3.common.ForwardingPlayer
 import androidx.media3.common.Player.Commands
 import androidx.media3.exoplayer.ExoPlayer
 import androidx.media3.session.CommandButton
+import androidx.media3.session.LibraryResult
+import androidx.media3.session.MediaLibraryService
+import androidx.media3.session.MediaLibraryService.LibraryParams
+import androidx.media3.session.MediaLibraryService.MediaLibrarySession
 import androidx.media3.session.MediaNotification
 import androidx.media3.session.MediaSession
-import androidx.media3.session.MediaSessionService
 import com.google.common.collect.ImmutableList
+import com.google.common.util.concurrent.Futures
+import com.google.common.util.concurrent.ListenableFuture
 import com.parachord.android.R
 import com.parachord.android.playback.handlers.SpotifyPlaybackHandler
 import org.koin.android.ext.android.inject
@@ -44,10 +50,14 @@ import java.net.URL
 
 /**
  * Foreground service that manages audio playback via ExoPlayer and exposes a
- * MediaSession for lock-screen controls, Bluetooth, and Android Auto.
+ * MediaLibrarySession for lock-screen controls, Bluetooth, and Android Auto.
  *
- * Also manages the Spotify App Remote connection lifecycle — connecting when
- * the service starts and disconnecting on destroy.
+ * Extends [MediaLibraryService] (rather than plain MediaSessionService) so the
+ * app registers as a browsable media app with Android Auto. Auto requires a
+ * library callback even for "remote control only" integrations — we expose a
+ * minimal browsable root with no children, which is enough for Auto to surface
+ * the Now Playing screen while the user's actual audio routes through their
+ * preferred channel (Bluetooth, Auto audio). See [LibraryCallback].
  *
  * Uses a unified notification style for both ExoPlayer (local/SoundCloud) and
  * external (Spotify/Apple Music) playback so the notification tray always looks
@@ -58,13 +68,13 @@ import java.net.URL
  * We handle this by explicitly calling [startForeground] with a persistent
  * notification, preventing Android from killing the process.
  */
-class PlaybackService : MediaSessionService() {
+class PlaybackService : MediaLibraryService() {
 
     private val spotifyHandler: SpotifyPlaybackHandler by inject()
     private val playbackController: PlaybackController by inject()
     private val stateHolder: PlaybackStateHolder by inject()
 
-    private var mediaSession: MediaSession? = null
+    private var mediaSession: MediaLibrarySession? = null
     private var player: ExoPlayer? = null
     private var forwardingPlayer: ExternalPlaybackForwardingPlayer? = null
     private var isExternalForeground = false
@@ -106,6 +116,7 @@ class PlaybackService : MediaSessionService() {
         private const val NOTIFICATION_ID = 1337
         private const val CHANNEL_ID = "parachord_playback"
         private const val ARTWORK_SIZE = 256
+        private const val LIBRARY_ROOT_ID = "parachord_root"
 
         /** Intent actions sent by PlaybackController to manage foreground state. */
         const val ACTION_EXTERNAL_PLAYBACK_START = "com.parachord.android.EXTERNAL_PLAYBACK_START"
@@ -149,7 +160,7 @@ class PlaybackService : MediaSessionService() {
         val wrapper = ExternalPlaybackForwardingPlayer(exoPlayer, playbackController, stateHolder)
         forwardingPlayer = wrapper
 
-        mediaSession = MediaSession.Builder(this, wrapper)
+        mediaSession = MediaLibrarySession.Builder(this, wrapper, LibraryCallback())
             .build()
 
         // Unified notification provider — same look for ExoPlayer and external playback.
@@ -205,7 +216,7 @@ class PlaybackService : MediaSessionService() {
      * our own app. Block unknown third-party apps from issuing playback commands.
      * security: M11
      */
-    override fun onGetSession(controllerInfo: MediaSession.ControllerInfo): MediaSession? {
+    override fun onGetSession(controllerInfo: MediaSession.ControllerInfo): MediaLibrarySession? {
         val pkg = controllerInfo.packageName
         // Allow system packages (notifications, lockscreen, BT, Android Auto)
         if (controllerInfo.isTrusted) return mediaSession
@@ -220,6 +231,53 @@ class PlaybackService : MediaSessionService() {
         if (systemPrefixes.any { pkg.startsWith(it) }) return mediaSession
         Log.w(TAG, "Rejected MediaSession connection from untrusted package: $pkg")
         return null
+    }
+
+    /**
+     * Minimal [MediaLibrarySession.Callback] that exposes a browsable root
+     * with no children. Android Auto requires a library callback for the app
+     * to register as a media app, but we don't implement a real browse tree
+     * today — Auto's use case is limited to displaying the Now Playing screen
+     * and forwarding transport controls (play/pause/skip/seek) back to our
+     * existing [ExternalPlaybackForwardingPlayer], which already routes them
+     * to the correct handler (Spotify Web API, MusicKit JS, ExoPlayer).
+     *
+     * Audio routing is independent: whether via Bluetooth A2DP or Auto's own
+     * audio channel, the car speakers receive audio from whichever app owns
+     * the audio stream (Spotify app, MusicKit WebView, ExoPlayer). Parachord's
+     * role in Auto is purely the remote-control UI.
+     */
+    private inner class LibraryCallback : MediaLibrarySession.Callback {
+        override fun onGetLibraryRoot(
+            session: MediaLibrarySession,
+            browser: MediaSession.ControllerInfo,
+            params: LibraryParams?,
+        ): ListenableFuture<LibraryResult<MediaItem>> {
+            val rootMetadata = MediaMetadata.Builder()
+                .setTitle("Parachord")
+                .setIsBrowsable(true)
+                .setIsPlayable(false)
+                .setMediaType(MediaMetadata.MEDIA_TYPE_FOLDER_MIXED)
+                .build()
+            val rootItem = MediaItem.Builder()
+                .setMediaId(LIBRARY_ROOT_ID)
+                .setMediaMetadata(rootMetadata)
+                .build()
+            return Futures.immediateFuture(LibraryResult.ofItem(rootItem, params))
+        }
+
+        override fun onGetChildren(
+            session: MediaLibrarySession,
+            browser: MediaSession.ControllerInfo,
+            parentId: String,
+            page: Int,
+            pageSize: Int,
+            params: LibraryParams?,
+        ): ListenableFuture<LibraryResult<ImmutableList<MediaItem>>> {
+            return Futures.immediateFuture(
+                LibraryResult.ofItemList(ImmutableList.of(), params)
+            )
+        }
     }
 
     /**
