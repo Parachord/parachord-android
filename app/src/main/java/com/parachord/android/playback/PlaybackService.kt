@@ -632,7 +632,7 @@ class PlaybackService : MediaLibraryService() {
     class ExternalPlaybackForwardingPlayer(
         private val delegate: ExoPlayer,
         private val playbackController: PlaybackController,
-        @Suppress("unused") private val stateHolder: PlaybackStateHolder,
+        private val stateHolder: PlaybackStateHolder,
     ) : ForwardingPlayer(delegate) {
 
         /** When true, next/prev commands are available and routed to PlaybackController. */
@@ -651,6 +651,28 @@ class PlaybackService : MediaLibraryService() {
                     .build()
             }
             return super.getAvailableCommands()
+        }
+
+        /**
+         * Report the real track duration (from [PlaybackStateHolder]) during
+         * external playback instead of the silence-loop file's duration.
+         * Without this override, Android Auto's progress bar shows 10:00 for
+         * every Spotify / Apple Music track.
+         */
+        override fun getDuration(): Long {
+            if (externalMode) {
+                val real = stateHolder.state.value.duration
+                if (real > 0L) return real
+            }
+            return super.getDuration()
+        }
+
+        override fun getContentDuration(): Long {
+            if (externalMode) {
+                val real = stateHolder.state.value.duration
+                if (real > 0L) return real
+            }
+            return super.getContentDuration()
         }
 
         override fun play() {
