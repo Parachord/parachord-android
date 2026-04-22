@@ -500,12 +500,19 @@ class PlaybackService : MediaLibraryService() {
         val playPauseIcon = if (isPlaying) R.drawable.ic_widget_pause else R.drawable.ic_widget_play
         val playPauseLabel = if (isPlaying) "Pause" else "Play"
 
+        // NOTE: do NOT call `setSilent(true)` here. The SILENT flag it adds
+        // causes Pixel's lockscreen notification filter (Android 14+) to
+        // hide the notification entirely — the media card never renders
+        // on the lock screen, even though `VISIBILITY_PUBLIC` and the
+        // MediaStyle + MediaSession token are set correctly. The channel
+        // is already `IMPORTANCE_LOW`, which handles the sound /
+        // vibration / heads-up suppression. Setting silent on top of that
+        // is redundant and actively harmful.
         val builder = NotificationCompat.Builder(this, CHANNEL_ID)
             .setContentTitle(title)
             .setContentText(artist)
             .setSmallIcon(R.drawable.ic_notification)
             .setOngoing(isPlaying)
-            .setSilent(true)
             .setContentIntent(contentPendingIntent)
             .setCategory(NotificationCompat.CATEGORY_TRANSPORT)
             .setVisibility(NotificationCompat.VISIBILITY_PUBLIC)
