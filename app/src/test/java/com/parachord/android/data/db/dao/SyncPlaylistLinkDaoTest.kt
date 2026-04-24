@@ -3,6 +3,7 @@ package com.parachord.android.data.db.dao
 import com.parachord.android.data.db.TestDatabaseFactory
 import kotlinx.coroutines.runBlocking
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertNotNull
 import org.junit.Assert.assertNull
 import org.junit.Test
 
@@ -44,5 +45,23 @@ class SyncPlaylistLinkDaoTest {
         val pendingSpotify = dao.selectPendingForProvider("spotify")
         assertEquals(1, pendingSpotify.size)
         assertEquals("b", pendingSpotify.first().localPlaylistId)
+        // Verify the provider filter actually works, not just "only one spotify row happens to be pending."
+        val pendingApple = dao.selectPendingForProvider("applemusic")
+        assertEquals(1, pendingApple.size)
+        assertEquals("c", pendingApple.first().localPlaylistId)
+    }
+
+    @Test
+    fun `upsertWithSnapshot twice on same key updates snapshotId`() = runBlocking {
+        val db = TestDatabaseFactory.create()
+        val dao = SyncPlaylistLinkDao(db)
+        dao.upsertWithSnapshot("local-abc", "spotify", "xyz", "snap-1", 1L)
+        dao.upsertWithSnapshot("local-abc", "spotify", "xyz", "snap-2", 2L)
+        val row = dao.selectForLink("local-abc", "spotify")
+        assertNotNull(row)
+        assertEquals("snap-2", row!!.snapshotId)
+        assertEquals(2L, row.syncedAt)
+        // Should be exactly one row — upsert, not insert-append.
+        assertEquals(1, dao.selectAll().size)
     }
 }

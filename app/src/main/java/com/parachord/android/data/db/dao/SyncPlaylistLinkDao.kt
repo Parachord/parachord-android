@@ -71,6 +71,12 @@ class SyncPlaylistLinkDao(private val db: ParachordDb) {
         queries.upsertWithSnapshot(localPlaylistId, providerId, externalId, snapshotId, syncedAt)
     }
 
+    /**
+     * DAO signature is keys-first (localPlaylistId, providerId, pendingAction) to match
+     * sibling methods like selectForLink/deleteForLink. The SQLDelight-generated
+     * queries.setPendingAction binds in SQL order (pendingAction, localPlaylistId, providerId);
+     * the rebinding below is intentional — do NOT "fix" the apparent mismatch.
+     */
     suspend fun setPendingAction(
         localPlaylistId: String,
         providerId: String,
