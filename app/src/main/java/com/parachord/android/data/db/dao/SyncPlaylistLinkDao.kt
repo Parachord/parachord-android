@@ -21,18 +21,34 @@ class SyncPlaylistLinkDao(private val db: ParachordDb) {
         val providerId: String,
         val externalId: String,
         val syncedAt: Long,
+        val snapshotId: String? = null,
+        val pendingAction: String? = null,
     )
 
     suspend fun selectAll(): List<Link> = withContext(Dispatchers.IO) {
         queries.selectAll().executeAsList().map {
-            Link(it.localPlaylistId, it.providerId, it.externalId, it.syncedAt)
+            Link(
+                localPlaylistId = it.localPlaylistId,
+                providerId = it.providerId,
+                externalId = it.externalId,
+                syncedAt = it.syncedAt,
+                snapshotId = it.snapshotId,
+                pendingAction = it.pendingAction,
+            )
         }
     }
 
     suspend fun selectForLink(localPlaylistId: String, providerId: String): Link? =
         withContext(Dispatchers.IO) {
             queries.selectForLink(localPlaylistId, providerId).executeAsOneOrNull()?.let {
-                Link(it.localPlaylistId, it.providerId, it.externalId, it.syncedAt)
+                Link(
+                    localPlaylistId = it.localPlaylistId,
+                    providerId = it.providerId,
+                    externalId = it.externalId,
+                    syncedAt = it.syncedAt,
+                    snapshotId = it.snapshotId,
+                    pendingAction = it.pendingAction,
+                )
             }
         }
 
@@ -44,6 +60,43 @@ class SyncPlaylistLinkDao(private val db: ParachordDb) {
     ): Unit = withContext(Dispatchers.IO) {
         queries.upsert(localPlaylistId, providerId, externalId, syncedAt)
     }
+
+    suspend fun upsertWithSnapshot(
+        localPlaylistId: String,
+        providerId: String,
+        externalId: String,
+        snapshotId: String?,
+        syncedAt: Long = System.currentTimeMillis(),
+    ): Unit = withContext(Dispatchers.IO) {
+        queries.upsertWithSnapshot(localPlaylistId, providerId, externalId, snapshotId, syncedAt)
+    }
+
+    suspend fun setPendingAction(
+        localPlaylistId: String,
+        providerId: String,
+        pendingAction: String?,
+    ): Unit = withContext(Dispatchers.IO) {
+        queries.setPendingAction(pendingAction, localPlaylistId, providerId)
+    }
+
+    suspend fun clearPendingAction(localPlaylistId: String, providerId: String): Unit =
+        withContext(Dispatchers.IO) {
+            queries.clearPendingAction(localPlaylistId, providerId)
+        }
+
+    suspend fun selectPendingForProvider(providerId: String): List<Link> =
+        withContext(Dispatchers.IO) {
+            queries.selectPendingForProvider(providerId).executeAsList().map {
+                Link(
+                    localPlaylistId = it.localPlaylistId,
+                    providerId = it.providerId,
+                    externalId = it.externalId,
+                    syncedAt = it.syncedAt,
+                    snapshotId = it.snapshotId,
+                    pendingAction = it.pendingAction,
+                )
+            }
+        }
 
     suspend fun deleteForLink(localPlaylistId: String, providerId: String): Unit =
         withContext(Dispatchers.IO) {
