@@ -16,6 +16,7 @@ class SyncEngine constructor(
     private val playlistTrackDao: PlaylistTrackDao,
     private val syncSourceDao: SyncSourceDao,
     private val syncPlaylistLinkDao: SyncPlaylistLinkDao,
+    private val syncPlaylistSourceDao: SyncPlaylistSourceDao,
     private val settingsStore: SettingsStore,
     private val spotifyProvider: SpotifySyncProvider,
 ) {
@@ -29,6 +30,56 @@ class SyncEngine constructor(
          * localCount is passed as 0 to force a full diff.
          */
         private const val SYNC_DATA_VERSION = 4
+
+        /**
+         * Backfill `sync_playlist_source` from playlist rows whose id prefix
+         * identifies a provider pull source. Currently handles the `spotify-`
+         * prefix — the convention used by [SpotifySyncProvider.fetchPlaylists]
+         * when importing remote playlists into local rows. Idempotent; safe to
+         * call on every sync.
+         *
+         * Mirrors [migrateLinksFromPlaylists] but writes the `syncedFrom`
+         * single-source table instead of the per-provider `syncedTo` link map.
+         * Where `sync_playlist_link` answers "which remote(s) do we push this
+         * local playlist to?", `sync_playlist_source` answers "which remote did
+         * this local playlist originally come from?".
+         *
+         * Defensive: a `spotify-` playlist with a null `spotifyId` column (mid-
+         * migration legacy data) is skipped rather than writing a source row
+         * with an empty externalId. `local-*` and `hosted-xspf-*` rows are
+         * ignored entirely — they may have a `spotifyId` for push, but that's
+         * a push target, not a pull source.
+         */
+        suspend fun migrateSourceFromPlaylists(
+            db: ParachordDb,
+            sourceDao: SyncPlaylistSourceDao,
+        ) {
+            val providerId = SpotifySyncProvider.PROVIDER_ID
+            val now = System.currentTimeMillis()
+            var added = 0
+            for (playlist in db.playlistQueries.getAll().executeAsList()) {
+                if (!playlist.id.startsWith("$providerId-")) continue
+                val spotifyId = playlist.spotifyId ?: continue
+                val existing = sourceDao.selectForLocal(playlist.id)
+                if (existing != null
+                    && existing.providerId == providerId
+                    && existing.externalId == spotifyId
+                    && existing.snapshotId == playlist.snapshotId
+                ) continue
+                sourceDao.upsert(
+                    localPlaylistId = playlist.id,
+                    providerId = providerId,
+                    externalId = spotifyId,
+                    snapshotId = playlist.snapshotId,
+                    ownerId = null,
+                    syncedAt = if (playlist.lastModified > 0) playlist.lastModified else now,
+                )
+                added++
+            }
+            if (added > 0) {
+                Log.d(TAG, "Backfilled $added playlist source(s) into sync_playlist_source")
+            }
+        }
     }
 
     private val syncMutex = Mutex()
@@ -422,6 +473,13 @@ class SyncEngine constructor(
         // without writing a link. Mirrors desktop's
         // migrateSyncLinksFromPlaylists (main.js).
         migrateLinksFromPlaylists()
+
+        // Sibling backfill for the per-playlist pull-source table. Any
+        // `spotify-<externalId>` playlist row from a prior import that
+        // predates Phase 1's `sync_playlist_source` table gets a
+        // `syncedFrom` row so future pull cycles have a stable key beyond
+        // the id-prefix convention.
+        migrateSourceFromPlaylists(db, syncPlaylistSourceDao)
 
         val remotePlaylists = spotifyProvider.fetchPlaylists { current, total ->
             onProgress(SyncProgress(SyncPhase.PLAYLISTS, current, total, "Fetching playlists..."))
