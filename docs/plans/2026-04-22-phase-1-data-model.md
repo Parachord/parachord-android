@@ -63,7 +63,7 @@ git commit -m "Add SQLite-JDBC driver for DAO-level tests"
 package com.parachord.android.data.db
 
 import app.cash.sqldelight.driver.jdbc.sqlite.JdbcSqliteDriver
-import com.parachord.shared.db.ParachordDatabase
+import com.parachord.shared.db.ParachordDb
 
 /**
  * Creates a fresh in-memory SQLDelight database for each test. Mirrors the
@@ -73,10 +73,10 @@ import com.parachord.shared.db.ParachordDatabase
  * see the same schema existing installs get.
  */
 object TestDatabaseFactory {
-    fun create(): ParachordDatabase {
+    fun create(): ParachordDb {
         val driver = JdbcSqliteDriver(JdbcSqliteDriver.IN_MEMORY)
-        ParachordDatabase.Schema.create(driver)
-        return ParachordDatabase(driver)
+        ParachordDb.Schema.create(driver)
+        return ParachordDb(driver)
     }
 }
 ```
@@ -94,7 +94,7 @@ class TestDatabaseFactoryTest {
     @Test
     fun `creates usable in-memory db`() {
         val db = TestDatabaseFactory.create()
-        val count = db.playlistsQueries.getAll().executeAsList().size
+        val count = db.playlistQueries.getAll().executeAsList().size
         assertTrue("expected fresh DB to have 0 playlists, got $count", count == 0)
     }
 }
@@ -303,23 +303,23 @@ class PlaylistLocalOnlyTest {
     @Test
     fun `localOnly defaults to 0`() {
         val db = TestDatabaseFactory.create()
-        db.playlistsQueries.insert(
+        db.playlistQueries.insert(
             id = "local-abc", name = "My List", description = null, artworkUrl = null,
             trackCount = 0, createdAt = 1L, updatedAt = 1L, spotifyId = null,
             snapshotId = null, lastModified = 1L, locallyModified = 0L,
             ownerName = null, sourceUrl = null, sourceContentHash = null,
             // localOnly intentionally omitted to test default
         )
-        val row = db.playlistsQueries.getById("local-abc").executeAsOne()
+        val row = db.playlistQueries.getById("local-abc").executeAsOne()
         assertEquals(0L, row.localOnly)
     }
 
     @Test
     fun `setLocalOnly flips the flag`() {
         val db = TestDatabaseFactory.create()
-        db.playlistsQueries.insert(/* ... same as above ... */)
-        db.playlistsQueries.setLocalOnly("local-abc", 1L)
-        val row = db.playlistsQueries.getById("local-abc").executeAsOne()
+        db.playlistQueries.insert(/* ... same as above ... */)
+        db.playlistQueries.setLocalOnly("local-abc", 1L)
+        val row = db.playlistQueries.getById("local-abc").executeAsOne()
         assertEquals(1L, row.localOnly)
     }
 }
@@ -344,7 +344,7 @@ runCatching {
 }
 ```
 
-**Step 5: Existing `insert` call sites need updating.** Add `localOnly = 0` to each of them so the compile passes. Grep for `playlistsQueries.insert(` and `playlistDao.insert(` to find every site. Don't change any behavior — just pass 0.
+**Step 5: Existing `insert` call sites need updating.** Add `localOnly = 0` to each of them so the compile passes. Grep for `playlistQueries.insert(` and `playlistDao.insert(` to find every site. Don't change any behavior — just pass 0.
 
 **Step 6: Run — PASS**. **Step 7: full suite passes**. **Step 8: commit**.
 
@@ -579,7 +579,7 @@ class MigrateSourceFromPlaylistsTest {
     @Test
     fun `backfills syncedFrom for spotify-imported playlists`() {
         val db = TestDatabaseFactory.create()
-        db.playlistsQueries.insert(
+        db.playlistQueries.insert(
             id = "spotify-abc", name = "From Spotify", /* ... */
             spotifyId = "abc", snapshotId = "snap-1", /* ... */,
             localOnly = 0,
