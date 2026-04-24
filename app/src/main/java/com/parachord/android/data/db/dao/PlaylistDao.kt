@@ -134,26 +134,32 @@ class PlaylistDao(private val db: ParachordDb) {
     }
 
     suspend fun getHosted(): List<PlaylistEntity> = withContext(Dispatchers.IO) {
-        queries.getHosted().executeAsList().map { row ->
-            Playlist(
-                id = row.id,
-                name = row.name,
-                description = row.description,
-                artworkUrl = row.artworkUrl,
-                trackCount = row.trackCount.toInt(),
-                createdAt = row.createdAt,
-                updatedAt = row.updatedAt,
-                spotifyId = row.spotifyId,
-                snapshotId = row.snapshotId,
-                lastModified = row.lastModified,
-                locallyModified = row.locallyModified != 0L,
-                ownerName = row.ownerName,
-                sourceUrl = row.sourceUrl,
-                sourceContentHash = row.sourceContentHash,
-                localOnly = row.localOnly != 0L,
-            )
-        }
+        queries.getHosted().executeAsList().map { it.toPlaylist() }
     }
+
+    /**
+     * `getHosted` uses `SELECT * FROM playlists WHERE sourceUrl IS NOT NULL`, which
+     * makes SQLDelight generate a bespoke `GetHosted` row type with `sourceUrl: String`
+     * (non-null) instead of reusing `Playlists`. Map back through the same shape as
+     * `Playlists.toPlaylist()` so every reader returns the same `PlaylistEntity`.
+     */
+    private fun com.parachord.shared.db.GetHosted.toPlaylist() = Playlist(
+        id = id,
+        name = name,
+        description = description,
+        artworkUrl = artworkUrl,
+        trackCount = trackCount.toInt(),
+        createdAt = createdAt,
+        updatedAt = updatedAt,
+        spotifyId = spotifyId,
+        snapshotId = snapshotId,
+        lastModified = lastModified,
+        locallyModified = locallyModified != 0L,
+        ownerName = ownerName,
+        sourceUrl = sourceUrl,
+        sourceContentHash = sourceContentHash,
+        localOnly = localOnly != 0L,
+    )
 
     suspend fun updateHostedSnapshot(
         playlistId: String,

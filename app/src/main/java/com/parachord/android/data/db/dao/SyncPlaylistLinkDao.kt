@@ -26,30 +26,12 @@ class SyncPlaylistLinkDao(private val db: ParachordDb) {
     )
 
     suspend fun selectAll(): List<Link> = withContext(Dispatchers.IO) {
-        queries.selectAll().executeAsList().map {
-            Link(
-                localPlaylistId = it.localPlaylistId,
-                providerId = it.providerId,
-                externalId = it.externalId,
-                syncedAt = it.syncedAt,
-                snapshotId = it.snapshotId,
-                pendingAction = it.pendingAction,
-            )
-        }
+        queries.selectAll().executeAsList().map { it.toLink() }
     }
 
     suspend fun selectForLink(localPlaylistId: String, providerId: String): Link? =
         withContext(Dispatchers.IO) {
-            queries.selectForLink(localPlaylistId, providerId).executeAsOneOrNull()?.let {
-                Link(
-                    localPlaylistId = it.localPlaylistId,
-                    providerId = it.providerId,
-                    externalId = it.externalId,
-                    syncedAt = it.syncedAt,
-                    snapshotId = it.snapshotId,
-                    pendingAction = it.pendingAction,
-                )
-            }
+            queries.selectForLink(localPlaylistId, providerId).executeAsOneOrNull()?.toLink()
         }
 
     suspend fun upsert(
@@ -92,16 +74,7 @@ class SyncPlaylistLinkDao(private val db: ParachordDb) {
 
     suspend fun selectPendingForProvider(providerId: String): List<Link> =
         withContext(Dispatchers.IO) {
-            queries.selectPendingForProvider(providerId).executeAsList().map {
-                Link(
-                    localPlaylistId = it.localPlaylistId,
-                    providerId = it.providerId,
-                    externalId = it.externalId,
-                    syncedAt = it.syncedAt,
-                    snapshotId = it.snapshotId,
-                    pendingAction = it.pendingAction,
-                )
-            }
+            queries.selectPendingForProvider(providerId).executeAsList().map { it.toLink() }
         }
 
     suspend fun deleteForLink(localPlaylistId: String, providerId: String): Unit =
@@ -121,4 +94,28 @@ class SyncPlaylistLinkDao(private val db: ParachordDb) {
     suspend fun deleteForProvider(providerId: String): Unit = withContext(Dispatchers.IO) {
         queries.deleteForProvider(providerId)
     }
+
+    private fun com.parachord.shared.db.Sync_playlist_link.toLink() = Link(
+        localPlaylistId = localPlaylistId,
+        providerId = providerId,
+        externalId = externalId,
+        snapshotId = snapshotId,
+        pendingAction = pendingAction,
+        syncedAt = syncedAt,
+    )
+
+    /**
+     * `selectPendingForProvider` filters on `pendingAction IS NOT NULL`, so
+     * SQLDelight generates a bespoke `SelectPendingForProvider` row type with
+     * `pendingAction: String` (non-null) instead of reusing `Sync_playlist_link`.
+     * Widen back to the nullable `Link.pendingAction` so callers see a single type.
+     */
+    private fun com.parachord.shared.db.SelectPendingForProvider.toLink() = Link(
+        localPlaylistId = localPlaylistId,
+        providerId = providerId,
+        externalId = externalId,
+        snapshotId = snapshotId,
+        pendingAction = pendingAction,
+        syncedAt = syncedAt,
+    )
 }
