@@ -289,6 +289,7 @@ val androidModule = module {
     single { SearchHistoryDao(get()) }
     single { SyncSourceDao(get()) }
     single { SyncPlaylistLinkDao(get()) }
+    single { SyncPlaylistSourceDao(get()) }
 
     // ── Settings & Auth ──────────────────────────────────────────────
 
