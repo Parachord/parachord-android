@@ -22,6 +22,13 @@ SELECT * FROM playlists ORDER BY updatedAt DESC;
 getById:
 SELECT * FROM playlists WHERE id = ?;
 
+getByIdWithSpotifyLink:
+SELECT p.*, l.externalId AS linkSpotifyId, l.snapshotId AS linkSnapshotId
+FROM playlists p
+LEFT JOIN sync_playlist_link l
+  ON l.localPlaylistId = p.id AND l.providerId = 'spotify'
+WHERE p.id = ?;
+
 getBySpotifyId:
 SELECT * FROM playlists WHERE spotifyId = ? LIMIT 1;
 

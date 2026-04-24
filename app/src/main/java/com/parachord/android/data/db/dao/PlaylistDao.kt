@@ -54,6 +54,55 @@ class PlaylistDao(private val db: ParachordDb) {
         queries.getById(id).executeAsOneOrNull()?.toPlaylist()
     }
 
+    /**
+     * Read-only view joining a playlist against its Spotify `sync_playlist_link` row.
+     * Per Decision 5 of the multi-provider sync plan: we keep the legacy
+     * `playlists.spotifyId` / `playlists.snapshotId` scalar columns for UI and share
+     * code, but new sync paths should prefer this view — link-table values win when
+     * present, falling back to the legacy scalars only when no link row exists.
+     *
+     * This keeps `sync_playlist_link` as the single source of truth for the Spotify
+     * mirror state without forcing every reader to JOIN.
+     */
+    data class PlaylistWithLink(
+        val entity: PlaylistEntity,
+        private val linkSpotifyId: String?,
+        private val linkSnapshotId: String?,
+    ) {
+        val spotifyId: String? get() = linkSpotifyId ?: entity.spotifyId
+        val snapshotId: String? get() = linkSnapshotId ?: entity.snapshotId
+    }
+
+    suspend fun getByIdWithSpotifyLink(id: String): PlaylistWithLink? = withContext(Dispatchers.IO) {
+        queries.getByIdWithSpotifyLink(
+            id,
+        ) { rowId, name, description, artworkUrl, trackCount, createdAt, updatedAt,
+            spotifyId, snapshotId, lastModified, locallyModified, ownerName, sourceUrl,
+            sourceContentHash, localOnly, linkSpotifyId, linkSnapshotId ->
+            PlaylistWithLink(
+                entity = Playlist(
+                    id = rowId,
+                    name = name,
+                    description = description,
+                    artworkUrl = artworkUrl,
+                    trackCount = trackCount.toInt(),
+                    createdAt = createdAt,
+                    updatedAt = updatedAt,
+                    spotifyId = spotifyId,
+                    snapshotId = snapshotId,
+                    lastModified = lastModified,
+                    locallyModified = locallyModified != 0L,
+                    ownerName = ownerName,
+                    sourceUrl = sourceUrl,
+                    sourceContentHash = sourceContentHash,
+                    localOnly = localOnly != 0L,
+                ),
+                linkSpotifyId = linkSpotifyId,
+                linkSnapshotId = linkSnapshotId,
+            )
+        }.executeAsOneOrNull()
+    }
+
     suspend fun getBySpotifyId(spotifyId: String): PlaylistEntity? = withContext(Dispatchers.IO) {
         queries.getBySpotifyId(spotifyId).executeAsOneOrNull()?.toPlaylist()
     }
