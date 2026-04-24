@@ -3,6 +3,7 @@ CREATE TABLE IF NOT EXISTS sync_playlist_link (
     providerId      TEXT NOT NULL,
     externalId      TEXT NOT NULL,
     snapshotId      TEXT,
+    pendingAction   TEXT,
     syncedAt        INTEGER NOT NULL,
     PRIMARY KEY (localPlaylistId, providerId)
 );
@@ -38,3 +39,12 @@ DELETE FROM sync_playlist_link WHERE localPlaylistId = ?;
 
 deleteForProvider:
 DELETE FROM sync_playlist_link WHERE providerId = ?;
+
+setPendingAction:
+UPDATE sync_playlist_link SET pendingAction = ? WHERE localPlaylistId = ? AND providerId = ?;
+
+clearPendingAction:
+UPDATE sync_playlist_link SET pendingAction = NULL WHERE localPlaylistId = ? AND providerId = ?;
+
+selectPendingForProvider:
+SELECT * FROM sync_playlist_link WHERE providerId = ? AND pendingAction IS NOT NULL;
