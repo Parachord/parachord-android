@@ -37,6 +37,7 @@ class PlaylistDao(private val db: ParachordDb) {
         ownerName = ownerName,
         sourceUrl = sourceUrl,
         sourceContentHash = sourceContentHash,
+        localOnly = localOnly != 0L,
     )
 
     /* ---- Queries returning Flow ---- */
@@ -79,6 +80,7 @@ class PlaylistDao(private val db: ParachordDb) {
             ownerName = playlist.ownerName,
             sourceUrl = playlist.sourceUrl,
             sourceContentHash = playlist.sourceContentHash,
+            localOnly = if (playlist.localOnly) 1L else 0L,
         )
     }
 
@@ -99,6 +101,7 @@ class PlaylistDao(private val db: ParachordDb) {
                 ownerName = row.ownerName,
                 sourceUrl = row.sourceUrl,
                 sourceContentHash = row.sourceContentHash,
+                localOnly = row.localOnly != 0L,
             )
         }
     }

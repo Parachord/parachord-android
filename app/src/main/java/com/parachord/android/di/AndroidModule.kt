@@ -182,6 +182,11 @@ val androidModule = module {
         } catch (_: Exception) {
             // Column already present (idempotent on repeat launches).
         }
+        try {
+            driver.execute(null, "ALTER TABLE playlists ADD COLUMN localOnly INTEGER NOT NULL DEFAULT 0", 0)
+        } catch (_: Exception) {
+            // Column already present (idempotent on repeat launches).
+        }
         com.parachord.shared.db.ParachordDb(driver)
     }
 

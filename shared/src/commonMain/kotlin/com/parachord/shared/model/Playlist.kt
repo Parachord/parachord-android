@@ -15,4 +15,5 @@ data class Playlist(
     val ownerName: String? = null,
     val sourceUrl: String? = null,
     val sourceContentHash: String? = null,
+    val localOnly: Boolean = false,
 )
