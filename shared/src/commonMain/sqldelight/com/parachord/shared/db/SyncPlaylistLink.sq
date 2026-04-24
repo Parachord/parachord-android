@@ -41,7 +41,9 @@ deleteForProvider:
 DELETE FROM sync_playlist_link WHERE providerId = ?;
 
 setPendingAction:
-UPDATE sync_playlist_link SET pendingAction = ? WHERE localPlaylistId = ? AND providerId = ?;
+UPDATE sync_playlist_link
+SET pendingAction = :pendingAction
+WHERE localPlaylistId = :localPlaylistId AND providerId = :providerId;
 
 clearPendingAction:
 UPDATE sync_playlist_link SET pendingAction = NULL WHERE localPlaylistId = ? AND providerId = ?;
