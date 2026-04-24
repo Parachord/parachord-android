@@ -99,6 +99,8 @@ The goal is to represent `syncedFrom` and `syncedTo` explicitly in the Android s
 
 Migrations are idempotent `ALTER TABLE … ADD COLUMN IF NOT EXISTS` (SQLite doesn't have IF NOT EXISTS for columns — wrap in try/catch same pattern as `sourceUrl`). `createAllTables` DDL in `AndroidModule.kt` re-executes on bind.
 
+> **Status: ✅ LANDED.** Execution plan: [`2026-04-22-phase-1-data-model.md`](2026-04-22-phase-1-data-model.md). Shipped in commits `06c396d` (test driver) through `ce3617c` (integration smoke test). 308 unit tests green; app launches clean on-device with all `ALTER TABLE` / `CREATE TABLE` migrations firing. No provider code changed yet; schema ready for Phase 2.
+
 ### Phase 2 — Provider abstraction
 
 Per the existing `.claude/plans/look-at-the-recent-stateless-backus.md` plan (#15), the refactor creates a `shared/.../sync/SyncProvider.kt` interface with the contract below, moves `SpotifySyncProvider`'s nested models to shared, then `SpotifySyncProvider implements SyncProvider` with behavior unchanged.
