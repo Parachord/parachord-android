@@ -4,11 +4,10 @@ import app.cash.sqldelight.driver.jdbc.sqlite.JdbcSqliteDriver
 import com.parachord.shared.db.ParachordDb
 
 /**
- * Creates a fresh in-memory SQLDelight database for each test. Mirrors the
- * CREATE TABLE statements that [AndroidModule] runs at DB bind time —
- * SQLDelight's auto-generated schema is sufficient for the core tables,
- * but any idempotent ALTER TABLE migrations must also run here so tests
- * see the same schema existing installs get.
+ * Fresh in-memory SQLDelight DB per call, built from [ParachordDb.Schema].
+ * Migration backfills in [AndroidModule] are intentionally not replayed —
+ * they exist only for installs upgraded from the original Room v12 schema
+ * and add nothing beyond what `.sq` files already declare.
  */
 object TestDatabaseFactory {
     fun create(): ParachordDb {
