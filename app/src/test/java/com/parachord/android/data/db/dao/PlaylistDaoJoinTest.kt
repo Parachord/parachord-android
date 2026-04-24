@@ -64,6 +64,9 @@ class PlaylistDaoJoinTest {
         val view = dao.getByIdWithSpotifyLink("local-abc")
         assertEquals("link-xyz", view?.spotifyId)
         assertEquals("link-snap", view?.snapshotId)
+        // Escape hatch: view.entity still returns legacy scalars for callers that need them.
+        assertEquals("legacy-xyz", view?.entity?.spotifyId)
+        assertEquals("legacy-snap", view?.entity?.snapshotId)
     }
 
     @Test
