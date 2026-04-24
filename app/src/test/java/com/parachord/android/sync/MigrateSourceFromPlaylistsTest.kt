@@ -97,4 +97,23 @@ class MigrateSourceFromPlaylistsTest {
 
         assertNull(sourceDao.selectForLocal("spotify-abc"))
     }
+
+    @Test
+    fun `mixed DB — only spotify-prefixed imports get source rows`() = runBlocking {
+        val db = TestDatabaseFactory.create()
+        // Real-world mix: one Spotify import, one hosted XSPF, one local-* push mirror.
+        db.insertPlaylist(id = "spotify-abc", spotifyId = "abc", snapshotId = "snap-1")
+        db.insertPlaylist(id = "hosted-xspf-def", spotifyId = null, snapshotId = null)
+        db.insertPlaylist(id = "local-ghi", spotifyId = "ghi", snapshotId = "snap-ghi")
+        val sourceDao = SyncPlaylistSourceDao(db)
+
+        SyncEngine.migrateSourceFromPlaylists(db, sourceDao)
+
+        // Exactly one source row; it belongs to the spotify-prefixed playlist.
+        val all = sourceDao.selectAll()
+        assertEquals(1, all.size)
+        assertEquals("spotify-abc", all.first().localPlaylistId)
+        assertNull(sourceDao.selectForLocal("hosted-xspf-def"))
+        assertNull(sourceDao.selectForLocal("local-ghi"))
+    }
 }

@@ -50,6 +50,7 @@ class SyncEngine constructor(
          * ignored entirely — they may have a `spotifyId` for push, but that's
          * a push target, not a pull source.
          */
+        // static for test isolation — avoids constructing SyncEngine with unrelated deps
         suspend fun migrateSourceFromPlaylists(
             db: ParachordDb,
             sourceDao: SyncPlaylistSourceDao,
@@ -64,14 +65,14 @@ class SyncEngine constructor(
                 if (existing != null
                     && existing.providerId == providerId
                     && existing.externalId == spotifyId
-                    && existing.snapshotId == playlist.snapshotId
+                    && existing.snapshotId == playlist.snapshotId // both-null snapshotId is a legitimate match (Kotlin == → null-safe equals)
                 ) continue
                 sourceDao.upsert(
                     localPlaylistId = playlist.id,
                     providerId = providerId,
                     externalId = spotifyId,
                     snapshotId = playlist.snapshotId,
-                    ownerId = null,
+                    ownerId = null, // playlist row has ownerName but no ownerId; source ownerId populated at pull time
                     syncedAt = if (playlist.lastModified > 0) playlist.lastModified else now,
                 )
                 added++
