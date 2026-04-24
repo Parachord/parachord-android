@@ -1,0 +1,33 @@
+-- Represents the desktop `syncedFrom: { resolver, externalId, snapshotId, ownerId }`
+-- shape. A playlist has at most one source (the provider it was imported from),
+-- so localPlaylistId is the sole primary key. Distinct from sync_playlist_link
+-- which is keyed (localPlaylistId, providerId) — many push targets, one pull source.
+
+CREATE TABLE IF NOT EXISTS sync_playlist_source (
+    localPlaylistId TEXT NOT NULL PRIMARY KEY,
+    providerId      TEXT NOT NULL,
+    externalId      TEXT NOT NULL,
+    snapshotId      TEXT,
+    ownerId         TEXT,
+    syncedAt        INTEGER NOT NULL
+);
+
+selectAll:
+SELECT * FROM sync_playlist_source;
+
+selectForLocal:
+SELECT * FROM sync_playlist_source WHERE localPlaylistId = ?;
+
+selectByExternalId:
+SELECT * FROM sync_playlist_source WHERE providerId = ? AND externalId = ?;
+
+upsert:
+INSERT OR REPLACE INTO sync_playlist_source
+    (localPlaylistId, providerId, externalId, snapshotId, ownerId, syncedAt)
+VALUES (?, ?, ?, ?, ?, ?);
+
+deleteForLocal:
+DELETE FROM sync_playlist_source WHERE localPlaylistId = ?;
+
+deleteForProvider:
+DELETE FROM sync_playlist_source WHERE providerId = ?;

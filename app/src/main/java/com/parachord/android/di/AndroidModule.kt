@@ -161,6 +161,21 @@ val androidModule = module {
             )""".trimIndent(),
             0,
         )
+        // Multi-provider sync: separate "syncedFrom" source-of-record table.
+        // One row per local playlist (at most one pull source), distinct from
+        // sync_playlist_link's (localPlaylistId, providerId) many-push-targets.
+        driver.execute(
+            null,
+            """CREATE TABLE IF NOT EXISTS sync_playlist_source (
+                localPlaylistId TEXT NOT NULL PRIMARY KEY,
+                providerId      TEXT NOT NULL,
+                externalId      TEXT NOT NULL,
+                snapshotId      TEXT,
+                ownerId         TEXT,
+                syncedAt        INTEGER NOT NULL
+            )""".trimIndent(),
+            0,
+        )
         // Hosted XSPF polling columns. SQLite has no ADD COLUMN IF NOT EXISTS,
         // so a second run throws "duplicate column name" — harmless, swallow it.
         for (col in listOf("sourceUrl", "sourceContentHash")) {
