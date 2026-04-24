@@ -2,6 +2,7 @@ CREATE TABLE IF NOT EXISTS sync_playlist_link (
     localPlaylistId TEXT NOT NULL,
     providerId      TEXT NOT NULL,
     externalId      TEXT NOT NULL,
+    snapshotId      TEXT,
     syncedAt        INTEGER NOT NULL,
     PRIMARY KEY (localPlaylistId, providerId)
 );
@@ -21,6 +22,10 @@ SELECT * FROM sync_playlist_link WHERE providerId = ? AND externalId = ?;
 upsert:
 INSERT OR REPLACE INTO sync_playlist_link (localPlaylistId, providerId, externalId, syncedAt)
 VALUES (?, ?, ?, ?);
+
+upsertWithSnapshot:
+INSERT OR REPLACE INTO sync_playlist_link (localPlaylistId, providerId, externalId, snapshotId, syncedAt)
+VALUES (?, ?, ?, ?, ?);
 
 deleteForLink:
 DELETE FROM sync_playlist_link WHERE localPlaylistId = ? AND providerId = ?;

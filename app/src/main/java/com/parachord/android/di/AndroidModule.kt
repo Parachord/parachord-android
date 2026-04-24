@@ -170,6 +170,11 @@ val androidModule = module {
                 // Column already present (idempotent on repeat launches).
             }
         }
+        // Multi-provider sync: snapshotId lets us detect remote-side changes
+        // per-link. Same idempotent ALTER pattern as above.
+        runCatching {
+            driver.execute(null, "ALTER TABLE sync_playlist_link ADD COLUMN snapshotId TEXT", 0)
+        }
         com.parachord.shared.db.ParachordDb(driver)
     }
 
