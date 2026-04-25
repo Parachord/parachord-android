@@ -248,6 +248,10 @@ for (playlist in locallyModifiedPlaylists) {
 
 ### Phase 4 — Apple Music sync provider
 
+> **Status:** ⚠️ Partially landed in commits `cc33a61` → (P4 wrap-up commit). The `AppleMusicSyncProvider` implementation is complete with full playlist surface, both session kill-switches, the no-retry-on-401 rule, and 19 MockWebServer tests covering all degradation paths. Koin registers it as a second `SyncProvider`. **What's deferred to Phase 4.5:** `SyncEngine.syncPlaylists` push-loop generalization to actually iterate `providers: List<SyncProvider>` — today the loop is still Spotify-shaped and won't call AM's methods even though the provider is registered. The Phase 3 propagation logic is wired and tested; Phase 4.5 just needs to extract `pushPlaylistsForProvider(provider, ...)` and call it once per enabled provider. Estimated 2–3 hours; bigger than fits cleanly under "ship the AM provider."
+
+
+
 Scope: per the existing sync plan in `.claude/plans/look-at-the-recent-stateless-backus.md`. Reuse its:
 - `AppleMusicLibraryApi.kt` Retrofit interface (`api.music.apple.com/v1/me/library/*`)
 - 150ms inter-request pacing + exponential backoff on 429
