@@ -211,6 +211,13 @@ private fun ConfirmRemovalStep(
     val confirmation by viewModel.pendingRemoval.collectAsStateWithLifecycle()
     val c = confirmation ?: return
 
+    // Local "which button was tapped" state. Disables all three buttons
+    // and swaps the tapped one's label for a spinner so the user has
+    // immediate visual confirmation that their tap registered (the
+    // actual work — removeItemsForProviderAxis + syncAll — can take
+    // several seconds for libraries with hundreds of items).
+    var processing by remember { mutableStateOf<String?>(null) }
+
     Column(
         modifier = Modifier
             .fillMaxWidth()
@@ -281,20 +288,48 @@ private fun ConfirmRemovalStep(
             OutlinedButton(
                 onClick = { viewModel.cancelRemoval() },
                 modifier = Modifier.weight(1f),
+                enabled = processing == null,
             ) { Text("Back") }
             Spacer(Modifier.width(8.dp))
             OutlinedButton(
-                onClick = { viewModel.confirmRemovalKeep() },
+                onClick = {
+                    processing = "keep"
+                    viewModel.confirmRemovalKeep()
+                },
                 modifier = Modifier.weight(1f),
-            ) { Text("Keep") }
+                enabled = processing == null,
+            ) {
+                if (processing == "keep") {
+                    CircularProgressIndicator(
+                        modifier = Modifier.size(16.dp),
+                        strokeWidth = 2.dp,
+                    )
+                } else {
+                    Text("Keep")
+                }
+            }
             Spacer(Modifier.width(8.dp))
             Button(
-                onClick = { viewModel.confirmRemovalRemove() },
+                onClick = {
+                    processing = "remove"
+                    viewModel.confirmRemovalRemove()
+                },
                 modifier = Modifier.weight(1f),
+                enabled = processing == null,
                 colors = ButtonDefaults.buttonColors(
                     containerColor = MaterialTheme.colorScheme.error,
                 ),
-            ) { Text("Remove") }
+            ) {
+                if (processing == "remove") {
+                    CircularProgressIndicator(
+                        modifier = Modifier.size(16.dp),
+                        strokeWidth = 2.dp,
+                        color = Color.White,
+                    )
+                } else {
+                    Text("Remove")
+                }
+            }
         }
         Spacer(Modifier.height(16.dp))
     }

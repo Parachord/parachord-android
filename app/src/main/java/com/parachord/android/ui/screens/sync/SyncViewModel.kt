@@ -1,5 +1,6 @@
 package com.parachord.android.ui.screens.sync
 
+import android.util.Log
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.parachord.android.data.db.dao.SyncSourceDao
@@ -222,10 +223,27 @@ class SyncViewModel constructor(
      *  (their sync_sources rows for this provider stay; future syncs
      *  ignore them per the per-axis gate). */
     fun confirmRemovalKeep() {
+        // Switch to SYNCING immediately so the user sees feedback the
+        // moment they tap, not after persistAndRunSync's first internal
+        // state update.
+        _currentStep.value = SetupStep.SYNCING
+        _syncProgress.value = SyncEngine.SyncProgress(
+            SyncEngine.SyncPhase.TRACKS, 0, 0, "Saving sync settings…"
+        )
         viewModelScope.launch {
-            val activeId = _activeProviderId.value
-            persistAndRunSync(activeId, _pendingNewCollections)
-            _pendingRemoval.value = null
+            try {
+                val activeId = _activeProviderId.value
+                persistAndRunSync(activeId, _pendingNewCollections)
+            } catch (e: Exception) {
+                Log.e("SyncViewModel", "confirmRemovalKeep failed", e)
+                _syncResult.value = SyncEngine.FullSyncResult(
+                    success = false,
+                    error = e.message ?: "Failed to save settings",
+                )
+                _currentStep.value = SetupStep.COMPLETE
+            } finally {
+                _pendingRemoval.value = null
+            }
         }
     }
 
@@ -234,16 +252,36 @@ class SyncViewModel constructor(
      *  synced from another provider stay (we only delete the entity
      *  when no other provider's sync_source row references it). */
     fun confirmRemovalRemove() {
+        // Switch to SYNCING immediately so the user sees a spinner
+        // while removeItemsForProviderAxis runs (can take seconds for
+        // libraries with hundreds of items). Without this, the wizard
+        // appears frozen on CONFIRM_REMOVAL after tapping Remove —
+        // exactly the "nothing happens" symptom the user reported.
+        _currentStep.value = SetupStep.SYNCING
+        val confirmation = _pendingRemoval.value
+        val totalToRemove = confirmation?.itemCountByAxis?.values?.sum() ?: 0
+        _syncProgress.value = SyncEngine.SyncProgress(
+            SyncEngine.SyncPhase.TRACKS, 0, totalToRemove, "Removing items…"
+        )
         viewModelScope.launch {
-            val activeId = _activeProviderId.value
-            val confirmation = _pendingRemoval.value
-            if (confirmation != null) {
-                for (axis in confirmation.droppedAxes) {
-                    syncEngine.removeItemsForProviderAxis(activeId, axis)
+            try {
+                val activeId = _activeProviderId.value
+                if (confirmation != null) {
+                    for (axis in confirmation.droppedAxes) {
+                        syncEngine.removeItemsForProviderAxis(activeId, axis)
+                    }
                 }
+                persistAndRunSync(activeId, _pendingNewCollections)
+            } catch (e: Exception) {
+                Log.e("SyncViewModel", "confirmRemovalRemove failed", e)
+                _syncResult.value = SyncEngine.FullSyncResult(
+                    success = false,
+                    error = e.message ?: "Failed to remove items",
+                )
+                _currentStep.value = SetupStep.COMPLETE
+            } finally {
+                _pendingRemoval.value = null
             }
-            persistAndRunSync(activeId, _pendingNewCollections)
-            _pendingRemoval.value = null
         }
     }
 
