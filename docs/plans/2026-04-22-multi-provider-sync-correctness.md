@@ -205,6 +205,8 @@ Wire up Koin to register all providers as `SyncProvider` and expose them as `Lis
 
 ### Phase 3 — Multi-provider propagation (the four cooperating fixes)
 
+> **Status:** ✅ Landed in commits `1f97215` → `72b1511` (Apr 24, 2026). All four cooperating fixes implemented + the cross-provider `syncedFrom` preservation guard. Single-provider Spotify behavior unchanged today; logic becomes load-bearing the moment Phase 4 adds Apple Music as a second provider in the iteration loops. Verified: 327 tests green, `assembleDebug` clean, installed on Pixel 9a (Spotify sync round-trip exercised post-install).
+
 Port the four pieces from desktop CLAUDE.md line by line, adapted to Kotlin / SQLDelight:
 
 **3.1. Pull paths set `locallyModified = true` when other mirrors exist.**
