@@ -18,8 +18,18 @@ class SyncEngine constructor(
     private val syncPlaylistLinkDao: SyncPlaylistLinkDao,
     private val syncPlaylistSourceDao: SyncPlaylistSourceDao,
     private val settingsStore: SettingsStore,
-    private val spotifyProvider: SpotifySyncProvider,
+    /**
+     * Multi-provider sync surface (Phase 2). Today only Spotify is
+     * registered; Phase 4 will add Apple Music. Method bodies still
+     * pull `spotifyProvider` out of the list — the iteration over
+     * every enabled provider is Phase 3 work. The `first { it.id == "spotify" }
+     * + cast` indirection goes away when those bodies are generalized.
+     */
+    private val providers: List<com.parachord.shared.sync.SyncProvider>,
 ) {
+
+    private val spotifyProvider: SpotifySyncProvider
+        get() = providers.first { it.id == SpotifySyncProvider.PROVIDER_ID } as SpotifySyncProvider
     companion object {
         private const val TAG = "SyncEngine"
         private const val MASS_REMOVAL_THRESHOLD_PERCENT = 0.25
