@@ -30,13 +30,13 @@ data class ProviderFeatures(
     /** What kind of snapshot/change-token this provider's playlists carry. */
     val snapshots: SnapshotKind,
     /** Whether the provider supports a follow/unfollow API for artists. Apple Music = false. */
-    val supportsFollow: Boolean,
+    val supportsFollow: Boolean = false,
     /** Whether the provider supports playlist deletion via API. Apple Music = false. */
-    val supportsPlaylistDelete: Boolean,
+    val supportsPlaylistDelete: Boolean = false,
     /** Whether the provider supports playlist rename via API. Apple Music = false. */
-    val supportsPlaylistRename: Boolean,
+    val supportsPlaylistRename: Boolean = false,
     /** Whether full-replace PUT on tracks is reliable; if false, push degrades to append-only after first failure. */
-    val supportsTrackReplace: Boolean,
+    val supportsTrackReplace: Boolean = false,
 )
 
 enum class SnapshotKind {
@@ -67,5 +67,11 @@ sealed class DeleteResult {
  */
 data class RemoteCreated(
     val externalId: String,
+    /**
+     * Null only when the provider's [SnapshotKind] is [SnapshotKind.None].
+     * Snapshot-bearing providers must return a real token here; if the
+     * create response omitted it, refetch via `getPlaylistSnapshotId` or
+     * fail rather than returning null.
+     */
     val snapshotId: String?,
 )

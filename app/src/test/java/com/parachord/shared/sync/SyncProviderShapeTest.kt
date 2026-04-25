@@ -20,11 +20,14 @@ class SyncProviderShapeTest {
         )
         assertEquals(SnapshotKind.Opaque, features.snapshots)
         assertEquals(true, features.supportsFollow)
+        assertEquals(true, features.supportsPlaylistDelete)
+        assertEquals(true, features.supportsPlaylistRename)
+        assertEquals(true, features.supportsTrackReplace)
     }
 
     @Test
     fun `SnapshotKind exposes Opaque, DateString, None`() {
-        val all = SnapshotKind.values().toList()
+        val all = SnapshotKind.entries
         assertEquals(3, all.size)
         assert(SnapshotKind.Opaque in all)
         assert(SnapshotKind.DateString in all)
@@ -36,6 +39,22 @@ class SyncProviderShapeTest {
         val success: DeleteResult = DeleteResult.Success
         val unsupported: DeleteResult = DeleteResult.Unsupported(401)
         val failed: DeleteResult = DeleteResult.Failed(RuntimeException("boom"))
-        listOf(success, unsupported, failed).forEach { _ -> /* exhaustive */ }
+        listOf(success, unsupported, failed).forEach { result ->
+            val tag: String = when (result) {
+                is DeleteResult.Success -> "ok"
+                is DeleteResult.Unsupported -> "unsupported:${result.status}"
+                is DeleteResult.Failed -> "failed:${result.error.message}"
+            }
+            assertEquals(true, tag.isNotEmpty())
+        }
+    }
+
+    @Test
+    fun `RemoteCreated allows null snapshotId for None providers`() {
+        val withSnapshot = RemoteCreated(externalId = "abc", snapshotId = "snap-1")
+        val withoutSnapshot = RemoteCreated(externalId = "xyz", snapshotId = null)
+        assertEquals("abc", withSnapshot.externalId)
+        assertEquals("snap-1", withSnapshot.snapshotId)
+        assertEquals(null, withoutSnapshot.snapshotId)
     }
 }
