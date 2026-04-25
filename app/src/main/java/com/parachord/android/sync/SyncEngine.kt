@@ -668,6 +668,34 @@ class SyncEngine constructor(
 
             for (playlist in localOnly) {
                 try {
+                    // Phase 3 — Fix 3 + pendingAction skip:
+                    // Skip rows the user marked remote-deleted. A `pendingAction`
+                    // means the linked remote was deleted on the provider side
+                    // and we must NOT silently recreate it; the playlist detail
+                    // banner will let the user re-push or unlink. Lift the
+                    // link lookup here so the dedup-Layer-1 block below can
+                    // reuse it without a second query.
+                    val link = syncPlaylistLinkDao.selectForLink(playlist.id, providerId)
+                    if (link?.pendingAction != null) {
+                        Log.d(TAG, "Skipping push for ${playlist.id} on $providerId — pendingAction=${link.pendingAction}")
+                        continue
+                    }
+
+                    // Phase 3 — Fix 3: provider-scoped `syncedFrom` guard.
+                    // Defensive today (single-provider Spotify push only matches
+                    // local-* and hosted-* playlists, which have no syncedFrom
+                    // entry); load-bearing the moment Phase 4 iterates Apple
+                    // Music too. Without this, a Spotify-imported playlist
+                    // would later get pushed back to Spotify by the AM loop's
+                    // counterpart and create duplicates. Pattern: only skip
+                    // when the CURRENT push target equals the playlist's pull
+                    // source — never blanket-skip on `syncedFrom != null`.
+                    val pullSource = syncPlaylistSourceDao.selectForLocal(playlist.id)
+                    if (pullSource?.providerId == providerId) {
+                        Log.d(TAG, "Skipping push for ${playlist.id} on $providerId — its pull source")
+                        continue
+                    }
+
                     // Three-layer dedup — mirrors desktop's sync:create-playlist
                     // IPC handler. Each layer yields an `existing` remote we
                     // can link to instead of creating a duplicate. Stop at the
@@ -675,9 +703,10 @@ class SyncEngine constructor(
 
                     // Layer 1: durable sync_playlist_link map. Survives any
                     // save path that drops `spotifyId` on the local row.
+                    // (Note: `link` was already loaded above for the
+                    // pendingAction skip; reuse it here.)
                     var existing: SyncedPlaylist? = null
                     var matchSource = ""
-                    val link = syncPlaylistLinkDao.selectForLink(playlist.id, providerId)
                     if (link != null) {
                         val fromLink = remoteById[link.externalId]
                         if (fromLink != null && fromLink.isOwned) {
