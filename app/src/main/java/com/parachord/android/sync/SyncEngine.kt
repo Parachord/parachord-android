@@ -41,6 +41,13 @@ class SyncEngine constructor(
          */
         private const val SYNC_DATA_VERSION = 4
 
+        /** Sentinel for the cross-provider local-row dedup migration
+         *  ([migrateMergeCrossProviderDuplicates]). Lives above
+         *  [SYNC_DATA_VERSION] so it doesn't piggyback on the v3→v4
+         *  Spotify dedup migration's gating. Idempotent: runs once
+         *  per install. */
+        private const val MIGRATION_DEDUP_LOCAL_V1 = 5
+
         /**
          * Backfill `sync_playlist_source` from playlist rows whose id prefix
          * identifies a provider pull source. Currently handles the `spotify-`
@@ -571,6 +578,119 @@ class SyncEngine constructor(
      * durable link map survives upgrades from pre-link-map installs and stays
      * in sync if an older push path wrote `spotifyId` without writing a link.
      */
+    /**
+     * One-shot cleanup: merge duplicate local playlist rows that exist
+     * because of the cross-provider name-match gap in earlier builds.
+     *
+     * Before commit ef5a3c2, syncing the same playlist on both Spotify
+     * and AM produced two local rows ("Workout 2024" appearing as both
+     * `spotify-X` and `applemusic-Y`). This migration finds those
+     * groups and collapses them into a single canonical row, moving
+     * the AM-side `sync_source` and `sync_playlist_link` (and
+     * `sync_playlist_source`, when not already claimed by a different
+     * provider) onto the keeper, then deleting the duplicate.
+     *
+     * Keeper selection: richest `trackCount`, oldest `createdAt` as
+     * tiebreak — same heuristic as [findCrossProviderNameMatch] for
+     * forward-going pulls. Excludes `local-*` rows (those duplicates
+     * are handled by the existing push-path dedup).
+     *
+     * Idempotent: sets a sync-data version flag so it runs at most once
+     * per install. Subsequent syncs use the new pull-path name-match
+     * (commit ef5a3c2) so duplicates can't reappear.
+     */
+    private suspend fun migrateMergeCrossProviderDuplicates() {
+        if (settingsStore.getSyncDataVersion() >= MIGRATION_DEDUP_LOCAL_V1) return
+
+        val all = playlistDao.getAllSync().filter { !it.id.startsWith("local-") }
+        val byName = all.groupBy { it.name.trim().lowercase() }.filterValues { it.size > 1 }
+        if (byName.isEmpty()) {
+            settingsStore.setSyncDataVersion(MIGRATION_DEDUP_LOCAL_V1)
+            Log.d(TAG, "Cross-provider dedup migration: no duplicates found")
+            return
+        }
+
+        var mergedCount = 0
+        for ((nameKey, group) in byName) {
+            // Keeper = richest trackCount, then oldest createdAt
+            val keeper = group.maxWithOrNull(
+                compareBy<PlaylistEntity> { it.trackCount }.thenByDescending { it.createdAt }
+            ) ?: continue
+            val duplicates = group.filter { it.id != keeper.id }
+            if (duplicates.isEmpty()) continue
+
+            Log.d(TAG, "Merging ${duplicates.size} duplicate(s) of '$nameKey' into ${keeper.id}")
+
+            val keeperLinks = syncPlaylistLinkDao.selectAll()
+                .filter { it.localPlaylistId == keeper.id }
+                .associateBy { it.providerId }
+            val keeperHasSource = syncPlaylistSourceDao.selectForLocal(keeper.id) != null
+
+            for (dup in duplicates) {
+                // Move sync_source rows: re-key from dup.id → keeper.id.
+                // The PK is (itemId, itemType, providerId) so insert
+                // OR REPLACE handles the case where keeper already has
+                // a row for the same provider (dup wins because it has
+                // a real externalId; keeper's was likely a stub).
+                val dupSources = syncSourceDao.getByItem(dup.id, "playlist")
+                for (src in dupSources) {
+                    syncSourceDao.insert(SyncSourceEntity(
+                        itemId = keeper.id,
+                        itemType = "playlist",
+                        providerId = src.providerId,
+                        externalId = src.externalId,
+                        addedAt = src.addedAt,
+                        syncedAt = src.syncedAt,
+                    ))
+                    syncSourceDao.deleteByKey(dup.id, "playlist", src.providerId)
+                }
+
+                // Move sync_playlist_link rows: only when keeper doesn't
+                // already have a link for that provider (otherwise we'd
+                // overwrite keeper's externalId, which might break an
+                // existing valid mirror).
+                val dupLinks = syncPlaylistLinkDao.selectAll()
+                    .filter { it.localPlaylistId == dup.id }
+                for (link in dupLinks) {
+                    if (link.providerId !in keeperLinks) {
+                        syncPlaylistLinkDao.upsertWithSnapshot(
+                            localPlaylistId = keeper.id,
+                            providerId = link.providerId,
+                            externalId = link.externalId,
+                            snapshotId = link.snapshotId,
+                            syncedAt = link.syncedAt,
+                        )
+                    }
+                }
+                syncPlaylistLinkDao.deleteForLocal(dup.id)
+
+                // Move sync_playlist_source: only when keeper has no
+                // syncedFrom yet. Otherwise keeper's pull source wins
+                // (preserves syncedFrom invariant from CLAUDE.md).
+                val dupSource = syncPlaylistSourceDao.selectForLocal(dup.id)
+                if (dupSource != null && !keeperHasSource) {
+                    syncPlaylistSourceDao.upsert(
+                        localPlaylistId = keeper.id,
+                        providerId = dupSource.providerId,
+                        externalId = dupSource.externalId,
+                        snapshotId = dupSource.snapshotId,
+                        ownerId = dupSource.ownerId,
+                        syncedAt = dupSource.syncedAt,
+                    )
+                }
+                syncPlaylistSourceDao.deleteForLocal(dup.id)
+
+                // Drop the duplicate's tracks; keeper's stay canonical.
+                playlistTrackDao.deleteByPlaylistId(dup.id)
+                playlistDao.delete(dup)
+                mergedCount++
+            }
+        }
+
+        settingsStore.setSyncDataVersion(MIGRATION_DEDUP_LOCAL_V1)
+        Log.d(TAG, "Cross-provider dedup migration: merged $mergedCount duplicate row(s)")
+    }
+
     private suspend fun migrateLinksFromPlaylists() {
         val providerId = SpotifySyncProvider.PROVIDER_ID
         var added = 0
@@ -618,6 +738,12 @@ class SyncEngine constructor(
         // `syncedFrom` row so future pull cycles have a stable key beyond
         // the id-prefix convention.
         migrateSourceFromPlaylists(db, syncPlaylistSourceDao)
+
+        // One-shot cleanup for installs that pre-date the cross-provider
+        // pull-path name-match (commit ef5a3c2). Walks all playlist
+        // rows, finds duplicates by name across providers, merges them
+        // into a single canonical row. Runs at most once per install.
+        migrateMergeCrossProviderDuplicates()
 
         // ── Spotify pull (existing block; preserves dedup-cleanup migration) ──
         // The dedup-cleanup migration block below is Spotify-only by design
