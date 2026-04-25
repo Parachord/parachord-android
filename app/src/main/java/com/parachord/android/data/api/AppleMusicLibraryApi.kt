@@ -42,6 +42,25 @@ interface AppleMusicLibraryApi {
         @Query("offset") offset: Int = 0,
     ): AmPlaylistTrackListResponse
 
+    /**
+     * Apple's `/me/library/playlists/{id}/tracks` endpoint silently
+     * returns empty for many library playlists where tracks DO exist
+     * in the Music app — including Apple-curated playlists added to
+     * library, shared/collaborative playlists, and some "smart"
+     * playlists. The `?include=tracks` form on the playlist endpoint
+     * is the workaround that consistently returns the actual tracks
+     * via the `relationships.tracks.data` array.
+     *
+     * Use this as the primary tracks-fetch path; the dedicated
+     * `/tracks` endpoint above is a fallback for the rare case where
+     * the relationship is somehow truncated.
+     */
+    @GET("v1/me/library/playlists/{id}")
+    suspend fun getLibraryPlaylistWithTracks(
+        @Path("id") playlistId: String,
+        @Query("include") include: String = "tracks",
+    ): AmPlaylistDetailResponse
+
     @POST("v1/me/library/playlists")
     suspend fun createPlaylist(
         @Body body: AmCreatePlaylistRequest,
@@ -267,6 +286,33 @@ data class AmArtwork(
 
 @Serializable
 data class AmPlaylistTrackListResponse(
+    val data: List<AmTrack> = emptyList(),
+    val next: String? = null,
+)
+
+/** Single-playlist GET response with relationships. Used by the
+ *  `?include=tracks` workaround when the dedicated `/tracks` endpoint
+ *  returns empty. */
+@Serializable
+data class AmPlaylistDetailResponse(
+    val data: List<AmPlaylistDetail> = emptyList(),
+)
+
+@Serializable
+data class AmPlaylistDetail(
+    val id: String,
+    val type: String,
+    val attributes: AmPlaylistAttributes,
+    val relationships: AmPlaylistRelationships? = null,
+)
+
+@Serializable
+data class AmPlaylistRelationships(
+    val tracks: AmPlaylistTracksRelationship? = null,
+)
+
+@Serializable
+data class AmPlaylistTracksRelationship(
     val data: List<AmTrack> = emptyList(),
     val next: String? = null,
 )

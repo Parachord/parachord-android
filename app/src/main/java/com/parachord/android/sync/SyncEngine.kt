@@ -1195,18 +1195,25 @@ class SyncEngine constructor(
                     continue
                 }
 
-                playlistDao.insert(remote.entity.copy(
-                    id = targetId,
-                    createdAt = existingLocalPlaylist?.createdAt ?: now,
-                    updatedAt = now,
-                    lastModified = now,
-                ))
                 val tracks = try {
                     provider.fetchPlaylistTracks(remote.spotifyId)
                 } catch (e: Exception) {
                     Log.e(TAG, "Failed to fetch tracks for ${provider.displayName} playlist ${remote.spotifyId}", e)
                     emptyList()
                 }
+                // Insert with the real trackCount from the fetched tracks.
+                // AM's playlist response always carries trackCount=0
+                // (the field isn't on the library endpoint), so without
+                // this override every AM-pulled playlist would show
+                // "0 tracks" in the UI even when tracks were fetched
+                // successfully.
+                playlistDao.insert(remote.entity.copy(
+                    id = targetId,
+                    createdAt = existingLocalPlaylist?.createdAt ?: now,
+                    updatedAt = now,
+                    lastModified = now,
+                    trackCount = tracks.size,
+                ))
                 playlistTrackDao.deleteByPlaylistId(targetId)
                 val remappedTracks = if (targetId != remote.entity.id) {
                     tracks.map { it.copy(playlistId = targetId) }
@@ -1239,6 +1246,33 @@ class SyncEngine constructor(
             } else {
                 val localPlaylist = playlistDao.getById(existingSource.itemId)
                 if (localPlaylist == null) {
+                    unchanged++
+                    continue
+                }
+
+                // Cross-provider push-mirror guard. The CREATE branch
+                // already has this guard (line ~1178); the UPDATE branch
+                // didn't, which let AM destructively pullPlaylist over a
+                // Spotify-pulled keeper after the dedup migration moved
+                // AM's sync_source onto it. Symptom: 79-track Spotify
+                // playlist gets clobbered with AM's empty track list,
+                // artwork swaps to AM's stock art, etc.
+                //
+                // Rule: if the local row's syncedFrom points at a
+                // DIFFERENT provider, we are a push mirror — only
+                // refresh the link's snapshotId + syncedAt, NEVER call
+                // pullPlaylist (which deletes + reinserts tracks).
+                val pullSource = syncPlaylistSourceDao.selectForLocal(localPlaylist.id)
+                val isCrossProviderPushMirror = pullSource != null
+                    && pullSource.providerId != providerId
+                if (isCrossProviderPushMirror) {
+                    syncPlaylistLinkDao.upsertWithSnapshot(
+                        localPlaylistId = localPlaylist.id,
+                        providerId = providerId,
+                        externalId = remote.spotifyId,
+                        snapshotId = remote.snapshotId,
+                    )
+                    syncSourceDao.insert(existingSource.copy(syncedAt = System.currentTimeMillis()))
                     unchanged++
                     continue
                 }
@@ -1600,6 +1634,41 @@ class SyncEngine constructor(
         // (use update, not insert/REPLACE, because REPLACE does DELETE+INSERT
         // which CASCADE-deletes playlist_tracks)
         val tracks = provider.fetchPlaylistTracks(remote.spotifyId)
+
+        // Empty-remote safety net: if the provider returned 0 tracks
+        // AND we currently have non-zero tracks locally, treat the
+        // empty result as an API hiccup (Apple Music's library
+        // playlist tracks endpoint returns empty for many shared/
+        // curated playlists; Spotify rate-limits can return empty
+        // pages). Do NOT delete the local tracks. The next snapshot
+        // change will trigger another pull and we'll get real data
+        // then. Worst case: a legitimately-emptied playlist takes
+        // one extra sync to reflect — way better than blowing away
+        // a 79-track playlist on a single bad response.
+        val existingTrackCount = playlistTrackDao.getByPlaylistIdSync(localPlaylist.id).size
+        if (tracks.isEmpty() && existingTrackCount > 0) {
+            Log.w(TAG, "pullPlaylist: ${provider.id} returned 0 tracks for " +
+                "'${remote.entity.name}' but local has $existingTrackCount — " +
+                "treating as transient and preserving local tracks")
+            // Still refresh metadata + link so syncedAt advances and we
+            // don't loop on the same mismatch every cycle.
+            val now = System.currentTimeMillis()
+            val resolvedArtwork = preserveLocalMosaic(localPlaylist.artworkUrl, remote.entity.artworkUrl)
+            playlistDao.update(localPlaylist.copy(
+                name = remote.entity.name,
+                description = remote.entity.description,
+                artworkUrl = resolvedArtwork,
+                updatedAt = now,
+            ))
+            syncPlaylistLinkDao.upsertWithSnapshot(
+                localPlaylistId = localPlaylist.id,
+                providerId = provider.id,
+                externalId = remote.spotifyId,
+                snapshotId = remote.snapshotId,
+            )
+            return
+        }
+
         playlistTrackDao.deleteByPlaylistId(localPlaylist.id)
         playlistTrackDao.insertAll(tracks)
 

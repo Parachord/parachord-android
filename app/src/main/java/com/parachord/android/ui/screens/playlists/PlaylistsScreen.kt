@@ -293,7 +293,19 @@ fun PlaylistsScreen(
                                         if (playlist.sourceUrl != null) {
                                             HostedBadge()
                                         }
-                                        if (playlist.spotifyId != null) {
+                                        // Provider chips. id-prefix is the
+                                        // primary signal (every pulled row
+                                        // is namespaced); Spotify scalar is
+                                        // a secondary fallback for legacy
+                                        // rows that pre-date id namespacing.
+                                        // Multi-mirror display (a single
+                                        // local row linked to BOTH providers)
+                                        // is a future follow-up — would need
+                                        // sync_playlist_link query in the VM.
+                                        val isSpotify = playlist.spotifyId != null
+                                            || playlist.id.startsWith("spotify-")
+                                        val isAppleMusic = playlist.id.startsWith("applemusic-")
+                                        if (isSpotify) {
                                             Text(
                                                 text = "Spotify",
                                                 style = MaterialTheme.typography.labelSmall,
@@ -301,6 +313,19 @@ fun PlaylistsScreen(
                                                 modifier = Modifier
                                                     .background(
                                                         color = SpotifyGreen.copy(alpha = 0.12f),
+                                                        shape = RoundedCornerShape(4.dp),
+                                                    )
+                                                    .padding(horizontal = 6.dp, vertical = 1.dp),
+                                            )
+                                        }
+                                        if (isAppleMusic) {
+                                            Text(
+                                                text = "Apple Music",
+                                                style = MaterialTheme.typography.labelSmall,
+                                                color = AppleMusicRed,
+                                                modifier = Modifier
+                                                    .background(
+                                                        color = AppleMusicRed.copy(alpha = 0.12f),
                                                         shape = RoundedCornerShape(4.dp),
                                                     )
                                                     .padding(horizontal = 6.dp, vertical = 1.dp),
@@ -430,3 +455,4 @@ private fun PlaylistContextMenu(
 }
 
 private val SpotifyGreen = Color(0xFF1DB954)
+private val AppleMusicRed = Color(0xFFFA243C)

@@ -147,9 +147,14 @@ class AppleMusicSyncProvider(
     override suspend fun fetchPlaylistTracks(
         externalPlaylistId: String,
     ): List<com.parachord.shared.model.PlaylistTrack> {
+        val localPlaylistId = "applemusic-$externalPlaylistId"
+
+        // PRIMARY path — matches desktop's sync-providers/applemusic.js
+        // (`/me/library/playlists/{id}/tracks?limit=100` with `data.next`
+        // pagination). This is the canonical Apple-documented endpoint
+        // for library-playlist tracks.
         val all = mutableListOf<com.parachord.shared.model.PlaylistTrack>()
         var offset = 0
-        val localPlaylistId = "applemusic-$externalPlaylistId"
         while (true) {
             delay(INTER_REQUEST_DELAY_MS)
             val resp = try {
@@ -159,19 +164,13 @@ class AppleMusicSyncProvider(
                     offset = offset,
                 )
             } catch (e: HttpException) {
-                // 404 is observed for playlists where the library mirror
-                // never materialized tracks (curated / shared playlists
-                // followed but not authored). Log and return whatever
-                // we collected so far rather than throwing — the playlist
-                // entity still gets created with whatever tracks did
-                // come through earlier pages.
                 if (e.code() == 401) throw AppleMusicReauthRequiredException()
                 if (e.code() == 404) {
-                    Log.w(TAG, "AM playlist $externalPlaylistId tracks 404 at offset=$offset; " +
+                    Log.w(TAG, "AM playlist $externalPlaylistId /tracks 404 at offset=$offset; " +
                         "returning ${all.size} tracks collected so far")
-                    return all
+                    break
                 }
-                Log.w(TAG, "AM playlist $externalPlaylistId tracks fetch failed at offset=$offset", e)
+                Log.w(TAG, "AM playlist $externalPlaylistId /tracks failed at offset=$offset", e)
                 throw e
             }
             for ((index, am) in resp.data.withIndex()) {
@@ -180,12 +179,43 @@ class AppleMusicSyncProvider(
             if (resp.next == null || resp.data.size < PAGE_SIZE) break
             offset += resp.data.size
         }
-        if (all.isEmpty()) {
-            Log.w(TAG, "AM playlist $externalPlaylistId returned 0 tracks — " +
-                "library mirror may not include tracks for this playlist (common for " +
-                "shared/curated playlists where editing is disabled)")
+        if (all.isNotEmpty()) return all
+
+        // FALLBACK — primary returned empty. Desktop doesn't have this
+        // fallback; we add it because the user reported AM playlists
+        // showing 0 tracks in Parachord while the same playlists have
+        // tracks visible in the Music app. The `?include=tracks` form
+        // on the playlist GET endpoint returns tracks via
+        // `relationships.tracks.data` and sometimes succeeds when the
+        // dedicated `/tracks` endpoint silently returns empty (Apple
+        // Music's library mirror has known inconsistencies for
+        // shared / curated / smart playlists).
+        delay(INTER_REQUEST_DELAY_MS)
+        val viaInclude = try {
+            val resp = api.getLibraryPlaylistWithTracks(externalPlaylistId)
+            val data = resp.data.firstOrNull()?.relationships?.tracks?.data ?: emptyList()
+            data.mapIndexed { i, am ->
+                am.toPlaylistTrack(playlistId = localPlaylistId, position = i)
+            }
+        } catch (e: HttpException) {
+            if (e.code() == 401) throw AppleMusicReauthRequiredException()
+            Log.w(TAG, "AM include=tracks fallback for $externalPlaylistId failed (${e.code()})")
+            emptyList()
+        } catch (e: Exception) {
+            Log.w(TAG, "AM include=tracks fallback for $externalPlaylistId threw", e)
+            emptyList()
         }
-        return all
+
+        if (viaInclude.isNotEmpty()) {
+            Log.d(TAG, "AM playlist $externalPlaylistId: /tracks returned 0 but " +
+                "?include=tracks recovered ${viaInclude.size} tracks (fallback worked)")
+            return viaInclude
+        }
+
+        Log.w(TAG, "AM playlist $externalPlaylistId returned 0 tracks via both " +
+            "/tracks AND ?include=tracks — playlist may genuinely be empty or be a " +
+            "Music-app-only smart-playlist source not exposed via API")
+        return emptyList()
     }
 
     /**
