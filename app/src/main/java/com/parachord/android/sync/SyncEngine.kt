@@ -621,7 +621,7 @@ class SyncEngine constructor(
                     // next poll tick would revert any pulled Spotify state
                     // within 5 minutes anyway. Desktop parity.
                     isHosted && localModified -> {
-                        pushPlaylist(localPlaylist)
+                        pushPlaylist(localPlaylist, spotifyProvider)
                         updated++
                     }
                     isHosted -> {
@@ -631,14 +631,14 @@ class SyncEngine constructor(
                     localModified && remoteSnapshotId != localSnapshotId -> {
                         val localIsNewer = localPlaylist.lastModified > existingSource.syncedAt
                         if (localIsNewer) {
-                            pushPlaylist(localPlaylist)
+                            pushPlaylist(localPlaylist, spotifyProvider)
                         } else {
                             pullPlaylist(localPlaylist, remote)
                         }
                         updated++
                     }
                     localModified -> {
-                        pushPlaylist(localPlaylist)
+                        pushPlaylist(localPlaylist, spotifyProvider)
                         updated++
                     }
                     remoteSnapshotId != localSnapshotId -> {
@@ -1012,19 +1012,59 @@ class SyncEngine constructor(
         else -> emptyList()
     }
 
-    private suspend fun pushPlaylist(playlist: PlaylistEntity) {
-        val spotifyId = playlist.spotifyId ?: return
+    /**
+     * Push a locally-modified playlist's tracks to a previously-linked
+     * remote on [provider]. Used by the import-branch's update flow
+     * when the local rev is newer than the remote.
+     *
+     * Resolves the external ID from `sync_playlist_link` for the
+     * provider; falls back to the legacy `playlist.spotifyId` scalar
+     * only for Spotify (backward-compat with installs that predate
+     * Phase 1's link table). For any other provider, no link → no push.
+     */
+    private suspend fun pushPlaylist(
+        playlist: PlaylistEntity,
+        provider: com.parachord.shared.sync.SyncProvider,
+    ) {
+        val link = syncPlaylistLinkDao.selectForLink(playlist.id, provider.id)
+        // Resolve the external id: link table is authoritative; legacy
+        // playlist.spotifyId is a fallback for Spotify only (backward
+        // compat with installs that predate Phase 1's link table).
+        val externalIdNullable: String? = link?.externalId
+            ?: if (provider.id == SpotifySyncProvider.PROVIDER_ID) playlist.spotifyId else null
+        val externalId: String = externalIdNullable ?: run {
+            Log.w(TAG, "pushPlaylist: no link for ${playlist.id} on ${provider.id}; skip")
+            return
+        }
         val tracks = playlistTrackDao.getByPlaylistIdSync(playlist.id)
-        val uris = tracks.mapNotNull { it.trackSpotifyUri }
-        val snapshotId = spotifyProvider.replacePlaylistTracks(spotifyId, uris)
+        val externalTrackIds = extractExternalTrackIds(tracks, provider.id)
+        val snapshotId = provider.replacePlaylistTracks(externalId, externalTrackIds)
 
-        playlistDao.update(playlist.copy(
-            snapshotId = snapshotId ?: playlist.snapshotId,
-            trackCount = tracks.size,
-            locallyModified = false,
-        ))
+        // Spotify-specific scalars stay write-through for backward compat
+        // (per Decision 5). For other providers, only the link's
+        // snapshot column is the source of truth.
+        if (provider.id == SpotifySyncProvider.PROVIDER_ID) {
+            playlistDao.update(playlist.copy(
+                snapshotId = snapshotId ?: playlist.snapshotId,
+                trackCount = tracks.size,
+                locallyModified = false,
+            ))
+        } else {
+            playlistDao.update(playlist.copy(
+                trackCount = tracks.size,
+                locallyModified = false,
+            ))
+        }
+        if (snapshotId != null) {
+            syncPlaylistLinkDao.upsertWithSnapshot(
+                localPlaylistId = playlist.id,
+                providerId = provider.id,
+                externalId = externalId,
+                snapshotId = snapshotId,
+            )
+        }
 
-        val source = syncSourceDao.get(playlist.id, "playlist", SpotifySyncProvider.PROVIDER_ID)
+        val source = syncSourceDao.get(playlist.id, "playlist", provider.id)
         if (source != null) {
             syncSourceDao.insert(source.copy(syncedAt = System.currentTimeMillis()))
         }
@@ -1033,11 +1073,12 @@ class SyncEngine constructor(
     private suspend fun pullPlaylist(
         localPlaylist: PlaylistEntity,
         remote: SyncedPlaylist,
+        provider: com.parachord.shared.sync.SyncProvider = spotifyProvider,
     ) {
         // Fetch tracks first, then update playlist metadata with actual count
         // (use update, not insert/REPLACE, because REPLACE does DELETE+INSERT
         // which CASCADE-deletes playlist_tracks)
-        val tracks = spotifyProvider.fetchPlaylistTracks(remote.spotifyId)
+        val tracks = provider.fetchPlaylistTracks(remote.spotifyId)
         playlistTrackDao.deleteByPlaylistId(localPlaylist.id)
         playlistTrackDao.insertAll(tracks)
 
@@ -1049,21 +1090,46 @@ class SyncEngine constructor(
         // Without this, an Android-edit → Spotify → desktop pull stops
         // at the desktop and never reaches Apple Music.
         val hasOtherMirrors = syncPlaylistLinkDao.hasOtherMirrors(
-            localPlaylist.id, SpotifySyncProvider.PROVIDER_ID,
+            localPlaylist.id, provider.id,
         )
-        playlistDao.update(localPlaylist.copy(
-            name = remote.entity.name,
-            description = remote.entity.description,
-            artworkUrl = remote.entity.artworkUrl,
-            trackCount = tracks.size,
+        // Spotify-specific scalars stay write-through (per Decision 5).
+        // For other providers, sync_playlist_link.snapshotId is the
+        // source of truth and gets refreshed via the upsert below.
+        if (provider.id == SpotifySyncProvider.PROVIDER_ID) {
+            playlistDao.update(localPlaylist.copy(
+                name = remote.entity.name,
+                description = remote.entity.description,
+                artworkUrl = remote.entity.artworkUrl,
+                trackCount = tracks.size,
+                snapshotId = remote.snapshotId,
+                updatedAt = now,
+                lastModified = now,
+                locallyModified = hasOtherMirrors,
+                ownerName = remote.entity.ownerName,
+            ))
+        } else {
+            playlistDao.update(localPlaylist.copy(
+                name = remote.entity.name,
+                description = remote.entity.description,
+                artworkUrl = remote.entity.artworkUrl,
+                trackCount = tracks.size,
+                updatedAt = now,
+                lastModified = now,
+                locallyModified = hasOtherMirrors,
+                ownerName = remote.entity.ownerName,
+            ))
+        }
+        // Refresh the link snapshot for this provider — the per-provider
+        // pull-vs-push decision in the next sync cycle reads from here
+        // (not from the legacy playlists.snapshotId scalar).
+        syncPlaylistLinkDao.upsertWithSnapshot(
+            localPlaylistId = localPlaylist.id,
+            providerId = provider.id,
+            externalId = remote.spotifyId,
             snapshotId = remote.snapshotId,
-            updatedAt = now,
-            lastModified = now,
-            locallyModified = hasOtherMirrors,
-            ownerName = remote.entity.ownerName,
-        ))
+        )
 
-        val source = syncSourceDao.get(localPlaylist.id, "playlist", SpotifySyncProvider.PROVIDER_ID)
+        val source = syncSourceDao.get(localPlaylist.id, "playlist", provider.id)
         if (source != null) {
             syncSourceDao.insert(source.copy(syncedAt = System.currentTimeMillis()))
         }
