@@ -242,4 +242,131 @@ class AppleMusicSyncProviderHttpTest {
         val result = provider.deletePlaylist("p.abc")
         assertTrue("5xx must NOT be treated as Unsupported", result is DeleteResult.Failed)
     }
+
+    // ── Collection sync: library tracks ──────────────────────────────
+
+    @Test fun `fetchTracks short-circuits when probe matches latest external id`() = runBlocking {
+        server.enqueue(MockResponse().setBody(
+            """{"data":[{"id":"i.song1","type":"library-songs","attributes":{"name":"Song","artistName":"Artist","dateAdded":"2026-04-24T12:00:00Z"}}]}"""
+        ))
+        val result = provider.fetchTracks(localCount = 5, latestExternalId = "i.song1")
+        assertNull("matching probe + non-empty local should short-circuit to null", result)
+    }
+
+    @Test fun `fetchTracks paginates when probe does not match`() = runBlocking {
+        // Probe returns a different id, forcing full pagination.
+        server.enqueue(MockResponse().setBody(
+            """{"data":[{"id":"i.different","type":"library-songs","attributes":{"name":"X","artistName":"X"}}]}"""
+        ))
+        // Page 1 of pagination — short page (< 100), exits loop.
+        server.enqueue(MockResponse().setBody(
+            """{"data":[{"id":"i.song1","type":"library-songs","attributes":{"name":"Song1","artistName":"Artist","dateAdded":"2026-04-24T12:00:00Z"}},{"id":"i.song2","type":"library-songs","attributes":{"name":"Song2","artistName":"Artist"}}]}"""
+        ))
+        val result = provider.fetchTracks(localCount = 0, latestExternalId = null)
+        assertEquals(2, result?.size)
+        assertEquals("i.song1", result?.first()?.spotifyId)
+    }
+
+    @Test fun `fetchTracks 401 raises reauth`() = runBlocking {
+        server.enqueue(MockResponse().setResponseCode(401).setBody("{}"))
+        try {
+            provider.fetchTracks(localCount = 0, latestExternalId = null)
+            fail("expected AppleMusicReauthRequiredException")
+        } catch (_: AppleMusicReauthRequiredException) { /* expected */ }
+    }
+
+    @Test fun `saveTracks posts ids as comma-separated query string`() = runBlocking {
+        server.enqueue(MockResponse().setResponseCode(204))
+        provider.saveTracks(listOf("a", "b", "c"))
+        val req = server.takeRequest()
+        assertEquals("POST", req.method)
+        assertTrue(
+            "URL must carry ids[songs] query: ${req.path}",
+            req.path?.contains("ids%5Bsongs%5D=a%2Cb%2Cc") == true
+                || req.path?.contains("ids[songs]=a,b,c") == true
+        )
+    }
+
+    @Test fun `saveTracks 401 raises reauth`() = runBlocking {
+        server.enqueue(MockResponse().setResponseCode(401).setBody("{}"))
+        try {
+            provider.saveTracks(listOf("a"))
+            fail("expected AppleMusicReauthRequiredException")
+        } catch (_: AppleMusicReauthRequiredException) { /* expected */ }
+    }
+
+    @Test fun `saveTracks no-ops on empty list (no HTTP)`() = runBlocking {
+        provider.saveTracks(emptyList())
+        assertEquals("must not have made any request", 0, server.requestCount)
+    }
+
+    @Test fun `removeTracks issues per-id DELETE`() = runBlocking {
+        server.enqueue(MockResponse().setResponseCode(204))
+        server.enqueue(MockResponse().setResponseCode(204))
+        provider.removeTracks(listOf("i.a", "i.b"))
+        val r1 = server.takeRequest()
+        val r2 = server.takeRequest()
+        assertEquals("DELETE", r1.method)
+        assertEquals("DELETE", r2.method)
+        assertTrue(r1.path!!.endsWith("/me/library/songs/i.a"))
+        assertTrue(r2.path!!.endsWith("/me/library/songs/i.b"))
+    }
+
+    @Test fun `removeTracks swallows 404 and continues`() = runBlocking {
+        server.enqueue(MockResponse().setResponseCode(404))
+        server.enqueue(MockResponse().setResponseCode(204))
+        // Should not throw.
+        provider.removeTracks(listOf("i.gone", "i.a"))
+        assertEquals(2, server.requestCount)
+    }
+
+    // ── Collection sync: library albums ──────────────────────────────
+
+    @Test fun `fetchAlbums short-circuits when probe matches`() = runBlocking {
+        server.enqueue(MockResponse().setBody(
+            """{"data":[{"id":"l.alb1","type":"library-albums","attributes":{"name":"Alb","artistName":"Artist"}}]}"""
+        ))
+        val result = provider.fetchAlbums(localCount = 3, latestExternalId = "l.alb1")
+        assertNull(result)
+    }
+
+    @Test fun `saveAlbums posts ids as albums query string`() = runBlocking {
+        server.enqueue(MockResponse().setResponseCode(204))
+        provider.saveAlbums(listOf("alb1", "alb2"))
+        val req = server.takeRequest()
+        assertEquals("POST", req.method)
+        assertTrue(
+            "URL must carry ids[albums]: ${req.path}",
+            req.path?.contains("ids%5Balbums%5D=alb1%2Calb2") == true
+                || req.path?.contains("ids[albums]=alb1,alb2") == true
+        )
+    }
+
+    @Test fun `removeAlbums issues per-id DELETE`() = runBlocking {
+        server.enqueue(MockResponse().setResponseCode(204))
+        provider.removeAlbums(listOf("alb1"))
+        val req = server.takeRequest()
+        assertEquals("DELETE", req.method)
+        assertTrue(req.path!!.endsWith("/me/library/albums/alb1"))
+    }
+
+    // ── Collection sync: library artists (pull-only) ─────────────────
+
+    @Test fun `fetchArtists pages and returns null when count unchanged`() = runBlocking {
+        server.enqueue(MockResponse().setBody(
+            """{"data":[{"id":"r.art1","type":"library-artists","attributes":{"name":"Artist 1"}}]}"""
+        ))
+        // localCount == returned size → null (unchanged).
+        val result = provider.fetchArtists(localCount = 1)
+        assertNull(result)
+    }
+
+    @Test fun `fetchArtists returns list when size differs from local count`() = runBlocking {
+        server.enqueue(MockResponse().setBody(
+            """{"data":[{"id":"r.art1","type":"library-artists","attributes":{"name":"Artist 1"}},{"id":"r.art2","type":"library-artists","attributes":{"name":"Artist 2"}}]}"""
+        ))
+        val result = provider.fetchArtists(localCount = 0)
+        assertEquals(2, result?.size)
+        assertEquals("r.art1", result?.first()?.spotifyId)
+    }
 }

@@ -219,7 +219,7 @@ Only if all three miss does `createPlaylistOnSpotify` run. The link is written *
 
 **Key files:** `shared/src/commonMain/sqldelight/com/parachord/shared/db/SyncPlaylistLink.sq`, `data/db/dao/SyncPlaylistLinkDao.kt`, `sync/SyncEngine.kt` (`migrateLinksFromPlaylists`, push loop), `sync/SpotifySyncProvider.kt`
 
-### Multi-Provider Sync — Apple Music + Spotify (Phases 1–6.5)
+### Multi-Provider Sync — Apple Music + Spotify (Phases 1–6.5 + Collection)
 
 The sync engine handles N providers concurrently. Phases 1 through 6.5 (Apr 2026) ported the desktop's multi-provider model: a playlist can carry one pull source (`syncedFrom`) and any number of push mirrors (`syncedTo[providerId]`). Today two providers are registered (Spotify + Apple Music); a third (e.g. Tidal) needs only a `SyncProvider` implementation + Koin registration. `SyncEngine` never branches on `provider.id`; it dispatches on `provider.features` and per-provider candidate filters.
 
@@ -288,6 +288,15 @@ data class ProviderFeatures(
 **Settings UI (Phase 6).** Settings → General shows an "Apple Music Sync" toggle row only when AM is authorized (MUT present). Flipping it adds/removes `applemusic` from `enabled_sync_providers`. An inline note explains the API limitations (no delete / rename / track-removal). The wizard's per-playlist picker is Spotify-only for now — AM gets all-or-nothing per Decision D1; per-playlist selection is a follow-up.
 
 **Sync-aware playlist deletion + Decision D8 toast (Phase 6.5).** `LibraryRepository.deletePlaylistWithSync(playlist)` calls `SyncEngine.onPlaylistRemoved(playlist)` to attempt remote deletion on each linked provider, then deletes the local row. Returns `List<PlaylistDeletionAttempt>`; ViewModels (`PlaylistDetailViewModel`, `PlaylistsViewModel`, `EditPlaylistViewModel`) filter for `Unsupported` and emit a one-shot Flow event; the screen renders a Toast: *"Removed from Parachord. Apple Music doesn't allow deletion via the API — remove manually in the Apple Music app."* Local cleanup runs regardless of provider response — leaving the link would re-link on next sync via three-layer dedup.
+
+**Collection sync (Phase 7 — Apr 2026).** The previously-deferred library axis (saved tracks, saved albums, followed/library artists) now runs per-provider too. `SyncEngine.syncTracks/syncAlbums/syncArtists` iterate every enabled `SyncProvider`. Tracks keep a Spotify-only legacy path first (preserves the v2→v3 wipe-and-refetch migration) before iterating non-Spotify providers; albums and artists generalize cleanly via per-provider helpers. `onTrackRemoved` / `onAlbumRemoved` / `onArtistRemoved` now walk every `sync_source` row for the item and call the matching provider's `removeTracks` / `removeAlbums` / `unfollowArtists` — local-side deletes propagate to every provider that has the item linked, not just Spotify.
+
+`AppleMusicSyncProvider` implements the library surface against `/me/library/{songs,albums,artists}`:
+
+- `fetchTracks` / `fetchAlbums` — single-item probe first; if the head item matches `latestExternalId` and `localCount > 0`, return null (unchanged shortcut). Otherwise paginate at `PAGE_SIZE = 100` with the standard 150ms inter-request delay, throw `AppleMusicReauthRequiredException` on 401.
+- `saveTracks` / `saveAlbums` — `POST /me/library?ids[songs|albums]=id1,id2,...` (NOT a JSON body — Apple's add-to-library endpoint is query-string-driven). Chunked at 50 IDs per request.
+- `removeTracks` / `removeAlbums` — per-item `DELETE` (Apple has no bulk-delete endpoint). 404 is silently swallowed (race with another client). Other errors log + continue so a single bad ID doesn't strand the rest of the batch.
+- `fetchArtists` — read-only; returns null when `result.size == localCount` (cheap unchanged-detection without a probe). `followArtists` / `unfollowArtists` inherit the no-op defaults from `SyncProvider` — Apple has no follow API.
 
 **Concurrency contract.** No cross-device locking. Each provider is its own merge oracle for the playlists it hosts; when two clients race an edit, the provider receiving the writes arbitrates last-write-wins, both clients converge on next pull. Sync mutex (`tryLock`, never `withLock`) is per-device only — two sync cycles on the same device skip-if-held; cross-device races resolve through the provider.
 
