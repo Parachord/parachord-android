@@ -3,6 +3,9 @@ package com.parachord.android.sync
 import android.util.Log
 import com.parachord.android.data.api.AmCreatePlaylistAttributes
 import com.parachord.android.data.api.AmCreatePlaylistRequest
+import com.parachord.android.data.api.AmLibraryAlbum
+import com.parachord.android.data.api.AmLibraryArtist
+import com.parachord.android.data.api.AmLibrarySong
 import com.parachord.android.data.api.AmPlaylist
 import com.parachord.android.data.api.AmTrack
 import com.parachord.android.data.api.AmTrackReference
@@ -10,24 +13,41 @@ import com.parachord.android.data.api.AmTracksRequest
 import com.parachord.android.data.api.AmUpdatePlaylistAttributes
 import com.parachord.android.data.api.AmUpdatePlaylistRequest
 import com.parachord.android.data.api.AppleMusicLibraryApi
+import com.parachord.android.data.db.entity.AlbumEntity
+import com.parachord.android.data.db.entity.ArtistEntity
 import com.parachord.android.data.db.entity.PlaylistEntity
 import com.parachord.android.data.db.entity.PlaylistTrackEntity
+import com.parachord.android.data.db.entity.TrackEntity
 import com.parachord.android.data.store.SettingsStore
 import com.parachord.shared.sync.DeleteResult
 import com.parachord.shared.sync.ProviderFeatures
 import com.parachord.shared.sync.RemoteCreated
 import com.parachord.shared.sync.SnapshotKind
 import com.parachord.shared.sync.SyncProvider
+import com.parachord.shared.sync.SyncedAlbum
+import com.parachord.shared.sync.SyncedArtist
 import com.parachord.shared.sync.SyncedPlaylist
+import com.parachord.shared.sync.SyncedTrack
 import kotlinx.coroutines.delay
 import retrofit2.HttpException
+import java.time.Instant
 
 /**
- * Apple Music sync provider — playlist surface only (Decision D1).
+ * Apple Music sync provider.
  *
- * Library tracks/albums/artists pull + push are deferred; the
- * SyncProvider interface deliberately doesn't include those methods
- * yet so AM doesn't have to no-op-implement them.
+ * Phase 4 shipped the playlist surface (fetchPlaylists, push, dedup,
+ * the kill-switch degradation pattern). The collection-sync surface
+ * (fetchTracks / fetchAlbums / fetchArtists + removeTracks /
+ * removeAlbums) landed in the Phase 6.5+ collection-sync extension.
+ *
+ * Limitations:
+ * - Apple has no follow/unfollow API for artists. `fetchArtists` is
+ *   pull-only; `followArtists` / `unfollowArtists` inherit the no-op
+ *   defaults from [SyncProvider].
+ * - `saveTracks` / `saveAlbums` use Apple's documented
+ *   `POST /me/library?ids[songs]=...` query-string API (NOT a JSON
+ *   body). `removeTracks` / `removeAlbums` use per-item
+ *   `DELETE /me/library/songs/{id}` etc. — no bulk delete.
  *
  * Endpoint degradation per desktop CLAUDE.md:
  * - PUT /library/playlists/{id}/tracks → 401 → [amPutUnsupportedForSession]
@@ -288,6 +308,173 @@ class AppleMusicSyncProvider(
         }
     }
 
+    // ── Collection sync: library tracks ──────────────────────────────
+
+    override suspend fun fetchTracks(
+        localCount: Int,
+        latestExternalId: String?,
+        onProgress: ((current: Int, total: Int) -> Unit)?,
+    ): List<SyncedTrack>? {
+        val all = mutableListOf<SyncedTrack>()
+        var offset = 0
+        // Quick-check shortcut: probe one item to compare against the
+        // local state. Apple's library endpoints don't expose a total
+        // count up-front, so we need at least one round-trip to know
+        // whether changes happened.
+        delay(INTER_REQUEST_DELAY_MS)
+        val probe = try {
+            api.listLibrarySongs(limit = 1, offset = 0)
+        } catch (e: HttpException) {
+            if (e.code() == 401) throw AppleMusicReauthRequiredException()
+            throw e
+        }
+        val probeId = probe.data.firstOrNull()?.id
+        if (probeId == latestExternalId && localCount > 0) {
+            // Nothing's changed at the head; assume rest is unchanged.
+            return null
+        }
+        // Full pagination
+        offset = 0
+        while (true) {
+            delay(INTER_REQUEST_DELAY_MS)
+            val resp = try {
+                api.listLibrarySongs(limit = PAGE_SIZE, offset = offset)
+            } catch (e: HttpException) {
+                if (e.code() == 401) throw AppleMusicReauthRequiredException()
+                throw e
+            }
+            for (am in resp.data) {
+                all.add(am.toSyncedTrack())
+            }
+            onProgress?.invoke(all.size, all.size)
+            if (resp.next == null || resp.data.size < PAGE_SIZE) break
+            offset += resp.data.size
+        }
+        return all
+    }
+
+    /**
+     * Apple's documented add-to-library endpoint takes catalog IDs
+     * via query string: `POST /me/library?ids[songs]=id1,id2,...`.
+     */
+    override suspend fun saveTracks(externalIds: List<String>) {
+        if (externalIds.isEmpty()) return
+        externalIds.chunked(50).forEach { batch ->
+            delay(INTER_REQUEST_DELAY_MS)
+            val resp = api.addToLibrary(songIds = batch.joinToString(","))
+            if (!resp.isSuccessful) {
+                if (resp.code() == 401) throw AppleMusicReauthRequiredException()
+                Log.w(TAG, "saveTracks returned ${resp.code()} for ${batch.size} ids")
+            }
+        }
+    }
+
+    /** Per-track DELETE — Apple has no bulk-delete endpoint for library songs. */
+    override suspend fun removeTracks(externalIds: List<String>) {
+        for (id in externalIds) {
+            delay(INTER_REQUEST_DELAY_MS)
+            try {
+                val resp = api.deleteLibrarySong(id)
+                if (!resp.isSuccessful && resp.code() != 404) {
+                    Log.w(TAG, "deleteLibrarySong $id returned ${resp.code()}")
+                }
+            } catch (e: Exception) {
+                Log.w(TAG, "deleteLibrarySong $id threw — continuing", e)
+            }
+        }
+    }
+
+    // ── Collection sync: library albums ──────────────────────────────
+
+    override suspend fun fetchAlbums(
+        localCount: Int,
+        latestExternalId: String?,
+        onProgress: ((current: Int, total: Int) -> Unit)?,
+    ): List<SyncedAlbum>? {
+        val all = mutableListOf<SyncedAlbum>()
+        delay(INTER_REQUEST_DELAY_MS)
+        val probe = try {
+            api.listLibraryAlbums(limit = 1, offset = 0)
+        } catch (e: HttpException) {
+            if (e.code() == 401) throw AppleMusicReauthRequiredException()
+            throw e
+        }
+        if (probe.data.firstOrNull()?.id == latestExternalId && localCount > 0) return null
+        var offset = 0
+        while (true) {
+            delay(INTER_REQUEST_DELAY_MS)
+            val resp = try {
+                api.listLibraryAlbums(limit = PAGE_SIZE, offset = offset)
+            } catch (e: HttpException) {
+                if (e.code() == 401) throw AppleMusicReauthRequiredException()
+                throw e
+            }
+            for (am in resp.data) {
+                all.add(am.toSyncedAlbum())
+            }
+            onProgress?.invoke(all.size, all.size)
+            if (resp.next == null || resp.data.size < PAGE_SIZE) break
+            offset += resp.data.size
+        }
+        return all
+    }
+
+    override suspend fun saveAlbums(externalIds: List<String>) {
+        if (externalIds.isEmpty()) return
+        externalIds.chunked(50).forEach { batch ->
+            delay(INTER_REQUEST_DELAY_MS)
+            val resp = api.addToLibrary(albumIds = batch.joinToString(","))
+            if (!resp.isSuccessful) {
+                if (resp.code() == 401) throw AppleMusicReauthRequiredException()
+                Log.w(TAG, "saveAlbums returned ${resp.code()} for ${batch.size} ids")
+            }
+        }
+    }
+
+    override suspend fun removeAlbums(externalIds: List<String>) {
+        for (id in externalIds) {
+            delay(INTER_REQUEST_DELAY_MS)
+            try {
+                val resp = api.deleteLibraryAlbum(id)
+                if (!resp.isSuccessful && resp.code() != 404) {
+                    Log.w(TAG, "deleteLibraryAlbum $id returned ${resp.code()}")
+                }
+            } catch (e: Exception) {
+                Log.w(TAG, "deleteLibraryAlbum $id threw — continuing", e)
+            }
+        }
+    }
+
+    // ── Collection sync: library artists (pull-only) ─────────────────
+
+    override suspend fun fetchArtists(
+        localCount: Int,
+        onProgress: ((current: Int, total: Int) -> Unit)?,
+    ): List<SyncedArtist>? {
+        val all = mutableListOf<SyncedArtist>()
+        var offset = 0
+        while (true) {
+            delay(INTER_REQUEST_DELAY_MS)
+            val resp = try {
+                api.listLibraryArtists(limit = PAGE_SIZE, offset = offset)
+            } catch (e: HttpException) {
+                if (e.code() == 401) throw AppleMusicReauthRequiredException()
+                throw e
+            }
+            for (am in resp.data) {
+                all.add(am.toSyncedArtist())
+            }
+            onProgress?.invoke(all.size, all.size)
+            if (resp.next == null || resp.data.size < PAGE_SIZE) break
+            offset += resp.data.size
+        }
+        if (all.size == localCount) return null
+        return all
+    }
+
+    // followArtists / unfollowArtists inherit the SyncProvider no-op
+    // defaults — Apple has no follow API.
+
     // ── Mappers ──────────────────────────────────────────────────────
 
     private fun AmPlaylist.toSyncedPlaylist(): SyncedPlaylist {
@@ -346,4 +533,72 @@ class AppleMusicSyncProvider(
         // playback); falls back to the library ID. Either is usable.
         trackAppleMusicId = attributes.playParams?.id ?: id,
     )
+
+    /** Library track → cross-provider [SyncedTrack]. The library row's
+     * `id` is the library ID; `playParams.id` is the catalog ID. We
+     * store the catalog ID in [TrackEntity.appleMusicId] so playback
+     * can resolve via MusicKit. */
+    private fun AmLibrarySong.toSyncedTrack(): SyncedTrack {
+        val catalogId = attributes.playParams?.id ?: id
+        val addedAt = attributes.dateAdded?.let { parseIso(it) } ?: 0L
+        return SyncedTrack(
+            entity = TrackEntity(
+                id = "applemusic-$catalogId",
+                title = attributes.name,
+                artist = attributes.artistName,
+                album = attributes.albumName,
+                albumId = null,
+                duration = attributes.durationInMillis,
+                artworkUrl = attributes.artwork?.url,
+                spotifyUri = null,
+                spotifyId = null,
+                appleMusicId = catalogId,
+                resolver = "applemusic",
+                sourceType = "synced",
+                addedAt = addedAt,
+            ),
+            spotifyId = catalogId,
+            addedAt = addedAt,
+        )
+    }
+
+    /** Library album → cross-provider [SyncedAlbum]. */
+    private fun AmLibraryAlbum.toSyncedAlbum(): SyncedAlbum {
+        val catalogId = attributes.playParams?.id ?: id
+        val addedAt = attributes.dateAdded?.let { parseIso(it) } ?: 0L
+        return SyncedAlbum(
+            entity = AlbumEntity(
+                id = "applemusic-$catalogId",
+                title = attributes.name,
+                artist = attributes.artistName,
+                artworkUrl = attributes.artwork?.url,
+                trackCount = attributes.trackCount,
+                addedAt = addedAt,
+                spotifyId = null,
+            ),
+            spotifyId = catalogId,
+            addedAt = addedAt,
+        )
+    }
+
+    /** Library artist → cross-provider [SyncedArtist]. AM library
+     * artist objects don't include images on the library endpoint —
+     * the artwork comes from the catalog endpoint, which we'd need
+     * one extra request per artist for. Skip for now; artist art on
+     * AM-imported rows comes from the metadata enrichment cascade. */
+    private fun AmLibraryArtist.toSyncedArtist(): SyncedArtist =
+        SyncedArtist(
+            entity = ArtistEntity(
+                id = "applemusic-$id",
+                name = attributes.name,
+                imageUrl = null,
+                spotifyId = null,
+                genres = "",
+            ),
+            spotifyId = id,
+        )
+
+    /** Lenient ISO-8601 parse; library timestamps come in `Z` form. */
+    private fun parseIso(s: String): Long =
+        try { Instant.parse(s).toEpochMilli() } catch (_: Exception) { 0L }
 }

@@ -89,11 +89,125 @@ interface AppleMusicLibraryApi {
         @Path("id") playlistId: String,
     ): Response<Unit>
 
+    // ── Library tracks (collection sync) ─────────────────────────────
+
+    @GET("v1/me/library/songs")
+    suspend fun listLibrarySongs(
+        @Query("limit") limit: Int = 100,
+        @Query("offset") offset: Int = 0,
+    ): AmLibrarySongListResponse
+
+    /**
+     * Add catalog songs to the user's library by ID. Apple's
+     * documented add-to-library endpoint takes a query-string
+     * `ids[songs]` parameter (NOT a JSON body), comma-separated.
+     */
+    @POST("v1/me/library")
+    suspend fun addToLibrary(
+        @Query("ids[songs]") songIds: String? = null,
+        @Query("ids[albums]") albumIds: String? = null,
+    ): Response<Unit>
+
+    /** Remove a single library song. */
+    @DELETE("v1/me/library/songs/{id}")
+    suspend fun deleteLibrarySong(
+        @Path("id") songId: String,
+    ): Response<Unit>
+
+    // ── Library albums (collection sync) ─────────────────────────────
+
+    @GET("v1/me/library/albums")
+    suspend fun listLibraryAlbums(
+        @Query("limit") limit: Int = 100,
+        @Query("offset") offset: Int = 0,
+    ): AmLibraryAlbumListResponse
+
+    @DELETE("v1/me/library/albums/{id}")
+    suspend fun deleteLibraryAlbum(
+        @Path("id") albumId: String,
+    ): Response<Unit>
+
+    // ── Library artists (read-only — Apple has no follow API) ────────
+
+    @GET("v1/me/library/artists")
+    suspend fun listLibraryArtists(
+        @Query("limit") limit: Int = 100,
+        @Query("offset") offset: Int = 0,
+    ): AmLibraryArtistListResponse
+
     // ── Storefront detection ─────────────────────────────────────────
 
     @GET("v1/me/storefront")
     suspend fun getStorefront(): AmStorefrontResponse
 }
+
+// ── Library JSON models ──────────────────────────────────────────────
+
+@Serializable
+data class AmLibrarySongListResponse(
+    val data: List<AmLibrarySong> = emptyList(),
+    val next: String? = null,
+)
+
+@Serializable
+data class AmLibrarySong(
+    val id: String,
+    val type: String,             // "library-songs"
+    val attributes: AmLibrarySongAttributes,
+)
+
+@Serializable
+data class AmLibrarySongAttributes(
+    val name: String,
+    val artistName: String,
+    val albumName: String? = null,
+    val durationInMillis: Long? = null,
+    val artwork: AmArtwork? = null,
+    val playParams: AmPlayParams? = null,
+    /** ISO timestamp this track was added to the library. */
+    val dateAdded: String? = null,
+)
+
+@Serializable
+data class AmLibraryAlbumListResponse(
+    val data: List<AmLibraryAlbum> = emptyList(),
+    val next: String? = null,
+)
+
+@Serializable
+data class AmLibraryAlbum(
+    val id: String,
+    val type: String,             // "library-albums"
+    val attributes: AmLibraryAlbumAttributes,
+)
+
+@Serializable
+data class AmLibraryAlbumAttributes(
+    val name: String,
+    val artistName: String,
+    val artwork: AmArtwork? = null,
+    val playParams: AmPlayParams? = null,
+    val dateAdded: String? = null,
+    val trackCount: Int = 0,
+)
+
+@Serializable
+data class AmLibraryArtistListResponse(
+    val data: List<AmLibraryArtist> = emptyList(),
+    val next: String? = null,
+)
+
+@Serializable
+data class AmLibraryArtist(
+    val id: String,
+    val type: String,             // "library-artists"
+    val attributes: AmLibraryArtistAttributes,
+)
+
+@Serializable
+data class AmLibraryArtistAttributes(
+    val name: String,
+)
 
 // ── JSON models ──────────────────────────────────────────────────────
 
