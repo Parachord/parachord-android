@@ -325,9 +325,17 @@ class SyncViewModel constructor(
         syncScheduler.startInAppTimer()
         syncScheduler.enableWorkManagerSync()
 
-        val result = syncEngine.syncAll { progress ->
-            _syncProgress.value = progress
-        }
+        // Filter syncAll to just the active provider so the wizard's
+        // progress UI shows ONLY this provider's messages — otherwise
+        // a fresh AM-wizard run would also kick off Spotify and the
+        // Spotify track-sync messages would dominate the progress
+        // display, confusing the user who thinks they're configuring
+        // AM. Other providers continue syncing on their normal
+        // periodic schedule.
+        val result = syncEngine.syncAll(
+            onProgress = { progress -> _syncProgress.value = progress },
+            providerFilter = activeId,
+        )
         _syncResult.value = result
         _currentStep.value = SetupStep.COMPLETE
     }
@@ -335,9 +343,9 @@ class SyncViewModel constructor(
     fun syncNow() {
         _currentStep.value = SetupStep.SYNCING
         viewModelScope.launch {
-            val result = syncEngine.syncAll { progress ->
-                _syncProgress.value = progress
-            }
+            val result = syncEngine.syncAll(
+                onProgress = { progress -> _syncProgress.value = progress },
+            )
             _syncResult.value = result
             _currentStep.value = SetupStep.COMPLETE
         }

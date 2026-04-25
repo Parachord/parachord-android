@@ -132,6 +132,7 @@ class SyncEngine constructor(
 
     suspend fun syncAll(
         onProgress: (SyncProgress) -> Unit = {},
+        providerFilter: String? = null,
     ): FullSyncResult {
         val settings = settingsStore.getSyncSettings()
         if (!settings.enabled) {
@@ -146,6 +147,17 @@ class SyncEngine constructor(
             return FullSyncResult(success = false, error = "Sync already in progress")
         }
 
+        // When called from a single-provider wizard, filter the enabled
+        // providers down to just the one being configured. Otherwise
+        // showing AM-wizard progress would be drowned out by Spotify's
+        // simultaneous sync (which runs unconditionally because syncAll
+        // iterates every enabled provider). Prog UX needs to look like
+        // it's only syncing what the user asked it to.
+        val activeProviderId = providerFilter
+        val providerLabel = if (activeProviderId != null) {
+            providers.firstOrNull { it.id == activeProviderId }?.displayName ?: activeProviderId
+        } else null
+
         return try {
             var trackResult = TypeSyncResult()
             var albumResult = TypeSyncResult()
@@ -153,23 +165,31 @@ class SyncEngine constructor(
             var playlistResult = TypeSyncResult()
 
             if (settings.syncTracks) {
-                onProgress(SyncProgress(SyncPhase.TRACKS, message = "Syncing liked songs..."))
-                trackResult = syncTracks(onProgress)
+                onProgress(SyncProgress(SyncPhase.TRACKS,
+                    message = if (providerLabel != null) "Syncing $providerLabel songs..."
+                              else "Syncing liked songs..."))
+                trackResult = syncTracks(onProgress, activeProviderId)
             }
 
             if (settings.syncAlbums) {
-                onProgress(SyncProgress(SyncPhase.ALBUMS, message = "Syncing saved albums..."))
-                albumResult = syncAlbums(onProgress)
+                onProgress(SyncProgress(SyncPhase.ALBUMS,
+                    message = if (providerLabel != null) "Syncing $providerLabel albums..."
+                              else "Syncing saved albums..."))
+                albumResult = syncAlbums(onProgress, activeProviderId)
             }
 
             if (settings.syncArtists) {
-                onProgress(SyncProgress(SyncPhase.ARTISTS, message = "Syncing followed artists..."))
-                artistResult = syncArtists(onProgress)
+                onProgress(SyncProgress(SyncPhase.ARTISTS,
+                    message = if (providerLabel != null) "Syncing $providerLabel artists..."
+                              else "Syncing followed artists..."))
+                artistResult = syncArtists(onProgress, activeProviderId)
             }
 
             if (settings.syncPlaylists) {
-                onProgress(SyncProgress(SyncPhase.PLAYLISTS, message = "Syncing playlists..."))
-                playlistResult = syncPlaylists(settings, onProgress)
+                onProgress(SyncProgress(SyncPhase.PLAYLISTS,
+                    message = if (providerLabel != null) "Syncing $providerLabel playlists..."
+                              else "Syncing playlists..."))
+                playlistResult = syncPlaylists(settings, onProgress, activeProviderId)
             }
 
             settingsStore.setLastSyncAt(System.currentTimeMillis())
@@ -195,21 +215,20 @@ class SyncEngine constructor(
 
     private suspend fun syncTracks(
         onProgress: (SyncProgress) -> Unit,
+        providerFilter: String? = null,
     ): TypeSyncResult {
-        // Always run the legacy Spotify-only path first (preserves
-        // the v2→v3 migration that wipes + refetches Spotify-tagged
-        // tracks; non-Spotify providers don't have that history). The
-        // per-provider axis opt-in still applies — Spotify can opt out
-        // of tracks via the wizard and this path skips itself.
-        var aggregate = if (providerHasAxis(SpotifySyncProvider.PROVIDER_ID, "tracks")) {
-            syncTracksForSpotify(onProgress)
-        } else TypeSyncResult()
+        // Spotify legacy path runs only when no filter, OR the filter
+        // selects Spotify. Skipping it for non-Spotify wizards keeps
+        // the user-visible progress bar focused on the provider the
+        // wizard is configuring.
+        val runSpotify = (providerFilter == null || providerFilter == SpotifySyncProvider.PROVIDER_ID)
+            && providerHasAxis(SpotifySyncProvider.PROVIDER_ID, "tracks")
+        var aggregate = if (runSpotify) syncTracksForSpotify(onProgress) else TypeSyncResult()
 
-        // Then iterate non-Spotify enabled providers via the generic
-        // per-provider helper. Each gates on its own axis opt-in.
         val enabled = settingsStore.getEnabledSyncProviders()
         val others = providers.filter {
             it.id in enabled && it.id != SpotifySyncProvider.PROVIDER_ID
+                && (providerFilter == null || providerFilter == it.id)
         }
         for (provider in others) {
             if (!providerHasAxis(provider.id, "tracks")) continue
@@ -375,10 +394,13 @@ class SyncEngine constructor(
 
     private suspend fun syncAlbums(
         onProgress: (SyncProgress) -> Unit,
+        providerFilter: String? = null,
     ): TypeSyncResult {
         val enabled = settingsStore.getEnabledSyncProviders()
         var aggregate = TypeSyncResult()
-        for (provider in providers.filter { it.id in enabled }) {
+        for (provider in providers.filter {
+            it.id in enabled && (providerFilter == null || providerFilter == it.id)
+        }) {
             if (!providerHasAxis(provider.id, "albums")) continue
             aggregate += syncAlbumsForProvider(provider, onProgress)
         }
@@ -484,10 +506,13 @@ class SyncEngine constructor(
 
     private suspend fun syncArtists(
         onProgress: (SyncProgress) -> Unit,
+        providerFilter: String? = null,
     ): TypeSyncResult {
         val enabled = settingsStore.getEnabledSyncProviders()
         var aggregate = TypeSyncResult()
-        for (provider in providers.filter { it.id in enabled }) {
+        for (provider in providers.filter {
+            it.id in enabled && (providerFilter == null || providerFilter == it.id)
+        }) {
             if (!providerHasAxis(provider.id, "artists")) continue
             aggregate += syncArtistsForProvider(provider, onProgress)
         }
@@ -778,6 +803,7 @@ class SyncEngine constructor(
     private suspend fun syncPlaylists(
         settings: SettingsStore.SyncSettings,
         onProgress: (SyncProgress) -> Unit,
+        providerFilter: String? = null,
     ): TypeSyncResult {
         val providerId = SpotifySyncProvider.PROVIDER_ID
         var added = 0
@@ -835,6 +861,7 @@ class SyncEngine constructor(
         // skip the fetch entirely — the push and non-Spotify-pull loops
         // below have their own per-axis gates.
         val spotifyPlaylistsEnabled = providerHasAxis(SpotifySyncProvider.PROVIDER_ID, "playlists")
+            && (providerFilter == null || providerFilter == SpotifySyncProvider.PROVIDER_ID)
         val remotePlaylists = if (spotifyPlaylistsEnabled) {
             spotifyProvider.fetchPlaylists { current, total ->
                 onProgress(SyncProgress(SyncPhase.PLAYLISTS, current, total, "Fetching playlists..."))
@@ -1102,7 +1129,9 @@ class SyncEngine constructor(
         // into AM as expected).
         if (settings.pushLocalPlaylists) {
             val enabledProviderIds = settingsStore.getEnabledSyncProviders()
-            val enabledProviders = providers.filter { it.id in enabledProviderIds }
+            val enabledProviders = providers.filter {
+                it.id in enabledProviderIds && (providerFilter == null || providerFilter == it.id)
+            }
             for (provider in enabledProviders) {
                 // Per-provider axis opt-in — skip push for providers that
                 // didn't enable the playlists axis in their wizard.
@@ -1167,6 +1196,7 @@ class SyncEngine constructor(
         val enabledProviderIds = settingsStore.getEnabledSyncProviders()
         val nonSpotifyProviders = providers.filter {
             it.id in enabledProviderIds && it.id != SpotifySyncProvider.PROVIDER_ID
+                && (providerFilter == null || providerFilter == it.id)
         }
         for (provider in nonSpotifyProviders) {
             if (!providerHasAxis(provider.id, "playlists")) continue
