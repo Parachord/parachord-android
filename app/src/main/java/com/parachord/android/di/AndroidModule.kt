@@ -76,6 +76,7 @@ import okhttp3.logging.HttpLoggingInterceptor
 import org.koin.android.ext.koin.androidContext
 import org.koin.core.module.dsl.singleOf
 import org.koin.core.module.dsl.viewModelOf
+import org.koin.dsl.bind
 import org.koin.dsl.module
 import retrofit2.Retrofit
 import retrofit2.converter.kotlinx.serialization.asConverterFactory
@@ -384,7 +385,12 @@ val androidModule = module {
     // ── Sync ─────────────────────────────────────────────────────────
 
     singleOf(::SyncEngine)
-    singleOf(::SpotifySyncProvider)
+    // Bind as SyncProvider so getAll<SyncProvider>() picks it up. Future
+    // providers (Apple Music, Tidal) register the same way; SyncEngine
+    // accepts the resulting List<SyncProvider> with no per-provider Koin
+    // changes required here.
+    singleOf(::SpotifySyncProvider) bind com.parachord.shared.sync.SyncProvider::class
+    single<List<com.parachord.shared.sync.SyncProvider>> { getAll() }
     singleOf(::SyncScheduler)
     singleOf(::HostedPlaylistPoller)
     single { HostedPlaylistScheduler(androidContext(), get()) }
