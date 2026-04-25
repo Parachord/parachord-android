@@ -522,12 +522,51 @@ class SyncEngine constructor(
                 val existingBySpotifyId = playlistDao.getBySpotifyId(remote.spotifyId)
                 val targetId = existingBySpotifyId?.id ?: remote.entity.id
 
+                // Phase 3 — cross-provider syncedFrom preservation.
+                // If the local row we're matching already has a `syncedFrom`
+                // pointing at a DIFFERENT provider, this match fired because
+                // the local is a push target for the current provider — its
+                // pull source is elsewhere. Don't clobber syncedFrom and
+                // don't refetch tracks (the source provider is authoritative).
+                // Only the sync_playlist_link's syncedAt advances. Without
+                // this guard, the original pull-source provider would see the
+                // local as a new playlist on its next sync and create a
+                // duplicate remote.
+                val existingPullSource = if (existingBySpotifyId != null) {
+                    syncPlaylistSourceDao.selectForLocal(existingBySpotifyId.id)
+                } else null
+                val isCrossProviderPushMirror = existingPullSource != null
+                    && existingPullSource.providerId != providerId
+
                 if (existingBySpotifyId != null && existingBySpotifyId.id != remote.entity.id) {
                     // Remove the old entry's tracks — they'll be replaced below
                     playlistTrackDao.deleteByPlaylistId(existingBySpotifyId.id)
                     playlistDao.delete(existingBySpotifyId)
                     // Clean up any orphaned sync source for the old ID
                     syncSourceDao.deleteAllForItem(existingBySpotifyId.id, "playlist")
+                }
+
+                if (isCrossProviderPushMirror) {
+                    // Preserve the existing local row + tracks + syncedFrom.
+                    // Just record that we synced with this provider as a
+                    // push mirror by updating sync_playlist_link.syncedAt.
+                    Log.d(TAG, "Cross-provider push mirror for ${existingBySpotifyId!!.id}: " +
+                        "syncedFrom=${existingPullSource!!.providerId}; preserving local tracks")
+                    syncPlaylistLinkDao.upsertWithSnapshot(
+                        localPlaylistId = existingBySpotifyId.id,
+                        providerId = providerId,
+                        externalId = remote.spotifyId,
+                        snapshotId = remote.snapshotId,
+                    )
+                    syncSourceDao.insert(SyncSourceEntity(
+                        itemId = existingBySpotifyId.id,
+                        itemType = "playlist",
+                        providerId = providerId,
+                        externalId = remote.spotifyId,
+                        syncedAt = System.currentTimeMillis(),
+                    ))
+                    unchanged++
+                    continue
                 }
 
                 playlistDao.insert(remote.entity.copy(
@@ -551,6 +590,18 @@ class SyncEngine constructor(
                     externalId = remote.spotifyId,
                     syncedAt = System.currentTimeMillis(),
                 ))
+                // Standard pull-source path: record syncedFrom for this
+                // provider so subsequent imports recognize it as own source
+                // (and Phase 4's AM-import branch correctly identifies us
+                // as a cross-provider push mirror at that point).
+                syncPlaylistSourceDao.upsert(
+                    localPlaylistId = targetId,
+                    providerId = providerId,
+                    externalId = remote.spotifyId,
+                    snapshotId = remote.snapshotId,
+                    ownerId = null,
+                    syncedAt = System.currentTimeMillis(),
+                )
                 added++
             } else {
                 val localPlaylist = playlistDao.getById(existingSource.itemId)
