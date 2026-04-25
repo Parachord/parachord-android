@@ -12,6 +12,19 @@ import com.parachord.android.data.store.SettingsStore
 import kotlinx.coroutines.delay
 import java.time.Instant
 
+// Re-exported for source compatibility while the shared sync package settles.
+// Kotlin permits typealiases at file scope and inside object declarations, but
+// not inside a class body — companion-object aliases were tried first and
+// failed to resolve via `SpotifySyncProvider.SyncedX`. Top-level aliases are
+// the working fallback; call sites that previously used the qualified
+// `SpotifySyncProvider.SyncedX` form were updated to the bare name in the
+// same commit. Both forms ultimately resolve to the same shared types in
+// `com.parachord.shared.sync`.
+typealias SyncedTrack = com.parachord.shared.sync.SyncedTrack
+typealias SyncedAlbum = com.parachord.shared.sync.SyncedAlbum
+typealias SyncedArtist = com.parachord.shared.sync.SyncedArtist
+typealias SyncedPlaylist = com.parachord.shared.sync.SyncedPlaylist
+
 class SpotifySyncProvider constructor(
     private val spotifyApi: SpotifyApi,
     private val settingsStore: SettingsStore,
@@ -24,31 +37,6 @@ class SpotifySyncProvider constructor(
         private const val PLAYLIST_TRACK_BATCH_SIZE = 100
         private const val MAX_RETRIES = 5
     }
-
-    data class SyncedTrack(
-        val entity: TrackEntity,
-        val spotifyId: String,
-        val addedAt: Long,
-    )
-
-    data class SyncedAlbum(
-        val entity: AlbumEntity,
-        val spotifyId: String,
-        val addedAt: Long,
-    )
-
-    data class SyncedArtist(
-        val entity: ArtistEntity,
-        val spotifyId: String,
-    )
-
-    data class SyncedPlaylist(
-        val entity: PlaylistEntity,
-        val spotifyId: String,
-        val snapshotId: String?,
-        val trackCount: Int,
-        val isOwned: Boolean,
-    )
 
     private var cachedMarket: String? = null
 

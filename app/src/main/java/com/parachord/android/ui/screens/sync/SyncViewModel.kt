@@ -7,6 +7,7 @@ import com.parachord.android.data.store.SettingsStore
 import com.parachord.android.sync.SpotifySyncProvider
 import com.parachord.android.sync.SyncEngine
 import com.parachord.android.sync.SyncScheduler
+import com.parachord.android.sync.SyncedPlaylist
 import kotlinx.coroutines.flow.*
 import kotlinx.coroutines.launch
 class SyncViewModel constructor(
@@ -39,8 +40,8 @@ class SyncViewModel constructor(
     fun setSyncArtists(v: Boolean) { _syncArtists.value = v }
     fun setSyncPlaylists(v: Boolean) { _syncPlaylists.value = v }
 
-    private val _availablePlaylists = MutableStateFlow<List<SpotifySyncProvider.SyncedPlaylist>>(emptyList())
-    val availablePlaylists: StateFlow<List<SpotifySyncProvider.SyncedPlaylist>> = _availablePlaylists
+    private val _availablePlaylists = MutableStateFlow<List<SyncedPlaylist>>(emptyList())
+    val availablePlaylists: StateFlow<List<SyncedPlaylist>> = _availablePlaylists
 
     private val _playlistsLoading = MutableStateFlow(false)
     val playlistsLoading: StateFlow<Boolean> = _playlistsLoading

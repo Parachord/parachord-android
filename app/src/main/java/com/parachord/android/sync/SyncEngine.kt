@@ -223,7 +223,7 @@ class SyncEngine constructor(
     }
 
     private suspend fun applyTrackDiff(
-        remote: List<SpotifySyncProvider.SyncedTrack>,
+        remote: List<SyncedTrack>,
         localSources: List<SyncSourceEntity>,
         providerId: String,
     ): TypeSyncResult {
@@ -309,7 +309,7 @@ class SyncEngine constructor(
     }
 
     private suspend fun applyAlbumDiff(
-        remote: List<SpotifySyncProvider.SyncedAlbum>,
+        remote: List<SyncedAlbum>,
         localSources: List<SyncSourceEntity>,
         providerId: String,
     ): TypeSyncResult {
@@ -665,7 +665,7 @@ class SyncEngine constructor(
 
                     // Layer 1: durable sync_playlist_link map. Survives any
                     // save path that drops `spotifyId` on the local row.
-                    var existing: SpotifySyncProvider.SyncedPlaylist? = null
+                    var existing: SyncedPlaylist? = null
                     var matchSource = ""
                     val link = syncPlaylistLinkDao.selectForLink(playlist.id, providerId)
                     if (link != null) {
@@ -806,7 +806,7 @@ class SyncEngine constructor(
 
     private suspend fun pullPlaylist(
         localPlaylist: PlaylistEntity,
-        remote: SpotifySyncProvider.SyncedPlaylist,
+        remote: SyncedPlaylist,
     ) {
         // Fetch tracks first, then update playlist metadata with actual count
         // (use update, not insert/REPLACE, because REPLACE does DELETE+INSERT
