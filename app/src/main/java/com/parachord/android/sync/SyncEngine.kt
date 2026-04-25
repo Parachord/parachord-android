@@ -188,6 +188,26 @@ class SyncEngine constructor(
     private suspend fun syncTracks(
         onProgress: (SyncProgress) -> Unit,
     ): TypeSyncResult {
+        // Always run the legacy Spotify-only path first (preserves
+        // the v2→v3 migration that wipes + refetches Spotify-tagged
+        // tracks; non-Spotify providers don't have that history).
+        var aggregate = syncTracksForSpotify(onProgress)
+
+        // Then iterate non-Spotify enabled providers via the
+        // generic per-provider helper.
+        val enabled = settingsStore.getEnabledSyncProviders()
+        val others = providers.filter {
+            it.id in enabled && it.id != SpotifySyncProvider.PROVIDER_ID
+        }
+        for (provider in others) {
+            aggregate += syncTracksForProvider(provider, onProgress)
+        }
+        return aggregate
+    }
+
+    private suspend fun syncTracksForSpotify(
+        onProgress: (SyncProgress) -> Unit,
+    ): TypeSyncResult {
         val providerId = SpotifySyncProvider.PROVIDER_ID
         val localSources = syncSourceDao.getByProvider(providerId, "track")
         val localCount = localSources.size
@@ -215,6 +235,43 @@ class SyncEngine constructor(
 
         return applyTrackDiff(remote, localSources, providerId)
     }
+
+    /**
+     * Generic per-provider track sync. Used for non-Spotify providers
+     * (Apple Music; future providers). Spotify keeps its dedicated
+     * path because of the v2→v3 migration that's specific to legacy
+     * Spotify imports.
+     */
+    private suspend fun syncTracksForProvider(
+        provider: com.parachord.shared.sync.SyncProvider,
+        onProgress: (SyncProgress) -> Unit,
+    ): TypeSyncResult {
+        val providerId = provider.id
+        val localSources = syncSourceDao.getByProvider(providerId, "track")
+        val localCount = localSources.size
+        val latest = syncSourceDao.getMostRecentByProvider(providerId, "track")
+        val remote = try {
+            provider.fetchTracks(
+                localCount = localCount,
+                latestExternalId = latest?.externalId,
+                onProgress = { current, total ->
+                    onProgress(SyncProgress(SyncPhase.TRACKS, current, total, "Syncing ${provider.displayName} library..."))
+                },
+            )
+        } catch (e: Exception) {
+            Log.e(TAG, "Failed to fetch tracks from ${provider.displayName}", e)
+            return TypeSyncResult()
+        } ?: return TypeSyncResult(unchanged = localCount)
+        return applyTrackDiff(remote, localSources, providerId)
+    }
+
+    private operator fun TypeSyncResult.plus(other: TypeSyncResult): TypeSyncResult =
+        TypeSyncResult(
+            added = added + other.added,
+            removed = removed + other.removed,
+            updated = updated + other.updated,
+            unchanged = unchanged + other.unchanged,
+        )
 
     /** Clean sync after wiping synced tracks — no local sources to diff against. */
     private suspend fun syncTracksClean(
@@ -302,18 +359,35 @@ class SyncEngine constructor(
     private suspend fun syncAlbums(
         onProgress: (SyncProgress) -> Unit,
     ): TypeSyncResult {
-        val providerId = SpotifySyncProvider.PROVIDER_ID
+        val enabled = settingsStore.getEnabledSyncProviders()
+        var aggregate = TypeSyncResult()
+        for (provider in providers.filter { it.id in enabled }) {
+            aggregate += syncAlbumsForProvider(provider, onProgress)
+        }
+        return aggregate
+    }
+
+    private suspend fun syncAlbumsForProvider(
+        provider: com.parachord.shared.sync.SyncProvider,
+        onProgress: (SyncProgress) -> Unit,
+    ): TypeSyncResult {
+        val providerId = provider.id
         val localSources = syncSourceDao.getByProvider(providerId, "album")
         val localCount = localSources.size
         val latest = syncSourceDao.getMostRecentByProvider(providerId, "album")
 
-        val remote = spotifyProvider.fetchAlbums(
-            localCount = localCount,
-            latestExternalId = latest?.externalId,
-            onProgress = { current, total ->
-                onProgress(SyncProgress(SyncPhase.ALBUMS, current, total, "Syncing saved albums..."))
-            },
-        ) ?: return TypeSyncResult(unchanged = localCount)
+        val remote = try {
+            provider.fetchAlbums(
+                localCount = localCount,
+                latestExternalId = latest?.externalId,
+                onProgress = { current, total ->
+                    onProgress(SyncProgress(SyncPhase.ALBUMS, current, total, "Syncing ${provider.displayName} albums..."))
+                },
+            )
+        } catch (e: Exception) {
+            Log.e(TAG, "Failed to fetch albums from ${provider.displayName}", e)
+            return TypeSyncResult()
+        } ?: return TypeSyncResult(unchanged = localCount)
 
         return applyAlbumDiff(remote, localSources, providerId)
     }
@@ -378,16 +452,33 @@ class SyncEngine constructor(
     private suspend fun syncArtists(
         onProgress: (SyncProgress) -> Unit,
     ): TypeSyncResult {
-        val providerId = SpotifySyncProvider.PROVIDER_ID
+        val enabled = settingsStore.getEnabledSyncProviders()
+        var aggregate = TypeSyncResult()
+        for (provider in providers.filter { it.id in enabled }) {
+            aggregate += syncArtistsForProvider(provider, onProgress)
+        }
+        return aggregate
+    }
+
+    private suspend fun syncArtistsForProvider(
+        provider: com.parachord.shared.sync.SyncProvider,
+        onProgress: (SyncProgress) -> Unit,
+    ): TypeSyncResult {
+        val providerId = provider.id
         val localSources = syncSourceDao.getByProvider(providerId, "artist")
         val localCount = localSources.size
 
-        val remote = spotifyProvider.fetchArtists(
-            localCount = localCount,
-            onProgress = { current, total ->
-                onProgress(SyncProgress(SyncPhase.ARTISTS, current, total, "Syncing followed artists..."))
-            },
-        ) ?: return TypeSyncResult(unchanged = localCount)
+        val remote = try {
+            provider.fetchArtists(
+                localCount = localCount,
+                onProgress = { current, total ->
+                    onProgress(SyncProgress(SyncPhase.ARTISTS, current, total, "Syncing ${provider.displayName} artists..."))
+                },
+            )
+        } catch (e: Exception) {
+            Log.e(TAG, "Failed to fetch artists from ${provider.displayName}", e)
+            return TypeSyncResult()
+        } ?: return TypeSyncResult(unchanged = localCount)
 
         val remoteByExternalId = remote.associateBy { it.spotifyId }
         val localByExternalId = localSources.associateBy { it.externalId }
@@ -1363,12 +1454,14 @@ class SyncEngine constructor(
 
     suspend fun onTrackRemoved(track: TrackEntity) {
         val sources = syncSourceDao.getByItem(track.id, "track")
-        val spotifySource = sources.find { it.providerId == SpotifySyncProvider.PROVIDER_ID }
-        if (spotifySource?.externalId != null) {
+        val providersById = providers.associateBy { it.id }
+        for (source in sources) {
+            val externalId = source.externalId ?: continue
+            val provider = providersById[source.providerId] ?: continue
             try {
-                spotifyProvider.removeTracks(listOf(spotifySource.externalId!!))
+                provider.removeTracks(listOf(externalId))
             } catch (e: Exception) {
-                Log.e(TAG, "Failed to remove track from Spotify", e)
+                Log.e(TAG, "Failed to remove track from ${provider.displayName}", e)
             }
         }
         syncSourceDao.deleteAllForItem(track.id, "track")
@@ -1376,12 +1469,14 @@ class SyncEngine constructor(
 
     suspend fun onAlbumRemoved(album: AlbumEntity) {
         val sources = syncSourceDao.getByItem(album.id, "album")
-        val spotifySource = sources.find { it.providerId == SpotifySyncProvider.PROVIDER_ID }
-        if (spotifySource?.externalId != null) {
+        val providersById = providers.associateBy { it.id }
+        for (source in sources) {
+            val externalId = source.externalId ?: continue
+            val provider = providersById[source.providerId] ?: continue
             try {
-                spotifyProvider.removeAlbums(listOf(spotifySource.externalId!!))
+                provider.removeAlbums(listOf(externalId))
             } catch (e: Exception) {
-                Log.e(TAG, "Failed to remove album from Spotify", e)
+                Log.e(TAG, "Failed to remove album from ${provider.displayName}", e)
             }
         }
         syncSourceDao.deleteAllForItem(album.id, "album")
@@ -1389,12 +1484,14 @@ class SyncEngine constructor(
 
     suspend fun onArtistRemoved(artist: ArtistEntity) {
         val sources = syncSourceDao.getByItem(artist.id, "artist")
-        val spotifySource = sources.find { it.providerId == SpotifySyncProvider.PROVIDER_ID }
-        if (spotifySource?.externalId != null) {
+        val providersById = providers.associateBy { it.id }
+        for (source in sources) {
+            val externalId = source.externalId ?: continue
+            val provider = providersById[source.providerId] ?: continue
             try {
-                spotifyProvider.unfollowArtists(listOf(spotifySource.externalId!!))
+                provider.unfollowArtists(listOf(externalId))
             } catch (e: Exception) {
-                Log.e(TAG, "Failed to unfollow artist on Spotify", e)
+                Log.e(TAG, "Failed to unfollow artist on ${provider.displayName}", e)
             }
         }
         syncSourceDao.deleteAllForItem(artist.id, "artist")
