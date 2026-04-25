@@ -31,13 +31,34 @@ import com.parachord.android.sync.SyncEngine
 import com.parachord.android.ui.components.AlbumArtCard
 
 private val SpotifyGreen = Color(0xFF1DB954)
+private val AppleMusicRed = Color(0xFFFA243C)
+
+/** Provider-specific accent color used for the wizard's CTA button + spinner. */
+private fun providerAccent(providerId: String): Color = when (providerId) {
+    "applemusic" -> AppleMusicRed
+    else -> SpotifyGreen
+}
+
+/** Provider-specific display name used in the OPTIONS step header. */
+private fun providerDisplayName(providerId: String): String = when (providerId) {
+    "applemusic" -> "Apple Music"
+    "spotify" -> "Spotify"
+    else -> providerId.replaceFirstChar { it.uppercase() }
+}
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun SyncSetupSheet(
     onDismiss: () -> Unit,
     viewModel: SyncViewModel = koinViewModel(),
+    providerId: String = com.parachord.android.sync.SpotifySyncProvider.PROVIDER_ID,
 ) {
+    // Tell the VM which provider we're configuring. Reactive: the same
+    // sheet can be reopened later for a different provider with no
+    // recompose-leak — setActiveProvider also resets axis checkboxes.
+    LaunchedEffect(providerId) { viewModel.setActiveProvider(providerId) }
+    val activeProviderId by viewModel.activeProviderId.collectAsStateWithLifecycle()
+    val accent = providerAccent(activeProviderId)
     val currentStep by viewModel.currentStep.collectAsStateWithLifecycle()
     val sheetState = rememberModalBottomSheetState(
         skipPartiallyExpanded = true,
@@ -61,20 +82,37 @@ fun SyncSetupSheet(
         },
     ) {
         when (currentStep) {
-            SyncViewModel.SetupStep.OPTIONS -> OptionsStep(viewModel)
-            SyncViewModel.SetupStep.PLAYLISTS -> PlaylistSelectionStep(viewModel)
-            SyncViewModel.SetupStep.SYNCING -> SyncingStep(viewModel)
-            SyncViewModel.SetupStep.COMPLETE -> CompleteStep(viewModel, onDismiss)
+            SyncViewModel.SetupStep.OPTIONS -> OptionsStep(viewModel, accent, providerDisplayName(activeProviderId), activeProviderId)
+            SyncViewModel.SetupStep.PLAYLISTS -> PlaylistSelectionStep(viewModel, accent)
+            SyncViewModel.SetupStep.SYNCING -> SyncingStep(viewModel, accent)
+            SyncViewModel.SetupStep.COMPLETE -> CompleteStep(viewModel, onDismiss, accent)
         }
     }
 }
 
 @Composable
-private fun OptionsStep(viewModel: SyncViewModel) {
+private fun OptionsStep(
+    viewModel: SyncViewModel,
+    accent: Color,
+    providerDisplayName: String,
+    providerId: String,
+) {
     val syncTracks by viewModel.syncTracks.collectAsStateWithLifecycle()
     val syncAlbums by viewModel.syncAlbums.collectAsStateWithLifecycle()
     val syncArtists by viewModel.syncArtists.collectAsStateWithLifecycle()
     val syncPlaylists by viewModel.syncPlaylists.collectAsStateWithLifecycle()
+
+    // Apple Music labels its library a bit differently from Spotify; use
+    // provider-native nomenclature for the row labels so the wizard
+    // matches the user's mental model of the source.
+    val isApple = providerId == "applemusic"
+    val tracksLabel = if (isApple) "Library Songs" else "Liked Songs"
+    val albumsLabel = if (isApple) "Library Albums" else "Saved Albums"
+    val artistsLabel = if (isApple) "Library Artists" else "Followed Artists"
+
+    // Apple Music skips the playlist picker (per Decision D1 — AM is
+    // all-or-nothing for now), so the CTA is "Start Sync" not "Next".
+    val showsPicker = !isApple
 
     Column(
         modifier = Modifier
@@ -85,39 +123,50 @@ private fun OptionsStep(viewModel: SyncViewModel) {
             Icon(
                 Icons.Default.Sync,
                 contentDescription = null,
-                tint = SpotifyGreen,
+                tint = accent,
                 modifier = Modifier.size(28.dp),
             )
             Spacer(Modifier.width(12.dp))
             Text(
-                "Sync with Spotify",
+                "Sync with $providerDisplayName",
                 style = MaterialTheme.typography.headlineSmall,
                 fontWeight = FontWeight.SemiBold,
             )
         }
         Spacer(Modifier.height(8.dp))
         Text(
-            "Choose what to sync from your Spotify library",
+            "Choose what to sync from your $providerDisplayName library",
             style = MaterialTheme.typography.bodyMedium,
             color = MaterialTheme.colorScheme.onSurfaceVariant,
         )
         Spacer(Modifier.height(24.dp))
 
-        SyncOptionRow("Liked Songs", Icons.Default.Favorite, syncTracks) { viewModel.setSyncTracks(it) }
-        SyncOptionRow("Saved Albums", Icons.Default.Album, syncAlbums) { viewModel.setSyncAlbums(it) }
-        SyncOptionRow("Followed Artists", Icons.Default.Person, syncArtists) { viewModel.setSyncArtists(it) }
+        SyncOptionRow(tracksLabel, Icons.Default.Favorite, syncTracks) { viewModel.setSyncTracks(it) }
+        SyncOptionRow(albumsLabel, Icons.Default.Album, syncAlbums) { viewModel.setSyncAlbums(it) }
+        SyncOptionRow(artistsLabel, Icons.Default.Person, syncArtists) { viewModel.setSyncArtists(it) }
         @Suppress("DEPRECATION")
         SyncOptionRow("Playlists", Icons.Default.QueueMusic, syncPlaylists) { viewModel.setSyncPlaylists(it) }
+
+        if (isApple) {
+            Spacer(Modifier.height(8.dp))
+            Text(
+                "Note: Apple Music's API doesn't allow Parachord to delete or rename " +
+                    "playlists, or remove tracks from a playlist. Those actions silently " +
+                    "no-op on Apple Music — make those changes in the Music app instead.",
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+        }
 
         Spacer(Modifier.height(24.dp))
 
         Button(
             onClick = { viewModel.proceedFromOptions() },
             modifier = Modifier.fillMaxWidth(),
-            colors = ButtonDefaults.buttonColors(containerColor = SpotifyGreen),
+            colors = ButtonDefaults.buttonColors(containerColor = accent),
             enabled = syncTracks || syncAlbums || syncArtists || syncPlaylists,
         ) {
-            Text(if (syncPlaylists) "Next" else "Start Sync")
+            Text(if (syncPlaylists && showsPicker) "Next" else "Start Sync")
         }
         Spacer(Modifier.height(16.dp))
     }
@@ -146,7 +195,7 @@ private fun SyncOptionRow(
 }
 
 @Composable
-private fun PlaylistSelectionStep(viewModel: SyncViewModel) {
+private fun PlaylistSelectionStep(viewModel: SyncViewModel, accent: Color = SpotifyGreen) {
     val playlists by viewModel.availablePlaylists.collectAsStateWithLifecycle()
     val selectedIds by viewModel.selectedPlaylistIds.collectAsStateWithLifecycle()
     val filter by viewModel.playlistFilter.collectAsStateWithLifecycle()
@@ -326,7 +375,7 @@ private fun PlaylistSelectionStep(viewModel: SyncViewModel) {
             Button(
                 onClick = { viewModel.startSync() },
                 modifier = Modifier.weight(1f),
-                colors = ButtonDefaults.buttonColors(containerColor = SpotifyGreen),
+                colors = ButtonDefaults.buttonColors(containerColor = accent),
                 enabled = selectedIds.isNotEmpty() && !isLoading,
             ) {
                 Text("Start Sync")
@@ -402,7 +451,7 @@ private fun PlaylistSkeletonRow() {
 }
 
 @Composable
-private fun SyncingStep(viewModel: SyncViewModel) {
+private fun SyncingStep(viewModel: SyncViewModel, accent: Color = SpotifyGreen) {
     val progress by viewModel.syncProgress.collectAsStateWithLifecycle()
 
     Column(
@@ -413,7 +462,7 @@ private fun SyncingStep(viewModel: SyncViewModel) {
     ) {
         CircularProgressIndicator(
             modifier = Modifier.size(48.dp),
-            color = SpotifyGreen,
+            color = accent,
         )
         Spacer(Modifier.height(24.dp))
         Text(
@@ -432,7 +481,7 @@ private fun SyncingStep(viewModel: SyncViewModel) {
             LinearProgressIndicator(
                 progress = { progress.current.toFloat() / progress.total.coerceAtLeast(1) },
                 modifier = Modifier.fillMaxWidth(),
-                color = SpotifyGreen,
+                color = accent,
             )
         }
         Spacer(Modifier.height(16.dp))
@@ -440,7 +489,7 @@ private fun SyncingStep(viewModel: SyncViewModel) {
 }
 
 @Composable
-private fun CompleteStep(viewModel: SyncViewModel, onDismiss: () -> Unit) {
+private fun CompleteStep(viewModel: SyncViewModel, onDismiss: () -> Unit, accent: Color = SpotifyGreen) {
     val result by viewModel.syncResult.collectAsStateWithLifecycle()
 
     Column(
@@ -453,7 +502,7 @@ private fun CompleteStep(viewModel: SyncViewModel, onDismiss: () -> Unit) {
             if (result?.success == true) Icons.Default.CheckCircle else Icons.Default.Error,
             contentDescription = null,
             modifier = Modifier.size(48.dp),
-            tint = if (result?.success == true) SpotifyGreen else MaterialTheme.colorScheme.error,
+            tint = if (result?.success == true) accent else MaterialTheme.colorScheme.error,
         )
         Spacer(Modifier.height(16.dp))
         Text(
@@ -465,10 +514,10 @@ private fun CompleteStep(viewModel: SyncViewModel, onDismiss: () -> Unit) {
         result?.let { r ->
             if (r.success) {
                 Spacer(Modifier.height(20.dp))
-                SyncStatRow("Tracks", r.tracks)
-                SyncStatRow("Albums", r.albums)
-                SyncStatRow("Artists", r.artists)
-                SyncStatRow("Playlists", r.playlists)
+                SyncStatRow("Tracks", r.tracks, accent)
+                SyncStatRow("Albums", r.albums, accent)
+                SyncStatRow("Artists", r.artists, accent)
+                SyncStatRow("Playlists", r.playlists, accent)
             } else {
                 Spacer(Modifier.height(8.dp))
                 Text(
@@ -494,7 +543,7 @@ private fun CompleteStep(viewModel: SyncViewModel, onDismiss: () -> Unit) {
 }
 
 @Composable
-private fun SyncStatRow(label: String, stats: SyncEngine.TypeSyncResult) {
+private fun SyncStatRow(label: String, stats: SyncEngine.TypeSyncResult, accent: Color = SpotifyGreen) {
     if (stats.added == 0 && stats.removed == 0 && stats.unchanged == 0) return
     Row(
         modifier = Modifier
@@ -510,7 +559,7 @@ private fun SyncStatRow(label: String, stats: SyncEngine.TypeSyncResult) {
             Text(
                 "+${stats.added}",
                 style = MaterialTheme.typography.bodyMedium,
-                color = SpotifyGreen,
+                color = accent,
                 modifier = Modifier.padding(end = 12.dp),
             )
         }

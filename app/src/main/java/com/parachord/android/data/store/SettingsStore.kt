@@ -63,6 +63,12 @@ class SettingsStore constructor(
         val SYNC_PUSH_LOCAL_PLAYLISTS = booleanPreferencesKey("sync_push_local_playlists")
         val SYNC_DATA_VERSION = stringPreferencesKey("sync_data_version")
         val ENABLED_SYNC_PROVIDERS = stringPreferencesKey("enabled_sync_providers")
+        /** Per-provider opt-in for which collection axes to sync.
+         *  Keyed as `sync_collections_<providerId>` ("tracks,albums,artists,playlists").
+         *  Absent ⇒ default to ALL axes (preserves the global-toggle behavior
+         *  that existed before per-provider opt-in landed). */
+        fun syncCollectionsKey(providerId: String) =
+            stringPreferencesKey("sync_collections_$providerId")
         val DELETED_FRIEND_KEYS = stringSetPreferencesKey("deleted_friend_keys")
         val SORT_ARTISTS = stringPreferencesKey("sort_artists")
         val SORT_ALBUMS = stringPreferencesKey("sort_albums")
@@ -635,6 +641,44 @@ class SettingsStore constructor(
 
     private fun parseEnabledSyncProviders(raw: String?): Set<String> =
         if (raw.isNullOrBlank()) setOf("spotify")
+        else raw.split(",").map { it.trim() }.filter { it.isNotEmpty() }.toSet()
+
+    /** All recognized collection axis identifiers. Used as the
+     *  default-everything return value when no per-provider opt-in
+     *  has been set yet. */
+    private val ALL_SYNC_COLLECTIONS = setOf("tracks", "albums", "artists", "playlists")
+
+    /**
+     * Per-provider collection-axis opt-in. Returns the set of axes
+     * (`"tracks"`, `"albums"`, `"artists"`, `"playlists"`) the
+     * provider should sync. **Defaults to all four** when no value has
+     * been written for [providerId] — preserves the legacy behavior
+     * where global toggles (`SYNC_TRACKS` etc.) gated every provider
+     * uniformly.
+     *
+     * Wizard-completed providers explicitly write a (possibly smaller)
+     * set; SyncEngine's per-provider helpers consult this to skip a
+     * provider for an axis it didn't opt into.
+     */
+    suspend fun getSyncCollectionsForProvider(providerId: String): Set<String> {
+        val raw = dataStore.data.first()[syncCollectionsKey(providerId)]
+        return parseSyncCollections(raw)
+    }
+
+    /** Reactive variant — used by the wizard to pre-fill its checkboxes
+     *  with whatever the user picked last time. */
+    fun getSyncCollectionsForProviderFlow(providerId: String): Flow<Set<String>> =
+        dataStore.data.map { parseSyncCollections(it[syncCollectionsKey(providerId)]) }
+
+    suspend fun setSyncCollectionsForProvider(providerId: String, collections: Set<String>) {
+        dataStore.edit {
+            it[syncCollectionsKey(providerId)] = collections.joinToString(",")
+        }
+    }
+
+    private fun parseSyncCollections(raw: String?): Set<String> =
+        if (raw == null) ALL_SYNC_COLLECTIONS
+        else if (raw.isBlank()) emptySet()
         else raw.split(",").map { it.trim() }.filter { it.isNotEmpty() }.toSet()
 
     suspend fun clearSyncSettings() {

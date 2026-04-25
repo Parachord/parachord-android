@@ -2576,6 +2576,10 @@ private fun GeneralTab(
     val syncEnabled by syncViewModel.syncEnabled.collectAsStateWithLifecycle()
     val lastSyncAt by syncViewModel.lastSyncAt.collectAsStateWithLifecycle()
     var showSyncSetupSheet by remember { mutableStateOf(false) }
+    /** Which provider the wizard is currently configuring. The same sheet
+     *  is reused — Spotify rows write `"spotify"`, the AM "Configure Sync…"
+     *  row below writes `"applemusic"`. */
+    var syncSetupProviderId by remember { mutableStateOf("spotify") }
     var showStopSyncDialog by remember { mutableStateOf(false) }
 
     LazyColumn(modifier = Modifier.fillMaxSize()) {
@@ -2650,6 +2654,7 @@ private fun GeneralTab(
                                 checked = syncEnabled,
                                 onCheckedChange = { enabled ->
                                     if (enabled) {
+                                        syncSetupProviderId = "spotify"
                                         showSyncSetupSheet = true
                                     } else {
                                         showStopSyncDialog = true
@@ -2676,6 +2681,7 @@ private fun GeneralTab(
                             // Sync Now button
                             Button(
                                 onClick = {
+                                    syncSetupProviderId = "spotify"
                                     syncViewModel.syncNow()
                                     showSyncSetupSheet = true
                                 },
@@ -2693,6 +2699,7 @@ private fun GeneralTab(
                             // Change sync settings button
                             OutlinedButton(
                                 onClick = {
+                                    syncSetupProviderId = "spotify"
                                     syncViewModel.resetSetup()
                                     showSyncSetupSheet = true
                                 },
@@ -2757,7 +2764,7 @@ private fun GeneralTab(
                                 )
                                 Text(
                                     if (appleMusicSyncEnabled)
-                                        "AM library playlists pull and push on every sync"
+                                        "Songs / albums / artists / playlists pull on every sync"
                                     else
                                         "Apple Music sync disabled",
                                     style = MaterialTheme.typography.bodySmall,
@@ -2766,10 +2773,37 @@ private fun GeneralTab(
                             }
                             Switch(
                                 checked = appleMusicSyncEnabled,
-                                onCheckedChange = onSetAppleMusicSyncEnabled,
+                                onCheckedChange = { enabled ->
+                                    if (enabled) {
+                                        // Open the wizard so the user picks which
+                                        // collection axes (songs/albums/artists/playlists)
+                                        // to pull from AM. The wizard's startSync()
+                                        // adds AM to enabledSyncProviders + persists
+                                        // the per-provider axis opt-in.
+                                        syncSetupProviderId = "applemusic"
+                                        syncViewModel.resetSetup()
+                                        showSyncSetupSheet = true
+                                    } else {
+                                        onSetAppleMusicSyncEnabled(false)
+                                    }
+                                },
                             )
                         }
                         if (appleMusicSyncEnabled) {
+                            Spacer(modifier = Modifier.height(12.dp))
+                            // Reconfigure button — same wizard, opens with AM's
+                            // current axis opt-in pre-filled.
+                            OutlinedButton(
+                                onClick = {
+                                    syncSetupProviderId = "applemusic"
+                                    syncViewModel.resetSetup()
+                                    showSyncSetupSheet = true
+                                },
+                                modifier = Modifier.fillMaxWidth(),
+                                shape = RoundedCornerShape(8.dp),
+                            ) {
+                                Text("Configure Sync…")
+                            }
                             Spacer(modifier = Modifier.height(12.dp))
                             Text(
                                 "Note: Apple Music's API doesn't allow Parachord to delete or " +
@@ -2791,6 +2825,7 @@ private fun GeneralTab(
         SyncSetupSheet(
             onDismiss = { showSyncSetupSheet = false },
             viewModel = syncViewModel,
+            providerId = syncSetupProviderId,
         )
     }
 

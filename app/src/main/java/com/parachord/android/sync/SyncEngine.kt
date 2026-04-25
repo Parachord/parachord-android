@@ -190,20 +190,29 @@ class SyncEngine constructor(
     ): TypeSyncResult {
         // Always run the legacy Spotify-only path first (preserves
         // the v2→v3 migration that wipes + refetches Spotify-tagged
-        // tracks; non-Spotify providers don't have that history).
-        var aggregate = syncTracksForSpotify(onProgress)
+        // tracks; non-Spotify providers don't have that history). The
+        // per-provider axis opt-in still applies — Spotify can opt out
+        // of tracks via the wizard and this path skips itself.
+        var aggregate = if (providerHasAxis(SpotifySyncProvider.PROVIDER_ID, "tracks")) {
+            syncTracksForSpotify(onProgress)
+        } else TypeSyncResult()
 
-        // Then iterate non-Spotify enabled providers via the
-        // generic per-provider helper.
+        // Then iterate non-Spotify enabled providers via the generic
+        // per-provider helper. Each gates on its own axis opt-in.
         val enabled = settingsStore.getEnabledSyncProviders()
         val others = providers.filter {
             it.id in enabled && it.id != SpotifySyncProvider.PROVIDER_ID
         }
         for (provider in others) {
+            if (!providerHasAxis(provider.id, "tracks")) continue
             aggregate += syncTracksForProvider(provider, onProgress)
         }
         return aggregate
     }
+
+    /** Per-provider axis opt-in lookup. Defaults to all axes for back-compat. */
+    private suspend fun providerHasAxis(providerId: String, axis: String): Boolean =
+        axis in settingsStore.getSyncCollectionsForProvider(providerId)
 
     private suspend fun syncTracksForSpotify(
         onProgress: (SyncProgress) -> Unit,
@@ -362,6 +371,7 @@ class SyncEngine constructor(
         val enabled = settingsStore.getEnabledSyncProviders()
         var aggregate = TypeSyncResult()
         for (provider in providers.filter { it.id in enabled }) {
+            if (!providerHasAxis(provider.id, "albums")) continue
             aggregate += syncAlbumsForProvider(provider, onProgress)
         }
         return aggregate
@@ -470,6 +480,7 @@ class SyncEngine constructor(
         val enabled = settingsStore.getEnabledSyncProviders()
         var aggregate = TypeSyncResult()
         for (provider in providers.filter { it.id in enabled }) {
+            if (!providerHasAxis(provider.id, "artists")) continue
             aggregate += syncArtistsForProvider(provider, onProgress)
         }
         return aggregate
@@ -612,10 +623,16 @@ class SyncEngine constructor(
         // The dedup-cleanup migration block below is Spotify-only by design
         // (one-time fix for playlists created by old Spotify sync bugs); it
         // can't be generalized so we keep the Spotify pull inline rather
-        // than duplicating the whole helper.
-        val remotePlaylists = spotifyProvider.fetchPlaylists { current, total ->
-            onProgress(SyncProgress(SyncPhase.PLAYLISTS, current, total, "Fetching playlists..."))
-        }
+        // than duplicating the whole helper. When Spotify has opted out
+        // of the playlists axis (per-provider opt-in via the wizard),
+        // skip the fetch entirely — the push and non-Spotify-pull loops
+        // below have their own per-axis gates.
+        val spotifyPlaylistsEnabled = providerHasAxis(SpotifySyncProvider.PROVIDER_ID, "playlists")
+        val remotePlaylists = if (spotifyPlaylistsEnabled) {
+            spotifyProvider.fetchPlaylists { current, total ->
+                onProgress(SyncProgress(SyncPhase.PLAYLISTS, current, total, "Fetching playlists..."))
+            }
+        } else emptyList()
 
         val selectedRemote = if (settings.selectedPlaylistIds.isEmpty()) {
             remotePlaylists
@@ -847,6 +864,9 @@ class SyncEngine constructor(
             val enabledProviderIds = settingsStore.getEnabledSyncProviders()
             val enabledProviders = providers.filter { it.id in enabledProviderIds }
             for (provider in enabledProviders) {
+                // Per-provider axis opt-in — skip push for providers that
+                // didn't enable the playlists axis in their wizard.
+                if (!providerHasAxis(provider.id, "playlists")) continue
                 // Spotify already loaded `remotePlaylists` + `deletedSpotifyIds`
                 // above for the dedup-cleanup phase; reuse those for Spotify
                 // and fetch fresh for any other provider.
@@ -909,6 +929,7 @@ class SyncEngine constructor(
             it.id in enabledProviderIds && it.id != SpotifySyncProvider.PROVIDER_ID
         }
         for (provider in nonSpotifyProviders) {
+            if (!providerHasAxis(provider.id, "playlists")) continue
             val pullResult = pullPlaylistsForProvider(provider, onProgress)
             added += pullResult.added
             removed += pullResult.removed
@@ -1435,11 +1456,17 @@ class SyncEngine constructor(
         // Spotify-specific scalars stay write-through (per Decision 5).
         // For other providers, sync_playlist_link.snapshotId is the
         // source of truth and gets refreshed via the upsert below.
+        // Preserve locally-generated mosaic art (`file://...filesDir/playlist_mosaics/`)
+        // from being overwritten by the provider's stock playlist art. Mosaics are
+        // built from album-art tiles in ImageEnrichmentService and are the canonical
+        // visual identity for playlists in Parachord. The provider's art gets used
+        // only when we have no local mosaic yet.
+        val resolvedArtwork = preserveLocalMosaic(localPlaylist.artworkUrl, remote.entity.artworkUrl)
         if (provider.id == SpotifySyncProvider.PROVIDER_ID) {
             playlistDao.update(localPlaylist.copy(
                 name = remote.entity.name,
                 description = remote.entity.description,
-                artworkUrl = remote.entity.artworkUrl,
+                artworkUrl = resolvedArtwork,
                 trackCount = tracks.size,
                 snapshotId = remote.snapshotId,
                 updatedAt = now,
@@ -1451,7 +1478,7 @@ class SyncEngine constructor(
             playlistDao.update(localPlaylist.copy(
                 name = remote.entity.name,
                 description = remote.entity.description,
-                artworkUrl = remote.entity.artworkUrl,
+                artworkUrl = resolvedArtwork,
                 trackCount = tracks.size,
                 updatedAt = now,
                 lastModified = now,
@@ -1607,5 +1634,19 @@ class SyncEngine constructor(
         syncSourceDao.deleteAllForProvider(providerId)
         syncPlaylistLinkDao.deleteForProvider(providerId)
         settingsStore.clearSyncSettings()
+    }
+
+    /**
+     * Don't overwrite a locally-generated mosaic with the provider's
+     * stock playlist art. Mosaics live under `filesDir/playlist_mosaics/`
+     * and are written as `file://...` URIs by [com.parachord.android.data.metadata.ImageEnrichmentService.enrichPlaylistArt].
+     * Returns:
+     *  - the existing mosaic when it's a `file://` path (don't overwrite)
+     *  - the remote URL when there's no existing artwork
+     *  - the existing remote URL when both are remote (no-op churn)
+     */
+    private fun preserveLocalMosaic(existing: String?, remote: String?): String? {
+        if (existing != null && existing.startsWith("file://")) return existing
+        return remote ?: existing
     }
 }

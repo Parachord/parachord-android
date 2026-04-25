@@ -197,8 +197,13 @@ fun PlaylistsScreen(
             } else {
                 LazyColumn(state = listState, modifier = Modifier.fillMaxSize()) {
                     items(sortedPlaylists, key = { it.id }) { playlist ->
-                        // Trigger mosaic generation for playlists without artwork
-                        if (playlist.artworkUrl.isNullOrBlank()) {
+                        // Trigger mosaic generation when artwork is missing OR when
+                        // the existing artwork is a remote URL (e.g. provider stock
+                        // art that overwrote a mosaic before the preserveLocalMosaic
+                        // guard landed). Only `file://` URLs (locally-generated
+                        // mosaics) are treated as canonical and skipped.
+                        val art = playlist.artworkUrl
+                        if (art.isNullOrBlank() || !art.startsWith("file://")) {
                             LaunchedEffect(playlist.id) {
                                 viewModel.enrichPlaylistArtIfNeeded(playlist.id)
                             }

@@ -159,7 +159,19 @@ class AppleMusicSyncProvider(
                     offset = offset,
                 )
             } catch (e: HttpException) {
+                // 404 is observed for playlists where the library mirror
+                // never materialized tracks (curated / shared playlists
+                // followed but not authored). Log and return whatever
+                // we collected so far rather than throwing — the playlist
+                // entity still gets created with whatever tracks did
+                // come through earlier pages.
                 if (e.code() == 401) throw AppleMusicReauthRequiredException()
+                if (e.code() == 404) {
+                    Log.w(TAG, "AM playlist $externalPlaylistId tracks 404 at offset=$offset; " +
+                        "returning ${all.size} tracks collected so far")
+                    return all
+                }
+                Log.w(TAG, "AM playlist $externalPlaylistId tracks fetch failed at offset=$offset", e)
                 throw e
             }
             for ((index, am) in resp.data.withIndex()) {
@@ -167,6 +179,11 @@ class AppleMusicSyncProvider(
             }
             if (resp.next == null || resp.data.size < PAGE_SIZE) break
             offset += resp.data.size
+        }
+        if (all.isEmpty()) {
+            Log.w(TAG, "AM playlist $externalPlaylistId returned 0 tracks — " +
+                "library mirror may not include tracks for this playlist (common for " +
+                "shared/curated playlists where editing is disabled)")
         }
         return all
     }

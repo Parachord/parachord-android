@@ -8,6 +8,7 @@ import com.parachord.android.sync.SpotifySyncProvider
 import com.parachord.android.sync.SyncEngine
 import com.parachord.android.sync.SyncScheduler
 import com.parachord.android.sync.SyncedPlaylist
+import com.parachord.shared.sync.SyncProvider
 import kotlinx.coroutines.flow.*
 import kotlinx.coroutines.launch
 class SyncViewModel constructor(
@@ -16,7 +17,30 @@ class SyncViewModel constructor(
     private val settingsStore: SettingsStore,
     private val spotifyProvider: SpotifySyncProvider,
     private val syncSourceDao: SyncSourceDao,
+    private val providers: List<SyncProvider>,
 ) : ViewModel() {
+
+    /** Which provider this wizard instance is configuring. Mutable so the
+     *  same VM can be reused between Spotify-config and AM-config flows
+     *  (the Settings screen swaps it before opening the sheet). Defaults
+     *  to Spotify for backwards compat with the Library-screen entry. */
+    private val _activeProviderId = MutableStateFlow(SpotifySyncProvider.PROVIDER_ID)
+    val activeProviderId: StateFlow<String> = _activeProviderId
+    val activeProvider: StateFlow<SyncProvider?> = _activeProviderId
+        .map { id -> providers.firstOrNull { it.id == id } }
+        .stateIn(viewModelScope, SharingStarted.Eagerly, providers.firstOrNull { it.id == SpotifySyncProvider.PROVIDER_ID })
+
+    fun setActiveProvider(providerId: String) {
+        _activeProviderId.value = providerId
+        viewModelScope.launch {
+            // Pre-fill axis checkboxes from the per-provider opt-in.
+            val collections = settingsStore.getSyncCollectionsForProvider(providerId)
+            _syncTracks.value = "tracks" in collections
+            _syncAlbums.value = "albums" in collections
+            _syncArtists.value = "artists" in collections
+            _syncPlaylists.value = "playlists" in collections
+        }
+    }
 
     enum class SetupStep { OPTIONS, PLAYLISTS, SYNCING, COMPLETE }
 
@@ -81,7 +105,11 @@ class SyncViewModel constructor(
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), 0L)
 
     fun proceedFromOptions() {
-        if (_syncPlaylists.value) {
+        // Per Decision D1, Apple Music doesn't expose per-playlist
+        // selection in the wizard yet (all-or-nothing). The picker is
+        // Spotify-only; non-Spotify providers skip straight to sync.
+        val canPickPlaylists = _activeProviderId.value == SpotifySyncProvider.PROVIDER_ID
+        if (_syncPlaylists.value && canPickPlaylists) {
             // Transition immediately — show skeleton loaders while fetching
             _playlistsLoading.value = true
             _playlistsError.value = null
@@ -126,16 +154,40 @@ class SyncViewModel constructor(
     fun startSync() {
         _currentStep.value = SetupStep.SYNCING
         viewModelScope.launch {
-            settingsStore.saveSyncSettings(SettingsStore.SyncSettings(
-                enabled = true,
-                provider = "spotify",
-                syncTracks = _syncTracks.value,
-                syncAlbums = _syncAlbums.value,
-                syncArtists = _syncArtists.value,
-                syncPlaylists = _syncPlaylists.value,
-                selectedPlaylistIds = _selectedPlaylistIds.value,
-                pushLocalPlaylists = true,
-            ))
+            val activeId = _activeProviderId.value
+
+            // Persist per-provider axis opt-in. Earlier this was a single
+            // global SyncSettings struct; per-provider lets AM sync only
+            // playlists while Spotify syncs everything (or vice versa).
+            val collections = buildSet {
+                if (_syncTracks.value) add("tracks")
+                if (_syncAlbums.value) add("albums")
+                if (_syncArtists.value) add("artists")
+                if (_syncPlaylists.value) add("playlists")
+            }
+            settingsStore.setSyncCollectionsForProvider(activeId, collections)
+
+            // Add this provider to enabledSyncProviders. Spotify is in
+            // by default; AM gets added the first time its wizard finishes.
+            val enabled = settingsStore.getEnabledSyncProviders() + activeId
+            settingsStore.setEnabledSyncProviders(enabled)
+
+            // Spotify path: keep writing the legacy SyncSettings struct so
+            // the existing global-toggle codepaths (sync mass-removal
+            // safeguard, etc.) continue to work. AM doesn't write this —
+            // its per-provider opt-in is the source of truth.
+            if (activeId == SpotifySyncProvider.PROVIDER_ID) {
+                settingsStore.saveSyncSettings(SettingsStore.SyncSettings(
+                    enabled = true,
+                    provider = "spotify",
+                    syncTracks = _syncTracks.value,
+                    syncAlbums = _syncAlbums.value,
+                    syncArtists = _syncArtists.value,
+                    syncPlaylists = _syncPlaylists.value,
+                    selectedPlaylistIds = _selectedPlaylistIds.value,
+                    pushLocalPlaylists = true,
+                ))
+            }
 
             syncScheduler.startInAppTimer()
             syncScheduler.enableWorkManagerSync()
