@@ -24,7 +24,25 @@ class LibraryRepository constructor(
     private val playlistTrackDao: PlaylistTrackDao,
     private val syncEngine: SyncEngine,
     private val mbidEnrichment: MbidEnrichmentService,
+    private val syncPlaylistLinkDao: com.parachord.android.data.db.dao.SyncPlaylistLinkDao,
+    private val syncPlaylistSourceDao: com.parachord.android.data.db.dao.SyncPlaylistSourceDao,
 ) {
+
+    /**
+     * True iff the playlist has any sync intent — either a `syncedFrom`
+     * pull source OR at least one `syncedTo` push mirror. Local-only
+     * playlists return false, so editing one doesn't pointlessly flag
+     * `locallyModified` (which would force the next sync cycle to scan
+     * a never-syncable playlist).
+     *
+     * Fix 2 of the multi-provider mirror-propagation rules from desktop
+     * CLAUDE.md.
+     */
+    private suspend fun hasSyncIntent(playlistId: String): Boolean {
+        val source = syncPlaylistSourceDao.selectForLocal(playlistId)
+        if (source != null) return true
+        return syncPlaylistLinkDao.selectForLocal(playlistId).isNotEmpty()
+    }
     fun getAllTracks(): Flow<List<TrackEntity>> = trackDao.getAll()
     fun getAllAlbums(): Flow<List<AlbumEntity>> = albumDao.getAll()
     fun getAllArtists(): Flow<List<ArtistEntity>> = artistDao.getAll()
@@ -174,11 +192,18 @@ class LibraryRepository constructor(
         // Update track count and modification timestamps
         val playlist = playlistDao.getById(playlistId) ?: return
         val now = System.currentTimeMillis()
+        // Fix 2: only flag locallyModified when the playlist has sync
+        // intent (syncedFrom OR any syncedTo). Editing a local-only
+        // playlist shouldn't pointlessly flag a never-syncable row.
+        // Preserve an existing locallyModified=true (don't downgrade
+        // a flag set by an earlier mutator that the push loop hasn't
+        // cleared yet).
+        val flag = playlist.locallyModified || hasSyncIntent(playlistId)
         playlistDao.update(playlist.copy(
             trackCount = playlist.trackCount + tracks.size,
             updatedAt = now,
             lastModified = now,
-            locallyModified = true,
+            locallyModified = flag,
         ))
     }
 
@@ -186,11 +211,12 @@ class LibraryRepository constructor(
     suspend fun renamePlaylist(playlistId: String, newName: String) {
         val playlist = playlistDao.getById(playlistId) ?: return
         val now = System.currentTimeMillis()
+        val flag = playlist.locallyModified || hasSyncIntent(playlistId)
         playlistDao.update(playlist.copy(
             name = newName,
             updatedAt = now,
             lastModified = now,
-            locallyModified = true,
+            locallyModified = flag,
         ))
     }
 
@@ -202,10 +228,11 @@ class LibraryRepository constructor(
         playlistTrackDao.replaceAll(playlistId, reindexed)
         val playlist = playlistDao.getById(playlistId) ?: return
         val now = System.currentTimeMillis()
+        val flag = playlist.locallyModified || hasSyncIntent(playlistId)
         playlistDao.update(playlist.copy(
             updatedAt = now,
             lastModified = now,
-            locallyModified = true,
+            locallyModified = flag,
         ))
     }
 
@@ -214,11 +241,12 @@ class LibraryRepository constructor(
         playlistTrackDao.deleteTrack(playlistId, position)
         val playlist = playlistDao.getById(playlistId) ?: return
         val now = System.currentTimeMillis()
+        val flag = playlist.locallyModified || hasSyncIntent(playlistId)
         playlistDao.update(playlist.copy(
             trackCount = (playlist.trackCount - 1).coerceAtLeast(0),
             updatedAt = now,
             lastModified = now,
-            locallyModified = true,
+            locallyModified = flag,
         ))
     }
 
