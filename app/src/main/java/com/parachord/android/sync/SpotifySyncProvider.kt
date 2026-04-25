@@ -272,8 +272,8 @@ class SpotifySyncProvider constructor(
         return all
     }
 
-    suspend fun fetchPlaylists(
-        onProgress: (current: Int, total: Int) -> Unit = { _, _ -> },
+    override suspend fun fetchPlaylists(
+        onProgress: ((current: Int, total: Int) -> Unit)?,
     ): List<SyncedPlaylist> {
         val currentUser = withRetry { spotifyApi.getCurrentUser(it) }
         val all = mutableListOf<SyncedPlaylist>()
@@ -308,27 +308,26 @@ class SpotifySyncProvider constructor(
                 }
             }
             offset += BATCH_SIZE
-            onProgress(all.size, total)
+            onProgress?.invoke(all.size, total)
         }
 
         return all
     }
 
-    suspend fun fetchPlaylistTracks(
-        spotifyPlaylistId: String,
-        onProgress: (current: Int, total: Int) -> Unit = { _, _ -> },
+    override suspend fun fetchPlaylistTracks(
+        externalPlaylistId: String,
     ): List<PlaylistTrackEntity> {
         val all = mutableListOf<PlaylistTrackEntity>()
         var offset = 0
-        val localPlaylistId = "spotify-$spotifyPlaylistId"
+        val localPlaylistId = "spotify-$externalPlaylistId"
 
         val market = getMarket()
-        val probe = withRetry { spotifyApi.getPlaylistTracks(it, spotifyPlaylistId, limit = 1, market = market) }
+        val probe = withRetry { spotifyApi.getPlaylistTracks(it, externalPlaylistId, limit = 1, market = market) }
         val total = probe.total
 
         while (offset < total) {
             val page = withRetry {
-                spotifyApi.getPlaylistTracks(it, spotifyPlaylistId, limit = PLAYLIST_TRACK_BATCH_SIZE, offset = offset, market = market)
+                spotifyApi.getPlaylistTracks(it, externalPlaylistId, limit = PLAYLIST_TRACK_BATCH_SIZE, offset = offset, market = market)
             }
             if (page.items.isEmpty()) break
             page.items.forEach { item ->
@@ -348,20 +347,19 @@ class SpotifySyncProvider constructor(
                 ))
             }
             offset += PLAYLIST_TRACK_BATCH_SIZE
-            onProgress(all.size, total)
         }
 
         return all
     }
 
-    suspend fun getPlaylistSnapshotId(spotifyPlaylistId: String): String? {
+    override suspend fun getPlaylistSnapshotId(externalPlaylistId: String): String? {
         return try {
             val playlist = withRetry {
-                spotifyApi.getPlaylist(it, spotifyPlaylistId, fields = "snapshot_id")
+                spotifyApi.getPlaylist(it, externalPlaylistId, fields = "snapshot_id")
             }
             playlist.snapshotId
         } catch (e: Exception) {
-            Log.e(TAG, "Failed to get snapshot for $spotifyPlaylistId", e)
+            Log.e(TAG, "Failed to get snapshot for $externalPlaylistId", e)
             null
         }
     }
@@ -404,27 +402,33 @@ class SpotifySyncProvider constructor(
         }
     }
 
-    suspend fun createPlaylistOnSpotify(name: String, description: String? = null): SpPlaylistFull {
+    override suspend fun createPlaylist(name: String, description: String?): com.parachord.shared.sync.RemoteCreated {
         val user = withRetry { spotifyApi.getCurrentUser(it) }
-        return withRetry {
+        val created = withRetry {
             spotifyApi.createPlaylist(it, user.id, SpCreatePlaylistRequest(name, description))
         }
+        val externalId = created.id
+            ?: throw IllegalStateException("Spotify create returned null id")
+        return com.parachord.shared.sync.RemoteCreated(
+            externalId = externalId,
+            snapshotId = created.snapshotId,
+        )
     }
 
-    suspend fun replacePlaylistTracks(spotifyPlaylistId: String, spotifyUris: List<String>): String? {
-        if (spotifyUris.isEmpty()) {
-            withRetry { spotifyApi.replacePlaylistTracks(it, spotifyPlaylistId, SpUrisRequest(emptyList())) }
+    override suspend fun replacePlaylistTracks(externalPlaylistId: String, externalTrackIds: List<String>): String? {
+        if (externalTrackIds.isEmpty()) {
+            withRetry { spotifyApi.replacePlaylistTracks(it, externalPlaylistId, SpUrisRequest(emptyList())) }
             return null
         }
 
-        val chunks = spotifyUris.chunked(PLAYLIST_TRACK_BATCH_SIZE)
+        val chunks = externalTrackIds.chunked(PLAYLIST_TRACK_BATCH_SIZE)
         var snapshotId: String? = null
 
         chunks.forEachIndexed { index, chunk ->
             val response = if (index == 0) {
-                withRetry { spotifyApi.replacePlaylistTracks(it, spotifyPlaylistId, SpUrisRequest(chunk)) }
+                withRetry { spotifyApi.replacePlaylistTracks(it, externalPlaylistId, SpUrisRequest(chunk)) }
             } else {
-                withRetry { spotifyApi.addPlaylistTracks(it, spotifyPlaylistId, SpUrisRequest(chunk)) }
+                withRetry { spotifyApi.addPlaylistTracks(it, externalPlaylistId, SpUrisRequest(chunk)) }
             }
             if (response.isSuccessful) {
                 snapshotId = response.body()?.snapshotId
@@ -434,13 +438,18 @@ class SpotifySyncProvider constructor(
         return snapshotId
     }
 
-    suspend fun updatePlaylistDetails(spotifyPlaylistId: String, name: String?, description: String?) {
+    override suspend fun updatePlaylistDetails(externalPlaylistId: String, name: String?, description: String?) {
         withRetry {
-            spotifyApi.updatePlaylistDetails(it, spotifyPlaylistId, SpUpdatePlaylistRequest(name, description))
+            spotifyApi.updatePlaylistDetails(it, externalPlaylistId, SpUpdatePlaylistRequest(name, description))
         }
     }
 
-    suspend fun deletePlaylist(spotifyPlaylistId: String) {
-        withRetry { spotifyApi.unfollowPlaylist(it, spotifyPlaylistId) }
+    override suspend fun deletePlaylist(externalPlaylistId: String): com.parachord.shared.sync.DeleteResult {
+        return try {
+            withRetry { spotifyApi.unfollowPlaylist(it, externalPlaylistId) }
+            com.parachord.shared.sync.DeleteResult.Success
+        } catch (e: Exception) {
+            com.parachord.shared.sync.DeleteResult.Failed(e)
+        }
     }
 }

@@ -19,6 +19,82 @@ interface SyncProvider {
 
     /** Capability flags. SyncEngine routes on these, never on `id`. */
     val features: ProviderFeatures
+
+    // ── Playlist surface (Phase 4) ──────────────────────────────────
+    // Library-sync members (fetchTracks/Albums/Artists, save/follow)
+    // are deferred — Phase 4 ships playlists-only (Decision D1).
+
+    /**
+     * Fetch the user's owned + followed playlists from the provider.
+     * Returns provider-shaped [SyncedPlaylist] rows; SyncEngine merges
+     * them into local state via the three-layer dedup logic.
+     */
+    suspend fun fetchPlaylists(
+        onProgress: ((current: Int, total: Int) -> Unit)? = null,
+    ): List<SyncedPlaylist>
+
+    /**
+     * Fetch every track in [externalPlaylistId]. Provider-specific
+     * track IDs (`spotifyId`, `appleMusicId`, etc.) are populated on
+     * the returned rows.
+     */
+    suspend fun fetchPlaylistTracks(
+        externalPlaylistId: String,
+    ): List<com.parachord.shared.model.PlaylistTrack>
+
+    /**
+     * Returns the provider's snapshot/change-token for [externalPlaylistId].
+     * Spotify returns its opaque `snapshot_id`; Apple Music returns the
+     * `lastModifiedDate` ISO string. SyncEngine compares as strings;
+     * mismatch ⇒ pull. Returns null when [features.snapshots] is
+     * [SnapshotKind.None] or the playlist isn't found.
+     */
+    suspend fun getPlaylistSnapshotId(externalPlaylistId: String): String?
+
+    /**
+     * Create a new remote playlist. Returns the newly-created external
+     * ID and (if the provider supports snapshots) the initial snapshot
+     * token.
+     */
+    suspend fun createPlaylist(
+        name: String,
+        description: String? = null,
+    ): RemoteCreated
+
+    /**
+     * Full-replace [externalPlaylistId]'s tracklist with the given
+     * external IDs. Returns the new snapshot token. Providers without
+     * reliable replace (e.g. Apple Music when PUT 401's) degrade to
+     * append-only after the first failure — a session kill-switch
+     * remembers the rejection so subsequent calls go straight to POST.
+     * Removals stay on the remote in that case.
+     */
+    suspend fun replacePlaylistTracks(
+        externalPlaylistId: String,
+        externalTrackIds: List<String>,
+    ): String?
+
+    /**
+     * Update playlist metadata (rename, description). Best-effort.
+     * Apple Music returns 401 here; providers must NOT throw on
+     * documented-unsupported responses (kill-switch + return without
+     * raising). Load-bearing: this runs before the track push in
+     * the create-or-link path; a throw here would abort the track
+     * push too.
+     */
+    suspend fun updatePlaylistDetails(
+        externalPlaylistId: String,
+        name: String?,
+        description: String?,
+    )
+
+    /**
+     * Delete [externalPlaylistId] from the provider. Apple Music
+     * returns 401; providers must return [DeleteResult.Unsupported]
+     * (NOT throw) so callers can surface "remove manually in the
+     * Music app" UX.
+     */
+    suspend fun deletePlaylist(externalPlaylistId: String): DeleteResult
 }
 
 /**

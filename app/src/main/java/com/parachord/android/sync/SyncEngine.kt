@@ -674,8 +674,19 @@ class SyncEngine constructor(
                         if (dupe.spotifyId == keep.spotifyId) continue
                         try {
                             Log.d(TAG, "Removing duplicate Spotify playlist: ${dupe.entity.name} (${dupe.spotifyId})")
-                            spotifyProvider.deletePlaylist(dupe.spotifyId)
-                            deletedSpotifyIds.add(dupe.spotifyId)
+                            val result = spotifyProvider.deletePlaylist(dupe.spotifyId)
+                            when (result) {
+                                is com.parachord.shared.sync.DeleteResult.Success ->
+                                    deletedSpotifyIds.add(dupe.spotifyId)
+                                is com.parachord.shared.sync.DeleteResult.Unsupported -> {
+                                    Log.w(TAG, "Spotify deletePlaylist returned Unsupported(${result.status}); skipping")
+                                    continue
+                                }
+                                is com.parachord.shared.sync.DeleteResult.Failed -> {
+                                    Log.w(TAG, "Spotify deletePlaylist failed for ${dupe.spotifyId}", result.error)
+                                    continue
+                                }
+                            }
                             val orphanSource = currentLocalSources.find { it.externalId == dupe.spotifyId }
                             if (orphanSource != null) {
                                 syncSourceDao.deleteByKey(orphanSource.itemId, "playlist", providerId)
@@ -805,10 +816,10 @@ class SyncEngine constructor(
                         spotifyId = existing.spotifyId
                         snapshotId = existing.snapshotId
                     } else {
-                        val created = spotifyProvider.createPlaylistOnSpotify(
+                        val created = spotifyProvider.createPlaylist(
                             playlist.name, playlist.description
                         )
-                        spotifyId = created.id ?: continue
+                        spotifyId = created.externalId
                         snapshotId = created.snapshotId
                         Log.d(TAG, "Created $providerId playlist '${playlist.name}' ($spotifyId)")
                     }
