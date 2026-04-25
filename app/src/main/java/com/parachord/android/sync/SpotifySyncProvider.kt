@@ -125,10 +125,10 @@ class SpotifySyncProvider constructor(
 
     // ── Fetch operations ─────────────────────────────────────────
 
-    suspend fun fetchTracks(
-        localCount: Int = 0,
-        latestExternalId: String? = null,
-        onProgress: (current: Int, total: Int) -> Unit = { _, _ -> },
+    override suspend fun fetchTracks(
+        localCount: Int,
+        latestExternalId: String?,
+        onProgress: ((current: Int, total: Int) -> Unit)?,
     ): List<SyncedTrack>? {
         val market = getMarket()
         Log.d(TAG, "fetchTracks: market=$market, localCount=$localCount, latestExternalId=$latestExternalId")
@@ -145,7 +145,7 @@ class SpotifySyncProvider constructor(
         var offset = 0
         val total = probe.total
         var skippedNullTracks = 0
-        onProgress(0, total)
+        onProgress?.invoke(0, total)
 
         while (offset < total) {
             val page = withRetry { spotifyApi.getLikedTracks(it, limit = BATCH_SIZE, offset = offset, market = market) }
@@ -183,19 +183,19 @@ class SpotifySyncProvider constructor(
                 ))
             }
             offset += BATCH_SIZE
-            onProgress(all.size, total)
+            onProgress?.invoke(all.size, total)
         }
 
         Log.d(TAG, "fetchTracks complete: fetched=${all.size}/$total, skippedNull=$skippedNullTracks")
         // Final progress with actual count (some tracks are null/unavailable in market)
-        onProgress(all.size, all.size)
+        onProgress?.invoke(all.size, all.size)
         return all
     }
 
-    suspend fun fetchAlbums(
-        localCount: Int = 0,
-        latestExternalId: String? = null,
-        onProgress: (current: Int, total: Int) -> Unit = { _, _ -> },
+    override suspend fun fetchAlbums(
+        localCount: Int,
+        latestExternalId: String?,
+        onProgress: ((current: Int, total: Int) -> Unit)?,
     ): List<SyncedAlbum>? {
         val market = getMarket()
         val probe = withRetry { spotifyApi.getSavedAlbums(it, limit = 1, market = market) }
@@ -230,7 +230,7 @@ class SpotifySyncProvider constructor(
                 ))
             }
             offset += BATCH_SIZE
-            onProgress(all.size, total)
+            onProgress?.invoke(all.size, total)
         }
 
         if (all.size < total) {
@@ -240,9 +240,9 @@ class SpotifySyncProvider constructor(
         return all
     }
 
-    suspend fun fetchArtists(
-        localCount: Int = 0,
-        onProgress: (current: Int, total: Int) -> Unit = { _, _ -> },
+    override suspend fun fetchArtists(
+        localCount: Int,
+        onProgress: ((current: Int, total: Int) -> Unit)?,
     ): List<SyncedArtist>? {
         val all = mutableListOf<SyncedArtist>()
         var after: String? = null
@@ -265,7 +265,7 @@ class SpotifySyncProvider constructor(
                 ))
             }
             after = response.artists.cursors?.after
-            onProgress(all.size, total)
+            onProgress?.invoke(all.size, total)
         } while (after != null)
 
         if (all.size == localCount) return null
@@ -366,38 +366,38 @@ class SpotifySyncProvider constructor(
 
     // ── Write operations ─────────────────────────────────────────
 
-    suspend fun saveTracks(spotifyIds: List<String>) {
-        spotifyIds.chunked(BATCH_SIZE).forEach { batch ->
+    override suspend fun saveTracks(externalIds: List<String>) {
+        externalIds.chunked(BATCH_SIZE).forEach { batch ->
             withRetry { spotifyApi.saveTracks(it, SpIdsRequest(batch)) }
         }
     }
 
-    suspend fun removeTracks(spotifyIds: List<String>) {
-        spotifyIds.chunked(BATCH_SIZE).forEach { batch ->
+    override suspend fun removeTracks(externalIds: List<String>) {
+        externalIds.chunked(BATCH_SIZE).forEach { batch ->
             withRetry { spotifyApi.removeTracks(it, SpIdsRequest(batch)) }
         }
     }
 
-    suspend fun saveAlbums(spotifyIds: List<String>) {
-        spotifyIds.chunked(BATCH_SIZE).forEach { batch ->
+    override suspend fun saveAlbums(externalIds: List<String>) {
+        externalIds.chunked(BATCH_SIZE).forEach { batch ->
             withRetry { spotifyApi.saveAlbums(it, SpIdsRequest(batch)) }
         }
     }
 
-    suspend fun removeAlbums(spotifyIds: List<String>) {
-        spotifyIds.chunked(BATCH_SIZE).forEach { batch ->
+    override suspend fun removeAlbums(externalIds: List<String>) {
+        externalIds.chunked(BATCH_SIZE).forEach { batch ->
             withRetry { spotifyApi.removeAlbums(it, SpIdsRequest(batch)) }
         }
     }
 
-    suspend fun followArtists(spotifyIds: List<String>) {
-        spotifyIds.chunked(BATCH_SIZE).forEach { batch ->
+    override suspend fun followArtists(externalIds: List<String>) {
+        externalIds.chunked(BATCH_SIZE).forEach { batch ->
             withRetry { spotifyApi.followArtists(it, body = SpIdsRequest(batch)) }
         }
     }
 
-    suspend fun unfollowArtists(spotifyIds: List<String>) {
-        spotifyIds.chunked(BATCH_SIZE).forEach { batch ->
+    override suspend fun unfollowArtists(externalIds: List<String>) {
+        externalIds.chunked(BATCH_SIZE).forEach { batch ->
             withRetry { spotifyApi.unfollowArtists(it, body = SpIdsRequest(batch)) }
         }
     }

@@ -95,6 +95,58 @@ interface SyncProvider {
      * Music app" UX.
      */
     suspend fun deletePlaylist(externalPlaylistId: String): DeleteResult
+
+    // ── Library surface (collection sync — Phase 6.5+) ───────────────
+    // Pull the user's saved tracks / albums / followed artists. Push
+    // adds/removes for tracks/albums; artists are pull-only on Apple
+    // Music (no follow/unfollow API).
+    //
+    // Default implementations no-op so providers that don't ship
+    // library sync don't have to implement them. Returning `null` from
+    // a fetch method means "not supported" (skip this collection axis
+    // for this provider); returning an empty list means "nothing to
+    // sync."
+
+    /**
+     * Fetch the user's saved tracks (Spotify "Liked Songs" /
+     * Apple Music "Loved Songs in library"). The implementation may
+     * use [localCount] + [latestExternalId] to short-circuit when no
+     * remote changes are detected (returns null in that case).
+     */
+    suspend fun fetchTracks(
+        localCount: Int,
+        latestExternalId: String?,
+        onProgress: ((current: Int, total: Int) -> Unit)? = null,
+    ): List<SyncedTrack>? = null
+
+    suspend fun saveTracks(externalIds: List<String>) { /* no-op */ }
+    suspend fun removeTracks(externalIds: List<String>) { /* no-op */ }
+
+    /**
+     * Fetch the user's saved albums (Spotify "Albums" / Apple Music
+     * "Albums in library"). Same short-circuit semantics as
+     * [fetchTracks].
+     */
+    suspend fun fetchAlbums(
+        localCount: Int,
+        latestExternalId: String?,
+        onProgress: ((current: Int, total: Int) -> Unit)? = null,
+    ): List<SyncedAlbum>? = null
+
+    suspend fun saveAlbums(externalIds: List<String>) { /* no-op */ }
+    suspend fun removeAlbums(externalIds: List<String>) { /* no-op */ }
+
+    /**
+     * Fetch the user's followed artists (Spotify) or library artists
+     * (Apple Music — pull-only since AM has no follow API).
+     */
+    suspend fun fetchArtists(
+        localCount: Int,
+        onProgress: ((current: Int, total: Int) -> Unit)? = null,
+    ): List<SyncedArtist>? = null
+
+    suspend fun followArtists(externalIds: List<String>) { /* no-op */ }
+    suspend fun unfollowArtists(externalIds: List<String>) { /* no-op */ }
 }
 
 /**
