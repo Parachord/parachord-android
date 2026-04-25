@@ -492,6 +492,11 @@ class SyncEngine constructor(
         // the id-prefix convention.
         migrateSourceFromPlaylists(db, syncPlaylistSourceDao)
 
+        // ── Spotify pull (existing block; preserves dedup-cleanup migration) ──
+        // The dedup-cleanup migration block below is Spotify-only by design
+        // (one-time fix for playlists created by old Spotify sync bugs); it
+        // can't be generalized so we keep the Spotify pull inline rather
+        // than duplicating the whole helper.
         val remotePlaylists = spotifyProvider.fetchPlaylists { current, total ->
             onProgress(SyncProgress(SyncPhase.PLAYLISTS, current, total, "Fetching playlists..."))
         }
@@ -777,14 +782,233 @@ class SyncEngine constructor(
             removed++
         }
 
+        // ── Phase 5: pull from non-Spotify enabled providers ─────────
+        // The Spotify pull above is left inline because it's coupled
+        // with the dedup-cleanup migration block (one-time Spotify-only
+        // fix). Other providers (Apple Music today; Tidal-style future
+        // ones) run through the helper, which mirrors the Spotify
+        // import/cleanup body but parameterized on `provider`.
+        val enabledProviderIds = settingsStore.getEnabledSyncProviders()
+        val nonSpotifyProviders = providers.filter {
+            it.id in enabledProviderIds && it.id != SpotifySyncProvider.PROVIDER_ID
+        }
+        for (provider in nonSpotifyProviders) {
+            val pullResult = pullPlaylistsForProvider(provider, onProgress)
+            added += pullResult.added
+            removed += pullResult.removed
+            updated += pullResult.updated
+            unchanged += pullResult.unchanged
+        }
+
         // Phase 3 — Fix 4 (multi-provider mirror propagation):
         // Clear `locallyModified` for any playlist whose relevant mirrors
         // are all caught up. `relevantMirrors` excludes the source
         // provider — the push loop never targets it (Fix 3 guard) so its
         // syncedAt would never advance and would strand the flag forever.
-        // Today only Spotify is enabled, but the loop is shaped for Phase
-        // 4 to add Apple Music with a one-line set change.
-        clearLocallyModifiedFlags(setOf(SpotifySyncProvider.PROVIDER_ID))
+        // Phase 5 generalizes to all enabled providers (was Spotify-only).
+        clearLocallyModifiedFlags(enabledProviderIds)
+
+        return TypeSyncResult(added = added, removed = removed, updated = updated, unchanged = unchanged)
+    }
+
+    /**
+     * Phase 5 — generic per-provider pull branch. Fetches the provider's
+     * remote playlists, runs the import-or-update flow with the cross-
+     * provider `syncedFrom` preservation guard, and cleans up sources
+     * for remotes that have been deselected or deleted upstream.
+     *
+     * Mirrors the inline Spotify pull body in [syncPlaylists] but
+     * parameterized on `provider` and stripped of the one-time dedup-
+     * cleanup migration (Spotify-only by design).
+     */
+    private suspend fun pullPlaylistsForProvider(
+        provider: com.parachord.shared.sync.SyncProvider,
+        onProgress: (SyncProgress) -> Unit,
+    ): TypeSyncResult {
+        val providerId = provider.id
+        var added = 0
+        var removed = 0
+        var updated = 0
+        var unchanged = 0
+
+        val remotePlaylists = try {
+            provider.fetchPlaylists { current, total ->
+                onProgress(SyncProgress(SyncPhase.PLAYLISTS, current, total, "Fetching ${provider.displayName} playlists..."))
+            }
+        } catch (e: Exception) {
+            Log.e(TAG, "Failed to fetch playlists from ${provider.displayName}", e)
+            return TypeSyncResult()
+        }
+
+        val localSources = syncSourceDao.getByProvider(providerId, "playlist")
+        val localByExternalId = localSources.associateBy { it.externalId }
+
+        for ((index, remote) in remotePlaylists.withIndex()) {
+            onProgress(SyncProgress(
+                SyncPhase.PLAYLISTS,
+                index + 1,
+                remotePlaylists.size,
+                "Syncing ${provider.displayName} playlist: ${remote.entity.name}",
+            ))
+            val existingSource = localByExternalId[remote.spotifyId]
+
+            if (existingSource == null) {
+                val now = System.currentTimeMillis()
+                // The "merge into existing" path here used playlist.spotifyId
+                // for Spotify; for other providers there's no equivalent
+                // scalar — the link table is the lookup.
+                val existingByLink = syncPlaylistLinkDao.selectByExternalId(providerId, remote.spotifyId)
+                val existingLocalPlaylist = existingByLink?.let { playlistDao.getById(it.localPlaylistId) }
+                val targetId = existingLocalPlaylist?.id ?: remote.entity.id
+
+                // Phase 3 — cross-provider syncedFrom preservation:
+                // if the local row's pull source points at a DIFFERENT
+                // provider, this match fired because we're a push mirror
+                // for that local. Don't refetch tracks; only update the
+                // link's syncedAt + sync_source row.
+                val existingPullSource = if (existingLocalPlaylist != null) {
+                    syncPlaylistSourceDao.selectForLocal(existingLocalPlaylist.id)
+                } else null
+                val isCrossProviderPushMirror = existingPullSource != null
+                    && existingPullSource.providerId != providerId
+
+                if (existingLocalPlaylist != null && existingLocalPlaylist.id != remote.entity.id && !isCrossProviderPushMirror) {
+                    playlistTrackDao.deleteByPlaylistId(existingLocalPlaylist.id)
+                    playlistDao.delete(existingLocalPlaylist)
+                    syncSourceDao.deleteAllForItem(existingLocalPlaylist.id, "playlist")
+                }
+
+                if (isCrossProviderPushMirror) {
+                    Log.d(TAG, "Cross-provider push mirror for ${existingLocalPlaylist!!.id}: " +
+                        "syncedFrom=${existingPullSource!!.providerId}; preserving local tracks")
+                    syncPlaylistLinkDao.upsertWithSnapshot(
+                        localPlaylistId = existingLocalPlaylist.id,
+                        providerId = providerId,
+                        externalId = remote.spotifyId,
+                        snapshotId = remote.snapshotId,
+                    )
+                    syncSourceDao.insert(SyncSourceEntity(
+                        itemId = existingLocalPlaylist.id,
+                        itemType = "playlist",
+                        providerId = providerId,
+                        externalId = remote.spotifyId,
+                        syncedAt = System.currentTimeMillis(),
+                    ))
+                    unchanged++
+                    continue
+                }
+
+                playlistDao.insert(remote.entity.copy(
+                    id = targetId,
+                    createdAt = existingLocalPlaylist?.createdAt ?: now,
+                    updatedAt = now,
+                    lastModified = now,
+                ))
+                val tracks = try {
+                    provider.fetchPlaylistTracks(remote.spotifyId)
+                } catch (e: Exception) {
+                    Log.e(TAG, "Failed to fetch tracks for ${provider.displayName} playlist ${remote.spotifyId}", e)
+                    emptyList()
+                }
+                playlistTrackDao.deleteByPlaylistId(targetId)
+                val remappedTracks = if (targetId != remote.entity.id) {
+                    tracks.map { it.copy(playlistId = targetId) }
+                } else {
+                    tracks
+                }
+                playlistTrackDao.insertAll(remappedTracks)
+                syncSourceDao.insert(SyncSourceEntity(
+                    itemId = targetId,
+                    itemType = "playlist",
+                    providerId = providerId,
+                    externalId = remote.spotifyId,
+                    syncedAt = System.currentTimeMillis(),
+                ))
+                syncPlaylistSourceDao.upsert(
+                    localPlaylistId = targetId,
+                    providerId = providerId,
+                    externalId = remote.spotifyId,
+                    snapshotId = remote.snapshotId,
+                    ownerId = null,
+                    syncedAt = System.currentTimeMillis(),
+                )
+                syncPlaylistLinkDao.upsertWithSnapshot(
+                    localPlaylistId = targetId,
+                    providerId = providerId,
+                    externalId = remote.spotifyId,
+                    snapshotId = remote.snapshotId,
+                )
+                added++
+            } else {
+                val localPlaylist = playlistDao.getById(existingSource.itemId)
+                if (localPlaylist == null) {
+                    unchanged++
+                    continue
+                }
+
+                // Per-provider snapshot: read from the link table (NOT
+                // from playlist.snapshotId, which is the Spotify-only
+                // legacy scalar).
+                val link = syncPlaylistLinkDao.selectForLink(localPlaylist.id, providerId)
+                val remoteSnapshotId = remote.snapshotId
+                val localSnapshotId = link?.snapshotId
+                val localModified = localPlaylist.locallyModified
+                val isHosted = localPlaylist.sourceUrl != null
+
+                when {
+                    isHosted && localModified -> {
+                        pushPlaylist(localPlaylist, provider)
+                        updated++
+                    }
+                    isHosted -> {
+                        syncSourceDao.insert(existingSource.copy(syncedAt = System.currentTimeMillis()))
+                        unchanged++
+                    }
+                    localModified && remoteSnapshotId != localSnapshotId -> {
+                        val localIsNewer = localPlaylist.lastModified > existingSource.syncedAt
+                        if (localIsNewer) {
+                            pushPlaylist(localPlaylist, provider)
+                        } else {
+                            pullPlaylist(localPlaylist, remote, provider)
+                        }
+                        updated++
+                    }
+                    localModified -> {
+                        pushPlaylist(localPlaylist, provider)
+                        updated++
+                    }
+                    remoteSnapshotId != localSnapshotId -> {
+                        pullPlaylist(localPlaylist, remote, provider)
+                        updated++
+                    }
+                    else -> {
+                        syncSourceDao.insert(existingSource.copy(syncedAt = System.currentTimeMillis()))
+                        unchanged++
+                    }
+                }
+            }
+        }
+
+        // Removed-source cleanup, mirroring the Spotify path. A locally-
+        // owned playlist (hosted XSPF or local-*) is NEVER deleted by
+        // sync cleanup — it's just deselected/deleted from the provider.
+        val remoteIds = remotePlaylists.map { it.spotifyId }.toSet()
+        val removedSources = localSources.filter { it.externalId != null && it.externalId !in remoteIds }
+        removedSources.forEach { source ->
+            val localPlaylist = playlistDao.getById(source.itemId)
+            if (localPlaylist?.sourceUrl != null ||
+                localPlaylist?.id?.startsWith("local-") == true
+            ) {
+                return@forEach
+            }
+            syncSourceDao.deleteByKey(source.itemId, "playlist", providerId)
+            val remaining = syncSourceDao.getByItem(source.itemId, "playlist")
+            if (remaining.isEmpty()) {
+                localPlaylist?.let { playlistDao.delete(it) }
+                playlistTrackDao.deleteByPlaylistId(source.itemId)
+            }
+            removed++
+        }
 
         return TypeSyncResult(added = added, removed = removed, updated = updated, unchanged = unchanged)
     }

@@ -268,6 +268,8 @@ Add to that plan:
 
 ### Phase 5 — Conflict + concurrency
 
+> **Status:** ✅ Landed in commits `8b6cefd` → (Phase 5 wrap-up). The pull side now mirrors the push side from Phase 4.5: `pullPlaylistsForProvider(provider, ...)` extracts the per-provider import + removed-source cleanup logic. SyncEngine iterates non-Spotify enabled providers after the existing Spotify pull (the Spotify pull stays inline because it's coupled with the one-time dedup-cleanup migration). `pushPlaylist` and `pullPlaylist` helpers gained a `provider: SyncProvider` parameter (defaulted to spotifyProvider for backward-compat with existing import-branch call sites). Per-provider snapshot lookup reads from `sync_playlist_link.snapshotId` instead of the Spotify-only `playlists.snapshotId` scalar — Apple Music's `lastModifiedDate` ISO string compares the same way as Spotify's `snapshot_id`. Phase 4 (Fix 4) clear logic now passes `enabledProviders` (was hardcoded to spotify). End result: enabling AM via `enabled_sync_providers` DataStore now pulls AM library playlists into Parachord on every sync cycle, applies the cross-provider syncedFrom preservation guard, and pushes locally-modified playlists back. Concurrency contract (each provider its own merge oracle, no cross-provider locking) holds because the per-provider iteration is sequential in a single sync run.
+
 **Concurrent multi-device edit:** there is no distributed locking and we're not building one. The contract:
 
 - **Each provider is its own merge oracle for the playlists it hosts.** When two clients edit the same playlist simultaneously, both push to that provider; whichever request lands last wins; both clients converge on next pull from that provider. No app-side merge logic.

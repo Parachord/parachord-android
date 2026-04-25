@@ -83,6 +83,17 @@ class SyncPlaylistLinkDao(private val db: ParachordDb) {
         }
 
     /**
+     * Reverse lookup: find the link row for a given provider's
+     * external ID. Used by the per-provider import branch (Phase 5)
+     * to detect when an incoming remote already has a local row
+     * via a previous sync.
+     */
+    suspend fun selectByExternalId(providerId: String, externalId: String): Link? =
+        withContext(Dispatchers.IO) {
+            queries.selectByExternalId(providerId, externalId).executeAsOneOrNull()?.toLink()
+        }
+
+    /**
      * True iff at least one mirror exists for [localPlaylistId] under a
      * provider OTHER than [currentProviderId]. Used by Fix 1 of the
      * multi-provider propagation rules: a pull from one provider must
