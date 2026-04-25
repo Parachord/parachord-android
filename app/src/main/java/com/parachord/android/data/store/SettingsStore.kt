@@ -62,6 +62,7 @@ class SettingsStore constructor(
         val SYNC_LAST_COMPLETED_AT = stringPreferencesKey("sync_last_completed_at")
         val SYNC_PUSH_LOCAL_PLAYLISTS = booleanPreferencesKey("sync_push_local_playlists")
         val SYNC_DATA_VERSION = stringPreferencesKey("sync_data_version")
+        val ENABLED_SYNC_PROVIDERS = stringPreferencesKey("enabled_sync_providers")
         val DELETED_FRIEND_KEYS = stringSetPreferencesKey("deleted_friend_keys")
         val SORT_ARTISTS = stringPreferencesKey("sort_artists")
         val SORT_ALBUMS = stringPreferencesKey("sort_albums")
@@ -609,6 +610,24 @@ class SettingsStore constructor(
 
     suspend fun setSyncDataVersion(version: Int) {
         dataStore.edit { it[SYNC_DATA_VERSION] = version.toString() }
+    }
+
+    /**
+     * The set of sync provider IDs the user has enabled. Default is
+     * `setOf("spotify")` until Phase 6's wizard lands provider-selection
+     * UX; an Apple-Music-only user can enable AM via this preference
+     * before then by writing it directly (or the Phase 6 toggle).
+     *
+     * Stored as a comma-separated string for DataStore simplicity.
+     */
+    suspend fun getEnabledSyncProviders(): Set<String> {
+        val raw = dataStore.data.first()[ENABLED_SYNC_PROVIDERS]
+        return if (raw.isNullOrBlank()) setOf("spotify")
+        else raw.split(",").map { it.trim() }.filter { it.isNotEmpty() }.toSet()
+    }
+
+    suspend fun setEnabledSyncProviders(providers: Set<String>) {
+        dataStore.edit { it[ENABLED_SYNC_PROVIDERS] = providers.joinToString(",") }
     }
 
     suspend fun clearSyncSettings() {
