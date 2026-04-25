@@ -18,11 +18,14 @@ import com.parachord.android.playback.PlaybackController
 import com.parachord.android.resolver.PlaylistTrackInfo
 import com.parachord.android.resolver.TrackResolverCache
 import com.parachord.android.sync.SpotifySyncProvider
+import kotlinx.coroutines.channels.Channel
+import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.map
+import kotlinx.coroutines.flow.receiveAsFlow
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
 class PlaylistDetailViewModel constructor(
@@ -253,10 +256,37 @@ class PlaylistDetailViewModel constructor(
         playbackController.addToQueue(entities)
     }
 
-    /** Delete this playlist. */
+    /**
+     * Phase 6.5 — one-shot toast events emitted after sync-aware deletes
+     * when a provider returned `Unsupported` (e.g. Apple Music's 401 on
+     * DELETE). The screen collects this Flow and shows the message via
+     * an Android Toast.
+     */
+    private val _toastEvents = Channel<String>(Channel.BUFFERED)
+    val toastEvents: Flow<String> = _toastEvents.receiveAsFlow()
+
+    /**
+     * Delete this playlist locally AND attempt to delete each remote
+     * mirror. Per Decision D8, when Apple Music returns
+     * `DeleteResult.Unsupported` (its public API rejects DELETE on
+     * library playlists with 401), surface a toast telling the user to
+     * remove the playlist manually in the Music app — the local row
+     * is gone but the AM mirror is not.
+     */
     fun deletePlaylist() {
         viewModelScope.launch {
-            playlist.value?.let { libraryRepository.deletePlaylist(it) }
+            val pl = playlist.value ?: return@launch
+            val attempts = libraryRepository.deletePlaylistWithSync(pl)
+            val unsupported = attempts.filter {
+                it.result is com.parachord.shared.sync.DeleteResult.Unsupported
+            }
+            if (unsupported.isNotEmpty()) {
+                val names = unsupported.joinToString(", ") { it.providerDisplayName }
+                _toastEvents.trySend(
+                    "Removed from Parachord. $names doesn't allow deletion via the API — " +
+                        "remove manually in the $names app."
+                )
+            }
         }
     }
 }

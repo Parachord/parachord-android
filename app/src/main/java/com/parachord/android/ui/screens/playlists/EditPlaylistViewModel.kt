@@ -10,6 +10,7 @@ import com.parachord.android.data.repository.LibraryRepository
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.receiveAsFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.stateIn
@@ -117,10 +118,34 @@ class EditPlaylistViewModel constructor(
         }
     }
 
-    /** Delete this playlist entirely. */
+    /**
+     * Phase 6.5 — one-shot toast events for sync-aware delete
+     * Unsupported responses (e.g. Apple Music's 401 on DELETE).
+     */
+    private val _toastEvents = kotlinx.coroutines.channels.Channel<String>(
+        kotlinx.coroutines.channels.Channel.BUFFERED,
+    )
+    val toastEvents: kotlinx.coroutines.flow.Flow<String> = _toastEvents.receiveAsFlow()
+
+    /**
+     * Delete this playlist entirely. Phase 6.5 sync-aware: also
+     * attempts remote deletion and surfaces a toast if any provider
+     * returned Unsupported (per Decision D8).
+     */
     fun deletePlaylist(onDone: () -> Unit) {
         viewModelScope.launch {
-            playlist.value?.let { libraryRepository.deletePlaylist(it) }
+            val pl = playlist.value ?: run { onDone(); return@launch }
+            val attempts = libraryRepository.deletePlaylistWithSync(pl)
+            val unsupported = attempts.filter {
+                it.result is com.parachord.shared.sync.DeleteResult.Unsupported
+            }
+            if (unsupported.isNotEmpty()) {
+                val names = unsupported.joinToString(", ") { it.providerDisplayName }
+                _toastEvents.trySend(
+                    "Removed from Parachord. $names doesn't allow deletion via the API — " +
+                        "remove manually in the $names app."
+                )
+            }
             onDone()
         }
     }

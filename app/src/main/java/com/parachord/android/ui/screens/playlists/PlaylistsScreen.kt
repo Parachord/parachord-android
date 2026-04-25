@@ -89,6 +89,15 @@ fun PlaylistsScreen(
         listState.scrollToItem(0)
     }
 
+    // Phase 6.5 — Decision D8: surface a toast when a sync-aware
+    // delete returns Unsupported (Apple Music's 401 on DELETE).
+    val context = androidx.compose.ui.platform.LocalContext.current
+    LaunchedEffect(Unit) {
+        viewModel.toastEvents.collect { msg ->
+            android.widget.Toast.makeText(context, msg, android.widget.Toast.LENGTH_LONG).show()
+        }
+    }
+
     Column(modifier = modifier.fillMaxSize()) {
         TopAppBar(
             title = {

@@ -79,6 +79,15 @@ fun EditPlaylistScreen(
     val hasChanges by viewModel.hasChanges.collectAsStateWithLifecycle()
     var showDeleteConfirm by remember { mutableStateOf(false) }
 
+    // Phase 6.5 — Decision D8: surface a toast when sync-aware delete
+    // returns Unsupported (Apple Music's 401 on DELETE).
+    val context = androidx.compose.ui.platform.LocalContext.current
+    androidx.compose.runtime.LaunchedEffect(Unit) {
+        viewModel.toastEvents.collect { msg ->
+            android.widget.Toast.makeText(context, msg, android.widget.Toast.LENGTH_LONG).show()
+        }
+    }
+
     // Drag state
     var draggingIndex by remember { mutableIntStateOf(-1) }
     var dragOffsetY by remember { mutableFloatStateOf(0f) }

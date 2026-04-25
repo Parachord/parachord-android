@@ -1,5 +1,6 @@
 package com.parachord.android.ui.screens.playlists
 
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.expandVertically
 import androidx.compose.animation.shrinkVertically
@@ -101,6 +102,17 @@ fun PlaylistDetailScreen(
     // not just on ViewModel init (which doesn't re-run on back navigation).
     LaunchedEffect(Unit) {
         viewModel.checkForRemoteUpdate()
+    }
+
+    // Phase 6.5 — Decision D8: surface a toast when a sync-aware
+    // delete returns Unsupported from a provider (e.g. Apple Music's
+    // 401 on DELETE means the AM mirror persists; the user has to
+    // remove it manually in the Music app).
+    val context = LocalContext.current
+    LaunchedEffect(Unit) {
+        viewModel.toastEvents.collect { msg ->
+            android.widget.Toast.makeText(context, msg, android.widget.Toast.LENGTH_LONG).show()
+        }
     }
 
     val hasRemoteUpdate by viewModel.hasRemoteUpdate.collectAsStateWithLifecycle()

@@ -113,6 +113,27 @@ class LibraryRepository constructor(
     suspend fun deleteAlbum(album: AlbumEntity) = albumDao.delete(album)
     suspend fun deletePlaylist(playlist: PlaylistEntity) = playlistDao.delete(playlist)
 
+    /**
+     * Phase 6.5 — delete a playlist locally AND attempt to delete each
+     * remote mirror. Returns the per-provider attempt results so the
+     * caller (a ViewModel) can surface a toast if any provider returned
+     * `Unsupported` (per Decision D8 — Apple Music returns 401 on
+     * `DELETE /me/library/playlists/{id}`, so the AM mirror persists
+     * and the user has to remove it manually in the Music app).
+     *
+     * Order matters: remote-cleanup runs FIRST so the per-provider link
+     * rows are consulted before the local row's foreign-key cascade
+     * blows them away. The local delete is still last so a partial
+     * failure doesn't leave the local row referencing dead remotes.
+     */
+    suspend fun deletePlaylistWithSync(
+        playlist: PlaylistEntity,
+    ): List<SyncEngine.PlaylistDeletionAttempt> {
+        val attempts = syncEngine.onPlaylistRemoved(playlist)
+        playlistDao.delete(playlist)
+        return attempts
+    }
+
     // ── Sync-aware deletions (push removal back to source) ───────────
 
     suspend fun deleteTrackWithSync(track: TrackEntity) {

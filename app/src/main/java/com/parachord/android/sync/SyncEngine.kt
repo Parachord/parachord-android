@@ -1400,6 +1400,64 @@ class SyncEngine constructor(
         syncSourceDao.deleteAllForItem(artist.id, "artist")
     }
 
+    /**
+     * Per-provider result of attempting to delete a playlist's remote
+     * mirror. Surfaced to the UI so the user can be told when an Apple
+     * Music mirror couldn't be deleted via the API (Decision D8) — the
+     * playlist still exists in Apple Music and the user has to remove
+     * it from the Music app manually.
+     */
+    data class PlaylistDeletionAttempt(
+        val providerId: String,
+        val providerDisplayName: String,
+        val externalId: String,
+        val result: com.parachord.shared.sync.DeleteResult,
+    )
+
+    /**
+     * Phase 6.5 — sync-aware playlist deletion. Iterates the playlist's
+     * `sync_playlist_link` rows and calls each provider's
+     * [com.parachord.shared.sync.SyncProvider.deletePlaylist], returning
+     * the per-provider results. Cleanup of the local link rows + sync
+     * sources happens regardless of provider response so the local
+     * state stays consistent — if Apple Music returns Unsupported, we
+     * unlink Parachord-side and surface the limitation to the user.
+     *
+     * Caller is responsible for the actual local row deletion
+     * (`playlistDao.delete`) — this method only handles the remote
+     * cleanup so it composes with `LibraryRepository.deletePlaylist`
+     * without ordering surprises.
+     */
+    suspend fun onPlaylistRemoved(playlist: PlaylistEntity): List<PlaylistDeletionAttempt> {
+        val attempts = mutableListOf<PlaylistDeletionAttempt>()
+        val links = syncPlaylistLinkDao.selectForLocal(playlist.id)
+        for (link in links) {
+            val provider = providers.firstOrNull { it.id == link.providerId } ?: continue
+            val result = try {
+                provider.deletePlaylist(link.externalId)
+            } catch (e: Exception) {
+                Log.e(TAG, "deletePlaylist threw for ${provider.id}:${link.externalId}", e)
+                com.parachord.shared.sync.DeleteResult.Failed(e)
+            }
+            attempts.add(PlaylistDeletionAttempt(
+                providerId = provider.id,
+                providerDisplayName = provider.displayName,
+                externalId = link.externalId,
+                result = result,
+            ))
+            // Always clean up the local link + sync source — even when
+            // the remote returned Unsupported, the user's intent is
+            // "stop syncing this playlist." Leaving the link would
+            // re-link on next sync via three-layer dedup.
+            syncPlaylistLinkDao.deleteForLink(playlist.id, provider.id)
+            syncSourceDao.deleteByKey(playlist.id, "playlist", provider.id)
+        }
+        // Drop the syncedFrom row too, in case this was a pull-source
+        // playlist (avoids the next sync re-importing it).
+        syncPlaylistSourceDao.deleteForLocal(playlist.id)
+        return attempts
+    }
+
     // ── Stop syncing ─────────────────────────────────────────────
 
     suspend fun stopSyncing(removeItems: Boolean) {

@@ -13,6 +13,7 @@ import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.first
+import kotlinx.coroutines.flow.receiveAsFlow
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
 class PlaylistsViewModel constructor(
@@ -77,8 +78,31 @@ class PlaylistsViewModel constructor(
         }
     }
 
+    /**
+     * Phase 6.5 — one-shot toast events emitted after sync-aware
+     * deletes when a provider returned `Unsupported` (Apple Music's
+     * 401 on DELETE, per Decision D8). The Playlists screen collects
+     * this and shows a Toast.
+     */
+    private val _toastEvents = kotlinx.coroutines.channels.Channel<String>(
+        kotlinx.coroutines.channels.Channel.BUFFERED,
+    )
+    val toastEvents: kotlinx.coroutines.flow.Flow<String> = _toastEvents.receiveAsFlow()
+
     fun deletePlaylist(playlist: PlaylistEntity) {
-        viewModelScope.launch { libraryRepository.deletePlaylist(playlist) }
+        viewModelScope.launch {
+            val attempts = libraryRepository.deletePlaylistWithSync(playlist)
+            val unsupported = attempts.filter {
+                it.result is com.parachord.shared.sync.DeleteResult.Unsupported
+            }
+            if (unsupported.isNotEmpty()) {
+                val names = unsupported.joinToString(", ") { it.providerDisplayName }
+                _toastEvents.trySend(
+                    "Removed from Parachord. $names doesn't allow deletion via the API — " +
+                        "remove manually in the $names app."
+                )
+            }
+        }
     }
 
     /** Play all tracks in a playlist. */
