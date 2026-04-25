@@ -6,6 +6,7 @@ import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.parachord.android.data.db.dao.PlaylistDao
 import com.parachord.android.data.db.dao.PlaylistTrackDao
+import com.parachord.android.data.db.dao.SyncPlaylistLinkDao
 import com.parachord.android.data.db.entity.PlaylistEntity
 import com.parachord.android.data.db.entity.PlaylistTrackEntity
 import com.parachord.android.data.db.entity.TrackEntity
@@ -35,6 +36,7 @@ class PlaylistDetailViewModel constructor(
     private val trackResolverCache: TrackResolverCache,
     private val spotifySyncProvider: SpotifySyncProvider,
     private val imageEnrichmentService: ImageEnrichmentService,
+    private val syncPlaylistLinkDao: SyncPlaylistLinkDao,
 ) : ViewModel() {
 
     companion object {
@@ -157,12 +159,20 @@ class PlaylistDetailViewModel constructor(
                 playlistTrackDao.insertAll(remoteTracks)
 
                 val now = System.currentTimeMillis()
+                // Fix 1 (multi-provider mirror propagation): if this playlist
+                // has push-mirror entries on providers OTHER than Spotify
+                // (e.g. Apple Music), those copies are now stale relative
+                // to the just-pulled state. Flag locallyModified so the
+                // next push loop catches them up. Without this, an
+                // Android-edit → Spotify → desktop pull stops at the
+                // desktop and never reaches Apple Music.
+                val hasOtherMirrors = syncPlaylistLinkDao.hasOtherMirrors(playlistId, "spotify")
                 playlistDao.update(pl.copy(
                     trackCount = remoteTracks.size,
                     snapshotId = remoteSnapshot ?: pl.snapshotId,
                     updatedAt = now,
                     lastModified = now,
-                    locallyModified = false,
+                    locallyModified = hasOtherMirrors,
                 ))
 
                 _hasRemoteUpdate.value = false

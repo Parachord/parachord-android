@@ -826,6 +826,15 @@ class SyncEngine constructor(
         playlistTrackDao.insertAll(tracks)
 
         val now = System.currentTimeMillis()
+        // Fix 1 (multi-provider mirror propagation): a pull replaces the
+        // local tracks with the remote's. If this playlist also has push-
+        // mirror entries on OTHER providers, those copies are now stale.
+        // Flag locallyModified so the next push loop catches them up.
+        // Without this, an Android-edit → Spotify → desktop pull stops
+        // at the desktop and never reaches Apple Music.
+        val hasOtherMirrors = syncPlaylistLinkDao.hasOtherMirrors(
+            localPlaylist.id, SpotifySyncProvider.PROVIDER_ID,
+        )
         playlistDao.update(localPlaylist.copy(
             name = remote.entity.name,
             description = remote.entity.description,
@@ -834,7 +843,7 @@ class SyncEngine constructor(
             snapshotId = remote.snapshotId,
             updatedAt = now,
             lastModified = now,
-            locallyModified = false,
+            locallyModified = hasOtherMirrors,
             ownerName = remote.entity.ownerName,
         ))
 
