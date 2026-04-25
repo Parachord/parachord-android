@@ -211,6 +211,7 @@ fun SettingsScreen(
     val appleMusicDeveloperToken by viewModel.appleMusicDeveloperToken.collectAsStateWithLifecycle()
     val appleMusicConfigured by viewModel.appleMusicConfigured.collectAsStateWithLifecycle()
     val appleMusicAuthorized by viewModel.appleMusicAuthorized.collectAsStateWithLifecycle()
+    val appleMusicSyncEnabled by viewModel.appleMusicSyncEnabled.collectAsStateWithLifecycle()
     val appleMusicConnecting by viewModel.appleMusicConnecting.collectAsStateWithLifecycle()
     val persistQueue by viewModel.persistQueue.collectAsStateWithLifecycle()
     val libreFmAuthError by viewModel.libreFmAuthError.collectAsStateWithLifecycle()
@@ -317,6 +318,9 @@ fun SettingsScreen(
                     persistQueue = persistQueue,
                     onPersistQueueChanged = { viewModel.setPersistQueue(it) },
                     spotifyConnected = spotifyConnected,
+                    appleMusicAuthorized = appleMusicAuthorized,
+                    appleMusicSyncEnabled = appleMusicSyncEnabled,
+                    onSetAppleMusicSyncEnabled = { viewModel.setAppleMusicSyncEnabled(it) },
                 )
                 2 -> AboutTab()
             }
@@ -2564,6 +2568,9 @@ private fun GeneralTab(
     persistQueue: Boolean,
     onPersistQueueChanged: (Boolean) -> Unit,
     spotifyConnected: Boolean,
+    appleMusicAuthorized: Boolean,
+    appleMusicSyncEnabled: Boolean,
+    onSetAppleMusicSyncEnabled: (Boolean) -> Unit,
 ) {
     val syncViewModel: SyncViewModel = koinViewModel()
     val syncEnabled by syncViewModel.syncEnabled.collectAsStateWithLifecycle()
@@ -2707,6 +2714,71 @@ private fun GeneralTab(
                                     color = MaterialTheme.colorScheme.error,
                                 )
                             }
+                        }
+                    }
+                }
+            }
+        }
+
+        // ── Apple Music Sync section (Phase 6) ───────────────────────
+        // Mirrors the Spotify Sync section above. Only shown when
+        // Apple Music is authorized (MUT present); the toggle writes
+        // to enabled_sync_providers, which the multi-provider sync
+        // engine from Phases 4.5 + 5 reads on every cycle.
+        //
+        // Per Decision D1, Phase 6 ships a single global enable/disable
+        // toggle for AM — per-playlist selection is deferred to a
+        // follow-up. Enabling AM here means "sync every AM library
+        // playlist + push every locally-eligible playlist with AM
+        // track IDs to AM."
+        if (appleMusicAuthorized) {
+            item { Spacer(modifier = Modifier.height(8.dp)) }
+            item { SectionHeader("Apple Music Sync") }
+            item {
+                Card(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(horizontal = 16.dp),
+                    shape = RoundedCornerShape(8.dp),
+                    colors = CardDefaults.cardColors(
+                        containerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f),
+                    ),
+                ) {
+                    Column(modifier = Modifier.padding(16.dp)) {
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            verticalAlignment = Alignment.CenterVertically,
+                        ) {
+                            Column(modifier = Modifier.weight(1f)) {
+                                Text(
+                                    "Sync Library",
+                                    style = MaterialTheme.typography.bodyLarge,
+                                    fontWeight = FontWeight.Medium,
+                                )
+                                Text(
+                                    if (appleMusicSyncEnabled)
+                                        "AM library playlists pull and push on every sync"
+                                    else
+                                        "Apple Music sync disabled",
+                                    style = MaterialTheme.typography.bodySmall,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                )
+                            }
+                            Switch(
+                                checked = appleMusicSyncEnabled,
+                                onCheckedChange = onSetAppleMusicSyncEnabled,
+                            )
+                        }
+                        if (appleMusicSyncEnabled) {
+                            Spacer(modifier = Modifier.height(12.dp))
+                            Text(
+                                "Note: Apple Music's API doesn't allow Parachord to delete or " +
+                                    "rename playlists, or remove tracks from a playlist. Those " +
+                                    "actions silently no-op on Apple Music — make those changes in " +
+                                    "the Music app instead.",
+                                style = MaterialTheme.typography.bodySmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            )
                         }
                     }
                 }

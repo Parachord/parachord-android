@@ -622,13 +622,20 @@ class SettingsStore constructor(
      */
     suspend fun getEnabledSyncProviders(): Set<String> {
         val raw = dataStore.data.first()[ENABLED_SYNC_PROVIDERS]
-        return if (raw.isNullOrBlank()) setOf("spotify")
-        else raw.split(",").map { it.trim() }.filter { it.isNotEmpty() }.toSet()
+        return parseEnabledSyncProviders(raw)
     }
+
+    /** Reactive flow of the enabled-providers set. Used by the settings UI. */
+    fun getEnabledSyncProvidersFlow(): Flow<Set<String>> =
+        dataStore.data.map { parseEnabledSyncProviders(it[ENABLED_SYNC_PROVIDERS]) }
 
     suspend fun setEnabledSyncProviders(providers: Set<String>) {
         dataStore.edit { it[ENABLED_SYNC_PROVIDERS] = providers.joinToString(",") }
     }
+
+    private fun parseEnabledSyncProviders(raw: String?): Set<String> =
+        if (raw.isNullOrBlank()) setOf("spotify")
+        else raw.split(",").map { it.trim() }.filter { it.isNotEmpty() }.toSet()
 
     suspend fun clearSyncSettings() {
         dataStore.edit { prefs ->

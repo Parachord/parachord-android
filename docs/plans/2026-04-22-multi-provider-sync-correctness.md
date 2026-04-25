@@ -289,6 +289,8 @@ Push direction uses `lastModified > max(syncedTo[*].syncedAt over relevantMirror
 
 ### Phase 6 — Settings, wizard, and picker
 
+> **Status:** ⚠️ Minimum-viable Phase 6 landed in commit `(Phase 6 wrap-up)`. Settings → General now shows an "Apple Music Sync" section (only when AM is authorized — MUT present); the toggle wires to `enabled_sync_providers` in DataStore, which the multi-provider sync engine from Phases 4.5 + 5 reads on every cycle. Disconnecting Apple Music also drops it from the enabled set so the engine stops trying to call AM endpoints with a missing MUT. AM-side Apple-unsupported limitations (no delete, no rename, no track-removal) are surfaced inline as a static note under the toggle. **Deferred to Phase 6.5+:** the SyncSetupSheet wizard refactor (provider-selection step, per-provider playlist picker), the AM-deletion-unsupported toast/banner UI from Decision D8, and the per-provider sync-history UI. AM users today get an "all-or-nothing" sync experience — one toggle controls all AM library playlists.
+
 - `SettingsStore.SyncSettings` gains `enabledProviders: Set<String>` and `selectedPlaylistIdsByProvider: Map<String, Set<String>>`.
 - One-shot migration from old single-provider state — the legacy `selectedPlaylistIds` field becomes the `spotify` entry.
 - `SyncSetupSheet` is **provider-driven**, not provider-coded. It iterates `Koin.getAll<SyncProvider>()` and renders one row per provider with its `displayName`, an availability indicator (configured / needs auth), and a checkbox. Adding Tidal later means registering a `TidalSyncProvider` in Koin — the wizard picks it up automatically with no UI changes.

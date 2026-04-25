@@ -292,6 +292,32 @@ class SettingsViewModel constructor(
         viewModelScope.launch {
             settingsStore.clearAppleMusicDeveloperToken()
             musicKitBridge.disconnect()
+            // Also drop AM from the enabled-sync-providers set so the
+            // sync engine stops trying to call AM endpoints with a
+            // missing/cleared MUT.
+            val current = settingsStore.getEnabledSyncProviders()
+            settingsStore.setEnabledSyncProviders(current - "applemusic")
+        }
+    }
+
+    // ── Apple Music sync (Phase 6) ──────────────────────────────────
+    // Multi-provider sync is keyed on `enabled_sync_providers` in
+    // DataStore; this exposes the AM-specific bit reactively for the
+    // settings toggle. The toggle is only visible when AM is
+    // authorized (MUT present); the reactive flow recomputes whenever
+    // either input changes. Spotify keeps its existing dedicated
+    // toggle (sync_enabled boolean) for backward compatibility — both
+    // signals feed the same sync engine.
+    val appleMusicSyncEnabled: StateFlow<Boolean> =
+        settingsStore.getEnabledSyncProvidersFlow()
+            .map { "applemusic" in it }
+            .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), false)
+
+    fun setAppleMusicSyncEnabled(enabled: Boolean) {
+        viewModelScope.launch {
+            val current = settingsStore.getEnabledSyncProviders()
+            val next = if (enabled) current + "applemusic" else current - "applemusic"
+            settingsStore.setEnabledSyncProviders(next)
         }
     }
 
