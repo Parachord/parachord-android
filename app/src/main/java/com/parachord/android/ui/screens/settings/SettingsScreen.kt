@@ -2789,21 +2789,30 @@ private fun GeneralTab(
                                 },
                             )
                         }
+                        // "Configure Sync…" button — always visible. When AM is
+                        // already enabled it pre-fills with current axis selection
+                        // for re-config. When AM is off it doubles as the primary
+                        // entry to enable + configure (the wizard's startSync()
+                        // adds AM to enabledSyncProviders on completion). Without
+                        // this always-visible entry, the only path to the wizard
+                        // when AM was already enabled was to flip the switch off
+                        // then on — confusing.
+                        Spacer(modifier = Modifier.height(12.dp))
+                        OutlinedButton(
+                            onClick = {
+                                syncSetupProviderId = "applemusic"
+                                syncViewModel.resetSetup()
+                                showSyncSetupSheet = true
+                            },
+                            modifier = Modifier.fillMaxWidth(),
+                            shape = RoundedCornerShape(8.dp),
+                        ) {
+                            Text(
+                                if (appleMusicSyncEnabled) "Configure Sync…"
+                                else "Set Up Sync…"
+                            )
+                        }
                         if (appleMusicSyncEnabled) {
-                            Spacer(modifier = Modifier.height(12.dp))
-                            // Reconfigure button — same wizard, opens with AM's
-                            // current axis opt-in pre-filled.
-                            OutlinedButton(
-                                onClick = {
-                                    syncSetupProviderId = "applemusic"
-                                    syncViewModel.resetSetup()
-                                    showSyncSetupSheet = true
-                                },
-                                modifier = Modifier.fillMaxWidth(),
-                                shape = RoundedCornerShape(8.dp),
-                            ) {
-                                Text("Configure Sync…")
-                            }
                             Spacer(modifier = Modifier.height(12.dp))
                             Text(
                                 "Note: Apple Music's API doesn't allow Parachord to delete or " +

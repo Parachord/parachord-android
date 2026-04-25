@@ -32,6 +32,14 @@ class SyncViewModel constructor(
 
     fun setActiveProvider(providerId: String) {
         _activeProviderId.value = providerId
+        // Always re-enter the wizard at OPTIONS for the new provider —
+        // never carry a stale SYNCING / COMPLETE step over from a
+        // previous wizard run (e.g. the user just finished Spotify
+        // and is now opening AM). Without this reset, the wizard could
+        // skip past the per-axis picker and land directly on the
+        // sync-in-progress / done screen.
+        _currentStep.value = SetupStep.OPTIONS
+        _syncResult.value = null
         viewModelScope.launch {
             // Pre-fill axis checkboxes from the per-provider opt-in.
             val collections = settingsStore.getSyncCollectionsForProvider(providerId)
