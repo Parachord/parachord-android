@@ -2752,53 +2752,30 @@ private fun GeneralTab(
                     ),
                 ) {
                     Column(modifier = Modifier.padding(16.dp)) {
-                        Row(
-                            modifier = Modifier.fillMaxWidth(),
-                            verticalAlignment = Alignment.CenterVertically,
-                        ) {
-                            Column(modifier = Modifier.weight(1f)) {
-                                Text(
-                                    "Sync Library",
-                                    style = MaterialTheme.typography.bodyLarge,
-                                    fontWeight = FontWeight.Medium,
-                                )
-                                Text(
-                                    if (appleMusicSyncEnabled)
-                                        "Songs / albums / artists / playlists pull on every sync"
-                                    else
-                                        "Apple Music sync disabled",
-                                    style = MaterialTheme.typography.bodySmall,
-                                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                                )
-                            }
-                            Switch(
-                                checked = appleMusicSyncEnabled,
-                                onCheckedChange = { enabled ->
-                                    if (enabled) {
-                                        // Open the wizard so the user picks which
-                                        // collection axes (songs/albums/artists/playlists)
-                                        // to pull from AM. The wizard's startSync()
-                                        // adds AM to enabledSyncProviders + persists
-                                        // the per-provider axis opt-in.
-                                        syncSetupProviderId = "applemusic"
-                                        syncViewModel.resetSetup()
-                                        showSyncSetupSheet = true
-                                    } else {
-                                        onSetAppleMusicSyncEnabled(false)
-                                    }
-                                },
-                            )
-                        }
-                        // "Configure Sync…" button — always visible. When AM is
-                        // already enabled it pre-fills with current axis selection
-                        // for re-config. When AM is off it doubles as the primary
-                        // entry to enable + configure (the wizard's startSync()
-                        // adds AM to enabledSyncProviders on completion). Without
-                        // this always-visible entry, the only path to the wizard
-                        // when AM was already enabled was to flip the switch off
-                        // then on — confusing.
+                        // Header + status text.
+                        Text(
+                            if (appleMusicSyncEnabled) "Apple Music sync is on"
+                            else "Apple Music sync is off",
+                            style = MaterialTheme.typography.bodyLarge,
+                            fontWeight = FontWeight.Medium,
+                        )
+                        Spacer(modifier = Modifier.height(4.dp))
+                        Text(
+                            if (appleMusicSyncEnabled)
+                                "Tap below to choose which library items to sync."
+                            else
+                                "Tap below to choose which library items to sync from Apple Music.",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        )
                         Spacer(modifier = Modifier.height(12.dp))
-                        OutlinedButton(
+
+                        // PRIMARY ENTRY — filled button (not outlined). The wizard's
+                        // OPTIONS step is the only place users can change axis
+                        // selection, so make this button impossible to miss.
+                        // When AM is off this button enables it via the wizard;
+                        // when on it re-opens the wizard with current selection.
+                        Button(
                             onClick = {
                                 syncSetupProviderId = "applemusic"
                                 syncViewModel.resetSetup()
@@ -2806,13 +2783,28 @@ private fun GeneralTab(
                             },
                             modifier = Modifier.fillMaxWidth(),
                             shape = RoundedCornerShape(8.dp),
+                            colors = ButtonDefaults.buttonColors(
+                                containerColor = Color(0xFFFA243C),
+                            ),
                         ) {
                             Text(
-                                if (appleMusicSyncEnabled) "Configure Sync…"
-                                else "Set Up Sync…"
+                                if (appleMusicSyncEnabled) "Choose what to sync…"
+                                else "Set up Apple Music sync…"
                             )
                         }
+
+                        // SECONDARY — only shown when AM is on, gives an explicit
+                        // off path. Wizard handles axis changes; this is for the
+                        // simple "I'm done with AM sync entirely" case.
                         if (appleMusicSyncEnabled) {
+                            Spacer(modifier = Modifier.height(8.dp))
+                            OutlinedButton(
+                                onClick = { onSetAppleMusicSyncEnabled(false) },
+                                modifier = Modifier.fillMaxWidth(),
+                                shape = RoundedCornerShape(8.dp),
+                            ) {
+                                Text("Turn off Apple Music sync")
+                            }
                             Spacer(modifier = Modifier.height(12.dp))
                             Text(
                                 "Note: Apple Music's API doesn't allow Parachord to delete or " +

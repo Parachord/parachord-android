@@ -44,6 +44,8 @@ import androidx.compose.material.icons.filled.PlayArrow
 import androidx.compose.material.icons.filled.PushPin
 import androidx.compose.material.icons.filled.Sync
 import androidx.compose.material3.AlertDialog
+import androidx.compose.material3.Button
+import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
@@ -132,6 +134,16 @@ fun CollectionScreen(
     val searchQuery by viewModel.searchQuery.collectAsStateWithLifecycle()
 
     var showSyncSheet by remember { mutableStateOf(false) }
+    /** Which provider's wizard to open. Set when the user picks from the
+     *  provider menu below. Default Spotify for back-compat with the
+     *  previous single-provider entry. */
+    var syncSheetProviderId by remember { mutableStateOf("spotify") }
+    /** When true, render a small bottom sheet that lets the user pick
+     *  which provider's sync wizard to open. The library top-bar sync
+     *  icon now opens this picker instead of going straight into Spotify
+     *  — otherwise users with both Spotify + AM connected can't reach
+     *  the AM wizard from the Collection screen. */
+    var showSyncProviderPicker by remember { mutableStateOf(false) }
     val contextMenuState = rememberTrackContextMenuState()
     val allPlaylists by viewModel.playlists.collectAsStateWithLifecycle()
     val resolverOrder by viewModel.resolverOrder.collectAsStateWithLifecycle()
@@ -139,7 +151,21 @@ fun CollectionScreen(
     val trackResolverConfidences by viewModel.trackResolverConfidences.collectAsStateWithLifecycle()
 
     if (showSyncSheet) {
-        SyncSetupSheet(onDismiss = { showSyncSheet = false })
+        SyncSetupSheet(
+            onDismiss = { showSyncSheet = false },
+            providerId = syncSheetProviderId,
+        )
+    }
+
+    if (showSyncProviderPicker) {
+        SyncProviderPickerSheet(
+            onDismiss = { showSyncProviderPicker = false },
+            onPick = { providerId ->
+                syncSheetProviderId = providerId
+                showSyncProviderPicker = false
+                showSyncSheet = true
+            },
+        )
     }
 
     // Track context menu host
@@ -173,7 +199,7 @@ fun CollectionScreen(
                 }
             },
             actions = {
-                IconButton(onClick = { showSyncSheet = true }) {
+                IconButton(onClick = { showSyncProviderPicker = true }) {
                     Icon(Icons.Default.Sync, contentDescription = "Sync")
                 }
             },
@@ -210,7 +236,7 @@ fun CollectionScreen(
                             onClearSearch = { viewModel.setSearchQuery("") },
                         )
                         if (sortedArtists.isEmpty()) {
-                            EmptyState("No artists yet", Icons.Default.Person, onSyncClick = { showSyncSheet = true })
+                            EmptyState("No artists yet", Icons.Default.Person, onSyncClick = { showSyncProviderPicker = true })
                         } else {
                             LazyVerticalGrid(
                                 state = artistGridState,
@@ -305,7 +331,7 @@ fun CollectionScreen(
                             onClearSearch = { viewModel.setSearchQuery("") },
                         )
                         if (sortedAlbums.isEmpty()) {
-                            EmptyState("No albums yet", Icons.Default.MusicNote, onSyncClick = { showSyncSheet = true })
+                            EmptyState("No albums yet", Icons.Default.MusicNote, onSyncClick = { showSyncProviderPicker = true })
                         } else {
                             LazyVerticalGrid(
                                 state = albumGridState,
@@ -417,7 +443,7 @@ fun CollectionScreen(
                             onClearSearch = { viewModel.setSearchQuery("") },
                         )
                         if (sortedTracks.isEmpty()) {
-                            EmptyState("No songs yet", Icons.Default.MusicNote, onSyncClick = { showSyncSheet = true })
+                            EmptyState("No songs yet", Icons.Default.MusicNote, onSyncClick = { showSyncProviderPicker = true })
                         } else {
                             LazyColumn(state = trackListState, modifier = Modifier.fillMaxSize()) {
                                 items(sortedTracks, key = { it.id }) { track ->
@@ -925,6 +951,82 @@ private fun EmptyState(
                 }
             }
         }
+    }
+}
+
+/**
+ * Small bottom sheet asking which provider's sync wizard to open.
+ * Shown when the library top-bar sync icon (or any Collection
+ * empty-state "Sync now" button) is tapped. Lists every provider
+ * we have UI affordances for; the wizard itself handles the case
+ * where the chosen provider isn't authorized yet.
+ *
+ * Replaces the old behavior where the same button always opened the
+ * Spotify wizard — users with both Spotify + AM connected couldn't
+ * reach the AM wizard from the Collection screen otherwise.
+ */
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+private fun SyncProviderPickerSheet(
+    onDismiss: () -> Unit,
+    onPick: (String) -> Unit,
+) {
+    ModalBottomSheet(
+        onDismissRequest = onDismiss,
+        sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true),
+        containerColor = MaterialTheme.colorScheme.surface,
+    ) {
+        Column(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(horizontal = 24.dp, vertical = 16.dp),
+        ) {
+            Text(
+                "Choose a sync provider",
+                style = MaterialTheme.typography.headlineSmall,
+                fontWeight = FontWeight.SemiBold,
+            )
+            Spacer(Modifier.height(8.dp))
+            Text(
+                "Pick which library you want to configure. You can change " +
+                    "what's synced (songs, albums, artists, playlists) on the " +
+                    "next screen.",
+                style = MaterialTheme.typography.bodyMedium,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+            Spacer(Modifier.height(20.dp))
+
+            ProviderPickerRow(
+                label = "Spotify",
+                accent = Color(0xFF1DB954),
+                onClick = { onPick("spotify") },
+            )
+            Spacer(Modifier.height(8.dp))
+            ProviderPickerRow(
+                label = "Apple Music",
+                accent = Color(0xFFFA243C),
+                onClick = { onPick("applemusic") },
+            )
+            Spacer(Modifier.height(16.dp))
+        }
+    }
+}
+
+@Composable
+private fun ProviderPickerRow(
+    label: String,
+    accent: Color,
+    onClick: () -> Unit,
+) {
+    Button(
+        onClick = onClick,
+        modifier = Modifier.fillMaxWidth(),
+        shape = RoundedCornerShape(8.dp),
+        colors = ButtonDefaults.buttonColors(containerColor = accent),
+    ) {
+        Icon(Icons.Default.Sync, contentDescription = null, modifier = Modifier.size(20.dp))
+        Spacer(Modifier.width(8.dp))
+        Text("Configure $label sync…")
     }
 }
 
