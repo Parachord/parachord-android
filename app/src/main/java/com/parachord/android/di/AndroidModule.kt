@@ -407,6 +407,7 @@ val androidModule = module {
     // accepts the resulting List<SyncProvider> with no per-provider Koin
     // changes required here.
     singleOf(::SpotifySyncProvider) bind com.parachord.shared.sync.SyncProvider::class
+    singleOf(::com.parachord.android.sync.AppleMusicSyncProvider) bind com.parachord.shared.sync.SyncProvider::class
     single<List<com.parachord.shared.sync.SyncProvider>> { getAll() }
     singleOf(::SyncScheduler)
     singleOf(::HostedPlaylistPoller)
