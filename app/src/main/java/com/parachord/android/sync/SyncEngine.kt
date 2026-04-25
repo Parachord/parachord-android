@@ -657,7 +657,22 @@ class SyncEngine constructor(
                 // Check if a playlist with this spotifyId already exists under a
                 // different primary key (e.g. pushed local playlist or import).
                 // If so, merge into the existing entry to avoid duplicates.
-                val existingBySpotifyId = playlistDao.getBySpotifyId(remote.spotifyId)
+                var existingBySpotifyId = playlistDao.getBySpotifyId(remote.spotifyId)
+
+                // Cross-provider name-match fallback. If Spotify's pull
+                // sees "Workout 2024" but no Spotify-side sync_source
+                // exists, and an AM-pulled local row already has that
+                // exact name, link Spotify to the existing local row
+                // instead of creating a duplicate `spotify-X` next to
+                // `applemusic-Y`.
+                if (existingBySpotifyId == null) {
+                    val nameMatch = findCrossProviderNameMatch(remote.entity.name, providerId)
+                    if (nameMatch != null) {
+                        Log.d(TAG, "Pull name-match: Spotify remote '${remote.entity.name}' " +
+                            "absorbed by existing local ${nameMatch.id}")
+                        existingBySpotifyId = nameMatch
+                    }
+                }
                 val targetId = existingBySpotifyId?.id ?: remote.entity.id
 
                 // Phase 3 — cross-provider syncedFrom preservation.
@@ -994,8 +1009,27 @@ class SyncEngine constructor(
                 // The "merge into existing" path here used playlist.spotifyId
                 // for Spotify; for other providers there's no equivalent
                 // scalar — the link table is the lookup.
-                val existingByLink = syncPlaylistLinkDao.selectByExternalId(providerId, remote.spotifyId)
-                val existingLocalPlaylist = existingByLink?.let { playlistDao.getById(it.localPlaylistId) }
+                var existingByLink = syncPlaylistLinkDao.selectByExternalId(providerId, remote.spotifyId)
+                var existingLocalPlaylist = existingByLink?.let { playlistDao.getById(it.localPlaylistId) }
+
+                // Cross-provider name-match fallback. When neither the
+                // sync_source nor sync_playlist_link rows have anything
+                // for (this-provider, this-external-id), check whether
+                // an existing local row from a DIFFERENT provider has
+                // the same playlist name. If so, treat it as a cross-
+                // provider push mirror — link this provider's remote
+                // to the existing local and preserve the original
+                // tracks. Without this fallback, syncing the same
+                // playlist on both Spotify and AM produces two local
+                // rows ("Workout 2024" appearing twice).
+                if (existingLocalPlaylist == null) {
+                    val nameMatch = findCrossProviderNameMatch(remote.entity.name, providerId)
+                    if (nameMatch != null) {
+                        Log.d(TAG, "Pull name-match: AM remote '${remote.entity.name}' " +
+                            "absorbed by existing local ${nameMatch.id}")
+                        existingLocalPlaylist = nameMatch
+                    }
+                }
                 val targetId = existingLocalPlaylist?.id ?: remote.entity.id
 
                 // Phase 3 — cross-provider syncedFrom preservation:
@@ -1648,5 +1682,40 @@ class SyncEngine constructor(
     private fun preserveLocalMosaic(existing: String?, remote: String?): String? {
         if (existing != null && existing.startsWith("file://")) return existing
         return remote ?: existing
+    }
+
+    /**
+     * Cross-provider name-match dedup for the pull path. Returns the
+     * existing local playlist that should "absorb" [remoteName] from
+     * [currentProviderId], or null if no match.
+     *
+     * Used to prevent duplicate local rows when the same playlist
+     * exists on both Spotify and Apple Music. Without this, AM's pull
+     * after Spotify's pull creates `applemusic-Y` next to `spotify-X`
+     * for "Workout 2024" — two visible rows for the same playlist.
+     *
+     * Match rules (mirror of the push-path name dedup at line 1273):
+     * - case-insensitive, trimmed name equality
+     * - exclude rows that already have a link for [currentProviderId]
+     *   (those are this-provider's own playlists; matching them would
+     *   collapse two distinct remotes into one local)
+     * - exclude `local-*` rows (those are Parachord-originated and
+     *   handled by the push-path dedup)
+     * - if multiple match, pick the one with the most tracks
+     *   (richest wins, deterministic tiebreak)
+     */
+    private suspend fun findCrossProviderNameMatch(
+        remoteName: String,
+        currentProviderId: String,
+    ): PlaylistEntity? {
+        val key = remoteName.trim().lowercase()
+        if (key.isEmpty()) return null
+        val candidates = playlistDao.getAllSync().filter { local ->
+            local.name.trim().lowercase() == key
+                && !local.id.startsWith("local-")
+                && syncPlaylistLinkDao.selectForLink(local.id, currentProviderId) == null
+        }
+        if (candidates.isEmpty()) return null
+        return candidates.maxByOrNull { it.trackCount }
     }
 }
