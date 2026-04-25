@@ -10,6 +10,12 @@ CREATE TABLE IF NOT EXISTS artists (
 getAll:
 SELECT * FROM artists ORDER BY name ASC;
 
+countAll:
+SELECT COUNT(*) FROM artists;
+
+countByIdPrefix:
+SELECT COUNT(*) FROM artists WHERE id LIKE ? || '%';
+
 getById:
 SELECT * FROM artists WHERE id = ?;
 

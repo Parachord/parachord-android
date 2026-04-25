@@ -57,6 +57,18 @@ class ArtistDao(private val db: ParachordDb) {
         queries.getBySpotifyId(spotifyId).executeAsOneOrNull()?.toArtist()
     }
 
+    /** Total artist count. Used by SyncEngine to detect entity-table wipes
+     *  where `sync_sources` rows survived but the `artists` table is empty. */
+    suspend fun countAll(): Int = withContext(Dispatchers.IO) {
+        queries.countAll().executeAsOne().toInt()
+    }
+
+    /** Count of artists whose primary key starts with [idPrefix]
+     *  (e.g. `"spotify-"`). Per-provider variant of [countAll]. */
+    suspend fun countByIdPrefix(idPrefix: String): Int = withContext(Dispatchers.IO) {
+        queries.countByIdPrefix(idPrefix).executeAsOne().toInt()
+    }
+
     /* ---- Writes ---- */
 
     suspend fun insert(artist: ArtistEntity): Unit = withContext(Dispatchers.IO) {

@@ -12,6 +12,12 @@ CREATE TABLE IF NOT EXISTS albums (
 getAll:
 SELECT * FROM albums ORDER BY addedAt DESC;
 
+countAll:
+SELECT COUNT(*) FROM albums;
+
+countByIdPrefix:
+SELECT COUNT(*) FROM albums WHERE id LIKE ? || '%';
+
 getById:
 SELECT * FROM albums WHERE id = ?;
 

@@ -376,10 +376,25 @@ class SyncEngine constructor(
         val localCount = localSources.size
         val latest = syncSourceDao.getMostRecentByProvider(providerId, "album")
 
+        // Detect entity-table wipes: if `sync_sources` says we have N
+        // albums for this provider but the `albums` table has fewer
+        // rows with the matching id-prefix, lie to the provider about
+        // localCount so its unchanged-shortcut mismatches and forces a
+        // full refetch. Without this, a corrupted entity table never
+        // self-heals — the provider keeps short-circuiting on probe
+        // matches forever. See "Why did synced Albums/Artists
+        // disappear?" debugging session 2026-04-25.
+        val entityCount = albumDao.countByIdPrefix("$providerId-")
+        val effectiveLocalCount = if (entityCount < localCount) {
+            Log.w(TAG, "albums entity-table out of sync for $providerId: " +
+                "$entityCount entities vs $localCount sources — forcing refetch")
+            0
+        } else localCount
+
         val remote = try {
             provider.fetchAlbums(
-                localCount = localCount,
-                latestExternalId = latest?.externalId,
+                localCount = effectiveLocalCount,
+                latestExternalId = if (effectiveLocalCount == 0) null else latest?.externalId,
                 onProgress = { current, total ->
                     onProgress(SyncProgress(SyncPhase.ALBUMS, current, total, "Syncing ${provider.displayName} albums..."))
                 },
@@ -468,9 +483,19 @@ class SyncEngine constructor(
         val localSources = syncSourceDao.getByProvider(providerId, "artist")
         val localCount = localSources.size
 
+        // Same entity-table-wipe guard as syncAlbumsForProvider — see
+        // its KDoc for context. Force refetch when artist entity rows
+        // for this provider's id-prefix fall below the source count.
+        val entityCount = artistDao.countByIdPrefix("$providerId-")
+        val effectiveLocalCount = if (entityCount < localCount) {
+            Log.w(TAG, "artists entity-table out of sync for $providerId: " +
+                "$entityCount entities vs $localCount sources — forcing refetch")
+            0
+        } else localCount
+
         val remote = try {
             provider.fetchArtists(
-                localCount = localCount,
+                localCount = effectiveLocalCount,
                 onProgress = { current, total ->
                     onProgress(SyncProgress(SyncPhase.ARTISTS, current, total, "Syncing ${provider.displayName} artists..."))
                 },

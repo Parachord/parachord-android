@@ -52,6 +52,21 @@ class AlbumDao(private val db: ParachordDb) {
         queries.getById(id).executeAsOneOrNull()?.toAlbum()
     }
 
+    /** Total album count. Used by SyncEngine to detect entity-table wipes
+     *  where `sync_sources` rows survived but the `albums` table is empty —
+     *  forces a full refetch instead of trusting the provider's
+     *  unchanged-shortcut. */
+    suspend fun countAll(): Int = withContext(Dispatchers.IO) {
+        queries.countAll().executeAsOne().toInt()
+    }
+
+    /** Count of albums whose primary key starts with [idPrefix] (e.g.
+     *  `"spotify-"`). Per-provider variant of [countAll] — Apple Music
+     *  rows shouldn't unmask a Spotify wipe. */
+    suspend fun countByIdPrefix(idPrefix: String): Int = withContext(Dispatchers.IO) {
+        queries.countByIdPrefix(idPrefix).executeAsOne().toInt()
+    }
+
     suspend fun getByTitleAndArtist(title: String, artist: String): AlbumEntity? = withContext(Dispatchers.IO) {
         queries.getByTitleAndArtist(title, artist).executeAsOneOrNull()?.toAlbum()
     }
