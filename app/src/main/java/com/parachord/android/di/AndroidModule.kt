@@ -51,6 +51,7 @@ import com.parachord.android.plugin.PluginSyncService
 import com.parachord.android.resolver.ResolverManager
 import com.parachord.android.resolver.ResolverScoring
 import com.parachord.android.resolver.TrackResolverCache
+import com.parachord.android.sync.AppleMusicSyncProvider
 import com.parachord.android.sync.SpotifySyncProvider
 import com.parachord.android.sync.SyncEngine
 import com.parachord.android.sync.SyncScheduler
@@ -407,7 +408,7 @@ val androidModule = module {
     // accepts the resulting List<SyncProvider> with no per-provider Koin
     // changes required here.
     singleOf(::SpotifySyncProvider) bind com.parachord.shared.sync.SyncProvider::class
-    singleOf(::com.parachord.android.sync.AppleMusicSyncProvider) bind com.parachord.shared.sync.SyncProvider::class
+    singleOf(::AppleMusicSyncProvider) bind com.parachord.shared.sync.SyncProvider::class
     single<List<com.parachord.shared.sync.SyncProvider>> { getAll() }
     singleOf(::SyncScheduler)
     singleOf(::HostedPlaylistPoller)
