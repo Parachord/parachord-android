@@ -50,7 +50,22 @@ class SyncViewModel constructor(
         }
     }
 
-    enum class SetupStep { OPTIONS, PLAYLISTS, SYNCING, COMPLETE }
+    enum class SetupStep { OPTIONS, CONFIRM_REMOVAL, PLAYLISTS, SYNCING, COMPLETE }
+
+    /**
+     * State for the CONFIRM_REMOVAL step — the axes the user just
+     * unchecked (compared to their previously-saved opt-in) and a
+     * count of items affected per axis. The user picks Keep or Remove;
+     * Remove fires [SyncEngine.removeItemsForProviderAxis] for each.
+     */
+    data class RemovalConfirmation(
+        val providerId: String,
+        val droppedAxes: List<String>,           // e.g. ["artists", "albums"]
+        val itemCountByAxis: Map<String, Int>,   // "artists" → 84
+    )
+
+    private val _pendingRemoval = MutableStateFlow<RemovalConfirmation?>(null)
+    val pendingRemoval: StateFlow<RemovalConfirmation?> = _pendingRemoval
 
     private val _currentStep = MutableStateFlow(SetupStep.OPTIONS)
     val currentStep: StateFlow<SetupStep> = _currentStep
@@ -160,52 +175,123 @@ class SyncViewModel constructor(
     }
 
     fun startSync() {
-        _currentStep.value = SetupStep.SYNCING
         viewModelScope.launch {
             val activeId = _activeProviderId.value
 
-            // Persist per-provider axis opt-in. Earlier this was a single
-            // global SyncSettings struct; per-provider lets AM sync only
-            // playlists while Spotify syncs everything (or vice versa).
-            val collections = buildSet {
+            // Compute the new axis set from the wizard checkboxes.
+            val newCollections = buildSet {
                 if (_syncTracks.value) add("tracks")
                 if (_syncAlbums.value) add("albums")
                 if (_syncArtists.value) add("artists")
                 if (_syncPlaylists.value) add("playlists")
             }
-            settingsStore.setSyncCollectionsForProvider(activeId, collections)
 
-            // Add this provider to enabledSyncProviders. Spotify is in
-            // by default; AM gets added the first time its wizard finishes.
-            val enabled = settingsStore.getEnabledSyncProviders() + activeId
-            settingsStore.setEnabledSyncProviders(enabled)
-
-            // Spotify path: keep writing the legacy SyncSettings struct so
-            // the existing global-toggle codepaths (sync mass-removal
-            // safeguard, etc.) continue to work. AM doesn't write this —
-            // its per-provider opt-in is the source of truth.
-            if (activeId == SpotifySyncProvider.PROVIDER_ID) {
-                settingsStore.saveSyncSettings(SettingsStore.SyncSettings(
-                    enabled = true,
-                    provider = "spotify",
-                    syncTracks = _syncTracks.value,
-                    syncAlbums = _syncAlbums.value,
-                    syncArtists = _syncArtists.value,
-                    syncPlaylists = _syncPlaylists.value,
-                    selectedPlaylistIds = _selectedPlaylistIds.value,
-                    pushLocalPlaylists = true,
-                ))
+            // Compare against the previously-stored axis set. If the
+            // user un-checked an axis they had on (and there are
+            // existing items for it), pause and ask "Keep or Remove?".
+            // The Confirm step calls confirmRemovalKeep() or
+            // confirmRemovalRemove() which both end by re-entering
+            // continueStartSync() with `newCollections` finalized.
+            val oldCollections = settingsStore.getSyncCollectionsForProvider(activeId)
+            val droppedAxes = (oldCollections - newCollections)
+                .filter { axis -> syncEngine.countItemsForProviderAxis(activeId, axis) > 0 }
+            if (droppedAxes.isNotEmpty()) {
+                val counts = droppedAxes.associateWith {
+                    syncEngine.countItemsForProviderAxis(activeId, it)
+                }
+                _pendingRemoval.value = RemovalConfirmation(
+                    providerId = activeId,
+                    droppedAxes = droppedAxes,
+                    itemCountByAxis = counts,
+                )
+                _pendingNewCollections = newCollections
+                _currentStep.value = SetupStep.CONFIRM_REMOVAL
+                return@launch
             }
 
-            syncScheduler.startInAppTimer()
-            syncScheduler.enableWorkManagerSync()
-
-            val result = syncEngine.syncAll { progress ->
-                _syncProgress.value = progress
-            }
-            _syncResult.value = result
-            _currentStep.value = SetupStep.COMPLETE
+            // No removals — proceed straight to syncing.
+            persistAndRunSync(activeId, newCollections)
         }
+    }
+
+    /** Stash for the post-confirmation continuation. */
+    private var _pendingNewCollections: Set<String> = emptySet()
+
+    /** "Keep items" branch — same effect as before: stop tracking
+     *  the dropped axes but leave existing items in the library
+     *  (their sync_sources rows for this provider stay; future syncs
+     *  ignore them per the per-axis gate). */
+    fun confirmRemovalKeep() {
+        viewModelScope.launch {
+            val activeId = _activeProviderId.value
+            persistAndRunSync(activeId, _pendingNewCollections)
+            _pendingRemoval.value = null
+        }
+    }
+
+    /** "Remove items" branch — purge the user's items for each dropped
+     *  axis on this provider. Cross-provider survival: items also
+     *  synced from another provider stay (we only delete the entity
+     *  when no other provider's sync_source row references it). */
+    fun confirmRemovalRemove() {
+        viewModelScope.launch {
+            val activeId = _activeProviderId.value
+            val confirmation = _pendingRemoval.value
+            if (confirmation != null) {
+                for (axis in confirmation.droppedAxes) {
+                    syncEngine.removeItemsForProviderAxis(activeId, axis)
+                }
+            }
+            persistAndRunSync(activeId, _pendingNewCollections)
+            _pendingRemoval.value = null
+        }
+    }
+
+    fun cancelRemoval() {
+        // User backed out — bounce back to OPTIONS, axis checkboxes
+        // retain their wizard-side state. They can adjust and try
+        // Start Sync again.
+        _pendingRemoval.value = null
+        _currentStep.value = SetupStep.OPTIONS
+    }
+
+    private suspend fun persistAndRunSync(activeId: String, collections: Set<String>) {
+        _currentStep.value = SetupStep.SYNCING
+        // Persist per-provider axis opt-in. Earlier this was a single
+        // global SyncSettings struct; per-provider lets AM sync only
+        // playlists while Spotify syncs everything (or vice versa).
+        settingsStore.setSyncCollectionsForProvider(activeId, collections)
+
+        // Add this provider to enabledSyncProviders. Spotify is in
+        // by default; AM gets added the first time its wizard finishes.
+        val enabled = settingsStore.getEnabledSyncProviders() + activeId
+        settingsStore.setEnabledSyncProviders(enabled)
+
+        // Spotify path: keep writing the legacy SyncSettings struct so
+        // the existing global-toggle codepaths (sync mass-removal
+        // safeguard, etc.) continue to work. AM doesn't write this —
+        // its per-provider opt-in is the source of truth.
+        if (activeId == SpotifySyncProvider.PROVIDER_ID) {
+            settingsStore.saveSyncSettings(SettingsStore.SyncSettings(
+                enabled = true,
+                provider = "spotify",
+                syncTracks = _syncTracks.value,
+                syncAlbums = _syncAlbums.value,
+                syncArtists = _syncArtists.value,
+                syncPlaylists = _syncPlaylists.value,
+                selectedPlaylistIds = _selectedPlaylistIds.value,
+                pushLocalPlaylists = true,
+            ))
+        }
+
+        syncScheduler.startInAppTimer()
+        syncScheduler.enableWorkManagerSync()
+
+        val result = syncEngine.syncAll { progress ->
+            _syncProgress.value = progress
+        }
+        _syncResult.value = result
+        _currentStep.value = SetupStep.COMPLETE
     }
 
     fun syncNow() {

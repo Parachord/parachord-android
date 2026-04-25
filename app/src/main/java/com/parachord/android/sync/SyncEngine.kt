@@ -1797,6 +1797,76 @@ class SyncEngine constructor(
     }
 
     /**
+     * Per-axis cleanup: walk every `sync_sources` row for
+     * (`providerId`, [axis]) and remove the underlying entity row IF
+     * no other provider has a `sync_sources` row pointing at it. Used
+     * by the wizard's opt-out flow when the user un-checks an axis
+     * they had previously enabled — they get to choose Keep (no-op)
+     * or Remove (this method).
+     *
+     * [axis] values: `"tracks"` / `"albums"` / `"artists"` / `"playlists"`.
+     * Internally translates to the singular `itemType` used by the
+     * sync_sources schema (`"track"` / `"album"` / `"artist"` / `"playlist"`).
+     *
+     * Cross-provider survival: an item that's also synced from another
+     * provider stays in the library — only the dropped provider's
+     * sync_source row is deleted, not the entity. This matches the
+     * existing `stopSyncing(removeItems = true)` behavior at the
+     * provider level, applied at axis granularity.
+     */
+    suspend fun removeItemsForProviderAxis(providerId: String, axis: String): Int {
+        val itemType = when (axis) {
+            "tracks" -> "track"
+            "albums" -> "album"
+            "artists" -> "artist"
+            "playlists" -> "playlist"
+            else -> return 0
+        }
+        var purged = 0
+        val sources = syncSourceDao.getByProvider(providerId, itemType)
+        for (source in sources) {
+            val others = syncSourceDao.getByItem(source.itemId, itemType)
+                .filter { it.providerId != providerId }
+            syncSourceDao.deleteByKey(source.itemId, itemType, providerId)
+            if (others.isEmpty()) {
+                when (itemType) {
+                    "track" -> trackDao.getById(source.itemId)?.let { trackDao.delete(it) }
+                    "album" -> albumDao.getById(source.itemId)?.let { albumDao.delete(it) }
+                    "artist" -> artistDao.deleteById(source.itemId)
+                    "playlist" -> {
+                        playlistDao.getById(source.itemId)?.let { playlistDao.delete(it) }
+                        playlistTrackDao.deleteByPlaylistId(source.itemId)
+                        // Also drop any per-provider link / source rows so
+                        // the playlist-level invariants stay clean.
+                        syncPlaylistLinkDao.deleteForLocal(source.itemId)
+                        syncPlaylistSourceDao.deleteForLocal(source.itemId)
+                    }
+                }
+                purged++
+            }
+        }
+        Log.d(TAG, "Per-axis purge: provider=$providerId axis=$axis " +
+            "scanned=${sources.size} purged=$purged " +
+            "(others kept survived under another provider's link)")
+        return purged
+    }
+
+    /** Quick count for the wizard's confirmation prompt — number of
+     *  items the user has on this provider+axis that would be touched
+     *  by [removeItemsForProviderAxis]. Includes both purge-able rows
+     *  and rows that would survive under another provider. */
+    suspend fun countItemsForProviderAxis(providerId: String, axis: String): Int {
+        val itemType = when (axis) {
+            "tracks" -> "track"
+            "albums" -> "album"
+            "artists" -> "artist"
+            "playlists" -> "playlist"
+            else -> return 0
+        }
+        return syncSourceDao.getByProvider(providerId, itemType).size
+    }
+
+    /**
      * Don't overwrite a locally-generated mosaic with the provider's
      * stock playlist art. Mosaics live under `filesDir/playlist_mosaics/`
      * and are written as `file://...` URIs by [com.parachord.android.data.metadata.ImageEnrichmentService.enrichPlaylistArt].

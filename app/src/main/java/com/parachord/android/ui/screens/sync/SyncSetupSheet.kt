@@ -83,6 +83,7 @@ fun SyncSetupSheet(
     ) {
         when (currentStep) {
             SyncViewModel.SetupStep.OPTIONS -> OptionsStep(viewModel, accent, providerDisplayName(activeProviderId), activeProviderId)
+            SyncViewModel.SetupStep.CONFIRM_REMOVAL -> ConfirmRemovalStep(viewModel, accent, providerDisplayName(activeProviderId))
             SyncViewModel.SetupStep.PLAYLISTS -> PlaylistSelectionStep(viewModel, accent)
             SyncViewModel.SetupStep.SYNCING -> SyncingStep(viewModel, accent)
             SyncViewModel.SetupStep.COMPLETE -> CompleteStep(viewModel, onDismiss, accent)
@@ -191,6 +192,111 @@ private fun SyncOptionRow(
         Spacer(Modifier.width(16.dp))
         Text(label, style = MaterialTheme.typography.bodyLarge, modifier = Modifier.weight(1f))
         Checkbox(checked = checked, onCheckedChange = onCheckedChange)
+    }
+}
+
+/**
+ * Shown when the user un-checks an axis they previously had on AND
+ * the provider has existing items for that axis. Two paths:
+ *  - Keep items: stop tracking but leave items in the library
+ *  - Remove items: purge items (cross-provider survival applies —
+ *    items also synced from another provider stay)
+ */
+@Composable
+private fun ConfirmRemovalStep(
+    viewModel: SyncViewModel,
+    accent: Color,
+    providerDisplayName: String,
+) {
+    val confirmation by viewModel.pendingRemoval.collectAsStateWithLifecycle()
+    val c = confirmation ?: return
+
+    Column(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(horizontal = 24.dp, vertical = 16.dp),
+    ) {
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            Icon(
+                Icons.Default.Warning,
+                contentDescription = null,
+                tint = accent,
+                modifier = Modifier.size(28.dp),
+            )
+            Spacer(Modifier.width(12.dp))
+            Text(
+                "Stop syncing from $providerDisplayName?",
+                style = MaterialTheme.typography.headlineSmall,
+                fontWeight = FontWeight.SemiBold,
+            )
+        }
+        Spacer(Modifier.height(12.dp))
+        Text(
+            "You unchecked the following from your $providerDisplayName sync. " +
+                "What should happen to the items already in your library?",
+            style = MaterialTheme.typography.bodyMedium,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+        )
+        Spacer(Modifier.height(16.dp))
+
+        for (axis in c.droppedAxes) {
+            val count = c.itemCountByAxis[axis] ?: 0
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(vertical = 6.dp),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                Icon(
+                    when (axis) {
+                        "tracks" -> Icons.Default.Favorite
+                        "albums" -> Icons.Default.Album
+                        "artists" -> Icons.Default.Person
+                        @Suppress("DEPRECATION") "playlists" -> Icons.Default.QueueMusic
+                        else -> Icons.Default.Sync
+                    },
+                    contentDescription = null,
+                    modifier = Modifier.size(20.dp),
+                    tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+                Spacer(Modifier.width(12.dp))
+                Text(
+                    "$count ${axis.replaceFirstChar { it.uppercase() }}",
+                    style = MaterialTheme.typography.bodyLarge,
+                )
+            }
+        }
+
+        Spacer(Modifier.height(16.dp))
+        Text(
+            "Keep items: stop syncing but leave them in your library.\n" +
+                "Remove items: delete them from Parachord. Items also synced " +
+                "from another provider will stay.",
+            style = MaterialTheme.typography.bodySmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+        )
+        Spacer(Modifier.height(24.dp))
+
+        Row(modifier = Modifier.fillMaxWidth()) {
+            OutlinedButton(
+                onClick = { viewModel.cancelRemoval() },
+                modifier = Modifier.weight(1f),
+            ) { Text("Back") }
+            Spacer(Modifier.width(8.dp))
+            OutlinedButton(
+                onClick = { viewModel.confirmRemovalKeep() },
+                modifier = Modifier.weight(1f),
+            ) { Text("Keep") }
+            Spacer(Modifier.width(8.dp))
+            Button(
+                onClick = { viewModel.confirmRemovalRemove() },
+                modifier = Modifier.weight(1f),
+                colors = ButtonDefaults.buttonColors(
+                    containerColor = MaterialTheme.colorScheme.error,
+                ),
+            ) { Text("Remove") }
+        }
+        Spacer(Modifier.height(16.dp))
     }
 }
 
