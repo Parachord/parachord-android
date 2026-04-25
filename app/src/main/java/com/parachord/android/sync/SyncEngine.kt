@@ -691,6 +691,28 @@ class SyncEngine constructor(
         Log.d(TAG, "Cross-provider dedup migration: merged $mergedCount duplicate row(s)")
     }
 
+    /**
+     * Walk every playlist whose `trackCount` field doesn't match its
+     * actual `playlist_tracks` row count, and fix it. Cheap (one
+     * query + one update per mismatched row). Runs every sync cycle
+     * because the AM-side trackCount drift can re-emerge any time
+     * a snapshot-matched cycle skips pullPlaylist (which is the only
+     * other path that writes trackCount).
+     */
+    private suspend fun reconcileTrackCounts() {
+        var fixed = 0
+        for (playlist in playlistDao.getAllSync()) {
+            val actual = playlistTrackDao.getByPlaylistIdSync(playlist.id).size
+            if (playlist.trackCount != actual) {
+                playlistDao.update(playlist.copy(trackCount = actual))
+                fixed++
+            }
+        }
+        if (fixed > 0) {
+            Log.d(TAG, "reconcileTrackCounts: fixed $fixed playlist(s)")
+        }
+    }
+
     private suspend fun migrateLinksFromPlaylists() {
         val providerId = SpotifySyncProvider.PROVIDER_ID
         var added = 0
@@ -744,6 +766,17 @@ class SyncEngine constructor(
         // rows, finds duplicates by name across providers, merges them
         // into a single canonical row. Runs at most once per install.
         migrateMergeCrossProviderDuplicates()
+
+        // Self-healing trackCount reconciliation. Earlier AM pulls
+        // inserted PlaylistEntity rows with trackCount=0 (AM's library
+        // playlist response always carries 0; the field doesn't exist
+        // on the response). Later pulls would only update trackCount
+        // via pullPlaylist (which runs on snapshot mismatch). Steady-
+        // state matched-snapshot rows therefore display "0 tracks" in
+        // the playlist list even when playlist_tracks actually has
+        // rows. Cheap to run every cycle — single SQL pass over the
+        // playlists table joined with the playlist_tracks counts.
+        reconcileTrackCounts()
 
         // ── Spotify pull (existing block; preserves dedup-cleanup migration) ──
         // The dedup-cleanup migration block below is Spotify-only by design
