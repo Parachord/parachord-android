@@ -921,7 +921,7 @@ private fun EmptyState(
                         modifier = Modifier.size(18.dp),
                     )
                     Spacer(modifier = Modifier.width(6.dp))
-                    Text("Sync Spotify")
+                    Text("Sync now")
                 }
             }
         }
