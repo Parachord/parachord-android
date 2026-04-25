@@ -9,6 +9,9 @@ import com.parachord.android.data.db.entity.PlaylistEntity
 import com.parachord.android.data.db.entity.PlaylistTrackEntity
 import com.parachord.android.data.db.entity.TrackEntity
 import com.parachord.android.data.store.SettingsStore
+import com.parachord.shared.sync.ProviderFeatures
+import com.parachord.shared.sync.SnapshotKind
+import com.parachord.shared.sync.SyncProvider
 import kotlinx.coroutines.delay
 import java.time.Instant
 
@@ -29,7 +32,7 @@ class SpotifySyncProvider constructor(
     private val spotifyApi: SpotifyApi,
     private val settingsStore: SettingsStore,
     private val oAuthManager: OAuthManager,
-) {
+) : SyncProvider {
     companion object {
         private const val TAG = "SpotifySyncProvider"
         const val PROVIDER_ID = "spotify"
@@ -37,6 +40,21 @@ class SpotifySyncProvider constructor(
         private const val PLAYLIST_TRACK_BATCH_SIZE = 100
         private const val MAX_RETRIES = 5
     }
+
+    // ── SyncProvider conformance ─────────────────────────────────────
+    // Capability declaration for the multi-provider SyncEngine. SyncEngine
+    // routes on `features`, never on `id` — so adding Apple Music or Tidal
+    // later doesn't require any change here. See SyncProvider.kt for the
+    // semantics of each flag.
+    override val id: String = PROVIDER_ID
+    override val displayName: String = "Spotify"
+    override val features = ProviderFeatures(
+        snapshots = SnapshotKind.Opaque,
+        supportsFollow = true,
+        supportsPlaylistDelete = true,
+        supportsPlaylistRename = true,
+        supportsTrackReplace = true,
+    )
 
     private var cachedMarket: String? = null
 
