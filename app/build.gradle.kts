@@ -179,6 +179,7 @@ dependencies {
     testImplementation(libs.turbine)
     testImplementation(libs.sqldelight.sqlite.driver)
     testImplementation(libs.sqlite.jdbc)
+    testImplementation(libs.okhttp.mockwebserver)
     androidTestImplementation(libs.androidx.test.ext)
     androidTestImplementation(libs.androidx.espresso.core)
     androidTestImplementation(platform(libs.androidx.compose.bom))
