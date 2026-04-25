@@ -147,6 +147,15 @@ interface AppleMusicLibraryApi {
 data class AmLibrarySongListResponse(
     val data: List<AmLibrarySong> = emptyList(),
     val next: String? = null,
+    val meta: AmListMeta? = null,
+)
+
+/** Apple Music wraps total counts in a `meta` envelope on paginated
+ *  list endpoints. Used by [AppleMusicSyncProvider] to emit accurate
+ *  `(current, total)` progress instead of `(current, current)`. */
+@Serializable
+data class AmListMeta(
+    val total: Int? = null,
 )
 
 @Serializable
@@ -172,6 +181,7 @@ data class AmLibrarySongAttributes(
 data class AmLibraryAlbumListResponse(
     val data: List<AmLibraryAlbum> = emptyList(),
     val next: String? = null,
+    val meta: AmListMeta? = null,
 )
 
 @Serializable
@@ -195,6 +205,7 @@ data class AmLibraryAlbumAttributes(
 data class AmLibraryArtistListResponse(
     val data: List<AmLibraryArtist> = emptyList(),
     val next: String? = null,
+    val meta: AmListMeta? = null,
 )
 
 @Serializable

@@ -316,11 +316,9 @@ class AppleMusicSyncProvider(
         onProgress: ((current: Int, total: Int) -> Unit)?,
     ): List<SyncedTrack>? {
         val all = mutableListOf<SyncedTrack>()
-        var offset = 0
         // Quick-check shortcut: probe one item to compare against the
-        // local state. Apple's library endpoints don't expose a total
-        // count up-front, so we need at least one round-trip to know
-        // whether changes happened.
+        // local state. The probe also returns meta.total which we use
+        // for accurate progress reporting through pagination.
         delay(INTER_REQUEST_DELAY_MS)
         val probe = try {
             api.listLibrarySongs(limit = 1, offset = 0)
@@ -333,8 +331,10 @@ class AppleMusicSyncProvider(
             // Nothing's changed at the head; assume rest is unchanged.
             return null
         }
-        // Full pagination
-        offset = 0
+        // Full pagination. Apple returns total in `meta.total` on every
+        // page; first page from the probe gives us a good initial guess.
+        var total = probe.meta?.total ?: 0
+        var offset = 0
         while (true) {
             delay(INTER_REQUEST_DELAY_MS)
             val resp = try {
@@ -343,10 +343,14 @@ class AppleMusicSyncProvider(
                 if (e.code() == 401) throw AppleMusicReauthRequiredException()
                 throw e
             }
+            // Refresh total in case the library shifted mid-paginate.
+            resp.meta?.total?.let { total = it }
             for (am in resp.data) {
                 all.add(am.toSyncedTrack())
             }
-            onProgress?.invoke(all.size, all.size)
+            // Floor total to the running count so progress never reports
+            // more than 100% if the remote shrunk during pagination.
+            onProgress?.invoke(all.size, maxOf(total, all.size))
             if (resp.next == null || resp.data.size < PAGE_SIZE) break
             offset += resp.data.size
         }
@@ -400,6 +404,7 @@ class AppleMusicSyncProvider(
             throw e
         }
         if (probe.data.firstOrNull()?.id == latestExternalId && localCount > 0) return null
+        var total = probe.meta?.total ?: 0
         var offset = 0
         while (true) {
             delay(INTER_REQUEST_DELAY_MS)
@@ -409,10 +414,11 @@ class AppleMusicSyncProvider(
                 if (e.code() == 401) throw AppleMusicReauthRequiredException()
                 throw e
             }
+            resp.meta?.total?.let { total = it }
             for (am in resp.data) {
                 all.add(am.toSyncedAlbum())
             }
-            onProgress?.invoke(all.size, all.size)
+            onProgress?.invoke(all.size, maxOf(total, all.size))
             if (resp.next == null || resp.data.size < PAGE_SIZE) break
             offset += resp.data.size
         }
@@ -452,6 +458,7 @@ class AppleMusicSyncProvider(
         onProgress: ((current: Int, total: Int) -> Unit)?,
     ): List<SyncedArtist>? {
         val all = mutableListOf<SyncedArtist>()
+        var total = 0
         var offset = 0
         while (true) {
             delay(INTER_REQUEST_DELAY_MS)
@@ -461,10 +468,11 @@ class AppleMusicSyncProvider(
                 if (e.code() == 401) throw AppleMusicReauthRequiredException()
                 throw e
             }
+            resp.meta?.total?.let { total = it }
             for (am in resp.data) {
                 all.add(am.toSyncedArtist())
             }
-            onProgress?.invoke(all.size, all.size)
+            onProgress?.invoke(all.size, maxOf(total, all.size))
             if (resp.next == null || resp.data.size < PAGE_SIZE) break
             offset += resp.data.size
         }
