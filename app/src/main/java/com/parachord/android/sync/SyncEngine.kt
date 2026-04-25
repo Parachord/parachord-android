@@ -894,6 +894,19 @@ class SyncEngine constructor(
                 val localModified = localPlaylist.locallyModified
                 val isHosted = localPlaylist.sourceUrl != null
 
+                // Self-heal for "Spotify-sourced playlist with 0 actual
+                // tracks" (Daily Brew, Daily Mix, etc. that AM clobbered
+                // before the cross-provider push-mirror guard landed).
+                // Force a refetch from Spotify even if snapshot matches
+                // — Spotify is the canonical source, and we trust it to
+                // give us non-empty tracks.
+                val pullSource = syncPlaylistSourceDao.selectForLocal(localPlaylist.id)
+                val ownPullSource = pullSource == null
+                    || pullSource.providerId == providerId
+                val localTrackCount = playlistTrackDao.getByPlaylistIdSync(localPlaylist.id).size
+                val needsTrackRecovery = ownPullSource && localTrackCount == 0
+                    && remote.trackCount > 0
+
                 when {
                     // Hosted XSPF: XSPF is canonical. Only push (when the
                     // poller flipped locallyModified); never pull, because the
@@ -920,7 +933,12 @@ class SyncEngine constructor(
                         pushPlaylist(localPlaylist, spotifyProvider)
                         updated++
                     }
-                    remoteSnapshotId != localSnapshotId -> {
+                    remoteSnapshotId != localSnapshotId || needsTrackRecovery -> {
+                        if (needsTrackRecovery) {
+                            Log.d(TAG, "Self-heal: Spotify playlist " +
+                                "'${localPlaylist.name}' has 0 local tracks (remote=" +
+                                "${remote.trackCount}); forcing refetch despite snapshot match")
+                        }
                         pullPlaylist(localPlaylist, remote)
                         updated++
                     }
@@ -1286,6 +1304,20 @@ class SyncEngine constructor(
                 val localModified = localPlaylist.locallyModified
                 val isHosted = localPlaylist.sourceUrl != null
 
+                // Self-heal for "playlist with 0 tracks" — if the
+                // local has zero tracks AND we're its pull source
+                // (i.e. NOT a cross-provider push mirror — that case
+                // already returned above), force a refetch even if
+                // the snapshot matches. Fixes the case where an
+                // earlier sync stored the snapshot but persisted 0
+                // tracks (Apple's library-tracks endpoint is flaky
+                // for some playlists; the fetchPlaylistTracks
+                // ?include=tracks fallback runs only when actually
+                // called, not for cached-empty rows).
+                val localTrackCount = playlistTrackDao.getByPlaylistIdSync(localPlaylist.id).size
+                val ownPullSource = pullSource?.providerId == providerId
+                val needsTrackRecovery = ownPullSource && localTrackCount == 0
+
                 when {
                     isHosted && localModified -> {
                         pushPlaylist(localPlaylist, provider)
@@ -1308,7 +1340,12 @@ class SyncEngine constructor(
                         pushPlaylist(localPlaylist, provider)
                         updated++
                     }
-                    remoteSnapshotId != localSnapshotId -> {
+                    remoteSnapshotId != localSnapshotId || needsTrackRecovery -> {
+                        if (needsTrackRecovery) {
+                            Log.d(TAG, "Self-heal: ${provider.id} playlist " +
+                                "'${localPlaylist.name}' has 0 local tracks; " +
+                                "forcing refetch despite snapshot match")
+                        }
                         pullPlaylist(localPlaylist, remote, provider)
                         updated++
                     }
