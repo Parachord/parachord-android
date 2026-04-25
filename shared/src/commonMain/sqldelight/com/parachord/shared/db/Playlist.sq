@@ -62,6 +62,18 @@ WHERE id = ?;
 setLocalOnly:
 UPDATE playlists SET localOnly = ? WHERE id = ?;
 
+-- Phase 3 — Fix 4 helpers for the post-push `relevantMirrors` clear.
+-- `getLocallyModified` returns every row whose flag is set (the
+-- candidate set the clear loop iterates). `clearLocallyModified`
+-- unsets the flag without touching any other column — distinct from
+-- the bigger `update` query which carries the whole row payload.
+
+getLocallyModified:
+SELECT * FROM playlists WHERE locallyModified = 1;
+
+clearLocallyModified:
+UPDATE playlists SET locallyModified = 0 WHERE id = ?;
+
 backfillLastModified:
 UPDATE playlists SET lastModified = COALESCE(
     (SELECT MAX(addedAt) FROM playlist_tracks WHERE playlist_tracks.playlistId = playlists.id),

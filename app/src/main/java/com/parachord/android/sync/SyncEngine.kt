@@ -822,7 +822,44 @@ class SyncEngine constructor(
             removed++
         }
 
+        // Phase 3 — Fix 4 (multi-provider mirror propagation):
+        // Clear `locallyModified` for any playlist whose relevant mirrors
+        // are all caught up. `relevantMirrors` excludes the source
+        // provider — the push loop never targets it (Fix 3 guard) so its
+        // syncedAt would never advance and would strand the flag forever.
+        // Today only Spotify is enabled, but the loop is shaped for Phase
+        // 4 to add Apple Music with a one-line set change.
+        clearLocallyModifiedFlags(setOf(SpotifySyncProvider.PROVIDER_ID))
+
         return TypeSyncResult(added = added, removed = removed, updated = updated, unchanged = unchanged)
+    }
+
+    /**
+     * Sweep `locallyModified` playlists and clear the flag iff every
+     * relevant push mirror's `syncedAt` has advanced past the row's
+     * `lastModified`. Relevant mirrors are the enabled providers that
+     * have a `sync_playlist_link` row for this playlist, EXCLUDING the
+     * pull source (since the push loop's Fix 3 guard never pushes back
+     * to source). When `relevantMirrors` is empty (e.g. source-only
+     * playlists), the flag clears immediately.
+     *
+     * Mirrors desktop's post-push clear logic (app.js L5916+).
+     */
+    private suspend fun clearLocallyModifiedFlags(enabledProviders: Set<String>) {
+        val candidates = playlistDao.getLocallyModified()
+        for (playlist in candidates) {
+            val sourceProvider = syncPlaylistSourceDao.selectForLocal(playlist.id)?.providerId
+            val mirrors = syncPlaylistLinkDao.selectForLocal(playlist.id)
+            val relevantMirrors = mirrors.filter { link ->
+                link.providerId in enabledProviders && link.providerId != sourceProvider
+            }
+            if (relevantMirrors.isEmpty()) {
+                playlistDao.clearLocallyModified(playlist.id)
+                continue
+            }
+            val allCaught = relevantMirrors.all { it.syncedAt >= playlist.lastModified }
+            if (allCaught) playlistDao.clearLocallyModified(playlist.id)
+        }
     }
 
     private suspend fun pushPlaylist(playlist: PlaylistEntity) {

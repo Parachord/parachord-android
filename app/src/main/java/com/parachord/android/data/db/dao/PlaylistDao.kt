@@ -191,6 +191,16 @@ class PlaylistDao(private val db: ParachordDb) {
         queries.backfillLastModified()
     }
 
+    /** All playlists with `locallyModified = 1`. Used by Phase 3's post-push clear. */
+    suspend fun getLocallyModified(): List<PlaylistEntity> = withContext(Dispatchers.IO) {
+        queries.getLocallyModified().executeAsList().map { it.toPlaylist() }
+    }
+
+    /** Unset `locallyModified` for the given playlist without touching any other column. */
+    suspend fun clearLocallyModified(id: String): Unit = withContext(Dispatchers.IO) {
+        queries.clearLocallyModified(id)
+    }
+
     suspend fun delete(playlist: PlaylistEntity): Unit = withContext(Dispatchers.IO) {
         queries.deleteById(playlist.id)
     }
