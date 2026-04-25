@@ -52,3 +52,4 @@ SET trackSpotifyId    = COALESCE(trackSpotifyId, ?),
     trackAppleMusicId = COALESCE(trackAppleMusicId, ?),
     trackSoundcloudId = COALESCE(trackSoundcloudId, ?)
 WHERE playlistId = ? AND position = ?;
+

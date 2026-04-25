@@ -543,7 +543,7 @@ class AppleMusicSyncProvider(
             id = "applemusic-$id",
             name = name,
             description = desc,
-            artworkUrl = attributes.artwork?.url,
+            artworkUrl = resolveArtworkUrl(attributes.artwork?.url),
             trackCount = 0,
             createdAt = 0L,
             updatedAt = System.currentTimeMillis(),
@@ -578,7 +578,7 @@ class AppleMusicSyncProvider(
         trackArtist = attributes.artistName,
         trackAlbum = attributes.albumName,
         trackDuration = attributes.durationInMillis?.let { it / 1000 },
-        trackArtworkUrl = attributes.artwork?.url,
+        trackArtworkUrl = resolveArtworkUrl(attributes.artwork?.url),
         trackSourceUrl = null,
         trackResolver = "applemusic",
         trackSpotifyUri = null,
@@ -604,7 +604,7 @@ class AppleMusicSyncProvider(
                 album = attributes.albumName,
                 albumId = null,
                 duration = attributes.durationInMillis,
-                artworkUrl = attributes.artwork?.url,
+                artworkUrl = resolveArtworkUrl(attributes.artwork?.url),
                 spotifyUri = null,
                 spotifyId = null,
                 appleMusicId = catalogId,
@@ -626,7 +626,7 @@ class AppleMusicSyncProvider(
                 id = "applemusic-$catalogId",
                 title = attributes.name,
                 artist = attributes.artistName,
-                artworkUrl = attributes.artwork?.url,
+                artworkUrl = resolveArtworkUrl(attributes.artwork?.url),
                 trackCount = attributes.trackCount,
                 addedAt = addedAt,
                 spotifyId = null,
@@ -656,4 +656,14 @@ class AppleMusicSyncProvider(
     /** Lenient ISO-8601 parse; library timestamps come in `Z` form. */
     private fun parseIso(s: String): Long =
         try { Instant.parse(s).toEpochMilli() } catch (_: Exception) { 0L }
+
+    /** Apple Music artwork URLs come back with literal `{w}` and `{h}`
+     *  placeholders (e.g. `.../{w}x{h}bb.jpg`) that the client is
+     *  expected to substitute with the desired dimensions. Coil and
+     *  the mosaic generator can't fetch URLs with the placeholders
+     *  intact, so swap in 600x600 (matches desktop's
+     *  `sync-providers/applemusic.js` which uses 500x500 — slight
+     *  bump for higher-DPI Android screens). */
+    private fun resolveArtworkUrl(url: String?): String? =
+        url?.replace("{w}", "600")?.replace("{h}", "600")
 }

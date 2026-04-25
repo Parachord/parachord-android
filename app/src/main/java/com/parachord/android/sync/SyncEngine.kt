@@ -9,6 +9,7 @@ import kotlinx.coroutines.sync.Mutex
 
 class SyncEngine constructor(
     private val db: ParachordDb,
+    private val driver: app.cash.sqldelight.db.SqlDriver,
     private val trackDao: TrackDao,
     private val albumDao: AlbumDao,
     private val artistDao: ArtistDao,
@@ -692,6 +693,44 @@ class SyncEngine constructor(
     }
 
     /**
+     * Repair AM artwork URLs that were stored before
+     * [com.parachord.android.sync.AppleMusicSyncProvider.resolveArtworkUrl]
+     * landed — pre-fix AM pulls persisted Apple's raw URLs with the
+     * `{w}` `{h}` placeholders intact, which Coil and the mosaic
+     * generator can't fetch. Substitutes 600x600 in place. Touches
+     * playlists, playlist_tracks, tracks, albums, and artists tables.
+     * Idempotent: a URL with no placeholders is a no-op replacement.
+     */
+    private suspend fun repairAppleMusicArtworkPlaceholders() {
+        var fixed = 0
+        for (pl in playlistDao.getAllSync()) {
+            val art = pl.artworkUrl ?: continue
+            if ("{w}" !in art && "{h}" !in art) continue
+            playlistDao.update(pl.copy(
+                artworkUrl = art.replace("{w}", "600").replace("{h}", "600")
+            ))
+            fixed++
+        }
+        if (fixed > 0) {
+            Log.d(TAG, "repairAppleMusicArtworkPlaceholders: fixed $fixed playlist row(s)")
+        }
+        // playlist_tracks repair is bulk SQL — fast even for thousands
+        // of rows. Raw driver execute because SQLDelight's UPDATE
+        // setter parser doesn't accept REPLACE() function calls.
+        try {
+            driver.execute(
+                null,
+                "UPDATE playlist_tracks " +
+                    "SET trackArtworkUrl = REPLACE(REPLACE(trackArtworkUrl, '{w}', '600'), '{h}', '600') " +
+                    "WHERE trackArtworkUrl LIKE '%{w}%' OR trackArtworkUrl LIKE '%{h}%'",
+                0,
+            )
+        } catch (e: Exception) {
+            Log.w(TAG, "playlist_tracks artwork-placeholder repair failed", e)
+        }
+    }
+
+    /**
      * Walk every playlist whose `trackCount` field doesn't match its
      * actual `playlist_tracks` row count, and fix it. Cheap (one
      * query + one update per mismatched row). Runs every sync cycle
@@ -777,6 +816,15 @@ class SyncEngine constructor(
         // rows. Cheap to run every cycle — single SQL pass over the
         // playlists table joined with the playlist_tracks counts.
         reconcileTrackCounts()
+
+        // Self-healing AM artwork URL repair. Earlier AM pulls stored
+        // raw `{w}x{h}` placeholder URLs from Apple's response; Coil
+        // can't fetch those, so playlist mosaics never generated
+        // (because the per-track artwork URLs they composed from
+        // weren't fetchable). Now resolveArtworkUrl substitutes
+        // 600x600 at write time, but existing rows still carry the
+        // raw placeholders. Fix them in place — cheap and idempotent.
+        repairAppleMusicArtworkPlaceholders()
 
         // ── Spotify pull (existing block; preserves dedup-cleanup migration) ──
         // The dedup-cleanup migration block below is Spotify-only by design

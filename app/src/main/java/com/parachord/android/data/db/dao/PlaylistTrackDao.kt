@@ -83,6 +83,7 @@ class PlaylistTrackDao(private val db: ParachordDb) {
         queries.deleteByPlaylistId(playlistId)
     }
 
+
     suspend fun deleteTrack(playlistId: String, position: Int): Unit = withContext(Dispatchers.IO) {
         queries.deleteTrack(playlistId = playlistId, position = position.toLong())
     }
