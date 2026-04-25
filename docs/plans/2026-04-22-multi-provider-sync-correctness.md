@@ -103,6 +103,8 @@ Migrations are idempotent `ALTER TABLE … ADD COLUMN IF NOT EXISTS` (SQLite doe
 
 ### Phase 2 — Provider abstraction
 
+> **Status:** ✅ Landed in commits `d02dbd1` → `38d6404` (Apr 24, 2026). Provider abstraction in place; SyncEngine accepts `List<SyncProvider>`; behavior unchanged. Apple Music has no sync yet — that's Phase 4. Multi-provider iteration inside method bodies is Phase 3. Verified: 312 tests green, `assembleDebug` clean, installed + force-stopped on Pixel 9a (Spotify sync round-trip exercised post-install).
+
 Per the existing `.claude/plans/look-at-the-recent-stateless-backus.md` plan (#15), the refactor creates a `shared/.../sync/SyncProvider.kt` interface with the contract below, moves `SpotifySyncProvider`'s nested models to shared, then `SpotifySyncProvider implements SyncProvider` with behavior unchanged.
 
 ```kotlin
