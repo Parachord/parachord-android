@@ -77,6 +77,38 @@ class SyncPlaylistLinkDao(private val db: ParachordDb) {
             queries.selectPendingForProvider(providerId).executeAsList().map { it.toLink() }
         }
 
+    suspend fun selectForLocal(localPlaylistId: String): List<Link> =
+        withContext(Dispatchers.IO) {
+            queries.selectForLocal(localPlaylistId).executeAsList().map { it.toLink() }
+        }
+
+    /**
+     * True iff at least one mirror exists for [localPlaylistId] under a
+     * provider OTHER than [currentProviderId]. Used by Fix 1 of the
+     * multi-provider propagation rules: a pull from one provider must
+     * flag locallyModified=true so the other mirrors get the update on
+     * the next push loop.
+     */
+    suspend fun hasOtherMirrors(localPlaylistId: String, currentProviderId: String): Boolean =
+        withContext(Dispatchers.IO) {
+            queries.countOtherMirrors(localPlaylistId, currentProviderId).executeAsOne() > 0L
+        }
+
+    /**
+     * All mirrors for [localPlaylistId] except those under [excludeProviderId].
+     * Used by Fix 4 (`relevantMirrors` clear) — the source provider is
+     * excluded because the push loop never targets it, so its `syncedAt`
+     * never advances and would strand the flag forever if included.
+     */
+    suspend fun selectMirrorsExcluding(
+        localPlaylistId: String,
+        excludeProviderId: String,
+    ): List<Link> = withContext(Dispatchers.IO) {
+        queries.selectMirrorsExcluding(localPlaylistId, excludeProviderId)
+            .executeAsList()
+            .map { it.toLink() }
+    }
+
     suspend fun deleteForLink(localPlaylistId: String, providerId: String): Unit =
         withContext(Dispatchers.IO) {
             queries.deleteForLink(localPlaylistId, providerId)

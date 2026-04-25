@@ -50,3 +50,16 @@ UPDATE sync_playlist_link SET pendingAction = NULL WHERE localPlaylistId = ? AND
 
 selectPendingForProvider:
 SELECT * FROM sync_playlist_link WHERE providerId = ? AND pendingAction IS NOT NULL;
+
+-- Multi-provider propagation predicates (Phase 3). Used by the four
+-- cooperating fixes from desktop CLAUDE.md: pull paths flag locallyModified
+-- when other mirrors exist; post-push clear iterates the source-excluding
+-- subset of mirrors.
+
+countOtherMirrors:
+SELECT COUNT(*) FROM sync_playlist_link
+WHERE localPlaylistId = :localPlaylistId AND providerId != :excludeProviderId;
+
+selectMirrorsExcluding:
+SELECT * FROM sync_playlist_link
+WHERE localPlaylistId = :localPlaylistId AND providerId != :excludeProviderId;
