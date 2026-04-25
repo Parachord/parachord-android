@@ -215,9 +215,83 @@ Only if all three miss does `createPlaylistOnSpotify` run. The link is written *
 
 **Invariants to preserve on every playlist save:** `spotifyId`, `snapshotId`, `locallyModified`, `lastModified`. The `.copy(...)` pattern preserves them automatically — fresh `PlaylistEntity(...)` constructors are only safe for genuinely new playlists.
 
-**Out of scope (not ported from desktop):** multi-provider `syncedTo: Map<providerId, ...>` generalization, `localOnly` opt-out, two-phase `cleanupDuplicatePlaylists` (orphan relink + link-aware keeper selection). If any of these come up, they're separate workstreams, not add-ons to the dedup code.
+**Still out of scope:** the two-phase `cleanupDuplicatePlaylists` (orphan relink + link-aware keeper selection from desktop). Single-provider scope; if it comes up it's its own workstream.
 
 **Key files:** `shared/src/commonMain/sqldelight/com/parachord/shared/db/SyncPlaylistLink.sq`, `data/db/dao/SyncPlaylistLinkDao.kt`, `sync/SyncEngine.kt` (`migrateLinksFromPlaylists`, push loop), `sync/SpotifySyncProvider.kt`
+
+### Multi-Provider Sync — Apple Music + Spotify (Phases 1–6.5)
+
+The sync engine handles N providers concurrently. Phases 1 through 6.5 (Apr 2026) ported the desktop's multi-provider model: a playlist can carry one pull source (`syncedFrom`) and any number of push mirrors (`syncedTo[providerId]`). Today two providers are registered (Spotify + Apple Music); a third (e.g. Tidal) needs only a `SyncProvider` implementation + Koin registration. `SyncEngine` never branches on `provider.id`; it dispatches on `provider.features` and per-provider candidate filters.
+
+**Schema (Phase 1).** Three additions on top of the original Spotify-only tables:
+- `sync_playlist_link.snapshotId TEXT, pendingAction TEXT` — per-mirror change-token + deferred action (e.g. `"remote-deleted"`).
+- `sync_playlist_source` (new table, PK = `localPlaylistId`) — the `syncedFrom` row. One pull source per playlist.
+- `playlists.localOnly INTEGER NOT NULL DEFAULT 0` — push-loop opt-out.
+
+The legacy `playlists.spotifyId` / `snapshotId` scalars stay for backward compat (Decision 5); new sync code reads from `sync_playlist_link` and writes both. `PlaylistDao.getByIdWithSpotifyLink` joins the two so legacy callers still work.
+
+**`SyncProvider` interface (Phase 2).** Property-only at first, then extended with playlist methods in Phase 4:
+
+```kotlin
+interface SyncProvider {
+    val id: String
+    val displayName: String
+    val features: ProviderFeatures
+    suspend fun fetchPlaylists(...): List<SyncedPlaylist>
+    suspend fun fetchPlaylistTracks(externalPlaylistId: String): List<PlaylistTrack>
+    suspend fun getPlaylistSnapshotId(externalPlaylistId: String): String?
+    suspend fun createPlaylist(name, description?): RemoteCreated
+    suspend fun replacePlaylistTracks(externalPlaylistId, externalTrackIds): String?
+    suspend fun updatePlaylistDetails(externalPlaylistId, name?, description?)
+    suspend fun deletePlaylist(externalPlaylistId): DeleteResult
+}
+
+data class ProviderFeatures(
+    val snapshots: SnapshotKind,             // Opaque (Spotify) | DateString (AM) | None
+    val supportsFollow: Boolean = false,     // AM has no follow API
+    val supportsPlaylistDelete: Boolean = false,
+    val supportsPlaylistRename: Boolean = false,
+    val supportsTrackReplace: Boolean = false,
+)
+```
+
+`DeleteResult` is a sealed class — `Success`, `Unsupported(status: Int)`, `Failed(error: Throwable)`. Providers must NEVER throw on documented-unsupported responses; return `Unsupported` so callers can surface "remove manually in the {provider}" UX.
+
+**Apple Music endpoint degradation (Phase 4).** Apple's public API rejects PATCH/PUT/DELETE on `/me/library/playlists/{id}` with 401. `AppleMusicSyncProvider` carries two independent session kill-switches: `amPutUnsupportedForSession` (track replace) and `amPatchUnsupportedForSession` (rename). On first 401:
+
+- **PUT** flips its kill-switch and degrades to POST-append; subsequent calls go straight to POST without re-probing PUT. Removals stay on the remote — accept this, document it.
+- **PATCH** flips its kill-switch and silently no-ops; future calls short-circuit. **Load-bearing** — runs before the track push in the create-or-link path; a throw here would abort tracks too. Even network errors from PATCH are swallowed (try/catch, log only).
+- **DELETE** returns `DeleteResult.Unsupported(401)`; `LibraryRepository.deletePlaylistWithSync` surfaces a toast (Phase 6.5).
+
+**Do NOT retry-on-401 on documented-unsupported endpoints.** A defensive retry would walk the user through a System Settings revoke flow for an authorization that was never broken (the 401 is structural, not token-related). Go straight to the sentinel return on the first 401 from these endpoints. Reauth-required behavior fires only for SHOULD-WORK endpoints (`listPlaylists`, `listPlaylistTracks`, `getStorefront`, `createPlaylist`) via `AppleMusicReauthRequiredException`.
+
+**Four-piece propagation rules (Phase 3).** Lifted line-by-line from desktop CLAUDE.md "Multi-Provider Mirror Propagation":
+
+1. **Pull paths set `locallyModified = true` when other mirrors exist** (`SyncPlaylistLinkDao.hasOtherMirrors(localId, currentProviderId)`). Without this, an Android edit pulled through Spotify never reaches Apple Music — the desktop sees fresh tracks but no flag, so its next push loop skips it.
+2. **Local mutators only flag `locallyModified` when the playlist has sync intent** (`syncedFrom` row exists OR any `syncedTo` row exists). `LibraryRepository.hasSyncIntent`. Editing a local-only playlist no longer pointlessly flags a never-syncable row.
+3. **Push-loop `syncedFrom` guard is provider-scoped** — `if (pullSource?.providerId == currentProviderId) continue`, never blanket. A Spotify-imported playlist must remain pushable to Apple Music; only blanket-skipping on `syncedFrom != null` would block that.
+4. **Post-push `clearLocallyModifiedFlags` filters by `relevantMirrors`** — enabled providers with a `sync_playlist_link` row, EXCLUDING the pull source. The push loop never targets the source (rule 3), so its `syncedAt` never advances and would strand the flag forever if included.
+
+**Cross-provider `syncedFrom` preservation.** Import branch's `isOwnPullSource` guard (Phase 3 follow-on): if the matched local row already has a `sync_playlist_source` pointing at a DIFFERENT provider, this is a cross-provider push mirror — don't overwrite `syncedFrom`, don't refetch tracks, only update the link's `syncedAt`. Without this, an AM import on a Spotify-imported playlist would clobber Spotify as the pull source and produce a duplicate on Spotify's next sync.
+
+**Per-provider iteration (Phases 4.5 + 5).** `SyncEngine.syncPlaylists` reads `enabledProviders` from `SettingsStore.getEnabledSyncProviders()` (default `setOf("spotify")`) and:
+- Fetches Spotify's remote list inline (coupled with the one-time dedup-cleanup migration that's Spotify-only by design)
+- Iterates `pullPlaylistsForProvider(provider)` for every non-Spotify enabled provider
+- Iterates `pushPlaylistsForProvider(provider)` for every enabled provider via the Phase 4.5 push generalization
+
+`pushPlaylist` and `pullPlaylist` helpers take a `provider: SyncProvider` parameter. Per-provider snapshot reads come from `sync_playlist_link.snapshotId`, not the Spotify-only `playlists.snapshotId` scalar — Apple Music's `lastModifiedDate` ISO string compares the same way as Spotify's opaque `snapshot_id`. `isPushCandidate(playlist, providerId)` is per-provider:
+- Spotify: `local-*` + hosted XSPF AND `playlist.spotifyId == null` (legacy filter preserved exactly)
+- Apple Music: same baseline + `spotify-*` (Spotify-imported playlists mirror to AM since rule 3 correctly skips them when targeting Spotify but not AM)
+
+`extractExternalTrackIds(tracks, providerId)` chooses the right ID per provider (`trackSpotifyUri` vs. `trackAppleMusicId`). Tracks without the relevant ID are silently skipped — catalog-search-based ID resolution is deferred (Decision D1).
+
+**Settings UI (Phase 6).** Settings → General shows an "Apple Music Sync" toggle row only when AM is authorized (MUT present). Flipping it adds/removes `applemusic` from `enabled_sync_providers`. An inline note explains the API limitations (no delete / rename / track-removal). The wizard's per-playlist picker is Spotify-only for now — AM gets all-or-nothing per Decision D1; per-playlist selection is a follow-up.
+
+**Sync-aware playlist deletion + Decision D8 toast (Phase 6.5).** `LibraryRepository.deletePlaylistWithSync(playlist)` calls `SyncEngine.onPlaylistRemoved(playlist)` to attempt remote deletion on each linked provider, then deletes the local row. Returns `List<PlaylistDeletionAttempt>`; ViewModels (`PlaylistDetailViewModel`, `PlaylistsViewModel`, `EditPlaylistViewModel`) filter for `Unsupported` and emit a one-shot Flow event; the screen renders a Toast: *"Removed from Parachord. Apple Music doesn't allow deletion via the API — remove manually in the Apple Music app."* Local cleanup runs regardless of provider response — leaving the link would re-link on next sync via three-layer dedup.
+
+**Concurrency contract.** No cross-device locking. Each provider is its own merge oracle for the playlists it hosts; when two clients race an edit, the provider receiving the writes arbitrates last-write-wins, both clients converge on next pull. Sync mutex (`tryLock`, never `withLock`) is per-device only — two sync cycles on the same device skip-if-held; cross-device races resolve through the provider.
+
+**Key files:** `shared/.../sync/SyncProvider.kt` (interface + features), `shared/.../sync/SyncedModels.kt` (cross-platform models), `shared/.../sqldelight/.../SyncPlaylistLink.sq`, `SyncPlaylistSource.sq`, `Playlist.sq`, `data/db/dao/SyncPlaylistLinkDao.kt`, `SyncPlaylistSourceDao.kt`, `data/api/AppleMusicLibraryApi.kt`, `data/api/AppleMusicAuthInterceptor.kt`, `sync/SyncEngine.kt` (per-provider push/pull iteration), `sync/SpotifySyncProvider.kt`, `sync/AppleMusicSyncProvider.kt`, `sync/AppleMusicReauthRequiredException.kt`, `data/store/SettingsStore.kt` (`getEnabledSyncProviders` / `setEnabledSyncProviders`), `data/repository/LibraryRepository.kt` (`deletePlaylistWithSync`, `hasSyncIntent`).
 
 ### Hosted XSPF Playlists
 
