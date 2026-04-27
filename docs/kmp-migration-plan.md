@@ -9,7 +9,16 @@ The Android app (191 files, ~51K lines) needs to share ~73% of its code with a f
 **Target code sharing: ~73%** (all business logic, data layer, networking, AI, resolver, plugin system)
 **Stays platform-specific:** Compose UI (82 files), PlaybackService/MediaSession, MediaScanner, Android widgets, JsBridge, NetworkMonitor
 
-> **Current status (April 2026):** Phases 0-7 complete. The `:shared` KMP module contains platform abstractions, models, API client infrastructure, SQLDelight schema, Koin DI, resolver scoring, metadata service, AI models/tools, plugin system, deep link parsing, and config. Phase 8 (Coil upgrade) is pending. Phase 9 (deferred tasks) covers the remaining "actual migration" work where the app switches from Retrofit/Room to Ktor/SQLDelight, and from TrackEntity to the shared Track model. iOS development can begin now using the shared module — the core business logic, plugin system, and API client interfaces are all shareable.
+> **Current status (April 2026, last verified 2026-04-25):**
+> - Phases 0–7: ✅ complete. The `:shared` KMP module contains platform abstractions, models, API client infrastructure, SQLDelight schema, Koin DI, resolver scoring, metadata service, AI models/tools, plugin system, deep link parsing, and config.
+> - Phase 8 (Coil 2 → Coil 3): ⏳ pending.
+> - **Phase 9A (TrackEntity → Track): ✅ complete.** `TrackEntity` is now `typealias TrackEntity = com.parachord.shared.model.Track`. All app code using `TrackEntity` is operating on the shared model under the hood. The original phase plan called for a 3-5 day migration; the typealias-bridge approach (per the "Bridge pattern" section in CLAUDE.md) absorbed most of that work as part of Phases 1 + 5.
+> - **Phase 9B (SettingsStore → multiplatform-settings): ⏳ pending.** `SettingsStore` is still in `app/` and DataStore-backed. The `multiplatform-settings` library is in `gradle/libs.versions.toml` (1.3.0) but not wired in. Required for iOS feature parity beyond playback MVP.
+> - **Phase 9C (QueueManager → shared): ✅ complete.** `QueueManager` and `QueueSnapshot` are typealiases re-exporting `com.parachord.shared.playback.*`. Pure queue logic runs cross-platform with JVM-runnable tests.
+> - **Phase 9D (Room → SQLDelight actual): ✅ complete.** Room is fully removed (no `room` dependency in `app/build.gradle.kts`). The `data/db/dao/*Dao.kt` files are now SQLDelight wrapper *classes* (not Room `@Dao` interfaces) that delegate to `ParachordDb.*Queries` and map row types to shared models. Drop-in replacement; consumer code unchanged.
+> - **Phase 9E (Retrofit → Ktor actual): ⏳ pending.** Retrofit is still present (`AppleMusicLibraryApi.kt`, all Spotify / Last.fm / etc. API interfaces). The Ktor clients in `:shared` from Phase 2 are infrastructure-ready but not consumed by the app. Required for `SyncEngine` and the provider classes to move to `commonMain` for iOS sync parity. **Not** required for iOS playback MVP.
+>
+> **iOS development can begin now.** The data-layer foundation (Track model, QueueManager, SQLDelight wiring) is in place. iOS playback MVP per `docs/plans/2026-04-25-ios-playback-design.md` requires no further KMP migration work. iOS sync parity additionally requires Phase 9E (Retrofit → Ktor) and Phase 9B (SettingsStore → multiplatform-settings).
 
 ---
 
@@ -895,19 +904,21 @@ All Compose files that use `AsyncImage` or `rememberAsyncImagePainter` (estimate
 
 These tasks were identified during Phases 5-7 as too large to tackle inline. They complete the migration to full code sharing but can be done incrementally without blocking iOS development.
 
-### 9A: TrackEntity → Shared Track Model
-**Scope:** Replace `com.parachord.android.data.db.entity.TrackEntity` with `com.parachord.shared.model.Track` across the entire app. This is the single largest remaining blocker to moving QueueManager, PlaybackController business logic, and ScrobbleManager to shared.
+### 9A: TrackEntity → Shared Track Model — ✅ DONE
 
-**Why deferred:** TrackEntity is referenced in 100+ files (every ViewModel, every screen, every repository, every playback handler). Changing it requires updating every call site simultaneously.
+**What landed:** Rather than the planned per-call-site migration, the work was absorbed into Phases 1 + 5 via the typealias-bridge pattern. `app/src/main/java/com/parachord/android/data/db/entity/TrackEntity.kt` is now:
 
-**Approach:**
-1. Add extension functions `TrackEntity.toTrack()` and `Track.toEntity()` as a bridge
-2. Migrate one subsystem at a time (e.g., QueueManager first, then ScrobbleManager, then repositories)
-3. Eventually remove TrackEntity and use Track + Room type converters, or replace Room with SQLDelight queries that return Track directly
+```kotlin
+package com.parachord.android.data.db.entity
+import com.parachord.shared.model.Track
+typealias TrackEntity = Track
+```
 
-**Depends on:** Phase 3 (SQLDelight) being wired into actual data access — currently the app still uses Room DAOs.
+Every call site that imports `TrackEntity` is operating on the shared `Track` data class under the hood. No mass-rename was needed; the typealias preserves source compatibility while the underlying type is shared.
 
-**Effort:** Large (3-5 days)
+**Why this works:** The shared `Track` model carries every field the app needs (title, artist, album, duration, artwork, addedAt, all resolver IDs, all MBIDs, source URL). The Room annotations that originally lived on `TrackEntity` were removable when Room was replaced by SQLDelight (Phase 9D) — SQLDelight maps query rows to `Track` via row-mapping functions in the wrapper DAOs (e.g., `TrackDao.Tracks.toTrack()`).
+
+**Future cleanup (optional, not blocking iOS):** Remove the typealias and rename all `TrackEntity` usages to `Track` directly. Mechanical rename, no behavior change. Can happen any time — there's no rush since the typealias is free.
 
 ### 9B: SettingsStore → Multiplatform Settings
 **Scope:** Migrate SettingsStore (78+ public methods, DataStore-backed) to use `com.russhwolf:multiplatform-settings` or a shared interface so iOS can provide its own NSUserDefaults backend.
@@ -923,25 +934,45 @@ These tasks were identified during Phases 5-7 as too large to tackle inline. The
 
 **Effort:** Medium-Large (2-4 days)
 
-### 9C: QueueManager + QueuePersistence → Shared
-**Scope:** Move QueueManager (pure queue logic) and QueuePersistence (JSON serialization) to shared/commonMain once TrackEntity → Track migration (9A) is complete.
+### 9C: QueueManager + QueuePersistence → Shared — ✅ DONE
 
-**Why deferred:** Blocked on 9A. QueueManager is already pure logic with no Android deps except TrackEntity.
+**What landed:** `QueueManager` and `QueueSnapshot` now live in `shared/src/commonMain/kotlin/com/parachord/shared/playback/`. The original `app/.../playback/QueueManager.kt` is a typealias re-export:
 
-**Effort:** Small (half day, once 9A is done)
+```kotlin
+@file:Suppress("unused")
+package com.parachord.android.playback
+typealias QueueSnapshot = com.parachord.shared.playback.QueueSnapshot
+typealias QueueManager = com.parachord.shared.playback.QueueManager
+```
 
-### 9D: Room → SQLDelight Actual Migration
-**Scope:** Switch the app's actual data access from Room DAOs to SQLDelight queries. Currently the app still uses Room for all DB operations; the SQLDelight .sq files in shared are infrastructure-ready but not wired in.
+JVM-runnable unit tests cover queue behavior (shuffle, repeat, advance, persistence). Same typealias bridge pattern as 9A.
 
-**Why deferred:** This is a high-risk change touching every repository and DAO consumer. Requires careful data migration (Room DB → SQLDelight DB) to preserve user data on upgrade.
+`QueuePersistence` location to be verified during the iOS playback orchestrator extraction (Phase A of `2026-04-25-ios-playback-design.md`); if not already shared, it's a half-day move at that point.
 
-**Approach:**
-1. Wire SQLDelight queries in repositories (one repository at a time)
-2. Add a one-time Room → SQLDelight data migration in `ParachordApplication.onCreate()`
-3. Remove Room DAOs and entities once all repositories use SQLDelight
-4. Remove Room dependency from app/build.gradle.kts
+### 9D: Room → SQLDelight Actual Migration — ✅ DONE
 
-**Effort:** Large (5-7 days)
+**What landed:** Room is fully removed from the app. `app/build.gradle.kts` has no `room-runtime` / `room-compiler` / `room-ktx` dependencies. The `app/.../data/db/dao/*Dao.kt` files are no longer Room `@Dao` *interfaces* — they are now wrapper *classes* around SQLDelight `*Queries` accessors. A representative sample:
+
+```kotlin
+// app/.../data/db/dao/TrackDao.kt (after migration)
+class TrackDao(private val db: ParachordDb, private val driver: SqlDriver) {
+    private val queries get() = db.trackQueries
+
+    private fun Tracks.toTrack() = Track(
+        id = id, title = title, artist = artist, /* ... full mapping ... */
+    )
+
+    fun getAll(): Flow<List<TrackEntity>> =
+        queries.getAll().asFlow().mapToList(Dispatchers.IO).map { it.map { it.toTrack() } }
+    // ...
+}
+```
+
+All 11 DAO files (`TrackDao`, `AlbumDao`, `ArtistDao`, `PlaylistDao`, `PlaylistTrackDao`, `FriendDao`, `ChatMessageDao`, `SearchHistoryDao`, `SyncSourceDao`, `SyncPlaylistLinkDao`, `SyncPlaylistSourceDao`) follow this pattern. Consumer code (repositories, ViewModels) is unchanged because the `*Dao` class API matches the previous Room interface signatures.
+
+**Data migration:** Existing Room SQLite databases are read by SQLDelight directly — same `parachord.db` file, same SQL schema (the SQLDelight `.sq` files were authored to match the final Room v12 schema). No one-time migration code was needed; SQLDelight just opened the existing file.
+
+**Future cleanup (optional, not blocking iOS):** Move the wrapper DAO classes to `shared/.../data/db/dao/` so they can be consumed from iOS. Today they live in `app/` and reference `ParachordDb` (which is in shared) — moving them is a matter of relocation, not refactoring. Required if iOS sync wants to share the data-access layer; not required for iOS playback (iOS-side queue / track ops can call SQLDelight directly via the shared module without going through these wrappers).
 
 ### 9E: Retrofit → Ktor Actual Migration
 **Scope:** Switch the app's API calls from Retrofit interfaces to the shared Ktor clients. Currently the app still uses Retrofit for all HTTP calls; the Ktor clients in shared are infrastructure-ready but not wired in.
@@ -1003,11 +1034,11 @@ Phases 2 and 3 can run in parallel. Phase 8 can run anytime. Phase 9 tasks are i
 | 6 | Plugin system | 5 new | ~8 | 1-2 days | Low | ✅ Done |
 | 7 | Platform abstractions | 4 new | ~3 | 2-3 days | Medium | ✅ Done |
 | 8 | Coil 2 -> 3 | 0 | ~25 | 0.5 days | Low | Pending |
-| 9A | TrackEntity → Track | 2 new | ~100+ | 3-5 days | High | Deferred |
-| 9B | SettingsStore → KMP | ~3 new | ~5 | 2-4 days | Medium | Deferred |
-| 9C | QueueManager → shared | 1 moved | ~3 | 0.5 days | Low | Deferred (needs 9A) |
-| 9D | Room → SQLDelight (actual) | 0 | ~30 | 5-7 days | High | Deferred (needs 9A) |
-| 9E | Retrofit → Ktor (actual) | 0 | ~15 | 3-5 days | Medium | Deferred |
+| 9A | TrackEntity → Track | 1 typealias | (absorbed by 1+5) | — | — | ✅ Done (typealias bridge) |
+| 9B | SettingsStore → KMP | ~3 new | ~5 | 2-4 days | Medium | Pending |
+| 9C | QueueManager → shared | 1 moved | ~3 | — | — | ✅ Done |
+| 9D | Room → SQLDelight (actual) | DAO wrappers | ~30 | — | — | ✅ Done (SQLDelight wrapper DAOs) |
+| 9E | Retrofit → Ktor (actual) | 0 | ~15 | 3-5 days | Medium | Pending |
 
 ## What Stays in `:app` (androidApp) — NOT Shared
 
