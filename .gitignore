@@ -19,5 +19,8 @@ local.properties
 *.hprof
 .claude/
 
+# Plugin-driven isolated workspaces (git worktrees)
+.worktrees/
+
 # Play Store service-account JSON — never commit.
 play-service-account.json
