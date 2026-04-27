@@ -321,18 +321,28 @@ Existing `PlaybackController.playTrackInternal` and `resolveOnTheFly` paths on A
 
 ## Phasing, sequencing, and verification gates
 
-| # | Phase | What ships | Effort | User impact |
-|---|---|---|---|---|
-| **0a** | **Phase 9A: TrackEntity → Track** | Shared `Track` model is the universal element type across queue, playback, scrobble, repos | 3–5 days | None — behavior-preserving Android refactor |
-| **0b** | **Phase 9C: QueueManager → shared** | Pure queue logic in `commonMain`, JVM-runnable tests | 0.5 day | None |
-| **A** | **Shared orchestration extraction** | `PlaybackEngine` / `NowPlayingPresenter` / `RemoteCommandSource` / `AudioSession` interfaces in commonMain. `PlaybackOrchestrator` extracted from `PlaybackController`. Android handlers refactored to implement the new interfaces. MediaSession wrapped as `AndroidNowPlayingPresenter`, widget becomes a 2nd presenter, focus+noisy wrapped as `AndroidAudioSession` | 5–7 days | None — Android still ships, identical behavior |
-| **B** | **iOS project bootstrap** | `iosApp/` Xcode project. `:shared` produces XCFramework consumable from Swift. `IosJsRuntime` via JavaScriptCore replaces the stub (unblocks 17 .axe plugins as a side effect). Smoke-test: Swift calls `ResolverScoring.selectBest` and gets the right answer | 2–3 days | None — internal milestone |
-| **C** | **iOS playback adapter (no audio yet)** | `IOSAudioSession`, `AVPlayerEngine`, `IOSNowPlayingPresenter`, `IOSRemoteCommandSource`, `IOSPlaybackHost`. `Info.plist` background audio mode. Minimal SwiftUI shell screen | 4–5 days | None — no UI for end users |
-| **D** | **First audible note: local files** | Tap a local file, hear it play. Lock screen shows metadata + transport controls. Background audio survives screen-off. Pause-on-noisy-route works. Siri interruption auto-resumes. Scrubber works | 2–3 days | **TestFlight build #1** — internal only |
-| **E** | **MusicKit integration** | `MusicAuthorization.request()` flow. `MusicKitEngine` via `ApplicationMusicPlayer.shared`. Cross-engine transitions verified (Local→AM→Local). Pre-resolution timing validated. End-of-track / queue advance through the resolver pipeline. Volume offsets actually work (unlike Android's WebView MusicKit) | 3–4 days | **TestFlight build #2** — feature-complete iOS MVP |
-| **F** | **Hardening + Android regression** | "All fallbacks failed" 10s timeout path tested. 5-track skip limit tested. Rapid-skip cancellation. Interruption resumption matrix (call, Siri, alarm). Android Auto queue exposure verified (the synthetic-queue win). Full Android regression sweep — the Phase A refactor must not have broken anything | 3–5 days | Android users get the Android Auto queue improvement; iOS goes to wider TestFlight |
+### About the estimates
 
-**Total realistic effort: ~22–32 focused days.**
+Three columns, because AI-assisted development compresses *active dev* dramatically while *verification and bake* stays human-paced:
+
+- **Active dev:** time you and the AI collaborator spend writing and iterating on code. Mechanical migrations (Retrofit → Ktor, DAO wrapper patterns, interface implementations) compress to hours, not days.
+- **Verification / bake:** real-device testing, regression sweeps, and the multi-day soak periods that surface CLAUDE.md-class bugs. Items #11–#34 in "Common Mistakes" were largely caught by hours of real listening, not by tests. AI does not compress this.
+- **Wallclock:** total elapsed time to ship the phase, including verification.
+
+| # | Phase | What ships | Active dev | Verification / bake | Wallclock | User impact |
+|---|---|---|---|---|---|---|
+| **0a** | **Phase 9A: TrackEntity → Track** | Already done — `TrackEntity` is `typealias TrackEntity = Track` to shared model | — | — | — | None |
+| **0b** | **Phase 9C: QueueManager → shared** | Already done — typealias re-export from `shared.playback.*` | — | — | — | None |
+| **A** | **Shared orchestration extraction** | `PlaybackEngine` / `NowPlayingPresenter` / `RemoteCommandSource` / `AudioSession` interfaces in commonMain. `PlaybackOrchestrator` extracted from `PlaybackController`. Android handlers refactored to implement the new interfaces. MediaSession wrapped as `AndroidNowPlayingPresenter`, widget becomes a 2nd presenter, focus+noisy wrapped as `AndroidAudioSession` | 1–2 days | 2–3 days (real-world bake — playback bugs surface across hours of listening, not minutes of testing) | 4–5 days | None — Android still ships, identical behavior |
+| **B** | **iOS project bootstrap** | `iosApp/` Xcode project. `:shared` produces XCFramework consumable from Swift. `IosJsRuntime` via JavaScriptCore replaces the stub (unblocks 17 .axe plugins as a side effect). Smoke-test: Swift calls `ResolverScoring.selectBest` and gets the right answer | 1 day | 0.5 day (smoke-test) | 1–2 days | None — internal milestone |
+| **C** | **iOS playback adapter (no audio yet)** | `IOSAudioSession`, `AVPlayerEngine`, `IOSNowPlayingPresenter`, `IOSRemoteCommandSource`, `IOSPlaybackHost`. `Info.plist` background audio mode. Minimal SwiftUI shell screen | 1–2 days | 1 day (compile + simulator boot) | 2–3 days | None — no UI for end users |
+| **D** | **First audible note: local files** | Tap a local file, hear it play. Lock screen shows metadata + transport controls. Background audio survives screen-off. Pause-on-noisy-route works. Siri interruption auto-resumes. Scrubber works | 1 day | 2 days (real-device, AirPods, screen-off, interruptions) | 3 days | **TestFlight build #1** — internal only |
+| **E** | **MusicKit integration** | `MusicAuthorization.request()` flow. `MusicKitEngine` via `ApplicationMusicPlayer.shared`. Cross-engine transitions verified (Local → AM → Local). Pre-resolution timing validated. End-of-track / queue advance through the resolver pipeline. Volume offsets actually work (unlike Android's WebView MusicKit) | 1–2 days | 2–3 days (real-device cross-engine bake) | 3–5 days | **TestFlight build #2** — feature-complete iOS MVP |
+| **F** | **Hardening + Android regression** | "All fallbacks failed" 10s timeout path tested. 5-track skip limit tested. Rapid-skip cancellation. Interruption resumption matrix (call, Siri, alarm). Android Auto queue exposure verified (the synthetic-queue win). Full Android regression sweep — the Phase A refactor must not have broken anything | 1 day | 2–3 days (Android Auto + iOS interruption matrix on real hardware) | 3–4 days | Android users get the Android Auto queue improvement; iOS goes to wider TestFlight |
+
+**Active dev total: ~6–9 days.** **Wallclock total: ~16–22 days.**
+
+The active-dev column is what fits in your calendar of focused work sessions. The wallclock column is what passes between "start Phase A" and "merge Phase F" if you bake each phase properly. Don't compress wallclock by skipping bake — Phase A in particular is the highest-risk merge in this plan and earned its 2–3-day bake from CLAUDE.md's track record.
 
 ### Three explicit verification gates
 

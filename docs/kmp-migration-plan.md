@@ -1023,6 +1023,8 @@ Phases 2 and 3 can run in parallel. Phase 8 can run anytime. Phase 9 tasks are i
 
 ## Summary Table
 
+> **About the effort estimates.** The historical entries (Phases 0–7) used human-developer-day estimates. The remaining-work entries (Phases 8 + 9) below now use AI-assisted-day estimates split into *active dev* (you + AI collaborator coding time) and *wallclock* (active dev + verification & bake). AI compresses mechanical work dramatically (Retrofit→Ktor, DAO wrappers, mass refactors) but does not compress real-device verification or multi-day soak periods. Treat active-dev as "calendar time of focused work sessions"; treat wallclock as "elapsed time from start to merge."
+
 | Phase | Scope | Files Moved/New | Files Modified | Effort | Risk | Status |
 |---|---|---|---|---|---|---|
 | 0 | Project structure | 3 new | 2 | 1-2 hours | Very Low | ✅ Done |
@@ -1033,12 +1035,14 @@ Phases 2 and 3 can run in parallel. Phase 8 can run anytime. Phase 9 tasks are i
 | 5 | Business logic → shared | ~12 new | ~25 | 5-7 days | Medium | ✅ Done |
 | 6 | Plugin system | 5 new | ~8 | 1-2 days | Low | ✅ Done |
 | 7 | Platform abstractions | 4 new | ~3 | 2-3 days | Medium | ✅ Done |
-| 8 | Coil 2 -> 3 | 0 | ~25 | 0.5 days | Low | Pending |
+| 8 | Coil 2 -> 3 | 0 | ~25 | active 0.5d / wall 1d | Low | Pending |
 | 9A | TrackEntity → Track | 1 typealias | (absorbed by 1+5) | — | — | ✅ Done (typealias bridge) |
-| 9B | SettingsStore → KMP | ~3 new | ~5 | 2-4 days | Medium | Pending |
+| 9B | SettingsStore → KMP | ~3 new | ~5 | active 1–2d / wall 3–4d | Medium | Pending |
 | 9C | QueueManager → shared | 1 moved | ~3 | — | — | ✅ Done |
 | 9D | Room → SQLDelight (actual) | DAO wrappers | ~30 | — | — | ✅ Done (SQLDelight wrapper DAOs) |
-| 9E | Retrofit → Ktor (actual) | 0 | ~15 | 3-5 days | Medium | Pending |
+| 9E.1 | Retrofit → Ktor (all 9 native API clients to commonMain) | ~9 Ktor clients | ~15 | active 1–2d / wall 2–3d | Medium | Pending |
+| 9E.2 | NativeBridge.fetch transport convergence (plugins inherit shared HttpClient) | 0 (transport rewire) | ~3 | active 0.5–1d / wall 2–3d | High (19 plugins must keep working) | Pending |
+| Sync | SyncEngine + providers → commonMain (depends on 9E.1; 9E.2 recommended first) | ~3 moved (SyncEngine, SpotifySyncProvider, AppleMusicSyncProvider) | ~10 | active 2–4d / wall 5–7d | High | Pending — separate design doc forthcoming |
 
 ## What Stays in `:app` (androidApp) — NOT Shared
 
