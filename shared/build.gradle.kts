@@ -33,6 +33,9 @@ kotlin {
             // Koin (Phase 4)
             api(libs.koin.core)
         }
+        commonTest.dependencies {
+            implementation(kotlin("test"))
+        }
         androidMain.dependencies {
             implementation(libs.ktor.client.okhttp)
             api(libs.sqldelight.android.driver)
