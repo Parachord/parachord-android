@@ -27,7 +27,7 @@ val sharedModule = module {
     }
 
     // HTTP Client (platform engine via expect/actual)
-    single { createHttpClient(get()) }
+    single { createHttpClient(get(), get()) }
 
     // API Clients (Ktor, cross-platform)
     single { SpotifyClient(get()) }
