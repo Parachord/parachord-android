@@ -1,18 +1,20 @@
 package com.parachord.android.sync
 
 import android.util.Log
-import com.parachord.android.data.api.AmCreatePlaylistAttributes
-import com.parachord.android.data.api.AmCreatePlaylistRequest
-import com.parachord.android.data.api.AmLibraryAlbum
-import com.parachord.android.data.api.AmLibraryArtist
-import com.parachord.android.data.api.AmLibrarySong
-import com.parachord.android.data.api.AmPlaylist
-import com.parachord.android.data.api.AmTrack
-import com.parachord.android.data.api.AmTrackReference
-import com.parachord.android.data.api.AmTracksRequest
-import com.parachord.android.data.api.AmUpdatePlaylistAttributes
-import com.parachord.android.data.api.AmUpdatePlaylistRequest
-import com.parachord.android.data.api.AppleMusicLibraryApi
+import com.parachord.shared.api.AmCreatePlaylistAttributes
+import com.parachord.shared.api.AmCreatePlaylistRequest
+import com.parachord.shared.api.AmLibraryAlbum
+import com.parachord.shared.api.AmLibraryArtist
+import com.parachord.shared.api.AmLibrarySong
+import com.parachord.shared.api.AmPlaylist
+import com.parachord.shared.api.AmTrack
+import com.parachord.shared.api.AmTrackReference
+import com.parachord.shared.api.AmTracksRequest
+import com.parachord.shared.api.AmUpdatePlaylistAttributes
+import com.parachord.shared.api.AmUpdatePlaylistRequest
+import com.parachord.shared.api.AppleMusicLibraryClient
+import com.parachord.shared.api.AppleMusicLibraryClient.AmHttpException
+import io.ktor.http.isSuccess
 import com.parachord.android.data.db.entity.AlbumEntity
 import com.parachord.android.data.db.entity.ArtistEntity
 import com.parachord.android.data.db.entity.PlaylistEntity
@@ -29,7 +31,6 @@ import com.parachord.shared.sync.SyncedArtist
 import com.parachord.shared.sync.SyncedPlaylist
 import com.parachord.shared.sync.SyncedTrack
 import kotlinx.coroutines.delay
-import retrofit2.HttpException
 import java.time.Instant
 
 /**
@@ -71,7 +72,7 @@ import java.time.Instant
  * tracks without one are silently skipped.
  */
 class AppleMusicSyncProvider(
-    private val api: AppleMusicLibraryApi,
+    private val api: AppleMusicLibraryClient,
     private val settingsStore: SettingsStore,
 ) : SyncProvider {
 
@@ -124,12 +125,7 @@ class AppleMusicSyncProvider(
         var offset = 0
         while (true) {
             delay(INTER_REQUEST_DELAY_MS)
-            val resp = try {
-                api.listPlaylists(limit = PAGE_SIZE, offset = offset)
-            } catch (e: HttpException) {
-                if (e.code() == 401) throw AppleMusicReauthRequiredException()
-                throw e
-            }
+            val resp = api.listPlaylists(limit = PAGE_SIZE, offset = offset)
             for (am in resp.data) {
                 all.add(am.toSyncedPlaylist())
             }
@@ -163,9 +159,8 @@ class AppleMusicSyncProvider(
                     limit = PAGE_SIZE,
                     offset = offset,
                 )
-            } catch (e: HttpException) {
-                if (e.code() == 401) throw AppleMusicReauthRequiredException()
-                if (e.code() == 404) {
+            } catch (e: AmHttpException) {
+                if (e.status == 404) {
                     Log.w(TAG, "AM playlist $externalPlaylistId /tracks 404 at offset=$offset; " +
                         "returning ${all.size} tracks collected so far")
                     break
@@ -197,9 +192,10 @@ class AppleMusicSyncProvider(
             data.mapIndexed { i, am ->
                 am.toPlaylistTrack(playlistId = localPlaylistId, position = i)
             }
-        } catch (e: HttpException) {
-            if (e.code() == 401) throw AppleMusicReauthRequiredException()
-            Log.w(TAG, "AM include=tracks fallback for $externalPlaylistId failed (${e.code()})")
+        } catch (e: AppleMusicReauthRequiredException) {
+            throw e
+        } catch (e: AmHttpException) {
+            Log.w(TAG, "AM include=tracks fallback for $externalPlaylistId failed (HTTP ${e.status})")
             emptyList()
         } catch (e: Exception) {
             Log.w(TAG, "AM include=tracks fallback for $externalPlaylistId threw", e)
@@ -240,9 +236,10 @@ class AppleMusicSyncProvider(
                 offset += resp.data.size
             }
             @Suppress("UNREACHABLE_CODE") null
-        } catch (e: HttpException) {
-            if (e.code() == 401) throw AppleMusicReauthRequiredException()
-            Log.w(TAG, "getPlaylistSnapshotId failed for $externalPlaylistId", e)
+        } catch (e: AppleMusicReauthRequiredException) {
+            throw e
+        } catch (e: AmHttpException) {
+            Log.w(TAG, "getPlaylistSnapshotId failed for $externalPlaylistId (HTTP ${e.status})")
             null
         }
     }
@@ -251,16 +248,11 @@ class AppleMusicSyncProvider(
 
     override suspend fun createPlaylist(name: String, description: String?): RemoteCreated {
         delay(INTER_REQUEST_DELAY_MS)
-        val resp = try {
-            api.createPlaylist(
-                AmCreatePlaylistRequest(
-                    attributes = AmCreatePlaylistAttributes(name = name, description = description),
-                )
+        val resp = api.createPlaylist(
+            AmCreatePlaylistRequest(
+                attributes = AmCreatePlaylistAttributes(name = name, description = description),
             )
-        } catch (e: HttpException) {
-            if (e.code() == 401) throw AppleMusicReauthRequiredException()
-            throw e
-        }
+        )
         val created = resp.data.firstOrNull()
             ?: throw IllegalStateException("Apple Music createPlaylist returned empty data")
         return RemoteCreated(
@@ -284,28 +276,28 @@ class AppleMusicSyncProvider(
         if (!amPutUnsupportedForSession) {
             delay(INTER_REQUEST_DELAY_MS)
             val resp = api.replacePlaylistTracks(externalPlaylistId, body)
-            if (resp.isSuccessful) {
+            if (resp.status.isSuccess()) {
                 return getPlaylistSnapshotId(externalPlaylistId)
             }
-            if (resp.code() in setOf(401, 403, 405)) {
+            if (resp.status.value in setOf(401, 403, 405)) {
                 // Documented-unsupported. Flip kill-switch; do NOT retry.
                 // Per desktop CLAUDE.md: refresh-and-retry on these
                 // endpoints would escalate a benign endpoint rejection
                 // into a phantom auth crisis (the 401 is structural,
                 // not token-related).
-                Log.w(TAG, "PUT replace returned ${resp.code()} for $externalPlaylistId; flipping session kill-switch, falling back to POST-append")
+                Log.w(TAG, "PUT replace returned ${resp.status.value} for $externalPlaylistId; flipping session kill-switch, falling back to POST-append")
                 amPutUnsupportedForSession = true
             } else {
-                throw HttpException(resp)
+                throw AmHttpException(resp.status.value)
             }
         }
 
         // POST-append fallback. Removals stay on the remote — accept this.
         delay(INTER_REQUEST_DELAY_MS)
         val resp = api.appendPlaylistTracks(externalPlaylistId, body)
-        if (!resp.isSuccessful) {
-            if (resp.code() == 401) throw AppleMusicReauthRequiredException()
-            throw HttpException(resp)
+        if (!resp.status.isSuccess()) {
+            if (resp.status.value == 401) throw AppleMusicReauthRequiredException()
+            throw AmHttpException(resp.status.value)
         }
         return getPlaylistSnapshotId(externalPlaylistId)
     }
@@ -329,13 +321,13 @@ class AppleMusicSyncProvider(
                 externalPlaylistId,
                 AmUpdatePlaylistRequest(AmUpdatePlaylistAttributes(name = name, description = description)),
             )
-            if (resp.isSuccessful) return
-            if (resp.code() in setOf(401, 403, 405)) {
-                Log.w(TAG, "PATCH details returned ${resp.code()} for $externalPlaylistId; flipping session kill-switch, future calls skip silently")
+            if (resp.status.isSuccess()) return
+            if (resp.status.value in setOf(401, 403, 405)) {
+                Log.w(TAG, "PATCH details returned ${resp.status.value} for $externalPlaylistId; flipping session kill-switch, future calls skip silently")
                 amPatchUnsupportedForSession = true
                 return
             }
-            Log.w(TAG, "PATCH details returned ${resp.code()} for $externalPlaylistId; not retrying")
+            Log.w(TAG, "PATCH details returned ${resp.status.value} for $externalPlaylistId; not retrying")
         } catch (e: Exception) {
             Log.w(TAG, "PATCH details network error for $externalPlaylistId — silently skipping", e)
         }
@@ -346,9 +338,9 @@ class AppleMusicSyncProvider(
         return try {
             val resp = api.deletePlaylist(externalPlaylistId)
             when {
-                resp.isSuccessful -> DeleteResult.Success
-                resp.code() in setOf(401, 403, 405) -> DeleteResult.Unsupported(resp.code())
-                else -> DeleteResult.Failed(HttpException(resp))
+                resp.status.isSuccess() -> DeleteResult.Success
+                resp.status.value in setOf(401, 403, 405) -> DeleteResult.Unsupported(resp.status.value)
+                else -> DeleteResult.Failed(AmHttpException(resp.status.value))
             }
         } catch (e: Exception) {
             DeleteResult.Failed(e)
@@ -367,12 +359,7 @@ class AppleMusicSyncProvider(
         // local state. The probe also returns meta.total which we use
         // for accurate progress reporting through pagination.
         delay(INTER_REQUEST_DELAY_MS)
-        val probe = try {
-            api.listLibrarySongs(limit = 1, offset = 0)
-        } catch (e: HttpException) {
-            if (e.code() == 401) throw AppleMusicReauthRequiredException()
-            throw e
-        }
+        val probe = api.listLibrarySongs(limit = 1, offset = 0)
         val probeId = probe.data.firstOrNull()?.id
         if (probeId == latestExternalId && localCount > 0) {
             // Nothing's changed at the head; assume rest is unchanged.
@@ -384,12 +371,7 @@ class AppleMusicSyncProvider(
         var offset = 0
         while (true) {
             delay(INTER_REQUEST_DELAY_MS)
-            val resp = try {
-                api.listLibrarySongs(limit = PAGE_SIZE, offset = offset)
-            } catch (e: HttpException) {
-                if (e.code() == 401) throw AppleMusicReauthRequiredException()
-                throw e
-            }
+            val resp = api.listLibrarySongs(limit = PAGE_SIZE, offset = offset)
             // Refresh total in case the library shifted mid-paginate.
             resp.meta?.total?.let { total = it }
             for (am in resp.data) {
@@ -413,9 +395,9 @@ class AppleMusicSyncProvider(
         externalIds.chunked(50).forEach { batch ->
             delay(INTER_REQUEST_DELAY_MS)
             val resp = api.addToLibrary(songIds = batch.joinToString(","))
-            if (!resp.isSuccessful) {
-                if (resp.code() == 401) throw AppleMusicReauthRequiredException()
-                Log.w(TAG, "saveTracks returned ${resp.code()} for ${batch.size} ids")
+            if (!resp.status.isSuccess()) {
+                if (resp.status.value == 401) throw AppleMusicReauthRequiredException()
+                Log.w(TAG, "saveTracks returned ${resp.status.value} for ${batch.size} ids")
             }
         }
     }
@@ -426,8 +408,8 @@ class AppleMusicSyncProvider(
             delay(INTER_REQUEST_DELAY_MS)
             try {
                 val resp = api.deleteLibrarySong(id)
-                if (!resp.isSuccessful && resp.code() != 404) {
-                    Log.w(TAG, "deleteLibrarySong $id returned ${resp.code()}")
+                if (!resp.status.isSuccess() && resp.status.value != 404) {
+                    Log.w(TAG, "deleteLibrarySong $id returned ${resp.status.value}")
                 }
             } catch (e: Exception) {
                 Log.w(TAG, "deleteLibrarySong $id threw — continuing", e)
@@ -444,23 +426,13 @@ class AppleMusicSyncProvider(
     ): List<SyncedAlbum>? {
         val all = mutableListOf<SyncedAlbum>()
         delay(INTER_REQUEST_DELAY_MS)
-        val probe = try {
-            api.listLibraryAlbums(limit = 1, offset = 0)
-        } catch (e: HttpException) {
-            if (e.code() == 401) throw AppleMusicReauthRequiredException()
-            throw e
-        }
+        val probe = api.listLibraryAlbums(limit = 1, offset = 0)
         if (probe.data.firstOrNull()?.id == latestExternalId && localCount > 0) return null
         var total = probe.meta?.total ?: 0
         var offset = 0
         while (true) {
             delay(INTER_REQUEST_DELAY_MS)
-            val resp = try {
-                api.listLibraryAlbums(limit = PAGE_SIZE, offset = offset)
-            } catch (e: HttpException) {
-                if (e.code() == 401) throw AppleMusicReauthRequiredException()
-                throw e
-            }
+            val resp = api.listLibraryAlbums(limit = PAGE_SIZE, offset = offset)
             resp.meta?.total?.let { total = it }
             for (am in resp.data) {
                 all.add(am.toSyncedAlbum())
@@ -477,9 +449,9 @@ class AppleMusicSyncProvider(
         externalIds.chunked(50).forEach { batch ->
             delay(INTER_REQUEST_DELAY_MS)
             val resp = api.addToLibrary(albumIds = batch.joinToString(","))
-            if (!resp.isSuccessful) {
-                if (resp.code() == 401) throw AppleMusicReauthRequiredException()
-                Log.w(TAG, "saveAlbums returned ${resp.code()} for ${batch.size} ids")
+            if (!resp.status.isSuccess()) {
+                if (resp.status.value == 401) throw AppleMusicReauthRequiredException()
+                Log.w(TAG, "saveAlbums returned ${resp.status.value} for ${batch.size} ids")
             }
         }
     }
@@ -489,8 +461,8 @@ class AppleMusicSyncProvider(
             delay(INTER_REQUEST_DELAY_MS)
             try {
                 val resp = api.deleteLibraryAlbum(id)
-                if (!resp.isSuccessful && resp.code() != 404) {
-                    Log.w(TAG, "deleteLibraryAlbum $id returned ${resp.code()}")
+                if (!resp.status.isSuccess() && resp.status.value != 404) {
+                    Log.w(TAG, "deleteLibraryAlbum $id returned ${resp.status.value}")
                 }
             } catch (e: Exception) {
                 Log.w(TAG, "deleteLibraryAlbum $id threw — continuing", e)
@@ -509,12 +481,7 @@ class AppleMusicSyncProvider(
         var offset = 0
         while (true) {
             delay(INTER_REQUEST_DELAY_MS)
-            val resp = try {
-                api.listLibraryArtists(limit = PAGE_SIZE, offset = offset)
-            } catch (e: HttpException) {
-                if (e.code() == 401) throw AppleMusicReauthRequiredException()
-                throw e
-            }
+            val resp = api.listLibraryArtists(limit = PAGE_SIZE, offset = offset)
             resp.meta?.total?.let { total = it }
             for (am in resp.data) {
                 all.add(am.toSyncedArtist())

@@ -1,6 +1,7 @@
 package com.parachord.shared.di
 
 import com.parachord.shared.api.AppleMusicClient
+import com.parachord.shared.api.AppleMusicLibraryClient
 import com.parachord.shared.api.GeoLocationClient
 import com.parachord.shared.api.LastFmClient
 import com.parachord.shared.api.ListenBrainzClient
@@ -38,6 +39,11 @@ val sharedModule = module {
     single { TicketmasterClient(get()) }
     single { SeatGeekClient(get()) }
     single { AppleMusicClient(get()) }
+    // AppleMusicLibraryClient: requires AuthTokenProvider (platform-supplied
+    // by AndroidModule / iOS module). Per-request auth via applyAuth() —
+    // not registered with OAuthRefreshPlugin since Apple's documented
+    // PATCH/PUT/DELETE 401s are structural, not token-related.
+    single { AppleMusicLibraryClient(get(), get()) }
     single { GeoLocationClient(get()) }
     single { ListenBrainzClient(get()) }
 }
