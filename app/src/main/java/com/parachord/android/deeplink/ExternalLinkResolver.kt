@@ -2,8 +2,8 @@ package com.parachord.android.deeplink
 
 import android.util.Log
 import com.parachord.shared.api.AppleMusicClient
-import com.parachord.android.data.api.SpotifyApi
-import com.parachord.android.data.api.bestImageUrl
+import com.parachord.shared.api.SpotifyClient
+import com.parachord.shared.api.bestImageUrl
 import com.parachord.android.data.db.entity.TrackEntity
 import com.parachord.android.data.store.SettingsStore
 
@@ -17,7 +17,7 @@ private const val TAG = "ExternalLinkResolver"
  * - Apple Music: apple-music.axe -> lookupUrl() calls iTunes /lookup?id={id}
  */
 class ExternalLinkResolver constructor(
-    private val spotifyApi: SpotifyApi,
+    private val spotifyClient: SpotifyClient,
     private val appleMusicClient: AppleMusicClient,
     private val settingsStore: SettingsStore,
 ) {
@@ -37,16 +37,23 @@ class ExternalLinkResolver constructor(
 
     data class ArtistResult(val name: String)
 
-    private suspend fun spotifyAuth(): String? {
-        val token = settingsStore.getSpotifyAccessToken()
-        return if (token.isNullOrBlank()) null else "Bearer $token"
+    /**
+     * Pre-flight check: skip Spotify lookups when no token is stored. Per Phase
+     * 9E.1.8, the Ktor `SpotifyClient` resolves the Bearer header from
+     * `AuthTokenProvider` per-request, and the `OAuthRefreshPlugin` handles
+     * 401-driven refresh + retry on `api.spotify.com` automatically.
+     */
+    private suspend fun requireSpotifyAuth() {
+        if (settingsStore.getSpotifyAccessToken().isNullOrBlank()) {
+            throw IllegalStateException("No Spotify token")
+        }
     }
 
     // -- Spotify ---------------------------------------------------------------
 
     suspend fun resolveSpotifyTrack(trackId: String): TrackResult? = try {
-        val auth = spotifyAuth() ?: throw IllegalStateException("No Spotify token")
-        val track = spotifyApi.getTrack(auth, trackId)
+        requireSpotifyAuth()
+        val track = spotifyClient.getTrack(trackId)
         val artworkUrl = track.album?.images.bestImageUrl()
         TrackResult(
             track = TrackEntity(
@@ -68,12 +75,12 @@ class ExternalLinkResolver constructor(
     }
 
     suspend fun resolveSpotifyAlbum(albumId: String): AlbumResult? = try {
-        val auth = spotifyAuth() ?: throw IllegalStateException("No Spotify token")
-        val albumTracks = spotifyApi.getAlbumTracks(auth, albumId)
+        requireSpotifyAuth()
+        val albumTracks = spotifyClient.getAlbumTracks(albumId)
         // Get album metadata from the first track's full details
         val firstTrackId = albumTracks.items.firstOrNull()?.id
         val albumMeta = if (firstTrackId != null) {
-            spotifyApi.getTrack(auth, firstTrackId)
+            spotifyClient.getTrack(firstTrackId)
         } else null
         val artworkUrl = albumMeta?.album?.images.bestImageUrl()
         val albumName = albumMeta?.album?.name ?: "Unknown Album"
@@ -104,9 +111,9 @@ class ExternalLinkResolver constructor(
     }
 
     suspend fun resolveSpotifyPlaylist(playlistId: String): PlaylistResult? = try {
-        val auth = spotifyAuth() ?: throw IllegalStateException("No Spotify token")
-        val playlist = spotifyApi.getPlaylist(auth, playlistId)
-        val tracks = spotifyApi.getPlaylistTracks(auth, playlistId)
+        requireSpotifyAuth()
+        val playlist = spotifyClient.getPlaylist(playlistId)
+        val tracks = spotifyClient.getPlaylistTracks(playlistId)
         PlaylistResult(
             name = playlist.name ?: "Playlist",
             tracks = tracks.items.mapNotNull { item ->
@@ -132,8 +139,8 @@ class ExternalLinkResolver constructor(
     }
 
     suspend fun resolveSpotifyArtist(artistId: String): ArtistResult? = try {
-        val auth = spotifyAuth() ?: throw IllegalStateException("No Spotify token")
-        val artist = spotifyApi.getArtist(auth, artistId)
+        requireSpotifyAuth()
+        val artist = spotifyClient.getArtist(artistId)
         ArtistResult(name = artist.name ?: "Unknown Artist")
     } catch (e: Exception) {
         Log.e(TAG, "Failed to resolve Spotify artist $artistId", e)

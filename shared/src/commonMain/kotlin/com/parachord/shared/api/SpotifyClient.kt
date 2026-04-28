@@ -1,7 +1,11 @@
 package com.parachord.shared.api
 
+import com.parachord.shared.api.auth.AuthCredential
+import com.parachord.shared.api.auth.AuthRealm
+import com.parachord.shared.api.auth.AuthTokenProvider
 import io.ktor.client.HttpClient
 import io.ktor.client.call.body
+import io.ktor.client.request.HttpRequestBuilder
 import io.ktor.client.request.delete
 import io.ktor.client.request.get
 import io.ktor.client.request.header
@@ -11,183 +15,215 @@ import io.ktor.client.request.put
 import io.ktor.client.request.setBody
 import io.ktor.client.statement.HttpResponse
 import io.ktor.http.ContentType
+import io.ktor.http.HttpHeaders
 import io.ktor.http.contentType
 import kotlinx.serialization.SerialName
 import kotlinx.serialization.Serializable
 
 /**
- * Spotify Web API client.
- * Base URL: https://api.spotify.com/
- * Auth: Bearer token in Authorization header.
+ * Spotify Web API client. Cross-platform (commonMain).
+ *
+ * Auth: per-request `Authorization: Bearer <access_token>` resolved
+ * via [AuthTokenProvider.tokenFor] for [AuthRealm.Spotify]. Consumers
+ * no longer pass `auth: String` per call — the client owns auth
+ * resolution.
+ *
+ * 401 handling: requests on `api.spotify.com` flow through the global
+ * [com.parachord.shared.api.transport.OAuthRefreshPlugin] (registered
+ * via [installSharedPlugins]). On 401 the plugin single-flights a token
+ * refresh via [com.parachord.shared.api.auth.OAuthTokenRefresher],
+ * retries once with the new bearer, and throws
+ * [com.parachord.shared.api.transport.ReauthRequiredException] on
+ * two-strikes failure. This client does NOT need its own 401 retry
+ * logic — the plugin owns that surface.
+ *
+ * Phase 9E.1.8 cutover (Apr 2026): consumers migrated from app-side
+ * Retrofit `SpotifyApi`. Spotify is the OAuth refresh canary — first
+ * production cutover to exercise [OAuthRefreshPlugin] under real
+ * concurrent load.
  */
-class SpotifyClient(private val httpClient: HttpClient) {
+class SpotifyClient(
+    private val httpClient: HttpClient,
+    private val tokens: AuthTokenProvider,
+) {
 
     companion object {
         private const val BASE = "https://api.spotify.com"
     }
 
+    /**
+     * Apply the Spotify bearer token from [AuthTokenProvider]. If no
+     * token is currently stored, the call falls through with no
+     * Authorization header set — the server will return 401, and
+     * `OAuthRefreshPlugin` will attempt a refresh-and-retry.
+     */
+    private suspend fun applyAuth(builder: HttpRequestBuilder) {
+        val token = (tokens.tokenFor(AuthRealm.Spotify) as? AuthCredential.BearerToken)?.accessToken
+        if (token != null) builder.header(HttpHeaders.Authorization, "Bearer $token")
+    }
+
     // ── Search + Lookup ──────────────────────────────────────────────
 
-    suspend fun search(auth: String, query: String, type: String, limit: Int = 20, market: String = "from_token"): SpSearchResponse =
+    suspend fun search(query: String, type: String, limit: Int = 20, market: String = "from_token"): SpSearchResponse =
         httpClient.get("$BASE/v1/search") {
-            header("Authorization", auth)
+            applyAuth(this)
             parameter("q", query); parameter("type", type); parameter("limit", limit); parameter("market", market)
         }.body()
 
-    suspend fun getTrack(auth: String, trackId: String, market: String = "from_token"): SpTrack =
+    suspend fun getTrack(trackId: String, market: String = "from_token"): SpTrack =
         httpClient.get("$BASE/v1/tracks/$trackId") {
-            header("Authorization", auth); parameter("market", market)
+            applyAuth(this); parameter("market", market)
         }.body()
 
-    suspend fun getArtist(auth: String, artistId: String): SpArtist =
-        httpClient.get("$BASE/v1/artists/$artistId") { header("Authorization", auth) }.body()
+    suspend fun getArtist(artistId: String): SpArtist =
+        httpClient.get("$BASE/v1/artists/$artistId") { applyAuth(this) }.body()
 
-    suspend fun getArtistTopTracks(auth: String, artistId: String, market: String = "US"): SpTopTracksResponse =
+    suspend fun getArtistTopTracks(artistId: String, market: String = "US"): SpTopTracksResponse =
         httpClient.get("$BASE/v1/artists/$artistId/top-tracks") {
-            header("Authorization", auth); parameter("market", market)
+            applyAuth(this); parameter("market", market)
         }.body()
 
-    suspend fun getArtistAlbums(auth: String, artistId: String, includeGroups: String = "album,single,compilation", limit: Int = 50): SpPaginated<SpAlbum> =
+    suspend fun getArtistAlbums(artistId: String, includeGroups: String = "album,single,compilation", limit: Int = 50): SpPaginated<SpAlbum> =
         httpClient.get("$BASE/v1/artists/$artistId/albums") {
-            header("Authorization", auth); parameter("include_groups", includeGroups); parameter("limit", limit)
+            applyAuth(this); parameter("include_groups", includeGroups); parameter("limit", limit)
         }.body()
 
-    suspend fun getAlbumTracks(auth: String, albumId: String, limit: Int = 50): SpPaginated<SpSimpleTrack> =
+    suspend fun getAlbumTracks(albumId: String, limit: Int = 50): SpPaginated<SpSimpleTrack> =
         httpClient.get("$BASE/v1/albums/$albumId/tracks") {
-            header("Authorization", auth); parameter("limit", limit)
+            applyAuth(this); parameter("limit", limit)
         }.body()
 
     // ── Playback Control (Spotify Connect) ───────────────────────────
 
-    suspend fun getDevices(auth: String): SpDevicesResponse =
-        httpClient.get("$BASE/v1/me/player/devices") { header("Authorization", auth) }.body()
+    suspend fun getDevices(): SpDevicesResponse =
+        httpClient.get("$BASE/v1/me/player/devices") { applyAuth(this) }.body()
 
-    suspend fun transferPlayback(auth: String, body: SpTransferRequest): HttpResponse =
+    suspend fun transferPlayback(body: SpTransferRequest): HttpResponse =
         httpClient.put("$BASE/v1/me/player") {
-            header("Authorization", auth); contentType(ContentType.Application.Json); setBody(body)
+            applyAuth(this); contentType(ContentType.Application.Json); setBody(body)
         }
 
-    suspend fun startPlayback(auth: String, body: SpPlaybackRequest, deviceId: String? = null): HttpResponse =
+    suspend fun startPlayback(body: SpPlaybackRequest, deviceId: String? = null): HttpResponse =
         httpClient.put("$BASE/v1/me/player/play") {
-            header("Authorization", auth); contentType(ContentType.Application.Json); setBody(body)
+            applyAuth(this); contentType(ContentType.Application.Json); setBody(body)
             if (deviceId != null) parameter("device_id", deviceId)
         }
 
-    suspend fun resumePlayback(auth: String): HttpResponse =
-        httpClient.put("$BASE/v1/me/player/play") { header("Authorization", auth) }
+    suspend fun resumePlayback(): HttpResponse =
+        httpClient.put("$BASE/v1/me/player/play") { applyAuth(this) }
 
-    suspend fun pausePlayback(auth: String): HttpResponse =
-        httpClient.put("$BASE/v1/me/player/pause") { header("Authorization", auth) }
+    suspend fun pausePlayback(): HttpResponse =
+        httpClient.put("$BASE/v1/me/player/pause") { applyAuth(this) }
 
-    suspend fun seekPlayback(auth: String, positionMs: Long): HttpResponse =
+    suspend fun seekPlayback(positionMs: Long): HttpResponse =
         httpClient.put("$BASE/v1/me/player/seek") {
-            header("Authorization", auth); parameter("position_ms", positionMs)
+            applyAuth(this); parameter("position_ms", positionMs)
         }
 
-    suspend fun setVolume(auth: String, volumePercent: Int, deviceId: String? = null): HttpResponse =
+    suspend fun setVolume(volumePercent: Int, deviceId: String? = null): HttpResponse =
         httpClient.put("$BASE/v1/me/player/volume") {
-            header("Authorization", auth)
+            applyAuth(this)
             parameter("volume_percent", volumePercent.coerceIn(0, 100))
             if (deviceId != null) parameter("device_id", deviceId)
         }
 
-    suspend fun getPlaybackState(auth: String): HttpResponse =
-        httpClient.get("$BASE/v1/me/player") { header("Authorization", auth) }
+    suspend fun getPlaybackState(): HttpResponse =
+        httpClient.get("$BASE/v1/me/player") { applyAuth(this) }
 
     // ── Library (Sync Read) ──────────────────────────────────────────
 
-    suspend fun getLikedTracks(auth: String, limit: Int = 50, offset: Int = 0, market: String = "from_token"): SpSavedTracksResponse =
+    suspend fun getLikedTracks(limit: Int = 50, offset: Int = 0, market: String = "from_token"): SpSavedTracksResponse =
         httpClient.get("$BASE/v1/me/tracks") {
-            header("Authorization", auth); parameter("limit", limit); parameter("offset", offset); parameter("market", market)
+            applyAuth(this); parameter("limit", limit); parameter("offset", offset); parameter("market", market)
         }.body()
 
-    suspend fun getSavedAlbums(auth: String, limit: Int = 50, offset: Int = 0, market: String = "from_token"): SpSavedAlbumsResponse =
+    suspend fun getSavedAlbums(limit: Int = 50, offset: Int = 0, market: String = "from_token"): SpSavedAlbumsResponse =
         httpClient.get("$BASE/v1/me/albums") {
-            header("Authorization", auth); parameter("limit", limit); parameter("offset", offset); parameter("market", market)
+            applyAuth(this); parameter("limit", limit); parameter("offset", offset); parameter("market", market)
         }.body()
 
-    suspend fun getFollowedArtists(auth: String, limit: Int = 50, after: String? = null): SpFollowedArtistsResponse =
+    suspend fun getFollowedArtists(limit: Int = 50, after: String? = null): SpFollowedArtistsResponse =
         httpClient.get("$BASE/v1/me/following") {
-            header("Authorization", auth); parameter("type", "artist"); parameter("limit", limit)
+            applyAuth(this); parameter("type", "artist"); parameter("limit", limit)
             if (after != null) parameter("after", after)
         }.body()
 
-    suspend fun getUserPlaylists(auth: String, limit: Int = 50, offset: Int = 0): SpPaginatedPlaylists =
+    suspend fun getUserPlaylists(limit: Int = 50, offset: Int = 0): SpPaginatedPlaylists =
         httpClient.get("$BASE/v1/me/playlists") {
-            header("Authorization", auth); parameter("limit", limit); parameter("offset", offset)
+            applyAuth(this); parameter("limit", limit); parameter("offset", offset)
         }.body()
 
-    suspend fun getPlaylistTracks(auth: String, playlistId: String, limit: Int = 100, offset: Int = 0, market: String = "from_token"): SpPlaylistTracksResponse =
+    suspend fun getPlaylistTracks(playlistId: String, limit: Int = 100, offset: Int = 0, market: String = "from_token"): SpPlaylistTracksResponse =
         httpClient.get("$BASE/v1/playlists/$playlistId/tracks") {
-            header("Authorization", auth); parameter("limit", limit); parameter("offset", offset); parameter("market", market)
+            applyAuth(this); parameter("limit", limit); parameter("offset", offset); parameter("market", market)
         }.body()
 
-    suspend fun getPlaylist(auth: String, playlistId: String, fields: String? = null): SpPlaylistFull =
+    suspend fun getPlaylist(playlistId: String, fields: String? = null): SpPlaylistFull =
         httpClient.get("$BASE/v1/playlists/$playlistId") {
-            header("Authorization", auth); if (fields != null) parameter("fields", fields)
+            applyAuth(this); if (fields != null) parameter("fields", fields)
         }.body()
 
-    suspend fun getCurrentUser(auth: String): SpUser =
-        httpClient.get("$BASE/v1/me") { header("Authorization", auth) }.body()
+    suspend fun getCurrentUser(): SpUser =
+        httpClient.get("$BASE/v1/me") { applyAuth(this) }.body()
 
     // ── Library Write ────────────────────────────────────────────────
 
-    suspend fun saveTracks(auth: String, body: SpIdsRequest): HttpResponse =
+    suspend fun saveTracks(body: SpIdsRequest): HttpResponse =
         httpClient.put("$BASE/v1/me/tracks") {
-            header("Authorization", auth); contentType(ContentType.Application.Json); setBody(body)
+            applyAuth(this); contentType(ContentType.Application.Json); setBody(body)
         }
 
-    suspend fun removeTracks(auth: String, body: SpIdsRequest): HttpResponse =
+    suspend fun removeTracks(body: SpIdsRequest): HttpResponse =
         httpClient.delete("$BASE/v1/me/tracks") {
-            header("Authorization", auth); contentType(ContentType.Application.Json); setBody(body)
+            applyAuth(this); contentType(ContentType.Application.Json); setBody(body)
         }
 
-    suspend fun saveAlbums(auth: String, body: SpIdsRequest): HttpResponse =
+    suspend fun saveAlbums(body: SpIdsRequest): HttpResponse =
         httpClient.put("$BASE/v1/me/albums") {
-            header("Authorization", auth); contentType(ContentType.Application.Json); setBody(body)
+            applyAuth(this); contentType(ContentType.Application.Json); setBody(body)
         }
 
-    suspend fun removeAlbums(auth: String, body: SpIdsRequest): HttpResponse =
+    suspend fun removeAlbums(body: SpIdsRequest): HttpResponse =
         httpClient.delete("$BASE/v1/me/albums") {
-            header("Authorization", auth); contentType(ContentType.Application.Json); setBody(body)
+            applyAuth(this); contentType(ContentType.Application.Json); setBody(body)
         }
 
-    suspend fun followArtists(auth: String, body: SpIdsRequest): HttpResponse =
+    suspend fun followArtists(body: SpIdsRequest): HttpResponse =
         httpClient.put("$BASE/v1/me/following") {
-            header("Authorization", auth); parameter("type", "artist")
+            applyAuth(this); parameter("type", "artist")
             contentType(ContentType.Application.Json); setBody(body)
         }
 
-    suspend fun unfollowArtists(auth: String, body: SpIdsRequest): HttpResponse =
+    suspend fun unfollowArtists(body: SpIdsRequest): HttpResponse =
         httpClient.delete("$BASE/v1/me/following") {
-            header("Authorization", auth); parameter("type", "artist")
+            applyAuth(this); parameter("type", "artist")
             contentType(ContentType.Application.Json); setBody(body)
         }
 
     // ── Playlist Write ───────────────────────────────────────────────
 
-    suspend fun createPlaylist(auth: String, userId: String, body: SpCreatePlaylistRequest): SpPlaylistFull =
+    suspend fun createPlaylist(userId: String, body: SpCreatePlaylistRequest): SpPlaylistFull =
         httpClient.post("$BASE/v1/users/$userId/playlists") {
-            header("Authorization", auth); contentType(ContentType.Application.Json); setBody(body)
+            applyAuth(this); contentType(ContentType.Application.Json); setBody(body)
         }.body()
 
-    suspend fun replacePlaylistTracks(auth: String, playlistId: String, body: SpUrisRequest): HttpResponse =
+    suspend fun replacePlaylistTracks(playlistId: String, body: SpUrisRequest): HttpResponse =
         httpClient.put("$BASE/v1/playlists/$playlistId/tracks") {
-            header("Authorization", auth); contentType(ContentType.Application.Json); setBody(body)
+            applyAuth(this); contentType(ContentType.Application.Json); setBody(body)
         }
 
-    suspend fun addPlaylistTracks(auth: String, playlistId: String, body: SpUrisRequest): HttpResponse =
+    suspend fun addPlaylistTracks(playlistId: String, body: SpUrisRequest): HttpResponse =
         httpClient.post("$BASE/v1/playlists/$playlistId/tracks") {
-            header("Authorization", auth); contentType(ContentType.Application.Json); setBody(body)
+            applyAuth(this); contentType(ContentType.Application.Json); setBody(body)
         }
 
-    suspend fun updatePlaylistDetails(auth: String, playlistId: String, body: SpUpdatePlaylistRequest): HttpResponse =
+    suspend fun updatePlaylistDetails(playlistId: String, body: SpUpdatePlaylistRequest): HttpResponse =
         httpClient.put("$BASE/v1/playlists/$playlistId") {
-            header("Authorization", auth); contentType(ContentType.Application.Json); setBody(body)
+            applyAuth(this); contentType(ContentType.Application.Json); setBody(body)
         }
 
-    suspend fun unfollowPlaylist(auth: String, playlistId: String): HttpResponse =
-        httpClient.delete("$BASE/v1/playlists/$playlistId/followers") { header("Authorization", auth) }
+    suspend fun unfollowPlaylist(playlistId: String): HttpResponse =
+        httpClient.delete("$BASE/v1/playlists/$playlistId/followers") { applyAuth(this) }
 }
 
 // ── Response Models ──────────────────────────────────────────────────

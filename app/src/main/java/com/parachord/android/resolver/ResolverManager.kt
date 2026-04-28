@@ -2,7 +2,7 @@ package com.parachord.android.resolver
 
 import android.util.Log
 import com.parachord.android.auth.OAuthManager
-import com.parachord.android.data.api.SpotifyApi
+import com.parachord.shared.api.SpotifyClient
 import com.parachord.android.data.db.dao.TrackDao
 import com.parachord.android.data.store.SettingsStore
 import com.parachord.android.playback.handlers.MusicKitWebBridge
@@ -23,7 +23,6 @@ import kotlinx.serialization.Serializable
 import kotlinx.serialization.json.Json
 import okhttp3.OkHttpClient
 import okhttp3.Request
-import retrofit2.HttpException
 
 /**
  * Manages track resolution using native Kotlin resolvers.
@@ -33,7 +32,7 @@ import retrofit2.HttpException
  * with the playback URI/URL and metadata needed by the playback handlers.
  */
 class ResolverManager constructor(
-    private val spotifyApi: SpotifyApi,
+    private val spotifyClient: SpotifyClient,
     private val settingsStore: SettingsStore,
     private val oAuthManager: OAuthManager,
     private val okHttpClient: OkHttpClient,
@@ -72,8 +71,11 @@ class ResolverManager constructor(
      * Proactively ensure the Spotify access token is fresh.
      * Debounced to once per 5 minutes to avoid unnecessary API calls.
      *
-     * Makes a lightweight "me" API call; if it 401s, refreshes the token once.
-     * This way, by the time individual resolveSpotify() calls run, the token is valid.
+     * Per Phase 9E.1.8 the global `OAuthRefreshPlugin` (registered for
+     * `api.spotify.com`) handles 401-driven refresh + retry transparently.
+     * `getCurrentUser()` here is a cheap probe — when the stored token is
+     * stale, the plugin sees the 401, refreshes via [OAuthManager], and
+     * the call succeeds with the new token. No manual refresh needed.
      */
     suspend fun ensureTokensFresh() {
         val now = System.currentTimeMillis()
@@ -83,16 +85,9 @@ class ResolverManager constructor(
         val token = settingsStore.getSpotifyAccessToken()
         if (!token.isNullOrBlank()) {
             try {
-                spotifyApi.getCurrentUser("Bearer $token")
-            } catch (e: HttpException) {
-                if (e.code() == 401) {
-                    Log.d(TAG, "Spotify token stale, proactively refreshing")
-                    if (oAuthManager.refreshSpotifyToken()) {
-                        Log.d(TAG, "Spotify token proactively refreshed")
-                    } else {
-                        Log.w(TAG, "Spotify proactive token refresh failed — re-auth may be needed")
-                    }
-                }
+                spotifyClient.getCurrentUser()
+            } catch (e: com.parachord.shared.api.auth.ReauthRequiredException) {
+                Log.w(TAG, "Spotify proactive token check: reauth required (refresh failed)")
             } catch (_: Exception) {
                 // Network error etc — resolve() will handle individual failures
             }
@@ -231,34 +226,22 @@ class ResolverManager constructor(
     }
 
     private suspend fun resolveSpotify(query: String): ResolvedSource? {
-        val token = settingsStore.getSpotifyAccessToken()
-        if (token.isNullOrBlank()) return null
+        if (settingsStore.getSpotifyAccessToken().isNullOrBlank()) return null
 
         return try {
-            searchSpotifyTrack(query, token)
-        } catch (e: HttpException) {
-            if (e.code() == 401 && oAuthManager.refreshSpotifyToken()) {
-                val newToken = settingsStore.getSpotifyAccessToken() ?: return null
-                try {
-                    searchSpotifyTrack(query, newToken)
-                } catch (e2: Exception) {
-                    Log.w(TAG, "Spotify resolve failed after refresh for '$query': ${e2.message}")
-                    null
-                }
-            } else {
-                Log.w(TAG, "Spotify resolve failed for '$query': ${e.message}")
-                null
-            }
+            searchSpotifyTrack(query)
+        } catch (e: com.parachord.shared.api.auth.ReauthRequiredException) {
+            Log.w(TAG, "Spotify resolve: reauth required for '$query' — user must reconnect")
+            null
         } catch (e: Exception) {
             Log.w(TAG, "Spotify resolve failed for '$query': ${e.message}")
             null
         }
     }
 
-    private suspend fun searchSpotifyTrack(query: String, token: String): ResolvedSource? {
+    private suspend fun searchSpotifyTrack(query: String): ResolvedSource? {
         // Use field-qualified search for better precision (matches desktop spotify.axe)
-        val response = spotifyApi.search(
-            auth = "Bearer $token",
+        val response = spotifyClient.search(
             query = query,
             type = "track",
             limit = 5, // Get a few results so we can filter to playable ones
@@ -286,11 +269,9 @@ class ResolverManager constructor(
      * Returns a ResolvedSource if playable, null if not available.
      */
     private suspend fun verifySpotifyTrack(spotifyId: String): ResolvedSource? {
-        val token = settingsStore.getSpotifyAccessToken()
-        if (token.isNullOrBlank()) return null
+        if (settingsStore.getSpotifyAccessToken().isNullOrBlank()) return null
         return try {
-            val track = spotifyApi.getTrack(
-                auth = "Bearer $token",
+            val track = spotifyClient.getTrack(
                 trackId = spotifyId,
             )
             if (track.isPlayable == false) {

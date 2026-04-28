@@ -33,7 +33,11 @@ val sharedModule = module {
     single { createHttpClient(get(), get(), get(), get()) }
 
     // API Clients (Ktor, cross-platform)
-    single { SpotifyClient(get()) }
+    // SpotifyClient: per-API auth via AuthTokenProvider for AuthRealm.Spotify.
+    // Registered with OAuthRefreshPlugin in HttpClientFactory — 401s on
+    // api.spotify.com get refreshed + retried automatically. Phase 9E.1.8
+    // is the OAuth refresh canary cutover.
+    single { SpotifyClient(get(), get()) }
     single { LastFmClient(get()) }
     single { MusicBrainzClient(get()) }
     single { TicketmasterClient(get()) }

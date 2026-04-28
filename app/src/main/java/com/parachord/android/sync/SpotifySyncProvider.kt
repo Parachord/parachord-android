@@ -2,7 +2,15 @@ package com.parachord.android.sync
 
 import android.util.Log
 import com.parachord.android.auth.OAuthManager
-import com.parachord.android.data.api.*
+import com.parachord.shared.api.SpotifyClient
+import com.parachord.shared.api.SpCreatePlaylistRequest
+import com.parachord.shared.api.SpIdsRequest
+import com.parachord.shared.api.SpSnapshotResponse
+import com.parachord.shared.api.SpUpdatePlaylistRequest
+import com.parachord.shared.api.SpUrisRequest
+import com.parachord.shared.api.bestImageUrl
+import io.ktor.client.call.body
+import io.ktor.http.isSuccess
 import com.parachord.android.data.db.entity.AlbumEntity
 import com.parachord.android.data.db.entity.ArtistEntity
 import com.parachord.android.data.db.entity.PlaylistEntity
@@ -29,7 +37,7 @@ typealias SyncedArtist = com.parachord.shared.sync.SyncedArtist
 typealias SyncedPlaylist = com.parachord.shared.sync.SyncedPlaylist
 
 class SpotifySyncProvider constructor(
-    private val spotifyApi: SpotifyApi,
+    private val spotifyClient: SpotifyClient,
     private val settingsStore: SettingsStore,
     private val oAuthManager: OAuthManager,
 ) : SyncProvider {
@@ -58,59 +66,37 @@ class SpotifySyncProvider constructor(
 
     private var cachedMarket: String? = null
 
-    private suspend fun auth(): String = "Bearer ${settingsStore.getSpotifyAccessToken() ?: ""}"
-
     /** Fetch the user's country code from their Spotify profile for market-aware API calls. */
     suspend fun getMarket(): String {
         cachedMarket?.let { return it }
-        val user = withRetry { spotifyApi.getCurrentUser(it) }
+        val user = withRetry { spotifyClient.getCurrentUser() }
         val market = user.country ?: "US"
         cachedMarket = market
         return market
     }
 
     /**
-     * Execute a Spotify API call with automatic token refresh on 401,
-     * rate-limit handling on 429, and exponential backoff on server errors.
+     * Execute a Spotify API call with reauth-friendly error mapping.
+     *
+     * Phase 9E.1.8: 401-driven token refresh + retry now happens transparently
+     * via the global [OAuthRefreshPlugin] on `api.spotify.com`. After two strikes
+     * the plugin throws [com.parachord.shared.api.auth.ReauthRequiredException]
+     * which we map to the same user-facing "reconnect Spotify" error this
+     * provider emitted before the cutover.
+     *
+     * **Regression note:** the old `withRetry` also handled 429 (rate-limited
+     * with `Retry-After`) and 5xx (exponential backoff) by inspecting the
+     * Retrofit `HttpException`. The shared Ktor client decodes typed responses
+     * directly and doesn't expose the status on those paths, so 429 / 5xx now
+     * surface as serialization / IOException to the caller and the next sync
+     * cycle picks up the work. Sufficient for the cutover; if Spotify
+     * rate-limits in practice we'll add a typed `SpHttpException` mid-tier.
      */
-    private suspend fun <T> withRetry(block: suspend (auth: String) -> T): T {
-        var retries = 0
-        while (true) {
-            try {
-                return block(auth())
-            } catch (e: retrofit2.HttpException) {
-                when (e.code()) {
-                    401 -> {
-                        if (retries > 0) throw IllegalStateException("Spotify session expired. Reconnect Spotify in Settings.")
-                        Log.d(TAG, "Token expired, refreshing...")
-                        if (!oAuthManager.refreshSpotifyToken()) {
-                            throw IllegalStateException("Spotify session expired. Reconnect Spotify in Settings.")
-                        }
-                        retries++
-                    }
-                    403 -> {
-                        // Permission denied — likely stale scopes from an older auth.
-                        // Re-authenticating with updated scopes should fix this.
-                        Log.w(TAG, "403 Forbidden — reconnect Spotify to grant updated permissions")
-                        throw IllegalStateException("Spotify access denied. Reconnect Spotify in Settings to grant updated permissions.")
-                    }
-                    429 -> {
-                        val retryAfter = e.response()?.headers()?.get("Retry-After")?.toLongOrNull() ?: 1
-                        if (retries >= MAX_RETRIES) throw e
-                        Log.d(TAG, "Rate limited, waiting ${retryAfter}s")
-                        delay(retryAfter * 1000)
-                        retries++
-                    }
-                    in 500..599 -> {
-                        if (retries >= MAX_RETRIES) throw e
-                        val backoff = (1L shl retries) * 1000
-                        Log.d(TAG, "Server error ${e.code()}, backoff ${backoff}ms")
-                        delay(backoff)
-                        retries++
-                    }
-                    else -> throw e
-                }
-            }
+    private suspend fun <T> withRetry(block: suspend () -> T): T {
+        return try {
+            block()
+        } catch (e: com.parachord.shared.api.auth.ReauthRequiredException) {
+            throw IllegalStateException("Spotify session expired. Reconnect Spotify in Settings.")
         }
     }
 
@@ -132,7 +118,7 @@ class SpotifySyncProvider constructor(
     ): List<SyncedTrack>? {
         val market = getMarket()
         Log.d(TAG, "fetchTracks: market=$market, localCount=$localCount, latestExternalId=$latestExternalId")
-        val probe = withRetry { spotifyApi.getLikedTracks(it, limit = 1, market = market) }
+        val probe = withRetry { spotifyClient.getLikedTracks(limit = 1, market = market) }
         val probeTrackId = probe.items.firstOrNull()?.track?.id
         Log.d(TAG, "fetchTracks probe: total=${probe.total}, firstTrackId=$probeTrackId, firstTrackName=${probe.items.firstOrNull()?.track?.name}")
         if (probe.total == localCount && probeTrackId == latestExternalId) {
@@ -148,7 +134,7 @@ class SpotifySyncProvider constructor(
         onProgress?.invoke(0, total)
 
         while (offset < total) {
-            val page = withRetry { spotifyApi.getLikedTracks(it, limit = BATCH_SIZE, offset = offset, market = market) }
+            val page = withRetry { spotifyClient.getLikedTracks(limit = BATCH_SIZE, offset = offset, market = market) }
             if (page.items.isEmpty()) break
             page.items.forEach { saved ->
                 val track = saved.track
@@ -198,7 +184,7 @@ class SpotifySyncProvider constructor(
         onProgress: ((current: Int, total: Int) -> Unit)?,
     ): List<SyncedAlbum>? {
         val market = getMarket()
-        val probe = withRetry { spotifyApi.getSavedAlbums(it, limit = 1, market = market) }
+        val probe = withRetry { spotifyClient.getSavedAlbums(limit = 1, market = market) }
         if (probe.total == localCount && probe.items.firstOrNull()?.album?.id == latestExternalId) {
             return null
         }
@@ -208,7 +194,7 @@ class SpotifySyncProvider constructor(
         val total = probe.total
 
         while (offset < total) {
-            val page = withRetry { spotifyApi.getSavedAlbums(it, limit = BATCH_SIZE, offset = offset, market = market) }
+            val page = withRetry { spotifyClient.getSavedAlbums(limit = BATCH_SIZE, offset = offset, market = market) }
             if (page.items.isEmpty()) break
             page.items.forEach { saved ->
                 val album = saved.album ?: return@forEach
@@ -249,7 +235,7 @@ class SpotifySyncProvider constructor(
         var total = 0
 
         do {
-            val response = withRetry { spotifyApi.getFollowedArtists(it, after = after) }
+            val response = withRetry { spotifyClient.getFollowedArtists(after = after) }
             total = response.artists.total
             response.artists.items.forEach { artist ->
                 val artistId = artist.id ?: return@forEach
@@ -275,16 +261,16 @@ class SpotifySyncProvider constructor(
     override suspend fun fetchPlaylists(
         onProgress: ((current: Int, total: Int) -> Unit)?,
     ): List<SyncedPlaylist> {
-        val currentUser = withRetry { spotifyApi.getCurrentUser(it) }
+        val currentUser = withRetry { spotifyClient.getCurrentUser() }
         val all = mutableListOf<SyncedPlaylist>()
         val seen = mutableSetOf<String>()
         var offset = 0
 
-        val probe = withRetry { spotifyApi.getUserPlaylists(it, limit = 1) }
+        val probe = withRetry { spotifyClient.getUserPlaylists(limit = 1) }
         val total = probe.total
 
         while (offset < total) {
-            val page = withRetry { spotifyApi.getUserPlaylists(it, limit = BATCH_SIZE, offset = offset) }
+            val page = withRetry { spotifyClient.getUserPlaylists(limit = BATCH_SIZE, offset = offset) }
             if (page.items.isEmpty()) break
             page.items.forEach { playlist ->
                 val playlistId = playlist.id ?: return@forEach
@@ -322,12 +308,12 @@ class SpotifySyncProvider constructor(
         val localPlaylistId = "spotify-$externalPlaylistId"
 
         val market = getMarket()
-        val probe = withRetry { spotifyApi.getPlaylistTracks(it, externalPlaylistId, limit = 1, market = market) }
+        val probe = withRetry { spotifyClient.getPlaylistTracks(externalPlaylistId, limit = 1, market = market) }
         val total = probe.total
 
         while (offset < total) {
             val page = withRetry {
-                spotifyApi.getPlaylistTracks(it, externalPlaylistId, limit = PLAYLIST_TRACK_BATCH_SIZE, offset = offset, market = market)
+                spotifyClient.getPlaylistTracks(externalPlaylistId, limit = PLAYLIST_TRACK_BATCH_SIZE, offset = offset, market = market)
             }
             if (page.items.isEmpty()) break
             page.items.forEach { item ->
@@ -355,7 +341,7 @@ class SpotifySyncProvider constructor(
     override suspend fun getPlaylistSnapshotId(externalPlaylistId: String): String? {
         return try {
             val playlist = withRetry {
-                spotifyApi.getPlaylist(it, externalPlaylistId, fields = "snapshot_id")
+                spotifyClient.getPlaylist(externalPlaylistId, fields = "snapshot_id")
             }
             playlist.snapshotId
         } catch (e: Exception) {
@@ -368,44 +354,44 @@ class SpotifySyncProvider constructor(
 
     override suspend fun saveTracks(externalIds: List<String>) {
         externalIds.chunked(BATCH_SIZE).forEach { batch ->
-            withRetry { spotifyApi.saveTracks(it, SpIdsRequest(batch)) }
+            withRetry { spotifyClient.saveTracks(SpIdsRequest(batch)) }
         }
     }
 
     override suspend fun removeTracks(externalIds: List<String>) {
         externalIds.chunked(BATCH_SIZE).forEach { batch ->
-            withRetry { spotifyApi.removeTracks(it, SpIdsRequest(batch)) }
+            withRetry { spotifyClient.removeTracks(SpIdsRequest(batch)) }
         }
     }
 
     override suspend fun saveAlbums(externalIds: List<String>) {
         externalIds.chunked(BATCH_SIZE).forEach { batch ->
-            withRetry { spotifyApi.saveAlbums(it, SpIdsRequest(batch)) }
+            withRetry { spotifyClient.saveAlbums(SpIdsRequest(batch)) }
         }
     }
 
     override suspend fun removeAlbums(externalIds: List<String>) {
         externalIds.chunked(BATCH_SIZE).forEach { batch ->
-            withRetry { spotifyApi.removeAlbums(it, SpIdsRequest(batch)) }
+            withRetry { spotifyClient.removeAlbums(SpIdsRequest(batch)) }
         }
     }
 
     override suspend fun followArtists(externalIds: List<String>) {
         externalIds.chunked(BATCH_SIZE).forEach { batch ->
-            withRetry { spotifyApi.followArtists(it, body = SpIdsRequest(batch)) }
+            withRetry { spotifyClient.followArtists(body = SpIdsRequest(batch)) }
         }
     }
 
     override suspend fun unfollowArtists(externalIds: List<String>) {
         externalIds.chunked(BATCH_SIZE).forEach { batch ->
-            withRetry { spotifyApi.unfollowArtists(it, body = SpIdsRequest(batch)) }
+            withRetry { spotifyClient.unfollowArtists(body = SpIdsRequest(batch)) }
         }
     }
 
     override suspend fun createPlaylist(name: String, description: String?): com.parachord.shared.sync.RemoteCreated {
-        val user = withRetry { spotifyApi.getCurrentUser(it) }
+        val user = withRetry { spotifyClient.getCurrentUser() }
         val created = withRetry {
-            spotifyApi.createPlaylist(it, user.id, SpCreatePlaylistRequest(name, description))
+            spotifyClient.createPlaylist(user.id, SpCreatePlaylistRequest(name, description))
         }
         val externalId = created.id
             ?: throw IllegalStateException("Spotify create returned null id")
@@ -417,7 +403,7 @@ class SpotifySyncProvider constructor(
 
     override suspend fun replacePlaylistTracks(externalPlaylistId: String, externalTrackIds: List<String>): String? {
         if (externalTrackIds.isEmpty()) {
-            withRetry { spotifyApi.replacePlaylistTracks(it, externalPlaylistId, SpUrisRequest(emptyList())) }
+            withRetry { spotifyClient.replacePlaylistTracks(externalPlaylistId, SpUrisRequest(emptyList())) }
             return null
         }
 
@@ -426,12 +412,12 @@ class SpotifySyncProvider constructor(
 
         chunks.forEachIndexed { index, chunk ->
             val response = if (index == 0) {
-                withRetry { spotifyApi.replacePlaylistTracks(it, externalPlaylistId, SpUrisRequest(chunk)) }
+                withRetry { spotifyClient.replacePlaylistTracks(externalPlaylistId, SpUrisRequest(chunk)) }
             } else {
-                withRetry { spotifyApi.addPlaylistTracks(it, externalPlaylistId, SpUrisRequest(chunk)) }
+                withRetry { spotifyClient.addPlaylistTracks(externalPlaylistId, SpUrisRequest(chunk)) }
             }
-            if (response.isSuccessful) {
-                snapshotId = response.body()?.snapshotId
+            if (response.status.isSuccess()) {
+                snapshotId = response.body<SpSnapshotResponse>().snapshotId
             }
         }
 
@@ -440,13 +426,13 @@ class SpotifySyncProvider constructor(
 
     override suspend fun updatePlaylistDetails(externalPlaylistId: String, name: String?, description: String?) {
         withRetry {
-            spotifyApi.updatePlaylistDetails(it, externalPlaylistId, SpUpdatePlaylistRequest(name, description))
+            spotifyClient.updatePlaylistDetails(externalPlaylistId, SpUpdatePlaylistRequest(name, description))
         }
     }
 
     override suspend fun deletePlaylist(externalPlaylistId: String): com.parachord.shared.sync.DeleteResult {
         return try {
-            withRetry { spotifyApi.unfollowPlaylist(it, externalPlaylistId) }
+            withRetry { spotifyClient.unfollowPlaylist(externalPlaylistId) }
             com.parachord.shared.sync.DeleteResult.Success
         } catch (e: Exception) {
             com.parachord.shared.sync.DeleteResult.Failed(e)

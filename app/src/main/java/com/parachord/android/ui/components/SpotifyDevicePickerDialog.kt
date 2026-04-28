@@ -19,7 +19,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
-import com.parachord.android.data.api.SpDevice
+import com.parachord.shared.api.SpDevice
 import com.parachord.android.playback.handlers.SpotifyPlaybackHandler
 
 /**

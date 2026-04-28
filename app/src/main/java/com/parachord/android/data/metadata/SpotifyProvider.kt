@@ -1,10 +1,9 @@
 package com.parachord.android.data.metadata
 
 import com.parachord.android.auth.OAuthManager
-import com.parachord.android.data.api.SpotifyApi
-import com.parachord.android.data.api.bestImageUrl
+import com.parachord.shared.api.SpotifyClient
+import com.parachord.shared.api.bestImageUrl
 import com.parachord.android.data.store.SettingsStore
-import retrofit2.HttpException
 
 /**
  * Spotify metadata provider.
@@ -12,7 +11,7 @@ import retrofit2.HttpException
  * Lowest priority since it requires OAuth and has rate limits.
  */
 class SpotifyProvider constructor(
-    private val api: SpotifyApi,
+    private val api: SpotifyClient,
     private val settingsStore: SettingsStore,
     private val oAuthManager: OAuthManager,
 ) : MetadataProvider {
@@ -24,8 +23,8 @@ class SpotifyProvider constructor(
         settingsStore.getSpotifyAccessToken() != null
 
     override suspend fun searchTracks(query: String, limit: Int): List<TrackSearchResult> =
-        withAuth { auth ->
-            val response = api.search(auth = auth, query = query, type = "track", limit = limit)
+        withAuth {
+            val response = api.search(query = query, type = "track", limit = limit)
             response.tracks?.items?.mapNotNull { t ->
                 val title = t.name ?: return@mapNotNull null
                 TrackSearchResult(
@@ -41,8 +40,8 @@ class SpotifyProvider constructor(
         } ?: emptyList()
 
     override suspend fun searchAlbums(query: String, limit: Int): List<AlbumSearchResult> =
-        withAuth { auth ->
-            val response = api.search(auth = auth, query = query, type = "album", limit = limit)
+        withAuth {
+            val response = api.search(query = query, type = "album", limit = limit)
             response.albums?.items?.mapNotNull { a ->
                 AlbumSearchResult(
                     title = a.name ?: return@mapNotNull null,
@@ -56,8 +55,8 @@ class SpotifyProvider constructor(
         } ?: emptyList()
 
     override suspend fun searchArtists(query: String, limit: Int): List<ArtistInfo> =
-        withAuth { auth ->
-            val response = api.search(auth = auth, query = "artist:\"$query\"", type = "artist", limit = limit)
+        withAuth {
+            val response = api.search(query = "artist:\"$query\"", type = "artist", limit = limit)
             response.artists?.items?.mapNotNull { a ->
                 ArtistInfo(
                     name = a.name ?: return@mapNotNull null,
@@ -69,12 +68,12 @@ class SpotifyProvider constructor(
         } ?: emptyList()
 
     override suspend fun getArtistInfo(artistName: String): ArtistInfo? =
-        withAuth { auth ->
+        withAuth {
             // Search to find artist ID, then fetch full artist for reliable images
-            val response = api.search(auth = auth, query = "artist:\"$artistName\"", type = "artist", limit = 1)
+            val response = api.search(query = "artist:\"$artistName\"", type = "artist", limit = 1)
             val searchArtist = response.artists?.items?.firstOrNull() ?: return@withAuth null
             val searchArtistId = searchArtist.id ?: return@withAuth null
-            val fullArtist = api.getArtist(auth = auth, artistId = searchArtistId)
+            val fullArtist = api.getArtist(artistId = searchArtistId)
             ArtistInfo(
                 name = fullArtist.name ?: return@withAuth null,
                 imageUrl = fullArtist.images.bestImageUrl(),
@@ -84,10 +83,10 @@ class SpotifyProvider constructor(
         }
 
     override suspend fun getArtistTopTracks(artistName: String, limit: Int): List<TrackSearchResult> =
-        withAuth { auth ->
-            val response = api.search(auth = auth, query = "artist:\"$artistName\"", type = "artist", limit = 1)
+        withAuth {
+            val response = api.search(query = "artist:\"$artistName\"", type = "artist", limit = 1)
             val artistId = response.artists?.items?.firstOrNull()?.id ?: return@withAuth emptyList()
-            val topTracks = api.getArtistTopTracks(auth = auth, artistId = artistId)
+            val topTracks = api.getArtistTopTracks(artistId = artistId)
             topTracks.tracks.take(limit).mapNotNull { t ->
                 val title = t.name ?: return@mapNotNull null
                 TrackSearchResult(
@@ -104,10 +103,10 @@ class SpotifyProvider constructor(
         } ?: emptyList()
 
     override suspend fun getArtistAlbums(artistName: String, limit: Int): List<AlbumSearchResult> =
-        withAuth { auth ->
-            val response = api.search(auth = auth, query = "artist:\"$artistName\"", type = "artist", limit = 1)
+        withAuth {
+            val response = api.search(query = "artist:\"$artistName\"", type = "artist", limit = 1)
             val artistId = response.artists?.items?.firstOrNull()?.id ?: return@withAuth emptyList()
-            val albums = api.getArtistAlbums(auth = auth, artistId = artistId, limit = limit)
+            val albums = api.getArtistAlbums(artistId = artistId, limit = limit)
             albums.items.mapNotNull { a ->
                 AlbumSearchResult(
                     title = a.name ?: return@mapNotNull null,
@@ -123,9 +122,8 @@ class SpotifyProvider constructor(
         } ?: emptyList()
 
     override suspend fun getAlbumTracks(albumTitle: String, artistName: String): AlbumDetail? =
-        withAuth { auth ->
+        withAuth {
             val response = api.search(
-                auth = auth,
                 query = "album:$albumTitle artist:$artistName",
                 type = "album",
                 limit = 1,
@@ -133,7 +131,7 @@ class SpotifyProvider constructor(
             val album = response.albums?.items?.firstOrNull() ?: return@withAuth null
             val albumId = album.id ?: return@withAuth null
             val albumName = album.name ?: return@withAuth null
-            val tracksResponse = api.getAlbumTracks(auth = auth, albumId = albumId)
+            val tracksResponse = api.getAlbumTracks(albumId = albumId)
             AlbumDetail(
                 title = albumName,
                 artist = album.artistName,
@@ -156,18 +154,18 @@ class SpotifyProvider constructor(
         }
 
     /**
-     * Execute a block with a valid Spotify access token.
-     * On HTTP 401, refreshes the token and retries once.
+     * Skip-if-unauthed gate. Per Phase 9E.1.8 the Ktor `SpotifyClient` resolves the
+     * Bearer token from `AuthTokenProvider` per-request, and the global
+     * `OAuthRefreshPlugin` handles 401-driven refresh + retry on `api.spotify.com`.
+     * This wrapper just short-circuits before the API call when no token is stored
+     * (avoids burning a refresh attempt on a not-yet-connected user).
      */
-    private suspend fun <T> withAuth(block: suspend (auth: String) -> T): T? {
-        val token = settingsStore.getSpotifyAccessToken() ?: return null
+    private suspend fun <T> withAuth(block: suspend () -> T): T? {
+        if (settingsStore.getSpotifyAccessToken() == null) return null
         return try {
-            block("Bearer $token")
-        } catch (e: HttpException) {
-            if (e.code() == 401 && oAuthManager.refreshSpotifyToken()) {
-                val newToken = settingsStore.getSpotifyAccessToken() ?: return null
-                block("Bearer $newToken")
-            } else null
+            block()
+        } catch (_: Exception) {
+            null
         }
     }
 }
