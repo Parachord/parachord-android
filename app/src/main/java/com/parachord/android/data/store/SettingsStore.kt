@@ -21,7 +21,7 @@ import kotlinx.coroutines.flow.map
 class SettingsStore constructor(
     private val dataStore: DataStore<Preferences>,
     internal val secureStore: SecureTokenStore,
-) {
+) : com.parachord.shared.sync.SyncSettingsProvider {
     companion object {
         val THEME_MODE = stringPreferencesKey("theme_mode")
         val SCROBBLING_ENABLED = booleanPreferencesKey("scrobbling_enabled")
@@ -574,7 +574,7 @@ class SettingsStore constructor(
         )
     }
 
-    suspend fun getSyncSettings(): SyncSettings {
+    override suspend fun getSyncSettings(): SyncSettings {
         val prefs = dataStore.data.first()
         return SyncSettings(
             enabled = prefs[SYNC_ENABLED] ?: false,
@@ -606,14 +606,14 @@ class SettingsStore constructor(
         dataStore.edit { it[SYNC_ENABLED] = enabled }
     }
 
-    suspend fun setLastSyncAt(timestamp: Long) {
+    override suspend fun setLastSyncAt(timestamp: Long) {
         dataStore.edit { it[SYNC_LAST_COMPLETED_AT] = timestamp.toString() }
     }
 
-    suspend fun getSyncDataVersion(): Int =
+    override suspend fun getSyncDataVersion(): Int =
         dataStore.data.first()[SYNC_DATA_VERSION]?.toIntOrNull() ?: 0
 
-    suspend fun setSyncDataVersion(version: Int) {
+    override suspend fun setSyncDataVersion(version: Int) {
         dataStore.edit { it[SYNC_DATA_VERSION] = version.toString() }
     }
 
@@ -625,7 +625,7 @@ class SettingsStore constructor(
      *
      * Stored as a comma-separated string for DataStore simplicity.
      */
-    suspend fun getEnabledSyncProviders(): Set<String> {
+    override suspend fun getEnabledSyncProviders(): Set<String> {
         val raw = dataStore.data.first()[ENABLED_SYNC_PROVIDERS]
         return parseEnabledSyncProviders(raw)
     }
@@ -659,7 +659,7 @@ class SettingsStore constructor(
      * set; SyncEngine's per-provider helpers consult this to skip a
      * provider for an axis it didn't opt into.
      */
-    suspend fun getSyncCollectionsForProvider(providerId: String): Set<String> {
+    override suspend fun getSyncCollectionsForProvider(providerId: String): Set<String> {
         val raw = dataStore.data.first()[syncCollectionsKey(providerId)]
         return parseSyncCollections(raw)
     }
@@ -680,7 +680,7 @@ class SettingsStore constructor(
         else if (raw.isBlank()) emptySet()
         else raw.split(",").map { it.trim() }.filter { it.isNotEmpty() }.toSet()
 
-    suspend fun clearSyncSettings() {
+    override suspend fun clearSyncSettings() {
         dataStore.edit { prefs ->
             prefs.remove(SYNC_ENABLED)
             prefs.remove(SYNC_PROVIDER)

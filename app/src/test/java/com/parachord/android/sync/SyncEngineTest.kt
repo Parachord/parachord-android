@@ -133,7 +133,7 @@ class SyncEngineTest {
 
     @Test
     fun `TypeSyncResult default values are all zero`() {
-        val result = SyncEngine.TypeSyncResult()
+        val result = com.parachord.shared.sync.SyncEngine.TypeSyncResult()
         assertEquals(0, result.added)
         assertEquals(0, result.removed)
         assertEquals(0, result.updated)
@@ -142,7 +142,7 @@ class SyncEngineTest {
 
     @Test
     fun `FullSyncResult defaults to success`() {
-        val result = SyncEngine.FullSyncResult()
+        val result = com.parachord.shared.sync.SyncEngine.FullSyncResult()
         assertTrue(result.success)
         assertNull(result.error)
     }
@@ -151,12 +151,12 @@ class SyncEngineTest {
 
     @Test
     fun `SyncPhase has correct order`() {
-        val phases = SyncEngine.SyncPhase.entries
+        val phases = com.parachord.shared.sync.SyncEngine.SyncPhase.entries
         assertEquals(5, phases.size)
-        assertEquals(SyncEngine.SyncPhase.TRACKS, phases[0])
-        assertEquals(SyncEngine.SyncPhase.ALBUMS, phases[1])
-        assertEquals(SyncEngine.SyncPhase.ARTISTS, phases[2])
-        assertEquals(SyncEngine.SyncPhase.PLAYLISTS, phases[3])
-        assertEquals(SyncEngine.SyncPhase.COMPLETE, phases[4])
+        assertEquals(com.parachord.shared.sync.SyncEngine.SyncPhase.TRACKS, phases[0])
+        assertEquals(com.parachord.shared.sync.SyncEngine.SyncPhase.ALBUMS, phases[1])
+        assertEquals(com.parachord.shared.sync.SyncEngine.SyncPhase.ARTISTS, phases[2])
+        assertEquals(com.parachord.shared.sync.SyncEngine.SyncPhase.PLAYLISTS, phases[3])
+        assertEquals(com.parachord.shared.sync.SyncEngine.SyncPhase.COMPLETE, phases[4])
     }
 }
