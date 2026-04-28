@@ -4,6 +4,7 @@ import com.parachord.shared.api.auth.AuthCredential
 import com.parachord.shared.api.auth.AuthRealm
 import com.parachord.shared.api.auth.AuthTokenProvider
 import com.parachord.shared.api.auth.OAuthTokenRefresher
+import com.parachord.shared.api.auth.ReauthRequiredException
 import io.ktor.client.HttpClient
 import io.ktor.client.engine.mock.MockEngine
 import io.ktor.client.engine.mock.respond
@@ -16,6 +17,7 @@ import kotlinx.coroutines.awaitAll
 import kotlinx.coroutines.runBlocking
 import kotlin.test.Test
 import kotlin.test.assertEquals
+import kotlin.test.assertFailsWith
 
 class OAuthRefreshPluginTest {
 
@@ -115,6 +117,50 @@ class OAuthRefreshPluginTest {
         assertEquals(5, results.size)
         assertEquals(true, results.all { it == HttpStatusCode.OK })
         assertEquals(1, refresher.refreshCalls, "expected single-flight: only one refresh call")
+    }
+
+    @Test
+    fun two401InARow_throwsReauthRequired() = runBlocking {
+        val mock = MockEngine { respond("", HttpStatusCode.Unauthorized) }
+        provider.setToken(AuthRealm.Spotify, "stale")
+        refresher.nextResult = AuthCredential.BearerToken("also-bad")
+
+        val client = HttpClient(mock) {
+            install(OAuthRefreshPlugin) {
+                tokenProvider = provider
+                tokenRefresher = refresher
+                refreshableHosts = mapOf("api.spotify.com" to AuthRealm.Spotify)
+            }
+        }
+
+        val ex = assertFailsWith<ReauthRequiredException> {
+            client.get("https://api.spotify.com/v1/me") {
+                headers { append("Authorization", "Bearer stale") }
+            }
+        }
+        assertEquals(AuthRealm.Spotify, ex.realm)
+    }
+
+    @Test
+    fun refreshReturnsNull_throwsReauthRequired() = runBlocking {
+        val mock = MockEngine { respond("", HttpStatusCode.Unauthorized) }
+        provider.setToken(AuthRealm.Spotify, "stale")
+        refresher.nextResult = null  // refresh failed
+
+        val client = HttpClient(mock) {
+            install(OAuthRefreshPlugin) {
+                tokenProvider = provider
+                tokenRefresher = refresher
+                refreshableHosts = mapOf("api.spotify.com" to AuthRealm.Spotify)
+            }
+        }
+
+        val ex = assertFailsWith<ReauthRequiredException> {
+            client.get("https://api.spotify.com/v1/me") {
+                headers { append("Authorization", "Bearer stale") }
+            }
+        }
+        assertEquals(AuthRealm.Spotify, ex.realm)
     }
 }
 

@@ -30,7 +30,10 @@ import kotlinx.coroutines.sync.withLock
  * Single-flight per realm: N concurrent 401s for the same realm only
  * trigger ONE refresh request; followers reuse the freshly cached token.
  *
- * Two-strikes escalation arrives in the next task.
+ * Two-strikes escalation: if the retry after a successful refresh ALSO
+ * returns 401, throw ReauthRequiredException so the call site can prompt
+ * re-login. Same exception is thrown when the refresher returns null
+ * (refresh token revoked / network error / etc.).
  *
  * @see docs/plans/2026-04-25-phase-9e-http-architecture-design.md Section 4
  */
@@ -79,6 +82,10 @@ val OAuthRefreshPlugin = createClientPlugin("OAuthRefreshPlugin", ::OAuthRefresh
         request.headers.remove(HttpHeaders.Authorization)
         request.headers.append(HttpHeaders.Authorization, "Bearer ${newToken.accessToken}")
 
-        execute(request)
+        val secondAttempt = execute(request)
+        if (secondAttempt.response.status == HttpStatusCode.Unauthorized) {
+            throw ReauthRequiredException(realm)
+        }
+        secondAttempt
     }
 }
