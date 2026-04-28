@@ -48,6 +48,40 @@ class OAuthRefreshPluginTest {
         assertEquals(HttpStatusCode.Unauthorized, response.status)
         assertEquals(0, refresher.refreshCalls)
     }
+
+    @Test
+    fun status401_fromRegisteredHost_triggersRefreshAndRetry() = runBlocking {
+        var requestCount = 0
+        val mock = MockEngine { request ->
+            requestCount++
+            when (requestCount) {
+                1 -> respond("", HttpStatusCode.Unauthorized)
+                2 -> {
+                    // Verify the retry has the new bearer.
+                    val authHeader = request.headers["Authorization"]
+                    assertEquals("Bearer refreshed", authHeader)
+                    respond("ok", HttpStatusCode.OK)
+                }
+                else -> error("unexpected request $requestCount")
+            }
+        }
+        provider.setToken(AuthRealm.Spotify, "stale")
+        refresher.nextResult = AuthCredential.BearerToken("refreshed")
+
+        val client = HttpClient(mock) {
+            install(OAuthRefreshPlugin) {
+                tokenProvider = provider
+                tokenRefresher = refresher
+                refreshableHosts = mapOf("api.spotify.com" to AuthRealm.Spotify)
+            }
+        }
+        val response = client.get("https://api.spotify.com/v1/me") {
+            headers { append("Authorization", "Bearer stale") }
+        }
+        assertEquals(HttpStatusCode.OK, response.status)
+        assertEquals(2, requestCount)
+        assertEquals(1, refresher.refreshCalls)
+    }
 }
 
 internal class StubProvider(
