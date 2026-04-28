@@ -1,7 +1,7 @@
 package com.parachord.android.deeplink
 
 import android.util.Log
-import com.parachord.android.data.api.AppleMusicApi
+import com.parachord.shared.api.AppleMusicClient
 import com.parachord.android.data.api.SpotifyApi
 import com.parachord.android.data.api.bestImageUrl
 import com.parachord.android.data.db.entity.TrackEntity
@@ -18,7 +18,7 @@ private const val TAG = "ExternalLinkResolver"
  */
 class ExternalLinkResolver constructor(
     private val spotifyApi: SpotifyApi,
-    private val appleMusicApi: AppleMusicApi,
+    private val appleMusicClient: AppleMusicClient,
     private val settingsStore: SettingsStore,
 ) {
     data class TrackResult(val track: TrackEntity)
@@ -143,7 +143,7 @@ class ExternalLinkResolver constructor(
     // -- Apple Music -----------------------------------------------------------
 
     suspend fun resolveAppleMusicSong(songId: String): TrackResult? = try {
-        val response = appleMusicApi.lookup(songId)
+        val response = appleMusicClient.lookup(songId)
         val item = response.results.firstOrNull { it.wrapperType == "track" || it.kind == "song" }
             ?: throw IllegalStateException("No track found for ID $songId")
         val artworkUrl = item.artworkUrl100?.replace("100x100", "600x600")
@@ -165,7 +165,7 @@ class ExternalLinkResolver constructor(
     }
 
     suspend fun resolveAppleMusicAlbum(albumId: String): AlbumResult? = try {
-        val response = appleMusicApi.lookup(albumId, entity = "song")
+        val response = appleMusicClient.lookup(albumId, entity = "song")
         val collection = response.results.firstOrNull { it.wrapperType == "collection" }
         val songs = response.results.filter { it.wrapperType == "track" || it.kind == "song" }
         val albumName = collection?.collectionName ?: songs.firstOrNull()?.collectionName ?: "Unknown"

@@ -1,6 +1,6 @@
 package com.parachord.android.data.metadata
 
-import com.parachord.android.data.api.AppleMusicApi
+import com.parachord.shared.api.AppleMusicClient
 import com.parachord.android.data.store.SettingsStore
 import io.mockk.coEvery
 import io.mockk.mockk
@@ -17,7 +17,7 @@ class MetadataServiceTest {
     private lateinit var discogs: DiscogsProvider
     private lateinit var spotify: SpotifyProvider
     private lateinit var settingsStore: SettingsStore
-    private lateinit var appleMusicApi: AppleMusicApi
+    private lateinit var appleMusicClient: AppleMusicClient
     private lateinit var service: MetadataService
 
     @Before
@@ -28,7 +28,7 @@ class MetadataServiceTest {
         discogs = mockk()
         spotify = mockk()
         settingsStore = mockk()
-        appleMusicApi = mockk(relaxed = true)
+        appleMusicClient = mockk(relaxed = true)
 
         coEvery { musicBrainz.priority } returns 0
         coEvery { musicBrainz.name } returns "musicbrainz"
@@ -52,7 +52,7 @@ class MetadataServiceTest {
 
         coEvery { settingsStore.getDisabledMetaProviders() } returns emptySet()
 
-        service = MetadataService(musicBrainz, wikipedia, lastFm, discogs, spotify, settingsStore, appleMusicApi)
+        service = MetadataService(musicBrainz, wikipedia, lastFm, discogs, spotify, settingsStore, appleMusicClient)
     }
 
     // -- searchTracks --

@@ -21,7 +21,6 @@ import com.parachord.android.bridge.JsBridge
 import com.parachord.shared.plugin.PluginFileAccess
 import com.parachord.android.data.api.LastFmApi
 import com.parachord.android.data.api.SpotifyApi
-import com.parachord.android.data.api.AppleMusicApi
 import com.parachord.android.data.db.dao.*
 import com.parachord.shared.db.DriverFactory
 import com.parachord.android.data.metadata.DiscogsProvider
@@ -259,15 +258,6 @@ val androidModule = module {
             .addConverterFactory(get<Json>().asConverterFactory("application/json".toMediaType()))
             .build()
             .create(LastFmApi::class.java)
-    }
-
-    single<AppleMusicApi> {
-        Retrofit.Builder()
-            .baseUrl("https://itunes.apple.com/")
-            .client(get())
-            .addConverterFactory(get<Json>().asConverterFactory("application/json".toMediaType()))
-            .build()
-            .create(AppleMusicApi::class.java)
     }
 
     // ── DAOs ─────────────────────────────────────────────────────────
