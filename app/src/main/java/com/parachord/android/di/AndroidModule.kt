@@ -20,7 +20,6 @@ import com.parachord.shared.api.auth.OAuthTokenRefresher
 import com.parachord.android.bridge.JsBridge
 import com.parachord.shared.plugin.PluginFileAccess
 import com.parachord.android.data.api.LastFmApi
-import com.parachord.android.data.api.ListenBrainzApi
 import com.parachord.android.data.api.SpotifyApi
 import com.parachord.android.data.api.AppleMusicApi
 import com.parachord.android.data.db.dao.*
@@ -394,7 +393,6 @@ val androidModule = module {
     single { HostedPlaylistScheduler(androidContext(), get()) }
     singleOf(::MediaScanner)
     singleOf(::PlaylistImportManager)
-    singleOf(::ListenBrainzApi)
 
     // ── Widget ───────────────────────────────────────────────────────
 

@@ -2,8 +2,8 @@ package com.parachord.android.data.metadata
 
 import android.content.Context
 import android.util.Log
-import com.parachord.android.data.api.ListenBrainzApi
-import com.parachord.android.data.api.MbidMapperResult
+import com.parachord.shared.api.ListenBrainzClient
+import com.parachord.shared.api.MbidMapperResult
 import com.parachord.android.data.db.dao.TrackDao
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -32,7 +32,7 @@ import java.util.concurrent.ConcurrentHashMap
  */
 class MbidEnrichmentService constructor(
     private val context: Context,
-    private val listenBrainzApi: ListenBrainzApi,
+    private val listenBrainzClient: ListenBrainzClient,
     private val trackDao: TrackDao,
 ) {
     companion object {
@@ -173,7 +173,7 @@ class MbidEnrichmentService constructor(
 
     private suspend fun mapperLookup(artist: String, recording: String): MbidMapperResult? {
         return try {
-            listenBrainzApi.mbidMapperLookup(artist, recording)
+            listenBrainzClient.mbidMapperLookup(artist, recording)
         } catch (e: Exception) {
             Log.w(TAG, "Mapper lookup failed for '$artist' - '$recording'", e)
             null

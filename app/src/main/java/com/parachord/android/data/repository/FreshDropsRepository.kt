@@ -4,7 +4,7 @@ import android.content.Context
 import android.util.Log
 import com.parachord.android.BuildConfig
 import com.parachord.android.data.api.LastFmApi
-import com.parachord.android.data.api.ListenBrainzApi
+import com.parachord.shared.api.ListenBrainzClient
 import com.parachord.shared.api.MbReleaseGroupEntry
 import com.parachord.shared.api.MusicBrainzClient
 import com.parachord.android.data.db.dao.TrackDao
@@ -41,7 +41,7 @@ class FreshDropsRepository constructor(
     private val context: Context,
     private val musicBrainzClient: MusicBrainzClient,
     private val lastFmApi: LastFmApi,
-    private val listenBrainzApi: ListenBrainzApi,
+    private val listenBrainzClient: ListenBrainzClient,
     private val settingsStore: SettingsStore,
     private val trackDao: TrackDao,
     private val mbidEnrichment: MbidEnrichmentService,
@@ -370,7 +370,7 @@ class FreshDropsRepository constructor(
         try {
             val lbUsername = settingsStore.getListenBrainzUsername()
             if (lbUsername != null) {
-                val lbArtists = listenBrainzApi.getUserTopArtists(lbUsername, "half_yearly", 50)
+                val lbArtists = listenBrainzClient.getUserTopArtists(lbUsername, "half_yearly", 50)
                     .map { it.name }
                     .filter { seen.add(it.lowercase().trim()) }
                     .map { ArtistSource(name = it, source = "history") }

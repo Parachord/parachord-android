@@ -2,7 +2,7 @@ package com.parachord.android.data.repository
 
 import android.content.Context
 import android.util.Log
-import com.parachord.android.data.api.ListenBrainzApi
+import com.parachord.shared.api.ListenBrainzClient
 import com.parachord.android.data.metadata.MetadataService
 import com.parachord.android.data.store.SettingsStore
 import kotlinx.coroutines.Dispatchers
@@ -32,7 +32,7 @@ import java.io.File
  */
 class RecommendationsRepository constructor(
     private val context: Context,
-    private val listenBrainzApi: ListenBrainzApi,
+    private val listenBrainzClient: ListenBrainzClient,
     private val settingsStore: SettingsStore,
     private val metadataService: MetadataService,
     private val okHttpClient: OkHttpClient,
@@ -304,7 +304,7 @@ class RecommendationsRepository constructor(
     private suspend fun fetchListenBrainzRecommendations(username: String): List<RecommendedTrack> {
         return try {
             // Try recommendation playlists first
-            val playlistTracks = listenBrainzApi.getRecommendationPlaylistTracks(username)
+            val playlistTracks = listenBrainzClient.getRecommendationPlaylistTracks(username)
             if (playlistTracks.isNotEmpty()) {
                 Log.d(TAG, "Fetched ${playlistTracks.size} ListenBrainz playlist recommendations for $username")
                 return playlistTracks.map { track ->
@@ -319,7 +319,7 @@ class RecommendationsRepository constructor(
 
             // Fallback: top recordings from past month
             Log.d(TAG, "No LB playlists, falling back to top recordings for $username")
-            val topRecordings = listenBrainzApi.getUserTopRecordings(username, "month", 50)
+            val topRecordings = listenBrainzClient.getUserTopRecordings(username, "month", 50)
             topRecordings.map { rec ->
                 RecommendedTrack(
                     title = rec.trackName,

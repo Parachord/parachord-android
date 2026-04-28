@@ -3,7 +3,7 @@ package com.parachord.android.data.repository
 import android.util.Log
 import com.parachord.android.BuildConfig
 import com.parachord.android.data.api.LastFmApi
-import com.parachord.android.data.api.ListenBrainzApi
+import com.parachord.shared.api.ListenBrainzClient
 import com.parachord.android.data.api.bestImageUrl
 import com.parachord.android.data.metadata.MetadataService
 import com.parachord.android.data.store.SettingsStore
@@ -20,7 +20,7 @@ import kotlin.math.abs
  */
 class HistoryRepository constructor(
     private val lastFmApi: LastFmApi,
-    private val listenBrainzApi: ListenBrainzApi,
+    private val listenBrainzClient: ListenBrainzClient,
     private val settingsStore: SettingsStore,
     private val metadataService: MetadataService,
 ) {
@@ -276,7 +276,7 @@ class HistoryRepository constructor(
         val token = settingsStore.getListenBrainzToken() ?: return emptyList()
         val username = settingsStore.getListenBrainzUsername() ?: return emptyList()
         return try {
-            val listens = listenBrainzApi.getRecentListens(username, token)
+            val listens = listenBrainzClient.getRecentListens(username, token)
             listens.map { listen ->
                 RecentTrack(
                     title = listen.trackName,
