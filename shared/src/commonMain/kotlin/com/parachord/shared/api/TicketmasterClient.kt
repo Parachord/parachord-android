@@ -147,8 +147,9 @@ data class TmDateStatus(
 @Serializable
 data class TmImage(
     val url: String,
-    val width: Int? = null,
-    val height: Int? = null,
+    val width: Int = 0,
+    val height: Int = 0,
+    val ratio: String? = null, // "16_9", "3_2", "4_3"
 )
 
 @Serializable

@@ -3,8 +3,8 @@ package com.parachord.android.data.repository
 import android.content.Context
 import android.util.Log
 import com.parachord.android.BuildConfig
-import com.parachord.android.data.api.SeatGeekApi
-import com.parachord.android.data.api.TicketmasterApi
+import com.parachord.shared.api.SeatGeekClient
+import com.parachord.shared.api.TicketmasterClient
 import com.parachord.android.data.store.SettingsStore
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.async
@@ -131,8 +131,8 @@ data class ConcertArtist(
 
 class ConcertsRepository constructor(
     private val context: Context,
-    private val ticketmasterApi: TicketmasterApi,
-    private val seatGeekApi: SeatGeekApi,
+    private val ticketmasterClient: TicketmasterClient,
+    private val seatGeekClient: SeatGeekClient,
     private val settingsStore: SettingsStore,
 ) {
     companion object {
@@ -362,7 +362,7 @@ class ConcertsRepository constructor(
         val tmDeferred = async {
             try {
                 if (tmKey.isBlank()) return@async emptyList()
-                val response = ticketmasterApi.getLocalEvents(
+                val response = ticketmasterClient.getLocalEvents(
                     apiKey = tmKey,
                     latlong = latlong,
                     radius = radiusMiles,
@@ -378,7 +378,7 @@ class ConcertsRepository constructor(
         val sgDeferred = async {
             try {
                 if (sgKey.isBlank()) return@async emptyList()
-                val response = seatGeekApi.getLocalEvents(
+                val response = seatGeekClient.getLocalEvents(
                     clientId = sgKey,
                     lat = lat,
                     lon = lon,
@@ -450,7 +450,7 @@ class ConcertsRepository constructor(
                 if (tmKey.isBlank()) return@async emptyList()
 
                 // Step 1: Resolve artist to attraction ID
-                val attractions = ticketmasterApi.searchAttractions(
+                val attractions = ticketmasterClient.searchAttractions(
                     keyword = artistName,
                     apiKey = tmKey,
                 )
@@ -461,7 +461,7 @@ class ConcertsRepository constructor(
 
                 // Step 2: Fetch events by attraction ID
                 val latlong = if (lat != null && lon != null) "$lat,$lon" else null
-                val response = ticketmasterApi.getEventsByAttraction(
+                val response = ticketmasterClient.getEventsByAttraction(
                     attractionId = attractionId,
                     apiKey = tmKey,
                     startDateTime = now,
@@ -480,7 +480,7 @@ class ConcertsRepository constructor(
                 if (sgKey.isBlank()) return@async emptyList()
 
                 // Step 1: Resolve artist to performer slug
-                val performers = seatGeekApi.searchPerformers(
+                val performers = seatGeekClient.searchPerformers(
                     query = artistName,
                     clientId = sgKey,
                 )
@@ -492,7 +492,7 @@ class ConcertsRepository constructor(
                 // Step 2: Fetch events by performer slug
                 val nowLocal = LocalDateTime.now()
                     .format(DateTimeFormatter.ofPattern("yyyy-MM-dd'T'HH:mm:ss"))
-                val response = seatGeekApi.getEventsByPerformer(
+                val response = seatGeekClient.getEventsByPerformer(
                     performerSlug = slug,
                     clientId = sgKey,
                     datetimeGte = nowLocal,
@@ -559,7 +559,7 @@ class ConcertsRepository constructor(
 
 // ── Extension mappers ───────────────────────────────────────────
 
-private fun com.parachord.android.data.api.TmEvent.toConcertEvent(): ConcertEvent {
+private fun com.parachord.shared.api.TmEvent.toConcertEvent(): ConcertEvent {
     val venue = embedded?.venues?.firstOrNull()
     val attraction = embedded?.attractions?.firstOrNull()
     // Pick best image — prefer 16:9 ratio, largest
@@ -591,7 +591,7 @@ private fun com.parachord.android.data.api.TmEvent.toConcertEvent(): ConcertEven
     )
 }
 
-private fun com.parachord.android.data.api.SgEvent.toConcertEvent(): ConcertEvent {
+private fun com.parachord.shared.api.SgEvent.toConcertEvent(): ConcertEvent {
     val mainPerformer = performers.firstOrNull()
     val dateStr = datetimeLocal?.take(10) // "2026-03-22T20:00:00" → "2026-03-22"
     val timeStr = datetimeLocal?.let {

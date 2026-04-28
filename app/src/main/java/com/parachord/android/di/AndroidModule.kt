@@ -23,8 +23,6 @@ import com.parachord.android.data.api.LastFmApi
 import com.parachord.android.data.api.ListenBrainzApi
 import com.parachord.android.data.api.SpotifyApi
 import com.parachord.android.data.api.AppleMusicApi
-import com.parachord.android.data.api.TicketmasterApi
-import com.parachord.android.data.api.SeatGeekApi
 import com.parachord.android.data.db.dao.*
 import com.parachord.shared.db.DriverFactory
 import com.parachord.android.data.metadata.DiscogsProvider
@@ -271,24 +269,6 @@ val androidModule = module {
             .addConverterFactory(get<Json>().asConverterFactory("application/json".toMediaType()))
             .build()
             .create(AppleMusicApi::class.java)
-    }
-
-    single<TicketmasterApi> {
-        Retrofit.Builder()
-            .baseUrl("https://app.ticketmaster.com/")
-            .client(get())
-            .addConverterFactory(get<Json>().asConverterFactory("application/json".toMediaType()))
-            .build()
-            .create(TicketmasterApi::class.java)
-    }
-
-    single<SeatGeekApi> {
-        Retrofit.Builder()
-            .baseUrl("https://api.seatgeek.com/2/")
-            .client(get())
-            .addConverterFactory(get<Json>().asConverterFactory("application/json".toMediaType()))
-            .build()
-            .create(SeatGeekApi::class.java)
     }
 
     // ── DAOs ─────────────────────────────────────────────────────────
