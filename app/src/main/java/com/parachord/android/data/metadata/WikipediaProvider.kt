@@ -1,7 +1,7 @@
 package com.parachord.android.data.metadata
 
 import android.util.Log
-import com.parachord.android.data.api.MusicBrainzApi
+import com.parachord.shared.api.MusicBrainzClient
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import okhttp3.OkHttpClient
@@ -21,7 +21,7 @@ import org.json.JSONObject
  * All APIs are public, no auth required.
  */
 class WikipediaProvider constructor(
-    private val musicBrainzApi: MusicBrainzApi,
+    private val musicBrainzClient: MusicBrainzClient,
     private val musicBrainzProvider: MusicBrainzProvider,
     private val okHttpClient: OkHttpClient,
 ) : MetadataProvider {
@@ -51,7 +51,7 @@ class WikipediaProvider constructor(
             val mbid = mbArtist.id
 
             // Step 2: Get artist relations to find Wikidata link
-            val detail = musicBrainzApi.getArtist(mbid)
+            val detail = musicBrainzClient.getArtist(mbid)
             val wikidataUrl = detail.relations
                 .firstOrNull { it.type == "wikidata" }
                 ?.url?.resource ?: return@withContext null

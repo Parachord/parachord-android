@@ -1,9 +1,9 @@
 package com.parachord.android.data.metadata
 
-import com.parachord.android.data.api.MbArtist
-import com.parachord.android.data.api.MbReleaseGroup
-import com.parachord.android.data.api.MbReleaseGroupEntry
-import com.parachord.android.data.api.MusicBrainzApi
+import com.parachord.shared.api.MbArtist
+import com.parachord.shared.api.MbReleaseGroup
+import com.parachord.shared.api.MbReleaseGroupEntry
+import com.parachord.shared.api.MusicBrainzClient
 import kotlinx.coroutines.CompletableDeferred
 import java.util.concurrent.ConcurrentHashMap
 
@@ -13,7 +13,7 @@ import java.util.concurrent.ConcurrentHashMap
  * Highest priority (tried first) because it's always available.
  */
 class MusicBrainzProvider constructor(
-    private val api: MusicBrainzApi,
+    private val api: MusicBrainzClient,
 ) : MetadataProvider {
 
     /**

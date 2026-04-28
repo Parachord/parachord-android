@@ -22,7 +22,6 @@ import com.parachord.shared.plugin.PluginFileAccess
 import com.parachord.android.data.api.GeoLocationService
 import com.parachord.android.data.api.LastFmApi
 import com.parachord.android.data.api.ListenBrainzApi
-import com.parachord.android.data.api.MusicBrainzApi
 import com.parachord.android.data.api.SpotifyApi
 import com.parachord.android.data.api.AppleMusicApi
 import com.parachord.android.data.api.TicketmasterApi
@@ -264,15 +263,6 @@ val androidModule = module {
             .addConverterFactory(get<Json>().asConverterFactory("application/json".toMediaType()))
             .build()
             .create(LastFmApi::class.java)
-    }
-
-    single<MusicBrainzApi> {
-        Retrofit.Builder()
-            .baseUrl("https://musicbrainz.org/ws/2/")
-            .client(get())
-            .addConverterFactory(get<Json>().asConverterFactory("application/json".toMediaType()))
-            .build()
-            .create(MusicBrainzApi::class.java)
     }
 
     single<AppleMusicApi> {

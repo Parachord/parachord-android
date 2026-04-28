@@ -2,7 +2,7 @@ package com.parachord.android.data.repository
 
 import android.content.Context
 import android.util.Log
-import com.parachord.android.data.api.MusicBrainzApi
+import com.parachord.shared.api.MusicBrainzClient
 import com.parachord.android.data.metadata.MusicBrainzProvider
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
@@ -36,7 +36,7 @@ import java.util.Locale
 class CriticalDarlingsRepository constructor(
     private val context: Context,
     private val okHttpClient: OkHttpClient,
-    private val musicBrainzApi: MusicBrainzApi,
+    private val musicBrainzClient: MusicBrainzClient,
 ) {
     companion object {
         private const val TAG = "CriticalDarlingsRepo"
@@ -327,7 +327,7 @@ class CriticalDarlingsRepository constructor(
         return try {
             // Search MusicBrainz for the release
             val query = "\"$albumTitle\" AND artist:\"$artistName\""
-            val results = musicBrainzApi.searchReleases(query, limit = 1)
+            val results = musicBrainzClient.searchReleases(query, limit = 1)
             val release = results.releases.firstOrNull() ?: return null
             // Return Cover Art Archive URL — Coil will follow the redirect
             MusicBrainzProvider.coverArtUrl(release.id)

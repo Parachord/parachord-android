@@ -5,8 +5,8 @@ import android.util.Log
 import com.parachord.android.BuildConfig
 import com.parachord.android.data.api.LastFmApi
 import com.parachord.android.data.api.ListenBrainzApi
-import com.parachord.android.data.api.MbReleaseGroupEntry
-import com.parachord.android.data.api.MusicBrainzApi
+import com.parachord.shared.api.MbReleaseGroupEntry
+import com.parachord.shared.api.MusicBrainzClient
 import com.parachord.android.data.db.dao.TrackDao
 import com.parachord.android.data.metadata.MbidEnrichmentService
 import com.parachord.android.data.metadata.MusicBrainzProvider
@@ -39,7 +39,7 @@ import java.time.format.DateTimeFormatter
  */
 class FreshDropsRepository constructor(
     private val context: Context,
-    private val musicBrainzApi: MusicBrainzApi,
+    private val musicBrainzClient: MusicBrainzClient,
     private val lastFmApi: LastFmApi,
     private val listenBrainzApi: ListenBrainzApi,
     private val settingsStore: SettingsStore,
@@ -167,7 +167,7 @@ class FreshDropsRepository constructor(
 
         // 4. Fall back to MusicBrainz artist search (rate-limited)
         try {
-            val results = musicBrainzApi.searchArtists(artistName, limit = 1)
+            val results = musicBrainzClient.searchArtists(artistName, limit = 1)
             val artist = results.artists.firstOrNull()
             if (artist != null) {
                 mbidCache[key] = artist.id
@@ -418,7 +418,7 @@ class FreshDropsRepository constructor(
         var lastPageSize: Int
         val pageSize = 100
         do {
-            val response = musicBrainzApi.browseReleaseGroups(mbid, limit = pageSize, offset = offset)
+            val response = musicBrainzClient.browseReleaseGroups(mbid, limit = pageSize, offset = offset)
             allReleaseGroups.addAll(response.releaseGroups)
             totalCount = response.releaseGroupCount
             lastPageSize = response.releaseGroups.size
