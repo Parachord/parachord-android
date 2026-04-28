@@ -233,22 +233,10 @@ val androidModule = module {
             .create(SpotifyApi::class.java)
     }
 
-    // Apple Music — separate Retrofit using the shared OkHttp client
-    // extended with an auth interceptor that adds the developer token
-    // and per-user MUT on every request. Inherits the shared client's
-    // User-Agent + logging interceptors.
-    single<com.parachord.android.data.api.AppleMusicLibraryApi> {
-        val baseClient: okhttp3.OkHttpClient = get()
-        val amClient = baseClient.newBuilder()
-            .addInterceptor(com.parachord.android.data.api.AppleMusicAuthInterceptor(get()))
-            .build()
-        Retrofit.Builder()
-            .baseUrl("https://api.music.apple.com/")
-            .client(amClient)
-            .addConverterFactory(get<Json>().asConverterFactory("application/json".toMediaType()))
-            .build()
-            .create(com.parachord.android.data.api.AppleMusicLibraryApi::class.java)
-    }
+    // Apple Music Library + Storefront API — migrated to shared Ktor
+    // client (AppleMusicLibraryClient) in Phase 9E.1.7. Binding lives in
+    // sharedModule; auth headers (dev-token + MUT) are applied per-request
+    // via AuthTokenProvider for AuthRealm.AppleMusicLibrary.
 
     // ── DAOs ─────────────────────────────────────────────────────────
 
