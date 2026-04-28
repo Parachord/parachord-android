@@ -13,6 +13,10 @@ import com.parachord.android.ai.providers.ClaudeProvider
 import com.parachord.android.ai.providers.GeminiProvider
 import com.parachord.android.ai.tools.DjToolExecutor
 import com.parachord.android.auth.OAuthManager
+import com.parachord.android.data.auth.AndroidAuthTokenProvider
+import com.parachord.android.data.auth.AndroidOAuthTokenRefresher
+import com.parachord.shared.api.auth.AuthTokenProvider
+import com.parachord.shared.api.auth.OAuthTokenRefresher
 import com.parachord.android.bridge.JsBridge
 import com.parachord.shared.plugin.PluginFileAccess
 import com.parachord.android.data.api.GeoLocationService
@@ -318,6 +322,10 @@ val androidModule = module {
     singleOf(::SettingsStore)
     singleOf(::OAuthManager)
     singleOf(::NetworkMonitor)
+
+    // Auth providers for the shared Ktor HTTP client (OAuthRefreshPlugin, etc.)
+    single<AuthTokenProvider> { AndroidAuthTokenProvider(get(), get()) }
+    single<OAuthTokenRefresher> { AndroidOAuthTokenRefresher(get(), get()) }
 
     // ── Playback ─────────────────────────────────────────────────────
 
