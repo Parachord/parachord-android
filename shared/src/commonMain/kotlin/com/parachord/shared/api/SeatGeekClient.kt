@@ -107,7 +107,7 @@ data class SgMeta(
 @Serializable
 data class SgEvent(
     val id: Long,
-    val title: String? = null,
+    val title: String = "",
     @SerialName("short_title") val shortTitle: String? = null,
     val url: String? = null,
     @SerialName("datetime_local") val datetimeLocal: String? = null,
