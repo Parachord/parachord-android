@@ -4,7 +4,8 @@ import android.util.Log
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.parachord.android.BuildConfig
-import com.parachord.android.data.api.GeoLocationService
+import com.parachord.shared.api.GeoLocation
+import com.parachord.shared.api.GeoLocationClient
 import com.parachord.android.data.api.LastFmApi
 import com.parachord.android.data.api.ListenBrainzApi
 import com.parachord.android.data.db.dao.ArtistDao
@@ -24,7 +25,7 @@ import kotlinx.coroutines.launch
 class ConcertsViewModel constructor(
     private val concertsRepository: ConcertsRepository,
     private val settingsStore: SettingsStore,
-    private val geoLocationService: GeoLocationService,
+    private val geoLocationClient: GeoLocationClient,
     private val artistDao: ArtistDao,
     private val trackDao: TrackDao,
     private val albumDao: AlbumDao,
@@ -57,8 +58,8 @@ class ConcertsViewModel constructor(
     private val _isDetectingLocation = MutableStateFlow(false)
     val isDetectingLocation: StateFlow<Boolean> = _isDetectingLocation.asStateFlow()
 
-    private val _locationSuggestions = MutableStateFlow<List<GeoLocationService.GeoLocation>>(emptyList())
-    val locationSuggestions: StateFlow<List<GeoLocationService.GeoLocation>> = _locationSuggestions.asStateFlow()
+    private val _locationSuggestions = MutableStateFlow<List<GeoLocation>>(emptyList())
+    val locationSuggestions: StateFlow<List<GeoLocation>> = _locationSuggestions.asStateFlow()
 
     private var loadJob: Job? = null
     private var searchJob: Job? = null
@@ -85,7 +86,7 @@ class ConcertsViewModel constructor(
         viewModelScope.launch {
             _isDetectingLocation.value = true
             try {
-                val geo = geoLocationService.detectLocationByIp()
+                val geo = geoLocationClient.detectLocationByIp()
                 if (geo != null) {
                     setLocation(geo.lat, geo.lng, geo.displayName)
                 }
@@ -108,7 +109,7 @@ class ConcertsViewModel constructor(
         }
         searchJob = viewModelScope.launch {
             try {
-                val results = geoLocationService.searchLocations(query)
+                val results = geoLocationClient.searchLocations(query)
                 _locationSuggestions.value = results
             } catch (e: Exception) {
                 Log.w(TAG, "Location search failed", e)
