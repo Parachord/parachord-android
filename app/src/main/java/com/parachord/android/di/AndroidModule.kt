@@ -253,6 +253,13 @@ val androidModule = module {
     // ── Settings & Auth ──────────────────────────────────────────────
 
     single { com.parachord.android.data.store.SecureTokenStore(androidContext()) }
+    // KvStore — KMP-friendly key-value store backed by SharedPreferences
+    // (Phase 9B Stage 1). Stage 2 migrates SettingsStore reads/writes onto
+    // this seam one surface at a time; Stage 3 moves SettingsStore to
+    // shared/commonMain. Until Stage 2 lands no one consumes this — the
+    // binding sits dormant on purpose so the dependency is wired but DataStore
+    // remains the live store.
+    single { com.parachord.shared.store.KvStoreFactory.create(androidContext()) }
     singleOf(::SettingsStore) bind com.parachord.shared.sync.SyncSettingsProvider::class
     singleOf(::OAuthManager)
     singleOf(::NetworkMonitor)
