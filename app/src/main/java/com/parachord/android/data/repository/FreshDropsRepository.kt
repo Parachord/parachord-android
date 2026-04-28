@@ -3,7 +3,7 @@ package com.parachord.android.data.repository
 import android.content.Context
 import android.util.Log
 import com.parachord.android.BuildConfig
-import com.parachord.android.data.api.LastFmApi
+import com.parachord.shared.api.LastFmClient
 import com.parachord.shared.api.ListenBrainzClient
 import com.parachord.shared.api.MbReleaseGroupEntry
 import com.parachord.shared.api.MusicBrainzClient
@@ -40,7 +40,7 @@ import java.time.format.DateTimeFormatter
 class FreshDropsRepository constructor(
     private val context: Context,
     private val musicBrainzClient: MusicBrainzClient,
-    private val lastFmApi: LastFmApi,
+    private val lastFmClient: LastFmClient,
     private val listenBrainzClient: ListenBrainzClient,
     private val settingsStore: SettingsStore,
     private val trackDao: TrackDao,
@@ -352,7 +352,7 @@ class FreshDropsRepository constructor(
             val lfmUsername = settingsStore.getLastFmUsername()
             if (lfmUsername != null) {
                 val apiKey = BuildConfig.LASTFM_API_KEY
-                val topArtists = lastFmApi.getUserTopArtists(
+                val topArtists = lastFmClient.getUserTopArtists(
                     user = lfmUsername, apiKey = apiKey, limit = 50, period = "6month",
                 )
                 val lfmArtists = topArtists.topartists?.artist

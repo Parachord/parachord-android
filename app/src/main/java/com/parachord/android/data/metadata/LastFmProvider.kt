@@ -1,8 +1,8 @@
 package com.parachord.android.data.metadata
 
 import com.parachord.android.BuildConfig
-import com.parachord.android.data.api.LastFmApi
-import com.parachord.android.data.api.bestImageUrl
+import com.parachord.shared.api.LastFmClient
+import com.parachord.shared.api.bestImageUrl
 import kotlinx.coroutines.async
 import kotlinx.coroutines.coroutineScope
 
@@ -12,7 +12,7 @@ import kotlinx.coroutines.coroutineScope
  * Requires a Last.fm API key (set in BuildConfig or constants).
  */
 class LastFmProvider constructor(
-    private val api: LastFmApi,
+    private val api: LastFmClient,
 ) : MetadataProvider {
 
     override val name = "lastfm"

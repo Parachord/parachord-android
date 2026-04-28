@@ -19,7 +19,6 @@ import com.parachord.shared.api.auth.AuthTokenProvider
 import com.parachord.shared.api.auth.OAuthTokenRefresher
 import com.parachord.android.bridge.JsBridge
 import com.parachord.shared.plugin.PluginFileAccess
-import com.parachord.android.data.api.LastFmApi
 import com.parachord.android.data.api.SpotifyApi
 import com.parachord.android.data.db.dao.*
 import com.parachord.shared.db.DriverFactory
@@ -249,15 +248,6 @@ val androidModule = module {
             .addConverterFactory(get<Json>().asConverterFactory("application/json".toMediaType()))
             .build()
             .create(com.parachord.android.data.api.AppleMusicLibraryApi::class.java)
-    }
-
-    single<LastFmApi> {
-        Retrofit.Builder()
-            .baseUrl("https://ws.audioscrobbler.com/2.0/")
-            .client(get())
-            .addConverterFactory(get<Json>().asConverterFactory("application/json".toMediaType()))
-            .build()
-            .create(LastFmApi::class.java)
     }
 
     // ── DAOs ─────────────────────────────────────────────────────────

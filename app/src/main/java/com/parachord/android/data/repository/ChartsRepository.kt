@@ -2,8 +2,8 @@ package com.parachord.android.data.repository
 
 import android.util.Log
 import com.parachord.android.BuildConfig
-import com.parachord.android.data.api.LastFmApi
-import com.parachord.android.data.api.bestImageUrl
+import com.parachord.shared.api.LastFmClient
+import com.parachord.shared.api.bestImageUrl
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.async
 import kotlinx.coroutines.awaitAll
@@ -15,7 +15,7 @@ import org.json.JSONObject
 
 class ChartsRepository constructor(
     private val okHttpClient: OkHttpClient,
-    private val lastFmApi: LastFmApi,
+    private val lastFmClient: LastFmClient,
 ) {
     companion object {
         private const val TAG = "ChartsRepo"
@@ -101,12 +101,12 @@ class ChartsRepository constructor(
             }
             try {
                 val tracks = if (countryCode == null) {
-                    val response = lastFmApi.getChartTopTracks(apiKey = apiKey)
+                    val response = lastFmClient.getChartTopTracks(apiKey = apiKey)
                     response.tracks?.track ?: emptyList()
                 } else {
                     val countryName = CHARTS_COUNTRIES.find { it.code == countryCode }?.lastfmName
                         ?: return@withContext emptyList()
-                    val response = lastFmApi.getGeoTopTracks(country = countryName, apiKey = apiKey)
+                    val response = lastFmClient.getGeoTopTracks(country = countryName, apiKey = apiKey)
                     response.tracks?.track ?: emptyList()
                 }
                 val songs = tracks.mapIndexed { i, t ->
@@ -161,7 +161,7 @@ class ChartsRepository constructor(
     /** Returns (artworkUrl, albumTitle) or null on failure. */
     private suspend fun fetchTrackArtwork(artist: String, track: String): Pair<String?, String?>? {
         return try {
-            val response = lastFmApi.getTrackInfo(track = track, artist = artist, apiKey = apiKey)
+            val response = lastFmClient.getTrackInfo(track = track, artist = artist, apiKey = apiKey)
             val album = response.track?.album
             val artUrl = album?.image?.bestImageUrl()
             if (artUrl != null || album?.title != null) {
