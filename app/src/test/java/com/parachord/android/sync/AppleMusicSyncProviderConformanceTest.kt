@@ -21,6 +21,7 @@ import org.junit.Test
 class AppleMusicSyncProviderConformanceTest {
     private val provider: SyncProvider = AppleMusicSyncProvider(
         api = mockk(relaxed = true),
+        catalogClient = mockk(relaxed = true),
     )
 
     @Test
