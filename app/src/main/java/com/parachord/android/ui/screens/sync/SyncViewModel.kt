@@ -10,6 +10,7 @@ import com.parachord.android.sync.SyncEngine
 import com.parachord.android.sync.SyncScheduler
 import com.parachord.android.sync.SyncedPlaylist
 import com.parachord.shared.sync.SyncProvider
+import com.parachord.shared.sync.SyncSettings
 import kotlinx.coroutines.flow.*
 import kotlinx.coroutines.launch
 class SyncViewModel constructor(
@@ -310,7 +311,7 @@ class SyncViewModel constructor(
         // safeguard, etc.) continue to work. AM doesn't write this —
         // its per-provider opt-in is the source of truth.
         if (activeId == SpotifySyncProvider.PROVIDER_ID) {
-            settingsStore.saveSyncSettings(SettingsStore.SyncSettings(
+            settingsStore.saveSyncSettings(SyncSettings(
                 enabled = true,
                 provider = "spotify",
                 syncTracks = _syncTracks.value,
