@@ -128,7 +128,7 @@ class LibraryRepository constructor(
      */
     suspend fun deletePlaylistWithSync(
         playlist: PlaylistEntity,
-    ): List<SyncEngine.PlaylistDeletionAttempt> {
+    ): List<com.parachord.shared.sync.SyncEngine.PlaylistDeletionAttempt> {
         val attempts = syncEngine.onPlaylistRemoved(playlist)
         playlistDao.delete(playlist)
         return attempts

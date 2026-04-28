@@ -117,11 +117,11 @@ class SyncViewModel constructor(
         _selectedPlaylistIds.value = _selectedPlaylistIds.value - spotifyIds.toSet()
     }
 
-    private val _syncProgress = MutableStateFlow(SyncEngine.SyncProgress(SyncEngine.SyncPhase.TRACKS))
-    val syncProgress: StateFlow<SyncEngine.SyncProgress> = _syncProgress
+    private val _syncProgress = MutableStateFlow(com.parachord.shared.sync.SyncEngine.SyncProgress(com.parachord.shared.sync.SyncEngine.SyncPhase.TRACKS))
+    val syncProgress: StateFlow<com.parachord.shared.sync.SyncEngine.SyncProgress> = _syncProgress
 
-    private val _syncResult = MutableStateFlow<SyncEngine.FullSyncResult?>(null)
-    val syncResult: StateFlow<SyncEngine.FullSyncResult?> = _syncResult
+    private val _syncResult = MutableStateFlow<com.parachord.shared.sync.SyncEngine.FullSyncResult?>(null)
+    val syncResult: StateFlow<com.parachord.shared.sync.SyncEngine.FullSyncResult?> = _syncResult
 
     val syncEnabled = settingsStore.syncEnabledFlow
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), false)
@@ -228,8 +228,8 @@ class SyncViewModel constructor(
         // moment they tap, not after persistAndRunSync's first internal
         // state update.
         _currentStep.value = SetupStep.SYNCING
-        _syncProgress.value = SyncEngine.SyncProgress(
-            SyncEngine.SyncPhase.TRACKS, 0, 0, "Saving sync settings…"
+        _syncProgress.value = com.parachord.shared.sync.SyncEngine.SyncProgress(
+            com.parachord.shared.sync.SyncEngine.SyncPhase.TRACKS, 0, 0, "Saving sync settings…"
         )
         viewModelScope.launch {
             try {
@@ -237,7 +237,7 @@ class SyncViewModel constructor(
                 persistAndRunSync(activeId, _pendingNewCollections)
             } catch (e: Exception) {
                 Log.e("SyncViewModel", "confirmRemovalKeep failed", e)
-                _syncResult.value = SyncEngine.FullSyncResult(
+                _syncResult.value = com.parachord.shared.sync.SyncEngine.FullSyncResult(
                     success = false,
                     error = e.message ?: "Failed to save settings",
                 )
@@ -261,8 +261,8 @@ class SyncViewModel constructor(
         _currentStep.value = SetupStep.SYNCING
         val confirmation = _pendingRemoval.value
         val totalToRemove = confirmation?.itemCountByAxis?.values?.sum() ?: 0
-        _syncProgress.value = SyncEngine.SyncProgress(
-            SyncEngine.SyncPhase.TRACKS, 0, totalToRemove, "Removing items…"
+        _syncProgress.value = com.parachord.shared.sync.SyncEngine.SyncProgress(
+            com.parachord.shared.sync.SyncEngine.SyncPhase.TRACKS, 0, totalToRemove, "Removing items…"
         )
         viewModelScope.launch {
             try {
@@ -275,7 +275,7 @@ class SyncViewModel constructor(
                 persistAndRunSync(activeId, _pendingNewCollections)
             } catch (e: Exception) {
                 Log.e("SyncViewModel", "confirmRemovalRemove failed", e)
-                _syncResult.value = SyncEngine.FullSyncResult(
+                _syncResult.value = com.parachord.shared.sync.SyncEngine.FullSyncResult(
                     success = false,
                     error = e.message ?: "Failed to remove items",
                 )

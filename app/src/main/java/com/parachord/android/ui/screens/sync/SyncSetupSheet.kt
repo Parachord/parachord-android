@@ -684,7 +684,7 @@ private fun CompleteStep(viewModel: SyncViewModel, onDismiss: () -> Unit, accent
 }
 
 @Composable
-private fun SyncStatRow(label: String, stats: SyncEngine.TypeSyncResult, accent: Color = SpotifyGreen) {
+private fun SyncStatRow(label: String, stats: com.parachord.shared.sync.SyncEngine.TypeSyncResult, accent: Color = SpotifyGreen) {
     if (stats.added == 0 && stats.removed == 0 && stats.unchanged == 0) return
     Row(
         modifier = Modifier
