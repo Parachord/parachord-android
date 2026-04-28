@@ -6,11 +6,11 @@ import android.os.Build
 import android.util.Log
 import android.view.KeyEvent
 import com.parachord.android.auth.OAuthManager
-import com.parachord.android.data.api.SpPlaybackRequest
-import com.parachord.android.data.api.SpPlaybackState
-import com.parachord.android.data.api.SpDevice
-import com.parachord.android.data.api.SpTransferRequest
-import com.parachord.android.data.api.SpotifyApi
+import com.parachord.shared.api.SpPlaybackRequest
+import com.parachord.shared.api.SpPlaybackState
+import com.parachord.shared.api.SpDevice
+import com.parachord.shared.api.SpTransferRequest
+import com.parachord.shared.api.SpotifyClient
 import com.parachord.android.data.db.entity.TrackEntity
 import com.parachord.android.data.store.SettingsStore
 import kotlinx.coroutines.CompletableDeferred
@@ -24,7 +24,9 @@ import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
-import retrofit2.HttpException
+import io.ktor.client.call.body
+import io.ktor.client.statement.bodyAsText
+import io.ktor.http.isSuccess
 
 /**
  * Handles Spotify playback via the Web API (Spotify Connect).
@@ -38,7 +40,7 @@ import retrofit2.HttpException
  * Requires an active Spotify device and Premium account.
  */
 class SpotifyPlaybackHandler constructor(
-    private val spotifyApi: SpotifyApi,
+    private val spotifyClient: SpotifyClient,
     private val settingsStore: SettingsStore,
     private val oAuthManager: OAuthManager,
     private val context: Context,
@@ -163,7 +165,7 @@ class SpotifyPlaybackHandler constructor(
         _playbackError.value = null // Clear any previous error
         val flowStart = System.currentTimeMillis()
 
-        val success = withAuth { auth -> attemptPlay(auth, uri, flowStart) } == true
+        val success = withAuth { attemptPlay(uri, flowStart) } == true
 
         if (success) {
             _isConnected = true
@@ -205,7 +207,7 @@ class SpotifyPlaybackHandler constructor(
      * Old flow had 3 layers of retries (playWithRetry × 502 retries × verification)
      * compounding to 27.5s worst case. This flow is single-pass: ~2-5s cold, ~200ms warm.
      */
-    private suspend fun attemptPlay(auth: String, uri: String, flowStart: Long): Boolean {
+    private suspend fun attemptPlay(uri: String, flowStart: Long): Boolean {
 
         // ── Phase 7: Optimistic warm-path ────────────────────────────
         // When device is already verified and we have a preferred device,
@@ -223,16 +225,16 @@ class SpotifyPlaybackHandler constructor(
         }
         if (deviceVerified && warmDeviceId != null) {
             try {
-                val currentDevices = spotifyApi.getDevices(auth).devices
+                val currentDevices = spotifyClient.getDevices().devices
                 val stillAlive = currentDevices.any { it.id == warmDeviceId }
                 if (stillAlive) {
                     Log.d(TAG, "Warm path: firing startPlayback directly on device=$warmDeviceId")
-                    val resp = spotifyApi.startPlayback(auth, SpPlaybackRequest(uris = listOf(uri)), deviceId = warmDeviceId)
-                    if (resp.isSuccessful || resp.code() == 204) {
+                    val resp = spotifyClient.startPlayback(SpPlaybackRequest(uris = listOf(uri)), deviceId = warmDeviceId)
+                    if (resp.status.isSuccess() || resp.status.value == 204) {
                         Log.d(TAG, "Warm path succeeded in ${System.currentTimeMillis() - flowStart}ms")
                         return true
                     }
-                    Log.d(TAG, "Warm path startPlayback failed (${resp.code()}), falling through")
+                    Log.d(TAG, "Warm path startPlayback failed (${resp.status.value}), falling through")
                 } else {
                     Log.d(TAG, "Warm path: cached device $warmDeviceId no longer in device list — invalidating and falling through")
                 }
@@ -247,7 +249,7 @@ class SpotifyPlaybackHandler constructor(
 
         // ── Phase 1+3: Ensure device ─────────────────────────────────
         val ensureStart = System.currentTimeMillis()
-        val devices = ensureDevice(auth)
+        val devices = ensureDevice()
         Log.d(TAG, "ensureDevice took ${System.currentTimeMillis() - ensureStart}ms, found ${devices.size} device(s)")
         Log.d(TAG, "Devices: ${devices.map { "${it.name}(active=${it.isActive}, type=${it.type})" }}")
 
@@ -262,7 +264,7 @@ class SpotifyPlaybackHandler constructor(
 
         // Resolve synthetic "This device" to a real device ID
         val targetDevice = if (isLocalPlaceholder(pickedDevice)) {
-            resolveLocalDevice(auth)
+            resolveLocalDevice()
         } else {
             pickedDevice
         }
@@ -284,14 +286,14 @@ class SpotifyPlaybackHandler constructor(
         val playStart = System.currentTimeMillis()
         for (attempt in 1..2) {
             try {
-                val resp = spotifyApi.startPlayback(auth, SpPlaybackRequest(uris = listOf(uri)), deviceId = targetDevice.id)
+                val resp = spotifyClient.startPlayback(SpPlaybackRequest(uris = listOf(uri)), deviceId = targetDevice.id)
 
-                if (resp.isSuccessful || resp.code() == 204) {
+                if (resp.status.isSuccess() || resp.status.value == 204) {
                     Log.d(TAG, "Playback accepted on '${targetDevice.name}' (attempt $attempt, ${System.currentTimeMillis() - playStart}ms)")
 
                     // Quick verification on cold devices only
                     if (!deviceVerified) {
-                        val verified = verifyPlaybackStarted(auth)
+                        val verified = verifyPlaybackStarted()
                         deviceVerified = true
                         if (!verified) {
                             Log.w(TAG, "Playback not verified but proceeding optimistically")
@@ -300,8 +302,8 @@ class SpotifyPlaybackHandler constructor(
                     return true
                 }
 
-                val code = resp.code()
-                val body = resp.errorBody()?.string()
+                val code = resp.status.value
+                val body = try { resp.bodyAsText() } catch (_: Exception) { null }
                 Log.w(TAG, "startPlayback failed: $code body=$body (attempt $attempt)")
 
                 when {
@@ -343,12 +345,12 @@ class SpotifyPlaybackHandler constructor(
      * 2 polls at 500ms intervals (1s total) — much faster than the old
      * 5 polls at 1s intervals (5s).
      */
-    private suspend fun verifyPlaybackStarted(auth: String): Boolean {
+    private suspend fun verifyPlaybackStarted(): Boolean {
         for (poll in 1..2) {
             delay(500)
             try {
-                val state = spotifyApi.getPlaybackState(auth)
-                val body = if (state.isSuccessful) state.body() else null
+                val state = spotifyClient.getPlaybackState()
+                val body = if (state.status.isSuccess()) state.body<SpPlaybackState>() else null
                 if (body != null && body.isPlaying) {
                     Log.d(TAG, "verifyPlayback: confirmed playing after ${poll * 500}ms")
                     return true
@@ -362,18 +364,18 @@ class SpotifyPlaybackHandler constructor(
 
     override suspend fun pause() {
         pausedByUs = true
-        withAuth { auth -> spotifyApi.pausePlayback(auth) }
+        withAuth { spotifyClient.pausePlayback() }
         cachedIsPlaying = false
     }
 
     override suspend fun resume() {
         pausedByUs = false
-        withAuth { auth -> spotifyApi.resumePlayback(auth) }
+        withAuth { spotifyClient.resumePlayback() }
         cachedIsPlaying = true
     }
 
     override suspend fun seekTo(positionMs: Long) {
-        withAuth { auth -> spotifyApi.seekPlayback(auth, positionMs) }
+        withAuth { spotifyClient.seekPlayback(positionMs) }
         cachedPosition = positionMs
     }
 
@@ -406,11 +408,11 @@ class SpotifyPlaybackHandler constructor(
      * Replaces the old split of wakeSpotifyAndAwaitDevice() + wakeLocalSpotifyApp()
      * which had separate 15s polling loops. Now a single 8s flow with 300ms polling.
      */
-    private suspend fun ensureDevice(auth: String): List<SpDevice> {
+    private suspend fun ensureDevice(): List<SpDevice> {
         // Fast path: if device is already verified (warm), just fetch devices
         if (deviceVerified) {
             return try {
-                spotifyApi.getDevices(auth).devices
+                spotifyClient.getDevices().devices
             } catch (e: Exception) {
                 Log.w(TAG, "Device fetch failed: ${e.message}")
                 emptyList()
@@ -419,7 +421,7 @@ class SpotifyPlaybackHandler constructor(
 
         // Check for existing devices without waking (Spotify already running)
         try {
-            val devices = spotifyApi.getDevices(auth).devices
+            val devices = spotifyClient.getDevices().devices
             if (devices.isNotEmpty()) {
                 Log.d(TAG, "Devices already available (no wake needed): ${devices.size}")
                 deviceVerified = true
@@ -443,13 +445,13 @@ class SpotifyPlaybackHandler constructor(
         while (System.currentTimeMillis() < deadline) {
             pollCount++
             try {
-                val devices = spotifyApi.getDevices(auth).devices
+                val devices = spotifyClient.getDevices().devices
                 if (devices.isNotEmpty()) {
                     Log.d(TAG, "Spotify woke up after $pollCount polls — found ${devices.size} device(s)")
                     // Silence any stale playback from the wake
                     if (!pauseSent) {
                         pauseSent = true
-                        try { spotifyApi.pausePlayback(auth) } catch (_: Exception) {}
+                        try { spotifyClient.pausePlayback() } catch (_: Exception) {}
                     }
                     deviceVerified = true
                     return devices
@@ -463,7 +465,7 @@ class SpotifyPlaybackHandler constructor(
                 launchSpotifyFallback()
                 delay(1500)
                 try {
-                    spotifyApi.pausePlayback(auth)
+                    spotifyClient.pausePlayback()
                     Log.d(TAG, "Sent pausePlayback after launch intent to prevent auto-resume")
                 } catch (_: Exception) {}
                 deadline = System.currentTimeMillis() + 18_000
@@ -484,7 +486,7 @@ class SpotifyPlaybackHandler constructor(
      * not be running. We need Spotify running on this phone to register as a
      * Smartphone Connect device.
      */
-    private suspend fun resolveLocalDevice(auth: String): SpDevice? {
+    private suspend fun resolveLocalDevice(): SpDevice? {
         Log.d(TAG, "Resolving local device: model='${Build.MODEL}', manufacturer='${Build.MANUFACTURER}'")
         val localModel = Build.MODEL.lowercase()
         val localManufacturer = Build.MANUFACTURER.lowercase()
@@ -502,7 +504,7 @@ class SpotifyPlaybackHandler constructor(
         while (System.currentTimeMillis() < deadline) {
             pollCount++
             try {
-                val devices = spotifyApi.getDevices(auth).devices
+                val devices = spotifyClient.getDevices().devices
                 val local = devices.firstOrNull { d ->
                     d.type == "Smartphone" && (
                         d.name.lowercase().contains(localModel) ||
@@ -522,7 +524,7 @@ class SpotifyPlaybackHandler constructor(
                     // During warm Spotify→Spotify transitions, Spotify is already playing
                     // our track — pausing it causes an audible stutter before startPlayback.
                     if (fallbackFired) {
-                        try { spotifyApi.pausePlayback(auth) } catch (_: Exception) {}
+                        try { spotifyClient.pausePlayback() } catch (_: Exception) {}
                     }
                     return local
                 }
@@ -540,7 +542,7 @@ class SpotifyPlaybackHandler constructor(
                 // the Connect API — Spotify's own app process handles the pause.
                 delay(1500) // Give Spotify a moment to start before pausing
                 try {
-                    spotifyApi.pausePlayback(auth)
+                    spotifyClient.pausePlayback()
                     Log.d(TAG, "Sent pausePlayback after launch intent to prevent auto-resume")
                 } catch (_: Exception) {
                     Log.d(TAG, "pausePlayback after launch failed (Spotify may not be ready yet)")
@@ -842,8 +844,8 @@ class SpotifyPlaybackHandler constructor(
                             Log.w(TAG, "Playback not started ${elapsed}ms after play — retrying startPlayback")
                             if (uri != null) {
                                 try {
-                                    withAuth { auth ->
-                                        spotifyApi.startPlayback(auth, SpPlaybackRequest(uris = listOf(uri)))
+                                    withAuth {
+                                        spotifyClient.startPlayback(SpPlaybackRequest(uris = listOf(uri)))
                                     }
                                     playStartedAt = System.currentTimeMillis()
                                 } catch (e: Exception) {
@@ -878,9 +880,7 @@ class SpotifyPlaybackHandler constructor(
                             }
 
                             // Preserve duration when item becomes null (track just ended)
-                            if (state.item?.durationMs != null) {
-                                cachedDuration = state.item.durationMs
-                            }
+                            state.item?.durationMs?.let { cachedDuration = it }
 
                             // Capture actual track metadata from Spotify
                             state.item?.let { item ->
@@ -913,31 +913,29 @@ class SpotifyPlaybackHandler constructor(
     }
 
     private suspend fun fetchPlaybackState(): SpPlaybackState? =
-        withAuth { auth ->
-            val response = spotifyApi.getPlaybackState(auth)
-            if (response.isSuccessful) response.body() else null
+        withAuth {
+            val response = spotifyClient.getPlaybackState()
+            if (response.status.isSuccess()) response.body<SpPlaybackState>() else null
         }
 
     /**
-     * Execute a block with a valid Spotify Bearer token.
-     * On 401, refreshes the token and retries once.
+     * Skip-if-unauthed gate. Per Phase 9E.1.8 the Ktor `SpotifyClient` resolves
+     * the Bearer token from `AuthTokenProvider` per-request, and the global
+     * `OAuthRefreshPlugin` handles 401-driven refresh + retry on `api.spotify.com`
+     * automatically (single-flight refresh, two-strikes → ReauthRequiredException).
+     * This wrapper just short-circuits when no token is stored and swallows
+     * exceptions so playback callers see null on failure.
      */
-    private suspend fun <T> withAuth(block: suspend (auth: String) -> T): T? {
-        val token = settingsStore.getSpotifyAccessToken()
-        if (token == null) {
+    private suspend fun <T> withAuth(block: suspend () -> T): T? {
+        if (settingsStore.getSpotifyAccessToken() == null) {
             Log.w(TAG, "withAuth: no Spotify access token stored — skipping API call")
             return null
         }
         return try {
-            block("Bearer $token")
-        } catch (e: HttpException) {
-            if (e.code() == 401 && oAuthManager.refreshSpotifyToken()) {
-                val newToken = settingsStore.getSpotifyAccessToken() ?: return null
-                block("Bearer $newToken")
-            } else {
-                Log.e(TAG, "Spotify API error: ${e.code()}")
-                null
-            }
+            block()
+        } catch (e: com.parachord.shared.api.auth.ReauthRequiredException) {
+            Log.w(TAG, "Spotify reauth required — user must reconnect")
+            null
         } catch (e: Exception) {
             Log.e(TAG, "Spotify API error", e)
             null

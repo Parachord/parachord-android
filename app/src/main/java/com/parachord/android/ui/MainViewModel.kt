@@ -168,7 +168,7 @@ class MainViewModel constructor(
         playbackController.skipNext()
     }
 
-    fun onSpotifyDevicePicked(device: com.parachord.android.data.api.SpDevice?) {
+    fun onSpotifyDevicePicked(device: com.parachord.shared.api.SpDevice?) {
         spotifyPlaybackHandler.onDevicePicked(device)
     }
 

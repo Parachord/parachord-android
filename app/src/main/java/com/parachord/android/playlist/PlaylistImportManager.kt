@@ -2,8 +2,8 @@ package com.parachord.android.playlist
 
 import android.util.Log
 import com.parachord.android.auth.OAuthManager
-import com.parachord.android.data.api.SpotifyApi
-import com.parachord.android.data.api.bestImageUrl
+import com.parachord.shared.api.SpotifyClient
+import com.parachord.shared.api.bestImageUrl
 import com.parachord.android.data.db.entity.PlaylistEntity
 import com.parachord.android.data.db.entity.TrackEntity
 import com.parachord.android.data.repository.LibraryRepository
@@ -13,7 +13,6 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import okhttp3.OkHttpClient
 import okhttp3.Request
-import retrofit2.HttpException
 import java.util.UUID
 
 private const val TAG = "PlaylistImportManager"
@@ -25,7 +24,7 @@ data class ImportResult(
 )
 
 class PlaylistImportManager constructor(
-    private val spotifyApi: SpotifyApi,
+    private val spotifyClient: SpotifyClient,
     private val musicKitBridge: MusicKitWebBridge,
     private val libraryRepository: LibraryRepository,
     private val settingsStore: SettingsStore,
@@ -61,27 +60,28 @@ class PlaylistImportManager constructor(
         url.contains("music.apple.com") && url.contains("/playlist/")
 
     /**
-     * Execute a Spotify API call with automatic token refresh on 401.
-     * Mirrors SpotifyProvider.withAuth() and ResolverManager.resolveSpotify().
+     * Pre-flight gate for Spotify import. Per Phase 9E.1.8 the Ktor `SpotifyClient`
+     * resolves the Bearer token from `AuthTokenProvider` per-request, and the global
+     * `OAuthRefreshPlugin` handles 401-driven refresh + retry on `api.spotify.com`.
+     *
+     * `ReauthRequiredException` from the plugin maps to "reconnect Spotify". Other
+     * exceptions surface as a generic Spotify error so the import UI can show
+     * something user-actionable.
      */
-    private suspend fun <T> withSpotifyAuth(block: suspend (auth: String) -> T): T {
-        val token = settingsStore.getSpotifyAccessToken()
-            ?: throw IllegalStateException("Spotify not connected. Connect Spotify in Settings to import playlists.")
+    private suspend fun <T> withSpotifyAuth(block: suspend () -> T): T {
+        if (settingsStore.getSpotifyAccessToken() == null) {
+            throw IllegalStateException("Spotify not connected. Connect Spotify in Settings to import playlists.")
+        }
         return try {
-            block("Bearer $token")
-        } catch (e: HttpException) {
-            if (e.code() == 401 && oAuthManager.refreshSpotifyToken()) {
-                val newToken = settingsStore.getSpotifyAccessToken()
-                    ?: throw IllegalStateException("Spotify session expired. Reconnect Spotify in Settings.")
-                block("Bearer $newToken")
-            } else {
-                when (e.code()) {
-                    401 -> throw IllegalStateException("Spotify session expired. Reconnect Spotify in Settings.")
-                    403 -> throw IllegalStateException("Spotify access denied. Reconnect Spotify in Settings to grant updated permissions.")
-                    404 -> throw IllegalArgumentException("Playlist not found. It may be private or deleted.")
-                    else -> throw IllegalStateException("Spotify error: HTTP ${e.code()}")
-                }
-            }
+            block()
+        } catch (e: com.parachord.shared.api.auth.ReauthRequiredException) {
+            throw IllegalStateException("Spotify session expired. Reconnect Spotify in Settings.")
+        } catch (e: IllegalStateException) {
+            throw e
+        } catch (e: IllegalArgumentException) {
+            throw e
+        } catch (e: Exception) {
+            throw IllegalStateException("Spotify import failed: ${e.message ?: e::class.simpleName}", e)
         }
     }
 
@@ -89,7 +89,7 @@ class PlaylistImportManager constructor(
         val playlistId = extractSpotifyPlaylistId(url)
             ?: throw IllegalArgumentException("Could not extract Spotify playlist ID from URL")
 
-        val playlist = withSpotifyAuth { auth -> spotifyApi.getPlaylist(auth, playlistId) }
+        val playlist = withSpotifyAuth { spotifyClient.getPlaylist(playlistId) }
         val playlistName = playlist.name ?: "Spotify Playlist"
         val artworkUrl = playlist.images?.firstOrNull()?.url
 
@@ -97,8 +97,8 @@ class PlaylistImportManager constructor(
         var offset = 0
         var hasMore = true
         while (hasMore) {
-            val page = withSpotifyAuth { auth ->
-                spotifyApi.getPlaylistTracks(auth, playlistId, limit = 100, offset = offset)
+            val page = withSpotifyAuth {
+                spotifyClient.getPlaylistTracks(playlistId, limit = 100, offset = offset)
             }
             page.items.forEach { item ->
                 val track = item.track ?: return@forEach

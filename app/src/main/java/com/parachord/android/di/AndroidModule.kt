@@ -19,7 +19,8 @@ import com.parachord.shared.api.auth.AuthTokenProvider
 import com.parachord.shared.api.auth.OAuthTokenRefresher
 import com.parachord.android.bridge.JsBridge
 import com.parachord.shared.plugin.PluginFileAccess
-import com.parachord.android.data.api.SpotifyApi
+// SpotifyApi (Retrofit) deleted in Phase 9E.1.8 — replaced by
+// com.parachord.shared.api.SpotifyClient bound in sharedModule
 import com.parachord.android.data.db.dao.*
 import com.parachord.shared.db.DriverFactory
 import com.parachord.android.data.metadata.DiscogsProvider
@@ -224,14 +225,11 @@ val androidModule = module {
     }
     single { com.parachord.android.share.ShareManager(get(), get(), get()) }
 
-    single<SpotifyApi> {
-        Retrofit.Builder()
-            .baseUrl("https://api.spotify.com/")
-            .client(get())
-            .addConverterFactory(get<Json>().asConverterFactory("application/json".toMediaType()))
-            .build()
-            .create(SpotifyApi::class.java)
-    }
+    // Spotify Web API — migrated to shared Ktor client (SpotifyClient) in
+    // Phase 9E.1.8. Binding lives in sharedModule; per-request auth via
+    // AuthTokenProvider for AuthRealm.Spotify. Spotify is the OAuth refresh
+    // canary — 401s on api.spotify.com flow through OAuthRefreshPlugin
+    // (single-flight refresh, two-strikes → ReauthRequiredException).
 
     // Apple Music Library + Storefront API — migrated to shared Ktor
     // client (AppleMusicLibraryClient) in Phase 9E.1.7. Binding lives in
