@@ -1,6 +1,7 @@
 package com.parachord.android.data.metadata
 
 import com.parachord.android.data.store.SettingsStore
+import com.parachord.shared.api.AppleMusicClient
 import com.parachord.shared.metadata.AlbumDetail
 import com.parachord.shared.metadata.AlbumSearchResult
 import com.parachord.shared.metadata.ArtistInfo
@@ -21,7 +22,7 @@ class MetadataService constructor(
     private val discogs: DiscogsProvider,
     private val spotify: SpotifyProvider,
     private val settingsStore: SettingsStore,
-    private val appleMusicApi: com.parachord.android.data.api.AppleMusicApi,
+    private val appleMusicClient: AppleMusicClient,
 ) {
     private val providers: List<com.parachord.shared.metadata.MetadataProvider> by lazy {
         listOf(musicBrainz, wikipedia, lastFm, discogs, spotify).sortedBy { it.priority }
@@ -73,7 +74,7 @@ class MetadataService constructor(
                 if (url != null && url.contains("coverartarchive.org")) {
                     try {
                         val term = "$artistName ${album.title}"
-                        val response = appleMusicApi.search(
+                        val response = appleMusicClient.search(
                             term = term,
                             entity = "album",
                             limit = 3,
