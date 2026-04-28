@@ -274,6 +274,8 @@ data class ProviderFeatures(
 
 **Cross-provider `syncedFrom` preservation.** Import branch's `isOwnPullSource` guard (Phase 3 follow-on): if the matched local row already has a `sync_playlist_source` pointing at a DIFFERENT provider, this is a cross-provider push mirror — don't overwrite `syncedFrom`, don't refetch tracks, only update the link's `syncedAt`. Without this, an AM import on a Spotify-imported playlist would clobber Spotify as the pull source and produce a duplicate on Spotify's next sync.
 
+**Hosted-XSPF preservation (Apr 2026 bugfix).** The same import-by-name preserve guard extends to hosted-XSPF rows. Hosted playlists mark canonicality with `sourceUrl != null` rather than a `sync_playlist_source` row, so the original `isCrossProviderPushMirror` check missed them. Without the extension, the import path matched the hosted local by name (because the auto-pushed Spotify/AM mirror has the same name as the hosted playlist), then deleted the local row + tracks and re-inserted using the remote's entity — wiping `sourceUrl` (so the `🌐 Hosted` chip vanished) and replacing tracks with whatever the remote had. Both pull paths (inline Spotify, `pullPlaylistsForProvider`) now compute `preserveLocal = isCrossProviderPushMirror || (existingLocal?.sourceUrl != null)` and the preserve branch keeps the local row intact while still recording the new `sync_playlist_link` + `sync_source` rows pointing at the provider mirror.
+
 **Per-provider iteration (Phases 4.5 + 5).** `SyncEngine.syncPlaylists` reads `enabledProviders` from `SettingsStore.getEnabledSyncProviders()` (default `setOf("spotify")`) and:
 - Fetches Spotify's remote list inline (coupled with the one-time dedup-cleanup migration that's Spotify-only by design)
 - Iterates `pullPlaylistsForProvider(provider)` for every non-Spotify enabled provider
@@ -283,9 +285,19 @@ data class ProviderFeatures(
 - Spotify: `local-*` + hosted XSPF AND `playlist.spotifyId == null` (legacy filter preserved exactly)
 - Apple Music: same baseline + `spotify-*` (Spotify-imported playlists mirror to AM since rule 3 correctly skips them when targeting Spotify but not AM)
 
-`extractExternalTrackIds(tracks, providerId)` chooses the right ID per provider (`trackSpotifyUri` vs. `trackAppleMusicId`). Tracks without the relevant ID are silently skipped — catalog-search-based ID resolution is deferred (Decision D1).
+`extractExternalTrackIds(tracks, providerId)` chooses the right ID per provider (`trackSpotifyUri` vs. `trackAppleMusicId`).
 
-**Settings UI (Phase 6).** Settings → General shows an "Apple Music Sync" toggle row only when AM is authorized (MUT present). Flipping it adds/removes `applemusic` from `enabled_sync_providers`. An inline note explains the API limitations (no delete / rename / track-removal). The wizard's per-playlist picker is Spotify-only for now — AM gets all-or-nothing per Decision D1; per-playlist selection is a follow-up.
+**Catalog-search-based ID hydration (un-defers Decision D1, Apr 2026).** Before `extractExternalTrackIds` runs, both push paths (`pushPlaylistsForProvider` for first-push and `pushPlaylist` for locally-modified updates) call `hydrateMissingTrackIds(playlistId, tracks, provider)`. For each track lacking the provider's ID, it parallel-resolves via `provider.searchForTrackId(title, artist, album)` and persists results back to `playlist_track` rows via `PlaylistTrackDao.replaceAll` (atomic delete+insert in one SQLDelight transaction so the playlist isn't briefly empty during the write). Subsequent syncs see fully-hydrated tracks and skip the search — bounded one-time cost.
+
+- **Spotify** uses field-qualified search (`track:"…" artist:"…" album:"…"`) and filters to `isPlayable != false` so users don't end up with greyed-out rows.
+- **Apple Music** uses iTunes Search (`/search?media=music&entity=song`) — the no-auth catalog endpoint, NOT the library API. Returns the bare numeric `trackId` which `AppleMusicLibraryClient.appendPlaylistTracks` accepts directly. `AppleMusicSyncProvider` constructor takes both `AppleMusicLibraryClient` (library API, dev-token + MUT) and `AppleMusicClient` (catalog search, no auth).
+- Both gate matches against `ResolverScoring.MIN_CONFIDENCE_THRESHOLD` (0.60) using `scoreConfidence(targetTitle, targetArtist, matchedTitle, matchedArtist)`. Wrong-song matches return null and the track is silently skipped on push — better N-1 correct tracks than N tracks with one wrong.
+
+**Why this matters:** without hydration, a freshly-imported hosted XSPF (whose tracks haven't been viewed yet, so the resolver pipeline hasn't backfilled `appleMusicId`) would push a 0-track mirror to Apple Music. The empty mirror then poisoned the next sync's import-by-name path and clobbered the local hosted row. Hydration prevents the empty-mirror creation at the source.
+
+Tracks that genuinely don't exist in a provider's catalog still get silently skipped on push, matching desktop behavior.
+
+**Settings UI (Phase 6).** Settings → General shows an "Apple Music Sync" toggle row only when AM is authorized (MUT present). Flipping it adds/removes `applemusic` from `enabled_sync_providers`. An inline note explains the API limitations (no delete / rename / track-removal). The wizard's per-playlist picker is Spotify-only for now — AM gets all-or-nothing; per-playlist selection is a follow-up.
 
 **Sync-aware playlist deletion + Decision D8 toast (Phase 6.5).** `LibraryRepository.deletePlaylistWithSync(playlist)` calls `SyncEngine.onPlaylistRemoved(playlist)` to attempt remote deletion on each linked provider, then deletes the local row. Returns `List<PlaylistDeletionAttempt>`; ViewModels (`PlaylistDetailViewModel`, `PlaylistsViewModel`, `EditPlaylistViewModel`) filter for `Unsupported` and emit a one-shot Flow event; the screen renders a Toast: *"Removed from Parachord. Apple Music doesn't allow deletion via the API — remove manually in the Apple Music app."* Local cleanup runs regardless of provider response — leaving the link would re-link on next sync via three-layer dedup.
 
