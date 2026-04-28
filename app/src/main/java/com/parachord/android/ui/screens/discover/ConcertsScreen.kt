@@ -348,8 +348,8 @@ private fun LocationSearchDialog(
     currentCity: String?,
     onDismiss: () -> Unit,
     onSearch: (String) -> Unit,
-    suggestions: List<com.parachord.android.data.api.GeoLocationService.GeoLocation>,
-    onLocationSelected: (com.parachord.android.data.api.GeoLocationService.GeoLocation) -> Unit,
+    suggestions: List<com.parachord.shared.api.GeoLocation>,
+    onLocationSelected: (com.parachord.shared.api.GeoLocation) -> Unit,
 ) {
     var searchQuery by remember { mutableStateOf("") }
 
