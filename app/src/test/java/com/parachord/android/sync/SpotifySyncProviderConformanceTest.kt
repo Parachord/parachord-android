@@ -21,8 +21,6 @@ import org.junit.Test
 class SpotifySyncProviderConformanceTest {
     private val provider: SyncProvider = SpotifySyncProvider(
         spotifyClient = mockk(relaxed = true),
-        settingsStore = mockk(relaxed = true),
-        oAuthManager = mockk(relaxed = true),
     )
 
     @Test

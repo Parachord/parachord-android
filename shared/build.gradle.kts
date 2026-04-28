@@ -23,6 +23,7 @@ kotlin {
         commonMain.dependencies {
             implementation(libs.kotlinx.serialization.json)
             implementation(libs.kotlinx.coroutines.core)
+            implementation(libs.kotlinx.datetime)
             // Ktor HTTP client (Phase 2)
             api(libs.ktor.client.core)
             implementation(libs.ktor.client.content.negotiation)
