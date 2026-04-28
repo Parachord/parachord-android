@@ -8,19 +8,38 @@ import androidx.datastore.preferences.core.edit
 import androidx.datastore.preferences.core.stringPreferencesKey
 import androidx.datastore.preferences.core.stringSetPreferencesKey
 import com.parachord.android.BuildConfig
+import com.parachord.shared.store.KvStore
 import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.first
+import kotlinx.coroutines.flow.flow
+import kotlinx.coroutines.flow.flowOf
+import kotlinx.coroutines.flow.flatMapConcat
 import kotlinx.coroutines.flow.map
+import kotlinx.coroutines.sync.Mutex
+import kotlinx.coroutines.sync.withLock
 
 /**
  * Preferences store replacing electron-store from the desktop app.
  * Uses Jetpack DataStore for non-sensitive preferences and
  * [SecureTokenStore] (EncryptedSharedPreferences) for OAuth tokens
  * and BYO API keys. security: C4
+ *
+ * Phase 9B Stage 2: the sync key family migrates from DataStore to
+ * the KMP-friendly [KvStore] (multiplatform-settings backed). The
+ * remaining ~40 keys (theme, sort prefs, OAuth keys, AI provider
+ * keys, etc.) stay in DataStore until later stages. A one-shot
+ * migration ([ensureSyncMigrated]) reads each sync key from DataStore
+ * and writes it through KvStore on first sync-method invocation;
+ * subsequent calls hit a `_migration_sync_v1` marker key in KvStore
+ * and skip the copy. After the marker is set, every sync read/write
+ * goes through KvStore exclusively — DataStore values for those keys
+ * still exist on-disk but are no longer consulted.
  */
 class SettingsStore constructor(
     private val dataStore: DataStore<Preferences>,
     internal val secureStore: SecureTokenStore,
+    private val kv: KvStore,
 ) : com.parachord.shared.sync.SyncSettingsProvider {
     companion object {
         val THEME_MODE = stringPreferencesKey("theme_mode")
@@ -554,67 +573,163 @@ class SettingsStore constructor(
      * the bare `SyncSettings` name in the same commit.
      */
 
-    val syncEnabledFlow: Flow<Boolean> = dataStore.data.map { it[SYNC_ENABLED] ?: false }
-
-    val lastSyncAtFlow: Flow<Long> = dataStore.data.map {
-        it[SYNC_LAST_COMPLETED_AT]?.toLongOrNull() ?: 0L
+    // ── KvStore-backed key names (Phase 9B Stage 2) ───────────────────
+    //
+    // Same wire names as the DataStore keys above so the migration is a
+    // verbatim copy. New writes go through KvStore exclusively after
+    // [ensureSyncMigrated] runs.
+    private object KvKeys {
+        const val SYNC_ENABLED = "sync_enabled"
+        const val SYNC_PROVIDER = "sync_provider"
+        const val SYNC_TRACKS = "sync_tracks"
+        const val SYNC_ALBUMS = "sync_albums"
+        const val SYNC_ARTISTS = "sync_artists"
+        const val SYNC_PLAYLISTS = "sync_playlists"
+        const val SYNC_SELECTED_PLAYLIST_IDS = "sync_selected_playlist_ids"
+        const val SYNC_LAST_COMPLETED_AT = "sync_last_completed_at"
+        const val SYNC_PUSH_LOCAL_PLAYLISTS = "sync_push_local_playlists"
+        const val SYNC_DATA_VERSION = "sync_data_version"
+        const val ENABLED_SYNC_PROVIDERS = "enabled_sync_providers"
+        /** Marker key — set to `true` once the one-shot DataStore→KvStore
+         *  copy completes. Lives in KvStore so it survives across reboots
+         *  without re-running the migration. */
+        const val MIGRATION_DONE_V1 = "_migration_sync_v1"
     }
 
-    fun getSyncSettingsFlow(): Flow<SyncSettings> = dataStore.data.map { prefs ->
-        SyncSettings(
-            enabled = prefs[SYNC_ENABLED] ?: false,
-            provider = prefs[SYNC_PROVIDER] ?: "spotify",
-            syncTracks = prefs[SYNC_TRACKS] ?: true,
-            syncAlbums = prefs[SYNC_ALBUMS] ?: true,
-            syncArtists = prefs[SYNC_ARTISTS] ?: true,
-            syncPlaylists = prefs[SYNC_PLAYLISTS] ?: true,
-            selectedPlaylistIds = (prefs[SYNC_SELECTED_PLAYLIST_IDS] ?: "")
-                .split(",").filter { it.isNotBlank() }.toSet(),
-            pushLocalPlaylists = prefs[SYNC_PUSH_LOCAL_PLAYLISTS] ?: true,
-        )
+    @Volatile private var syncMigrated = false
+    private val syncMigrationMutex = Mutex()
+
+    /**
+     * One-shot DataStore→KvStore copy of every sync-related preference.
+     * Idempotent: a marker key in KvStore prevents repeated runs across
+     * launches. Mutex-guarded so concurrent first-callers serialize on
+     * the same migration pass instead of racing.
+     *
+     * Per-provider `sync_collections_<id>` keys are walked from the
+     * DataStore key set rather than enumerated, since the provider-id
+     * universe is open-ended (Spotify, Apple Music, hypothetical Tidal).
+     */
+    private suspend fun ensureSyncMigrated() {
+        if (syncMigrated) return
+        syncMigrationMutex.withLock {
+            if (syncMigrated) return
+            if (kv.getBoolean(KvKeys.MIGRATION_DONE_V1)) {
+                syncMigrated = true
+                return
+            }
+            val prefs = dataStore.data.first()
+            prefs[SYNC_ENABLED]?.let { kv.setBoolean(KvKeys.SYNC_ENABLED, it) }
+            prefs[SYNC_PROVIDER]?.let { kv.setString(KvKeys.SYNC_PROVIDER, it) }
+            prefs[SYNC_TRACKS]?.let { kv.setBoolean(KvKeys.SYNC_TRACKS, it) }
+            prefs[SYNC_ALBUMS]?.let { kv.setBoolean(KvKeys.SYNC_ALBUMS, it) }
+            prefs[SYNC_ARTISTS]?.let { kv.setBoolean(KvKeys.SYNC_ARTISTS, it) }
+            prefs[SYNC_PLAYLISTS]?.let { kv.setBoolean(KvKeys.SYNC_PLAYLISTS, it) }
+            prefs[SYNC_SELECTED_PLAYLIST_IDS]?.let {
+                kv.setString(KvKeys.SYNC_SELECTED_PLAYLIST_IDS, it)
+            }
+            prefs[SYNC_LAST_COMPLETED_AT]?.let { kv.setString(KvKeys.SYNC_LAST_COMPLETED_AT, it) }
+            prefs[SYNC_PUSH_LOCAL_PLAYLISTS]?.let {
+                kv.setBoolean(KvKeys.SYNC_PUSH_LOCAL_PLAYLISTS, it)
+            }
+            prefs[SYNC_DATA_VERSION]?.let { kv.setString(KvKeys.SYNC_DATA_VERSION, it) }
+            prefs[ENABLED_SYNC_PROVIDERS]?.let { kv.setString(KvKeys.ENABLED_SYNC_PROVIDERS, it) }
+            // Per-provider sync_collections_* — open-ended id space, walk by prefix
+            for ((key, value) in prefs.asMap()) {
+                if (key.name.startsWith("sync_collections_") && value is String) {
+                    kv.setString(key.name, value)
+                }
+            }
+            kv.setBoolean(KvKeys.MIGRATION_DONE_V1, true)
+            syncMigrated = true
+        }
+    }
+
+    /** Inline-able prefix migration: lets sync-methods that take a
+     *  flow builder context call ensureSyncMigrated before their
+     *  observable emission. */
+    private fun migratedFlow(): Flow<Unit> = flow {
+        ensureSyncMigrated()
+        emit(Unit)
+    }
+
+    val syncEnabledFlow: Flow<Boolean> =
+        migratedFlow().flatMapConcat { kv.observeBoolean(KvKeys.SYNC_ENABLED, default = false) }
+
+    val lastSyncAtFlow: Flow<Long> = migratedFlow().flatMapConcat {
+        kv.observeStringOrNull(KvKeys.SYNC_LAST_COMPLETED_AT)
+            .map { it?.toLongOrNull() ?: 0L }
+    }
+
+    fun getSyncSettingsFlow(): Flow<SyncSettings> = migratedFlow().flatMapConcat {
+        combine(
+            kv.observeBoolean(KvKeys.SYNC_ENABLED, default = false),
+            kv.observeString(KvKeys.SYNC_PROVIDER, default = "spotify"),
+            kv.observeBoolean(KvKeys.SYNC_TRACKS, default = true),
+            kv.observeBoolean(KvKeys.SYNC_ALBUMS, default = true),
+            kv.observeBoolean(KvKeys.SYNC_ARTISTS, default = true),
+            kv.observeBoolean(KvKeys.SYNC_PLAYLISTS, default = true),
+            kv.observeStringOrNull(KvKeys.SYNC_SELECTED_PLAYLIST_IDS),
+            kv.observeBoolean(KvKeys.SYNC_PUSH_LOCAL_PLAYLISTS, default = true),
+        ) { values ->
+            SyncSettings(
+                enabled = values[0] as Boolean,
+                provider = values[1] as String,
+                syncTracks = values[2] as Boolean,
+                syncAlbums = values[3] as Boolean,
+                syncArtists = values[4] as Boolean,
+                syncPlaylists = values[5] as Boolean,
+                selectedPlaylistIds = (values[6] as String? ?: "")
+                    .split(",").filter { it.isNotBlank() }.toSet(),
+                pushLocalPlaylists = values[7] as Boolean,
+            )
+        }
     }
 
     override suspend fun getSyncSettings(): SyncSettings {
-        val prefs = dataStore.data.first()
+        ensureSyncMigrated()
         return SyncSettings(
-            enabled = prefs[SYNC_ENABLED] ?: false,
-            provider = prefs[SYNC_PROVIDER] ?: "spotify",
-            syncTracks = prefs[SYNC_TRACKS] ?: true,
-            syncAlbums = prefs[SYNC_ALBUMS] ?: true,
-            syncArtists = prefs[SYNC_ARTISTS] ?: true,
-            syncPlaylists = prefs[SYNC_PLAYLISTS] ?: true,
-            selectedPlaylistIds = (prefs[SYNC_SELECTED_PLAYLIST_IDS] ?: "")
+            enabled = kv.getBoolean(KvKeys.SYNC_ENABLED, default = false),
+            provider = kv.getString(KvKeys.SYNC_PROVIDER, default = "spotify"),
+            syncTracks = kv.getBoolean(KvKeys.SYNC_TRACKS, default = true),
+            syncAlbums = kv.getBoolean(KvKeys.SYNC_ALBUMS, default = true),
+            syncArtists = kv.getBoolean(KvKeys.SYNC_ARTISTS, default = true),
+            syncPlaylists = kv.getBoolean(KvKeys.SYNC_PLAYLISTS, default = true),
+            selectedPlaylistIds = (kv.getStringOrNull(KvKeys.SYNC_SELECTED_PLAYLIST_IDS) ?: "")
                 .split(",").filter { it.isNotBlank() }.toSet(),
-            pushLocalPlaylists = prefs[SYNC_PUSH_LOCAL_PLAYLISTS] ?: true,
+            pushLocalPlaylists = kv.getBoolean(KvKeys.SYNC_PUSH_LOCAL_PLAYLISTS, default = true),
         )
     }
 
     suspend fun saveSyncSettings(settings: SyncSettings) {
-        dataStore.edit { prefs ->
-            prefs[SYNC_ENABLED] = settings.enabled
-            prefs[SYNC_PROVIDER] = settings.provider
-            prefs[SYNC_TRACKS] = settings.syncTracks
-            prefs[SYNC_ALBUMS] = settings.syncAlbums
-            prefs[SYNC_ARTISTS] = settings.syncArtists
-            prefs[SYNC_PLAYLISTS] = settings.syncPlaylists
-            prefs[SYNC_SELECTED_PLAYLIST_IDS] = settings.selectedPlaylistIds.joinToString(",")
-            prefs[SYNC_PUSH_LOCAL_PLAYLISTS] = settings.pushLocalPlaylists
-        }
+        ensureSyncMigrated()
+        kv.setBoolean(KvKeys.SYNC_ENABLED, settings.enabled)
+        kv.setString(KvKeys.SYNC_PROVIDER, settings.provider)
+        kv.setBoolean(KvKeys.SYNC_TRACKS, settings.syncTracks)
+        kv.setBoolean(KvKeys.SYNC_ALBUMS, settings.syncAlbums)
+        kv.setBoolean(KvKeys.SYNC_ARTISTS, settings.syncArtists)
+        kv.setBoolean(KvKeys.SYNC_PLAYLISTS, settings.syncPlaylists)
+        kv.setString(KvKeys.SYNC_SELECTED_PLAYLIST_IDS, settings.selectedPlaylistIds.joinToString(","))
+        kv.setBoolean(KvKeys.SYNC_PUSH_LOCAL_PLAYLISTS, settings.pushLocalPlaylists)
     }
 
     suspend fun setSyncEnabled(enabled: Boolean) {
-        dataStore.edit { it[SYNC_ENABLED] = enabled }
+        ensureSyncMigrated()
+        kv.setBoolean(KvKeys.SYNC_ENABLED, enabled)
     }
 
     override suspend fun setLastSyncAt(timestamp: Long) {
-        dataStore.edit { it[SYNC_LAST_COMPLETED_AT] = timestamp.toString() }
+        ensureSyncMigrated()
+        kv.setString(KvKeys.SYNC_LAST_COMPLETED_AT, timestamp.toString())
     }
 
-    override suspend fun getSyncDataVersion(): Int =
-        dataStore.data.first()[SYNC_DATA_VERSION]?.toIntOrNull() ?: 0
+    override suspend fun getSyncDataVersion(): Int {
+        ensureSyncMigrated()
+        return kv.getStringOrNull(KvKeys.SYNC_DATA_VERSION)?.toIntOrNull() ?: 0
+    }
 
     override suspend fun setSyncDataVersion(version: Int) {
-        dataStore.edit { it[SYNC_DATA_VERSION] = version.toString() }
+        ensureSyncMigrated()
+        kv.setString(KvKeys.SYNC_DATA_VERSION, version.toString())
     }
 
     /**
@@ -623,19 +738,21 @@ class SettingsStore constructor(
      * UX; an Apple-Music-only user can enable AM via this preference
      * before then by writing it directly (or the Phase 6 toggle).
      *
-     * Stored as a comma-separated string for DataStore simplicity.
+     * Stored as a comma-separated string for KvStore portability.
      */
     override suspend fun getEnabledSyncProviders(): Set<String> {
-        val raw = dataStore.data.first()[ENABLED_SYNC_PROVIDERS]
-        return parseEnabledSyncProviders(raw)
+        ensureSyncMigrated()
+        return parseEnabledSyncProviders(kv.getStringOrNull(KvKeys.ENABLED_SYNC_PROVIDERS))
     }
 
     /** Reactive flow of the enabled-providers set. Used by the settings UI. */
-    fun getEnabledSyncProvidersFlow(): Flow<Set<String>> =
-        dataStore.data.map { parseEnabledSyncProviders(it[ENABLED_SYNC_PROVIDERS]) }
+    fun getEnabledSyncProvidersFlow(): Flow<Set<String>> = migratedFlow().flatMapConcat {
+        kv.observeStringOrNull(KvKeys.ENABLED_SYNC_PROVIDERS).map(::parseEnabledSyncProviders)
+    }
 
     suspend fun setEnabledSyncProviders(providers: Set<String>) {
-        dataStore.edit { it[ENABLED_SYNC_PROVIDERS] = providers.joinToString(",") }
+        ensureSyncMigrated()
+        kv.setString(KvKeys.ENABLED_SYNC_PROVIDERS, providers.joinToString(","))
     }
 
     private fun parseEnabledSyncProviders(raw: String?): Set<String> =
@@ -660,19 +777,20 @@ class SettingsStore constructor(
      * provider for an axis it didn't opt into.
      */
     override suspend fun getSyncCollectionsForProvider(providerId: String): Set<String> {
-        val raw = dataStore.data.first()[syncCollectionsKey(providerId)]
-        return parseSyncCollections(raw)
+        ensureSyncMigrated()
+        return parseSyncCollections(kv.getStringOrNull("sync_collections_$providerId"))
     }
 
     /** Reactive variant — used by the wizard to pre-fill its checkboxes
      *  with whatever the user picked last time. */
     fun getSyncCollectionsForProviderFlow(providerId: String): Flow<Set<String>> =
-        dataStore.data.map { parseSyncCollections(it[syncCollectionsKey(providerId)]) }
+        migratedFlow().flatMapConcat {
+            kv.observeStringOrNull("sync_collections_$providerId").map(::parseSyncCollections)
+        }
 
     suspend fun setSyncCollectionsForProvider(providerId: String, collections: Set<String>) {
-        dataStore.edit {
-            it[syncCollectionsKey(providerId)] = collections.joinToString(",")
-        }
+        ensureSyncMigrated()
+        kv.setString("sync_collections_$providerId", collections.joinToString(","))
     }
 
     private fun parseSyncCollections(raw: String?): Set<String> =
@@ -681,6 +799,19 @@ class SettingsStore constructor(
         else raw.split(",").map { it.trim() }.filter { it.isNotEmpty() }.toSet()
 
     override suspend fun clearSyncSettings() {
+        ensureSyncMigrated()
+        kv.remove(KvKeys.SYNC_ENABLED)
+        kv.remove(KvKeys.SYNC_PROVIDER)
+        kv.remove(KvKeys.SYNC_TRACKS)
+        kv.remove(KvKeys.SYNC_ALBUMS)
+        kv.remove(KvKeys.SYNC_ARTISTS)
+        kv.remove(KvKeys.SYNC_PLAYLISTS)
+        kv.remove(KvKeys.SYNC_SELECTED_PLAYLIST_IDS)
+        kv.remove(KvKeys.SYNC_LAST_COMPLETED_AT)
+        kv.remove(KvKeys.SYNC_PUSH_LOCAL_PLAYLISTS)
+        // Defense-in-depth: also clear the now-zombie DataStore copies so
+        // a future re-migration (if we ever re-set MIGRATION_DONE_V1=false)
+        // sees a clean slate.
         dataStore.edit { prefs ->
             prefs.remove(SYNC_ENABLED)
             prefs.remove(SYNC_PROVIDER)
