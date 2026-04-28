@@ -931,13 +931,30 @@ class SyncEngine constructor(
                 // this guard, the original pull-source provider would see the
                 // local as a new playlist on its next sync and create a
                 // duplicate remote.
+                //
+                // **Hosted-XSPF preservation (bugfix Apr 2026):** hosted XSPF
+                // playlists are *also* push-mirror targets — the XSPF URL is
+                // canonical (poller-driven), and Spotify/AM remotes are
+                // downstream mirrors via the auto-push filter. They mark
+                // canonicality with `sourceUrl != null` instead of a
+                // `sync_playlist_source` row, so the existing pull-source
+                // check missed them. Without this guard, the import path
+                // matched the hosted-XSPF local row by name (because the
+                // pushed Spotify/AM mirror has the same name), then deleted
+                // the local row + tracks and re-inserted using the remote's
+                // entity (sourceUrl=null, often 0 tracks if the push
+                // hadn't hydrated track IDs yet). Result: hosted playlist
+                // disappears, replaced by an empty `spotify-*` / `applemusic-*`
+                // row with no `🌐 Hosted` chip.
                 val existingPullSource = if (existingBySpotifyId != null) {
                     syncPlaylistSourceDao.selectForLocal(existingBySpotifyId.id)
                 } else null
                 val isCrossProviderPushMirror = existingPullSource != null
                     && existingPullSource.providerId != providerId
+                val isHostedXspf = existingBySpotifyId?.sourceUrl != null
+                val preserveLocal = isCrossProviderPushMirror || isHostedXspf
 
-                if (existingBySpotifyId != null && existingBySpotifyId.id != remote.entity.id) {
+                if (existingBySpotifyId != null && existingBySpotifyId.id != remote.entity.id && !preserveLocal) {
                     // Remove the old entry's tracks — they'll be replaced below
                     playlistTrackDao.deleteByPlaylistId(existingBySpotifyId.id)
                     playlistDao.delete(existingBySpotifyId)
@@ -945,12 +962,17 @@ class SyncEngine constructor(
                     syncSourceDao.deleteAllForItem(existingBySpotifyId.id, "playlist")
                 }
 
-                if (isCrossProviderPushMirror) {
-                    // Preserve the existing local row + tracks + syncedFrom.
-                    // Just record that we synced with this provider as a
-                    // push mirror by updating sync_playlist_link.syncedAt.
+                if (preserveLocal) {
+                    // Preserve the existing local row + tracks + sourceUrl /
+                    // syncedFrom. Just record that we synced with this
+                    // provider as a push mirror by updating
+                    // sync_playlist_link.syncedAt.
+                    val mirrorReason = when {
+                        isHostedXspf -> "sourceUrl=${existingBySpotifyId!!.sourceUrl}"
+                        else -> "syncedFrom=${existingPullSource!!.providerId}"
+                    }
                     Log.d(TAG, "Cross-provider push mirror for ${existingBySpotifyId!!.id}: " +
-                        "syncedFrom=${existingPullSource!!.providerId}; preserving local tracks")
+                        "$mirrorReason; preserving local tracks")
                     syncPlaylistLinkDao.upsertWithSnapshot(
                         localPlaylistId = existingBySpotifyId.id,
                         providerId = providerId,
@@ -1304,21 +1326,35 @@ class SyncEngine constructor(
                 // provider, this match fired because we're a push mirror
                 // for that local. Don't refetch tracks; only update the
                 // link's syncedAt + sync_source row.
+                //
+                // **Hosted-XSPF preservation (bugfix Apr 2026):** see the
+                // matching guard in the inline Spotify pull above for the
+                // full rationale. Hosted-XSPF playlists mark canonicality
+                // with `sourceUrl != null` rather than a sync_playlist_source
+                // row, so the existing pull-source check alone missed them
+                // and the AM/Tidal/etc. import path was clobbering them
+                // identically to the Spotify path.
                 val existingPullSource = if (existingLocalPlaylist != null) {
                     syncPlaylistSourceDao.selectForLocal(existingLocalPlaylist.id)
                 } else null
                 val isCrossProviderPushMirror = existingPullSource != null
                     && existingPullSource.providerId != providerId
+                val isHostedXspf = existingLocalPlaylist?.sourceUrl != null
+                val preserveLocal = isCrossProviderPushMirror || isHostedXspf
 
-                if (existingLocalPlaylist != null && existingLocalPlaylist.id != remote.entity.id && !isCrossProviderPushMirror) {
+                if (existingLocalPlaylist != null && existingLocalPlaylist.id != remote.entity.id && !preserveLocal) {
                     playlistTrackDao.deleteByPlaylistId(existingLocalPlaylist.id)
                     playlistDao.delete(existingLocalPlaylist)
                     syncSourceDao.deleteAllForItem(existingLocalPlaylist.id, "playlist")
                 }
 
-                if (isCrossProviderPushMirror) {
+                if (preserveLocal) {
+                    val mirrorReason = when {
+                        isHostedXspf -> "sourceUrl=${existingLocalPlaylist!!.sourceUrl}"
+                        else -> "syncedFrom=${existingPullSource!!.providerId}"
+                    }
                     Log.d(TAG, "Cross-provider push mirror for ${existingLocalPlaylist!!.id}: " +
-                        "syncedFrom=${existingPullSource!!.providerId}; preserving local tracks")
+                        "$mirrorReason; preserving local tracks")
                     syncPlaylistLinkDao.upsertWithSnapshot(
                         localPlaylistId = existingLocalPlaylist.id,
                         providerId = providerId,
