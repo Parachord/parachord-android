@@ -6,7 +6,7 @@ import androidx.lifecycle.viewModelScope
 import com.parachord.android.BuildConfig
 import com.parachord.shared.api.GeoLocation
 import com.parachord.shared.api.GeoLocationClient
-import com.parachord.android.data.api.LastFmApi
+import com.parachord.shared.api.LastFmClient
 import com.parachord.shared.api.ListenBrainzClient
 import com.parachord.android.data.db.dao.ArtistDao
 import com.parachord.android.data.db.dao.TrackDao
@@ -29,7 +29,7 @@ class ConcertsViewModel constructor(
     private val artistDao: ArtistDao,
     private val trackDao: TrackDao,
     private val albumDao: AlbumDao,
-    private val lastFmApi: LastFmApi,
+    private val lastFmClient: LastFmClient,
     private val listenBrainzClient: ListenBrainzClient,
 ) : ViewModel() {
 
@@ -238,7 +238,7 @@ class ConcertsViewModel constructor(
         try {
             val lastfmUsername = settingsStore.getLastFmUsername()
             if (lastfmUsername != null) {
-                val response = lastFmApi.getUserTopArtists(
+                val response = lastFmClient.getUserTopArtists(
                     user = lastfmUsername,
                     period = "6month",
                     limit = 40,

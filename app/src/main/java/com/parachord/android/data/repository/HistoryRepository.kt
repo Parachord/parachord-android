@@ -2,9 +2,9 @@ package com.parachord.android.data.repository
 
 import android.util.Log
 import com.parachord.android.BuildConfig
-import com.parachord.android.data.api.LastFmApi
+import com.parachord.shared.api.LastFmClient
 import com.parachord.shared.api.ListenBrainzClient
-import com.parachord.android.data.api.bestImageUrl
+import com.parachord.shared.api.bestImageUrl
 import com.parachord.android.data.metadata.MetadataService
 import com.parachord.android.data.store.SettingsStore
 import kotlinx.coroutines.async
@@ -19,7 +19,7 @@ import kotlin.math.abs
  * Mirrors the desktop app's history page data sources.
  */
 class HistoryRepository constructor(
-    private val lastFmApi: LastFmApi,
+    private val lastFmClient: LastFmClient,
     private val listenBrainzClient: ListenBrainzClient,
     private val settingsStore: SettingsStore,
     private val metadataService: MetadataService,
@@ -42,7 +42,7 @@ class HistoryRepository constructor(
                 return@flow
             }
 
-            val response = lastFmApi.getUserTopTracks(
+            val response = lastFmClient.getUserTopTracks(
                 user = username,
                 period = period,
                 limit = limit,
@@ -118,7 +118,7 @@ class HistoryRepository constructor(
                 return@flow
             }
 
-            val response = lastFmApi.getUserTopAlbums(
+            val response = lastFmClient.getUserTopAlbums(
                 user = username,
                 period = period,
                 limit = limit,
@@ -156,7 +156,7 @@ class HistoryRepository constructor(
                 return@flow
             }
 
-            val response = lastFmApi.getUserTopArtists(
+            val response = lastFmClient.getUserTopArtists(
                 user = username,
                 period = period,
                 limit = limit,
@@ -250,7 +250,7 @@ class HistoryRepository constructor(
     private suspend fun fetchLastFmRecentTracks(): List<RecentTrack> {
         val username = settingsStore.getLastFmUsername() ?: return emptyList()
         return try {
-            val response = lastFmApi.getUserRecentTracks(
+            val response = lastFmClient.getUserRecentTracks(
                 user = username,
                 limit = 50,
                 apiKey = BuildConfig.LASTFM_API_KEY,

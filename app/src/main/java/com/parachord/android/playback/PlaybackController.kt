@@ -16,7 +16,7 @@ import androidx.media3.session.SessionToken
 import com.google.common.util.concurrent.ListenableFuture
 import com.google.common.util.concurrent.MoreExecutors
 import com.parachord.android.BuildConfig
-import com.parachord.android.data.api.LastFmApi
+import com.parachord.shared.api.LastFmClient
 import com.parachord.android.data.db.entity.TrackEntity
 import com.parachord.android.data.metadata.ImageEnrichmentService
 import com.parachord.android.data.metadata.MbidEnrichmentService
@@ -58,7 +58,7 @@ class PlaybackController constructor(
     private val scrobbleManager: ScrobbleManager,
     private val imageEnrichment: ImageEnrichmentService,
     private val mbidEnrichment: MbidEnrichmentService,
-    private val lastFmApi: LastFmApi,
+    private val lastFmClient: LastFmClient,
     private val resolverManager: ResolverManager,
     private val resolverScoring: ResolverScoring,
     private val trackResolverCache: TrackResolverCache,
@@ -1419,7 +1419,7 @@ class PlaybackController constructor(
         spinoffJob = scope.launch(Dispatchers.IO) {
             try {
                 // 1. Fetch similar tracks from Last.fm
-                val response = lastFmApi.getSimilarTracks(
+                val response = lastFmClient.getSimilarTracks(
                     track = track.title,
                     artist = track.artist,
                     apiKey = BuildConfig.LASTFM_API_KEY,
@@ -1562,7 +1562,7 @@ class PlaybackController constructor(
 
         scope.launch(Dispatchers.IO) {
             try {
-                val response = lastFmApi.getSimilarTracks(
+                val response = lastFmClient.getSimilarTracks(
                     track = track.title,
                     artist = track.artist,
                     apiKey = BuildConfig.LASTFM_API_KEY,

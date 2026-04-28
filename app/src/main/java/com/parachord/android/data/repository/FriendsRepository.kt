@@ -2,9 +2,9 @@ package com.parachord.android.data.repository
 
 import android.util.Log
 import com.parachord.android.BuildConfig
-import com.parachord.android.data.api.LastFmApi
+import com.parachord.shared.api.LastFmClient
 import com.parachord.shared.api.ListenBrainzClient
-import com.parachord.android.data.api.bestImageUrl
+import com.parachord.shared.api.bestImageUrl
 import com.parachord.android.data.db.dao.FriendDao
 import com.parachord.android.data.db.entity.FriendEntity
 import com.parachord.android.data.metadata.MetadataService
@@ -24,7 +24,7 @@ import java.util.UUID
  */
 class FriendsRepository constructor(
     private val friendDao: FriendDao,
-    private val lastFmApi: LastFmApi,
+    private val lastFmClient: LastFmClient,
     private val listenBrainzClient: ListenBrainzClient,
     private val metadataService: MetadataService,
     private val settingsStore: SettingsStore,
@@ -146,7 +146,7 @@ class FriendsRepository constructor(
     }
 
     private suspend fun addLastFmFriend(username: String): FriendEntity? {
-        val response = lastFmApi.getUserInfo(
+        val response = lastFmClient.getUserInfo(
             user = username,
             apiKey = BuildConfig.LASTFM_API_KEY,
         )
@@ -236,7 +236,7 @@ class FriendsRepository constructor(
         try {
             val lastFmUsername = settingsStore.getLastFmUsername()
             if (lastFmUsername != null) {
-                val response = lastFmApi.getUserFriends(
+                val response = lastFmClient.getUserFriends(
                     user = lastFmUsername,
                     apiKey = BuildConfig.LASTFM_API_KEY,
                 )
@@ -325,7 +325,7 @@ class FriendsRepository constructor(
     }
 
     private suspend fun refreshLastFmActivity(friend: FriendEntity) {
-        val response = lastFmApi.getUserRecentTracks(
+        val response = lastFmClient.getUserRecentTracks(
             user = friend.username,
             limit = 1,
             apiKey = BuildConfig.LASTFM_API_KEY,
@@ -374,7 +374,7 @@ class FriendsRepository constructor(
         try {
             val tracks = when (service) {
                 "lastfm" -> {
-                    val response = lastFmApi.getUserTopTracks(
+                    val response = lastFmClient.getUserTopTracks(
                         user = username,
                         period = period,
                         limit = 50,
@@ -426,7 +426,7 @@ class FriendsRepository constructor(
         try {
             val albums = when (service) {
                 "lastfm" -> {
-                    val response = lastFmApi.getUserTopAlbums(
+                    val response = lastFmClient.getUserTopAlbums(
                         user = username,
                         period = period,
                         limit = 50,
@@ -471,7 +471,7 @@ class FriendsRepository constructor(
         try {
             val artists = when (service) {
                 "lastfm" -> {
-                    val response = lastFmApi.getUserTopArtists(
+                    val response = lastFmClient.getUserTopArtists(
                         user = username,
                         period = period,
                         limit = 50,
@@ -521,7 +521,7 @@ class FriendsRepository constructor(
         try {
             val tracks = when (service) {
                 "lastfm" -> {
-                    val response = lastFmApi.getUserRecentTracks(
+                    val response = lastFmClient.getUserRecentTracks(
                         user = username,
                         limit = 50,
                         apiKey = BuildConfig.LASTFM_API_KEY,
