@@ -49,6 +49,9 @@ kotlin {
         androidMain.dependencies {
             implementation(libs.ktor.client.okhttp)
             api(libs.sqldelight.android.driver)
+            // EncryptedSharedPreferences for AndroidSecureTokenStore (Phase 9B Stage 3).
+            // Backed by Android Keystore AES-256-GCM. security: C4.
+            implementation(libs.androidx.security.crypto)
         }
         iosMain.dependencies {
             implementation(libs.ktor.client.darwin)

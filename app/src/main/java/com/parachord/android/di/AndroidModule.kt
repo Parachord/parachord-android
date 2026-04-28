@@ -252,15 +252,29 @@ val androidModule = module {
 
     // ── Settings & Auth ──────────────────────────────────────────────
 
-    single { com.parachord.android.data.store.SecureTokenStore(androidContext()) }
+    // SecureTokenStore — Android impl is EncryptedSharedPreferences over Android
+    // Keystore (AES-256-GCM). The interface lives in shared/commonMain so the
+    // shared SettingsStore binds to it without an Android dep. security: C4.
+    single<com.parachord.shared.store.SecureTokenStore> {
+        com.parachord.shared.store.AndroidSecureTokenStore(androidContext())
+    }
     // KvStore — KMP-friendly key-value store backed by SharedPreferences
-    // (Phase 9B Stage 1). Stage 2 migrates SettingsStore reads/writes onto
-    // this seam one surface at a time; Stage 3 moves SettingsStore to
-    // shared/commonMain. Until Stage 2 lands no one consumes this — the
-    // binding sits dormant on purpose so the dependency is wired but DataStore
-    // remains the live store.
+    // (Phase 9B Stage 1). Stage 3 fully consolidates SettingsStore onto KvStore.
     single { com.parachord.shared.store.KvStoreFactory.create(androidContext()) }
-    singleOf(::SettingsStore) bind com.parachord.shared.sync.SyncSettingsProvider::class
+    // One-shot DataStore→KvStore migration (Phase 9B Stage 3). Runs the first
+    // time SettingsStore accesses KvStore on an upgraded install; subsequent
+    // launches see the `_migration_v1` marker and skip the copy.
+    single<com.parachord.shared.store.SettingsMigration> {
+        com.parachord.android.data.store.AndroidDataStoreMigration(get())
+    }
+    single {
+        com.parachord.shared.settings.SettingsStore(
+            secureStore = get(),
+            kv = get(),
+            migration = get(),
+            appleMusicDeveloperTokenFallback = com.parachord.android.BuildConfig.APPLE_MUSIC_DEVELOPER_TOKEN,
+        )
+    } bind com.parachord.shared.sync.SyncSettingsProvider::class
     singleOf(::OAuthManager)
     singleOf(::NetworkMonitor)
 
