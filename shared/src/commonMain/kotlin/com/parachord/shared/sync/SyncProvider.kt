@@ -96,6 +96,40 @@ interface SyncProvider {
      */
     suspend fun deletePlaylist(externalPlaylistId: String): DeleteResult
 
+    /**
+     * Catalog-search-based ID hydration (un-defers Decision D1).
+     *
+     * Search the provider's catalog for a track matching the given
+     * metadata. Returns the provider-specific external ID format —
+     * `"spotify:track:<id>"` for Spotify, the bare numeric catalog
+     * ID for Apple Music, etc. Returns null when no high-confidence
+     * match is found (caller skips the track on push rather than
+     * pushing a wrong-song match).
+     *
+     * SyncEngine calls this from [hydrateMissingTrackIds] before
+     * extracting external IDs for the push, so a freshly-imported
+     * playlist whose tracks lack provider IDs (e.g. a hosted XSPF)
+     * can still push a complete tracklist on first sync. Resolved
+     * IDs are persisted back to the track row so subsequent syncs
+     * skip the search.
+     *
+     * Default: null (no catalog search). Providers without a
+     * searchable catalog (e.g. SoundCloud once it gets sync) inherit
+     * this no-op and tracks lacking the relevant ID are silently
+     * skipped, matching the pre-Decision-D1 behavior.
+     *
+     * Confidence: implementations should return null for matches
+     * below the equivalent of [com.parachord.shared.resolver.MIN_CONFIDENCE_THRESHOLD]
+     * (0.60) using [com.parachord.shared.resolver.scoreConfidence] —
+     * better to push N-1 tracks than to pollute the user's mirror
+     * with a wrong-song match.
+     */
+    suspend fun searchForTrackId(
+        title: String,
+        artist: String,
+        album: String? = null,
+    ): String? = null
+
     // ── Library surface (collection sync — Phase 6.5+) ───────────────
     // Pull the user's saved tracks / albums / followed artists. Push
     // adds/removes for tracks/albums; artists are pull-only on Apple

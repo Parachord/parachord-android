@@ -17,6 +17,9 @@ import com.parachord.shared.model.SyncSource
 import com.parachord.shared.model.Track
 import com.parachord.shared.platform.Log
 import com.parachord.shared.platform.currentTimeMillis
+import kotlinx.coroutines.async
+import kotlinx.coroutines.awaitAll
+import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.sync.Mutex
 
 class SyncEngine constructor(
@@ -1694,7 +1697,13 @@ class SyncEngine constructor(
                     snapshotId = snapshotId,
                 )
 
-                val tracks = playlistTrackDao.getByPlaylistIdSync(playlist.id)
+                val rawTracks = playlistTrackDao.getByPlaylistIdSync(playlist.id)
+                // Hydrate provider-specific IDs for tracks lacking them
+                // (e.g. freshly-imported hosted XSPF where the resolver
+                // pipeline hasn't backfilled appleMusicId yet) so the
+                // first push ships a complete tracklist instead of an
+                // empty mirror.
+                val tracks = hydrateMissingTrackIds(playlist.id, rawTracks, provider)
                 val externalTrackIds = extractExternalTrackIds(tracks, providerId)
                 if (externalTrackIds.isNotEmpty()) {
                     provider.replacePlaylistTracks(externalId, externalTrackIds)
@@ -1750,9 +1759,9 @@ class SyncEngine constructor(
 
     /**
      * Extracts the per-provider external IDs from a playlist's tracks.
-     * Tracks without the relevant ID are silently skipped — Phase 4
-     * defers catalog-search-based ID resolution, so Apple Music push
-     * only handles tracks that already have an `appleMusicId`.
+     * Tracks without the relevant ID are silently skipped — call
+     * [hydrateMissingTrackIds] beforehand to populate IDs via catalog
+     * search.
      */
     private fun extractExternalTrackIds(
         tracks: List<PlaylistTrack>,
@@ -1761,6 +1770,115 @@ class SyncEngine constructor(
         SpotifySyncProvider.PROVIDER_ID -> tracks.mapNotNull { it.trackSpotifyUri }
         AppleMusicSyncProvider.PROVIDER_ID -> tracks.mapNotNull { it.trackAppleMusicId }
         else -> emptyList()
+    }
+
+    /**
+     * True if [track] is missing the external ID required to push it on
+     * [providerId]. Used by [hydrateMissingTrackIds] to identify which
+     * tracks need a catalog-search round-trip before push.
+     */
+    private fun missingProviderId(track: PlaylistTrack, providerId: String): Boolean = when (providerId) {
+        SpotifySyncProvider.PROVIDER_ID -> track.trackSpotifyUri.isNullOrBlank()
+        AppleMusicSyncProvider.PROVIDER_ID -> track.trackAppleMusicId.isNullOrBlank()
+        else -> true
+    }
+
+    /**
+     * Apply a freshly-resolved provider ID to a [PlaylistTrack] row.
+     * For Spotify the resolved value is the full `spotify:track:<id>`
+     * URI; we also derive the bare `<id>` for the legacy `trackSpotifyId`
+     * scalar. For Apple Music the resolved value is the bare numeric
+     * catalog ID — written directly into `trackAppleMusicId`.
+     */
+    private fun applyResolvedId(
+        track: PlaylistTrack,
+        providerId: String,
+        resolvedId: String,
+    ): PlaylistTrack = when (providerId) {
+        SpotifySyncProvider.PROVIDER_ID -> {
+            val bareId = resolvedId.removePrefix("spotify:track:")
+            track.copy(
+                trackSpotifyUri = resolvedId,
+                trackSpotifyId = bareId.takeIf { it.isNotBlank() } ?: track.trackSpotifyId,
+            )
+        }
+        AppleMusicSyncProvider.PROVIDER_ID -> track.copy(trackAppleMusicId = resolvedId)
+        else -> track
+    }
+
+    /**
+     * Catalog-search-based ID hydration (un-defers Decision D1).
+     *
+     * For each track in [tracks] missing the provider's ID, calls
+     * [com.parachord.shared.sync.SyncProvider.searchForTrackId] and persists
+     * the resolved ID back to the playlist_track row. Returns the
+     * (potentially-updated) track list ready for [extractExternalTrackIds].
+     *
+     * Without this step, a freshly-imported hosted XSPF would push a 0-track
+     * mirror to Apple Music (since the tracks lack `trackAppleMusicId`),
+     * which then poisons the next sync's import-by-name path. With this
+     * step, every track that the provider's catalog can match gets pushed.
+     *
+     * **Persistence:** uses [PlaylistTrackDao.replaceAll] (atomic delete +
+     * insert in a single SQLDelight transaction) so the playlist isn't
+     * briefly empty during the write. The track list returned reflects
+     * the just-persisted state.
+     *
+     * **Concurrency:** runs catalog-search calls in parallel via
+     * `coroutineScope { ... }.awaitAll()`. SpotifyClient is rate-limited by
+     * Ktor's HttpTimeout; the AM iTunes Search API is unauthenticated and
+     * pacing is governed by `INTER_REQUEST_DELAY_MS` inside
+     * [AppleMusicSyncProvider.searchForTrackId]. Worst case is a ~10-15s
+     * one-time hydration on first sync of a 50-track hosted playlist —
+     * subsequent syncs hit the persisted IDs and skip the search.
+     */
+    private suspend fun hydrateMissingTrackIds(
+        playlistId: String,
+        tracks: List<PlaylistTrack>,
+        provider: com.parachord.shared.sync.SyncProvider,
+    ): List<PlaylistTrack> {
+        val needsHydration = tracks.filter { missingProviderId(it, provider.id) }
+        if (needsHydration.isEmpty()) return tracks
+
+        Log.d(TAG, "Hydrating ${needsHydration.size}/${tracks.size} track IDs for " +
+            "$playlistId on ${provider.id}")
+
+        val resolved: List<Pair<Int, String?>> = coroutineScope {
+            needsHydration.map { track ->
+                async {
+                    val resolvedId = try {
+                        provider.searchForTrackId(
+                            title = track.trackTitle,
+                            artist = track.trackArtist,
+                            album = track.trackAlbum,
+                        )
+                    } catch (e: Exception) {
+                        Log.w(TAG, "hydrate: search threw for '${track.trackTitle}'", e)
+                        null
+                    }
+                    track.position to resolvedId
+                }
+            }.awaitAll()
+        }
+
+        val resolvedByPosition: Map<Int, String> = resolved
+            .mapNotNull { (pos, id) -> if (id != null) pos to id else null }
+            .toMap()
+
+        if (resolvedByPosition.isEmpty()) {
+            Log.d(TAG, "Hydrate: no IDs resolved for $playlistId on ${provider.id}")
+            return tracks
+        }
+
+        val updatedTracks = tracks.map { track ->
+            val newId = resolvedByPosition[track.position]
+            if (newId != null) applyResolvedId(track, provider.id, newId) else track
+        }
+
+        playlistTrackDao.replaceAll(playlistId, updatedTracks)
+        Log.d(TAG, "Hydrated ${resolvedByPosition.size} ${provider.id} IDs into $playlistId " +
+            "(${tracks.size - resolvedByPosition.size - (tracks.size - needsHydration.size)} unresolved)")
+        return updatedTracks
     }
 
     /**
@@ -1787,7 +1905,11 @@ class SyncEngine constructor(
             Log.w(TAG, "pushPlaylist: no link for ${playlist.id} on ${provider.id}; skip")
             return
         }
-        val tracks = playlistTrackDao.getByPlaylistIdSync(playlist.id)
+        val rawTracks = playlistTrackDao.getByPlaylistIdSync(playlist.id)
+        // Hydrate provider-specific IDs for tracks lacking them — see
+        // [hydrateMissingTrackIds] for rationale. Same pattern as the
+        // first-push branch above.
+        val tracks = hydrateMissingTrackIds(playlist.id, rawTracks, provider)
         val externalTrackIds = extractExternalTrackIds(tracks, provider.id)
         val snapshotId = provider.replacePlaylistTracks(externalId, externalTrackIds)
 

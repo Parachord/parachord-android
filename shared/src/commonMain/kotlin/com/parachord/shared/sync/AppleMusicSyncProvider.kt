@@ -13,6 +13,7 @@ import com.parachord.shared.api.AmTrackReference
 import com.parachord.shared.api.AmTracksRequest
 import com.parachord.shared.api.AmUpdatePlaylistAttributes
 import com.parachord.shared.api.AmUpdatePlaylistRequest
+import com.parachord.shared.api.AppleMusicClient
 import com.parachord.shared.api.AppleMusicLibraryClient
 import com.parachord.shared.api.AppleMusicLibraryClient.AmHttpException
 import io.ktor.http.isSuccess
@@ -73,6 +74,14 @@ import kotlinx.datetime.Instant
  */
 class AppleMusicSyncProvider(
     private val api: AppleMusicLibraryClient,
+    /**
+     * Catalog-search client (iTunes Search API). Used by [searchForTrackId]
+     * to hydrate `appleMusicId` for tracks lacking one before push. Distinct
+     * from [api] (the Library API client) because catalog search lives at
+     * `itunes.apple.com` and needs no auth, whereas the library API at
+     * `api.music.apple.com` needs the dev-token + MUT.
+     */
+    private val catalogClient: AppleMusicClient,
 ) : SyncProvider {
 
     companion object {
@@ -343,6 +352,47 @@ class AppleMusicSyncProvider(
             }
         } catch (e: Exception) {
             DeleteResult.Failed(e)
+        }
+    }
+
+    /**
+     * Catalog-search-based ID hydration (un-defers Decision D1).
+     *
+     * Uses iTunes Search (`/search?media=music&entity=song`) — the
+     * catalog endpoint, NOT the library API. Returns the bare numeric
+     * `trackId` as a string; this matches the format MusicKit catalog
+     * IDs use, and AppleMusicLibraryClient.appendPlaylistTracks /
+     * replacePlaylistTracks accepts the same.
+     *
+     * Confidence-gated against [com.parachord.shared.resolver.ResolverScoring.MIN_CONFIDENCE_THRESHOLD]
+     * (0.60) using [com.parachord.shared.resolver.scoreConfidence].
+     */
+    override suspend fun searchForTrackId(title: String, artist: String, album: String?): String? {
+        delay(INTER_REQUEST_DELAY_MS)
+        // iTunes Search has no field qualifiers; just concat the metadata
+        // and let its ranking find the best song match.
+        val term = listOfNotNull(title, artist, album?.takeIf { it.isNotBlank() })
+            .joinToString(" ")
+        return try {
+            val response = catalogClient.search(term = term, media = "music", entity = "song", limit = 5)
+            val songs = response.results.filter { it.kind == "song" || it.wrapperType == "track" }
+            val candidate = songs.firstOrNull { it.trackId != null } ?: return null
+            val confidence = com.parachord.shared.resolver.scoreConfidence(
+                targetTitle = title,
+                targetArtist = artist,
+                matchedTitle = candidate.trackName,
+                matchedArtist = candidate.artistName,
+            )
+            if (confidence < com.parachord.shared.resolver.ResolverScoring.MIN_CONFIDENCE_THRESHOLD) {
+                Log.d(TAG, "searchForTrackId: low-confidence match for '$title' by " +
+                    "'$artist' (got '${candidate.trackName}' by '${candidate.artistName}', " +
+                    "conf=$confidence) — skipping")
+                return null
+            }
+            candidate.trackId.toString()
+        } catch (e: Exception) {
+            Log.w(TAG, "searchForTrackId failed for '$title' by '$artist'", e)
+            null
         }
     }
 

@@ -425,4 +425,49 @@ class SpotifySyncProvider(
             DeleteResult.Failed(e)
         }
     }
+
+    /**
+     * Catalog-search-based ID hydration (un-defers Decision D1).
+     *
+     * Builds a field-qualified Spotify search query (`track:"…" artist:"…"
+     * album:"…"`) — the field qualifiers dramatically improve match
+     * precision over a plain term search. Filters to playable tracks
+     * (`isPlayable != false`) so users don't end up with greyed-out
+     * Spotify rows. Confidence-gated against
+     * [com.parachord.shared.resolver.MIN_CONFIDENCE_THRESHOLD] using
+     * [com.parachord.shared.resolver.scoreConfidence] — under the floor
+     * we return null and the caller skips the track rather than pushing a
+     * wrong-song mirror.
+     */
+    override suspend fun searchForTrackId(title: String, artist: String, album: String?): String? {
+        val q = buildString {
+            append("track:\""); append(title); append('"')
+            append(" artist:\""); append(artist); append('"')
+            if (!album.isNullOrBlank()) {
+                append(" album:\""); append(album); append('"')
+            }
+        }
+        return try {
+            val response = withRetry { spotifyClient.search(query = q, type = "track", limit = 5) }
+            val items = response.tracks?.items.orEmpty()
+            val candidate = items.firstOrNull { it.isPlayable != false } ?: return null
+            val candidateId = candidate.id ?: return null
+            val confidence = com.parachord.shared.resolver.scoreConfidence(
+                targetTitle = title,
+                targetArtist = artist,
+                matchedTitle = candidate.name,
+                matchedArtist = candidate.artistName,
+            )
+            if (confidence < com.parachord.shared.resolver.ResolverScoring.MIN_CONFIDENCE_THRESHOLD) {
+                Log.d(TAG, "searchForTrackId: low-confidence match for '$title' by " +
+                    "'$artist' (got '${candidate.name}' by '${candidate.artistName}', " +
+                    "conf=$confidence) — skipping")
+                return null
+            }
+            "spotify:track:$candidateId"
+        } catch (e: Exception) {
+            Log.w(TAG, "searchForTrackId failed for '$title' by '$artist'", e)
+            null
+        }
+    }
 }
