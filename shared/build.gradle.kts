@@ -24,6 +24,12 @@ kotlin {
             implementation(libs.kotlinx.serialization.json)
             implementation(libs.kotlinx.coroutines.core)
             implementation(libs.kotlinx.datetime)
+            // multiplatform-settings (Phase 9B): KMP-friendly key-value store
+            // backed by SharedPreferences on Android, NSUserDefaults on iOS.
+            // The `coroutines` artifact provides Flow-based observable settings
+            // that mirror DataStore's reactive surface.
+            api(libs.multiplatform.settings)
+            api(libs.multiplatform.settings.coroutines)
             // Ktor HTTP client (Phase 2)
             api(libs.ktor.client.core)
             implementation(libs.ktor.client.content.negotiation)
