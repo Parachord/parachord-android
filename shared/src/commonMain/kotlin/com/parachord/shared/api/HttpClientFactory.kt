@@ -1,5 +1,9 @@
 package com.parachord.shared.api
 
+import com.parachord.shared.api.auth.AuthRealm
+import com.parachord.shared.api.auth.AuthTokenProvider
+import com.parachord.shared.api.auth.OAuthTokenRefresher
+import com.parachord.shared.api.transport.OAuthRefreshPlugin
 import com.parachord.shared.config.AppConfig
 import io.ktor.client.HttpClient
 import io.ktor.client.HttpClientConfig
@@ -23,14 +27,22 @@ import kotlinx.serialization.json.Json
  *  1. ContentNegotiation — first, so subsequent plugins can read/write JSON bodies
  *  2. Logging — early, sees behavior post-content-negotiation; sanitizes Authorization
  *  3. DefaultRequest — sets User-Agent + baseline headers; before auth so it applies on retries
- *  4. HttpTimeout — last, wraps everything in 60s/15s/30s budget
- *
- * Subsequent task (9E.1.0 Tasks 7-11) inserts `OAuthRefreshPlugin` between
- * DefaultRequest and HttpTimeout.
+ *  4. OAuthRefreshPlugin — 401 → refresh + retry, single-flight per realm
+ *  5. HttpTimeout — last, wraps everything in 60s/15s/30s budget
  */
-expect fun createHttpClient(json: Json, appConfig: AppConfig): HttpClient
+expect fun createHttpClient(
+    json: Json,
+    appConfig: AppConfig,
+    authProvider: AuthTokenProvider,
+    tokenRefresher: OAuthTokenRefresher,
+): HttpClient
 
-internal fun HttpClientConfig<*>.installSharedPlugins(json: Json, appConfig: AppConfig) {
+internal fun HttpClientConfig<*>.installSharedPlugins(
+    json: Json,
+    appConfig: AppConfig,
+    authProvider: AuthTokenProvider,
+    tokenRefresher: OAuthTokenRefresher,
+) {
     install(ContentNegotiation) { json(json) }
     install(Logging) {
         level = if (appConfig.isDebug) LogLevel.HEADERS else LogLevel.INFO
@@ -38,6 +50,15 @@ internal fun HttpClientConfig<*>.installSharedPlugins(json: Json, appConfig: App
     }
     defaultRequest {
         header(HttpHeaders.UserAgent, appConfig.userAgent)
+    }
+    install(OAuthRefreshPlugin) {
+        this.tokenProvider = authProvider
+        this.tokenRefresher = tokenRefresher
+        this.refreshableHosts = mapOf(
+            "api.spotify.com" to AuthRealm.Spotify,
+            // SoundCloud added when its native client migrates from raw OkHttp
+            // calls in a later 9E phase.
+        )
     }
     install(HttpTimeout) {
         requestTimeoutMillis = 60_000     // AI endpoints take 30–60s (CLAUDE.md "AI generation needs long timeouts")

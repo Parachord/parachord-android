@@ -1,5 +1,9 @@
 package com.parachord.shared.api
 
+import com.parachord.shared.api.auth.AuthCredential
+import com.parachord.shared.api.auth.AuthRealm
+import com.parachord.shared.api.auth.AuthTokenProvider
+import com.parachord.shared.api.auth.OAuthTokenRefresher
 import com.parachord.shared.config.AppConfig
 import io.ktor.client.HttpClient
 import io.ktor.client.engine.mock.MockEngine
@@ -23,6 +27,14 @@ class HttpClientFactoryTest {
     )
     private val json = Json { ignoreUnknownKeys = true }
 
+    private val stubProvider = object : AuthTokenProvider {
+        override suspend fun tokenFor(realm: AuthRealm): AuthCredential? = null
+        override suspend fun invalidate(realm: AuthRealm) {}
+    }
+    private val stubRefresher = object : OAuthTokenRefresher {
+        override suspend fun refresh(realm: AuthRealm): AuthCredential.BearerToken? = null
+    }
+
     @Test
     fun userAgent_setOnEveryRequest() = runBlocking {
         var capturedUA: String? = null
@@ -31,7 +43,7 @@ class HttpClientFactoryTest {
             respond("ok", HttpStatusCode.OK, headersOf(HttpHeaders.ContentType, "text/plain"))
         }
         val client = HttpClient(mock) {
-            installSharedPlugins(json, appConfig)
+            installSharedPlugins(json, appConfig, stubProvider, stubRefresher)
         }
         client.get("https://example.com/test")
         assertEquals("Parachord/0.5.0-test (Android; https://parachord.app)", capturedUA)
@@ -40,7 +52,7 @@ class HttpClientFactoryTest {
     @Test
     fun httpTimeout_pluginInstalled() {
         val client = HttpClient(MockEngine { respond("ok") }) {
-            installSharedPlugins(json, appConfig)
+            installSharedPlugins(json, appConfig, stubProvider, stubRefresher)
         }
         assertNotNull(client.pluginOrNull(HttpTimeout))
     }
@@ -50,7 +62,7 @@ class HttpClientFactoryTest {
         // expectSuccess=false means call sites pattern-match status, not catch exceptions.
         val mock = MockEngine { respond("not found", HttpStatusCode.NotFound) }
         val client = HttpClient(mock) {
-            installSharedPlugins(json, appConfig)
+            installSharedPlugins(json, appConfig, stubProvider, stubRefresher)
         }
         // If expectSuccess were true, this would throw ClientRequestException.
         val response = client.get("https://example.com/missing")
