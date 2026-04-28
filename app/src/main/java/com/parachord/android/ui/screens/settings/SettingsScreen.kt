@@ -386,7 +386,7 @@ private fun PlugInsTab(
     onBandsintownDisconnect: () -> Unit = {},
     onSongkickApiKeySubmit: (String) -> Unit = {},
     onSongkickDisconnect: () -> Unit = {},
-    concertLocation: SettingsStore.ConcertLocation = SettingsStore.ConcertLocation(null, null, null, 50),
+    concertLocation: com.parachord.android.data.store.ConcertLocation = com.parachord.android.data.store.ConcertLocation(null, null, null, 50),
     onConcertLocationSelected: (Double, Double, String) -> Unit = { _, _, _ -> },
 ) {
     var selectedPlugin by remember { mutableStateOf<PluginInfo?>(null) }
@@ -976,7 +976,7 @@ private fun PluginConfigSheet(
     onBandsintownDisconnect: () -> Unit = {},
     onSongkickApiKeySubmit: (String) -> Unit = {},
     onSongkickDisconnect: () -> Unit = {},
-    concertLocation: SettingsStore.ConcertLocation = SettingsStore.ConcertLocation(null, null, null, 50),
+    concertLocation: com.parachord.android.data.store.ConcertLocation = com.parachord.android.data.store.ConcertLocation(null, null, null, 50),
     onConcertLocationSelected: (Double, Double, String) -> Unit = { _, _, _ -> },
 ) {
     val sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
@@ -1787,7 +1787,7 @@ private fun ConcertProviderConfig(
     devPortalUrl: String,
     onSubmitKey: (String) -> Unit,
     onDisconnect: () -> Unit,
-    concertLocation: SettingsStore.ConcertLocation,
+    concertLocation: com.parachord.android.data.store.ConcertLocation,
     onConcertLocationSelected: (Double, Double, String) -> Unit,
 ) {
     val uriHandler = LocalUriHandler.current
@@ -1882,7 +1882,8 @@ private fun ConcertProviderConfig(
     )
     Spacer(modifier = Modifier.height(8.dp))
 
-    if (concertLocation.city != null) {
+    val concertCity = concertLocation.city
+    if (concertCity != null) {
         Row(verticalAlignment = Alignment.CenterVertically) {
             Icon(
                 Icons.Filled.LocationOn,
@@ -1892,7 +1893,7 @@ private fun ConcertProviderConfig(
             )
             Spacer(modifier = Modifier.width(8.dp))
             Text(
-                text = concertLocation.city,
+                text = concertCity,
                 style = MaterialTheme.typography.bodyMedium,
                 modifier = Modifier.weight(1f),
             )

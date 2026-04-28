@@ -166,9 +166,11 @@ class ConcertsViewModel constructor(
                 if (artists.isEmpty()) {
                     // Fall back to local events by location if no library artists
                     val loc = settingsStore.getConcertLocation()
-                    if (loc.latitude != null && loc.longitude != null) {
+                    val lat = loc.latitude
+                    val lon = loc.longitude
+                    if (lat != null && lon != null) {
                         concertsRepository.getLocalEvents(
-                            loc.latitude, loc.longitude, loc.radiusMiles, forceRefresh,
+                            lat, lon, loc.radiusMiles, forceRefresh,
                         ).collect { _events.value = it }
                     } else {
                         _events.value = Resource.Success(emptyList())

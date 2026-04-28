@@ -453,12 +453,12 @@ class SettingsViewModel constructor(
 
     // --- Concert Location ---
 
-    val concertLocation: StateFlow<SettingsStore.ConcertLocation> =
+    val concertLocation: StateFlow<com.parachord.android.data.store.ConcertLocation> =
         settingsStore.getConcertLocationFlow()
             .stateIn(
                 viewModelScope,
                 SharingStarted.WhileSubscribed(5_000),
-                SettingsStore.ConcertLocation(null, null, null, 50),
+                com.parachord.android.data.store.ConcertLocation(null, null, null, 50),
             )
 
     fun setConcertLocation(lat: Double, lon: Double, city: String) {
