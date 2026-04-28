@@ -32,6 +32,12 @@ kotlin {
             api(libs.sqldelight.coroutines)
             // Koin (Phase 4)
             api(libs.koin.core)
+            // KMP crypto — MD5 for Last.fm api_sig (Phase 9E.1.0)
+            implementation(libs.kotlincrypto.hash.md5)
+        }
+        commonTest.dependencies {
+            implementation(kotlin("test"))
+            implementation(libs.ktor.client.mock)
         }
         androidMain.dependencies {
             implementation(libs.ktor.client.okhttp)

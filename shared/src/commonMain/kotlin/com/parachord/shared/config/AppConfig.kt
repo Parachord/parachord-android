@@ -18,4 +18,15 @@ data class AppConfig(
     val appleMusicDeveloperToken: String = "",
     val ticketmasterApiKey: String = "",
     val seatGeekClientId: String = "",
+    /**
+     * User-Agent header value for outbound HTTP requests.
+     * Format: "Parachord/<version> (<platform>; <homepage>)"
+     * Required by MusicBrainz (rejects default OkHttp UA with 403). See CLAUDE.md mistake #32.
+     */
+    val userAgent: String = "",
+    /**
+     * True for debug builds; controls log verbosity in the HTTP transport stack
+     * (e.g., Ktor Logging plugin LogLevel).
+     */
+    val isDebug: Boolean = false,
 )
