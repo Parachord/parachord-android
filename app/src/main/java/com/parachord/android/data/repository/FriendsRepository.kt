@@ -3,7 +3,7 @@ package com.parachord.android.data.repository
 import android.util.Log
 import com.parachord.android.BuildConfig
 import com.parachord.android.data.api.LastFmApi
-import com.parachord.android.data.api.ListenBrainzApi
+import com.parachord.shared.api.ListenBrainzClient
 import com.parachord.android.data.api.bestImageUrl
 import com.parachord.android.data.db.dao.FriendDao
 import com.parachord.android.data.db.entity.FriendEntity
@@ -25,7 +25,7 @@ import java.util.UUID
 class FriendsRepository constructor(
     private val friendDao: FriendDao,
     private val lastFmApi: LastFmApi,
-    private val listenBrainzApi: ListenBrainzApi,
+    private val listenBrainzClient: ListenBrainzClient,
     private val metadataService: MetadataService,
     private val settingsStore: SettingsStore,
 ) {
@@ -163,7 +163,7 @@ class FriendsRepository constructor(
     }
 
     private suspend fun addListenBrainzFriend(username: String): FriendEntity? {
-        val exists = listenBrainzApi.validateUser(username)
+        val exists = listenBrainzClient.validateUser(username)
         if (!exists) return null
 
         return FriendEntity(
@@ -184,7 +184,7 @@ class FriendsRepository constructor(
             when (friend.service) {
                 "listenbrainz" -> {
                     val token = settingsStore.getListenBrainzToken() ?: return
-                    listenBrainzApi.followUser(friend.username, token)
+                    listenBrainzClient.followUser(friend.username, token)
                     Log.d(TAG, "Followed ${friend.username} on ListenBrainz")
                 }
                 // Last.fm deprecated user.addFriend — can't follow via API
@@ -203,7 +203,7 @@ class FriendsRepository constructor(
             when (friend.service) {
                 "listenbrainz" -> {
                     val token = settingsStore.getListenBrainzToken() ?: return
-                    listenBrainzApi.unfollowUser(friend.username, token)
+                    listenBrainzClient.unfollowUser(friend.username, token)
                     Log.d(TAG, "Unfollowed ${friend.username} on ListenBrainz")
                 }
                 // Last.fm deprecated friend management API — can't unfollow via API.
@@ -266,7 +266,7 @@ class FriendsRepository constructor(
         try {
             val lbUsername = settingsStore.getListenBrainzUsername()
             if (lbUsername != null) {
-                val following = listenBrainzApi.getUserFollowing(lbUsername)
+                val following = listenBrainzClient.getUserFollowing(lbUsername)
                 for (username in following) {
                     val key = "listenbrainz:${username.lowercase()}"
                     if (key !in existingByKey && key !in deletedKeys) {
@@ -343,7 +343,7 @@ class FriendsRepository constructor(
     }
 
     private suspend fun refreshListenBrainzActivity(friend: FriendEntity) {
-        val listens = listenBrainzApi.getRecentListens(friend.username, count = 1)
+        val listens = listenBrainzClient.getRecentListens(friend.username, count = 1)
         val listen = listens.firstOrNull()
         friendDao.updateCachedTrack(
             id = friend.id,
@@ -391,7 +391,7 @@ class FriendsRepository constructor(
                     } ?: emptyList()
                 }
                 "listenbrainz" -> {
-                    val recordings = listenBrainzApi.getUserTopRecordings(
+                    val recordings = listenBrainzClient.getUserTopRecordings(
                         username = username,
                         range = periodToLbRange(period),
                         count = 50,
@@ -443,7 +443,7 @@ class FriendsRepository constructor(
                     } ?: emptyList()
                 }
                 "listenbrainz" -> {
-                    val releases = listenBrainzApi.getUserTopReleases(
+                    val releases = listenBrainzClient.getUserTopReleases(
                         username = username,
                         range = periodToLbRange(period),
                         count = 50,
@@ -487,7 +487,7 @@ class FriendsRepository constructor(
                     } ?: emptyList()
                 }
                 "listenbrainz" -> {
-                    val lbArtists = listenBrainzApi.getUserTopArtists(
+                    val lbArtists = listenBrainzClient.getUserTopArtists(
                         username = username,
                         range = periodToLbRange(period),
                         count = 50,
@@ -539,7 +539,7 @@ class FriendsRepository constructor(
                     } ?: emptyList()
                 }
                 "listenbrainz" -> {
-                    val listens = listenBrainzApi.getRecentListens(username, count = 50)
+                    val listens = listenBrainzClient.getRecentListens(username, count = 50)
                     listens.map { listen ->
                         RecentTrack(
                             title = listen.trackName,

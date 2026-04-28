@@ -1,8 +1,8 @@
 package com.parachord.android.data.repository
 
 import android.util.Log
-import com.parachord.android.data.api.LbPlaylistTrack
-import com.parachord.android.data.api.ListenBrainzApi
+import com.parachord.shared.api.LbPlaylistTrack
+import com.parachord.shared.api.ListenBrainzClient
 import com.parachord.android.data.store.SettingsStore
 import kotlinx.coroutines.async
 import kotlinx.coroutines.coroutineScope
@@ -16,7 +16,7 @@ import kotlinx.coroutines.coroutineScope
  * the most recent 4 of each type. Tracks are loaded lazily per playlist.
  */
 class WeeklyPlaylistsRepository constructor(
-    private val listenBrainzApi: ListenBrainzApi,
+    private val listenBrainzClient: ListenBrainzClient,
     private val settingsStore: SettingsStore,
 ) {
     companion object {
@@ -41,7 +41,7 @@ class WeeklyPlaylistsRepository constructor(
         val username = settingsStore.getListenBrainzUsername() ?: return null
 
         return try {
-            val allPlaylists = listenBrainzApi.getCreatedForPlaylists(username)
+            val allPlaylists = listenBrainzClient.getCreatedForPlaylists(username)
 
             val jamsPlaylists = allPlaylists
                 .filter { it.title.contains("weekly jams", ignoreCase = true) }
@@ -55,7 +55,7 @@ class WeeklyPlaylistsRepository constructor(
 
             val weekLabels = listOf("This Week", "Last Week", "2 Weeks Ago", "3 Weeks Ago")
 
-            fun buildEntries(playlists: List<com.parachord.android.data.api.LbCreatedForPlaylist>, defaultDesc: String) =
+            fun buildEntries(playlists: List<com.parachord.shared.api.LbCreatedForPlaylist>, defaultDesc: String) =
                 playlists.mapIndexed { i, p ->
                     WeeklyPlaylistEntry(
                         id = p.id,
@@ -89,7 +89,7 @@ class WeeklyPlaylistsRepository constructor(
      */
     suspend fun loadPlaylistTracks(playlistId: String): List<LbPlaylistTrack> {
         return try {
-            listenBrainzApi.getPlaylistTracksRich(playlistId)
+            listenBrainzClient.getPlaylistTracksRich(playlistId)
         } catch (e: Exception) {
             Log.e(TAG, "Failed to load tracks for playlist $playlistId", e)
             emptyList()

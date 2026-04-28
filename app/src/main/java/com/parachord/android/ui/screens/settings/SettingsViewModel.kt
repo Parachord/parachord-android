@@ -4,7 +4,7 @@ import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import android.util.Log
 import com.parachord.android.auth.OAuthManager
-import com.parachord.android.data.api.ListenBrainzApi
+import com.parachord.shared.api.ListenBrainzClient
 import com.parachord.android.data.scanner.MediaScanner
 import com.parachord.android.data.scanner.ScanProgress
 import com.parachord.android.data.store.SettingsStore
@@ -23,7 +23,7 @@ class SettingsViewModel constructor(
     private val oAuthManager: OAuthManager,
     private val queuePersistence: QueuePersistence,
     private val libreFmScrobbler: LibreFmScrobbler,
-    private val listenBrainzApi: ListenBrainzApi,
+    private val listenBrainzClient: ListenBrainzClient,
     private val musicKitBridge: MusicKitWebBridge,
     private val mediaScanner: MediaScanner,
     private val pluginManager: com.parachord.android.plugin.PluginManager,
@@ -357,7 +357,7 @@ class SettingsViewModel constructor(
         listenBrainzAuthError.value = null
         viewModelScope.launch {
             // Validate the token and extract the username (mirrors desktop's validateToken)
-            val username = listenBrainzApi.validateToken(token)
+            val username = listenBrainzClient.validateToken(token)
             if (username != null) {
                 settingsStore.setListenBrainzToken(token)
                 settingsStore.setListenBrainzUsername(username)

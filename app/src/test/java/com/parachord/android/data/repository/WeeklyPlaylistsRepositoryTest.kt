@@ -1,8 +1,8 @@
 package com.parachord.android.data.repository
 
-import com.parachord.android.data.api.LbCreatedForPlaylist
-import com.parachord.android.data.api.LbPlaylistTrack
-import com.parachord.android.data.api.ListenBrainzApi
+import com.parachord.shared.api.LbCreatedForPlaylist
+import com.parachord.shared.api.LbPlaylistTrack
+import com.parachord.shared.api.ListenBrainzClient
 import com.parachord.android.data.store.SettingsStore
 import io.mockk.coEvery
 import io.mockk.mockk
@@ -13,7 +13,7 @@ import org.junit.Test
 
 class WeeklyPlaylistsRepositoryTest {
 
-    private lateinit var api: ListenBrainzApi
+    private lateinit var api: ListenBrainzClient
     private lateinit var settingsStore: SettingsStore
     private lateinit var repo: WeeklyPlaylistsRepository
 

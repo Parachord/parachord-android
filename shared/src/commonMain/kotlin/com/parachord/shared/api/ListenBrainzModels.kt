@@ -1,10 +1,9 @@
 package com.parachord.shared.api
 
 /**
- * ListenBrainz API response models.
- * The actual API client migration from OkHttp → Ktor is deferred
- * because ListenBrainzApi uses manual JSON parsing (not Retrofit).
- * Models are shared now; client conversion happens in Phase 5.
+ * ListenBrainz API public model classes.
+ * Consumed by [ListenBrainzClient]; private @Serializable wire models live
+ * in that file and are mapped to these on read.
  */
 
 /** A single listen from the ListenBrainz API. */

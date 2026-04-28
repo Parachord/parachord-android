@@ -3,6 +3,7 @@ package com.parachord.shared.di
 import com.parachord.shared.api.AppleMusicClient
 import com.parachord.shared.api.GeoLocationClient
 import com.parachord.shared.api.LastFmClient
+import com.parachord.shared.api.ListenBrainzClient
 import com.parachord.shared.api.MusicBrainzClient
 import com.parachord.shared.api.SeatGeekClient
 import com.parachord.shared.api.SpotifyClient
@@ -38,4 +39,5 @@ val sharedModule = module {
     single { SeatGeekClient(get()) }
     single { AppleMusicClient(get()) }
     single { GeoLocationClient(get()) }
+    single { ListenBrainzClient(get()) }
 }

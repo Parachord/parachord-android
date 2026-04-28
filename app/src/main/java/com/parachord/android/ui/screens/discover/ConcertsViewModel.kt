@@ -7,7 +7,7 @@ import com.parachord.android.BuildConfig
 import com.parachord.shared.api.GeoLocation
 import com.parachord.shared.api.GeoLocationClient
 import com.parachord.android.data.api.LastFmApi
-import com.parachord.android.data.api.ListenBrainzApi
+import com.parachord.shared.api.ListenBrainzClient
 import com.parachord.android.data.db.dao.ArtistDao
 import com.parachord.android.data.db.dao.TrackDao
 import com.parachord.android.data.db.dao.AlbumDao
@@ -30,7 +30,7 @@ class ConcertsViewModel constructor(
     private val trackDao: TrackDao,
     private val albumDao: AlbumDao,
     private val lastFmApi: LastFmApi,
-    private val listenBrainzApi: ListenBrainzApi,
+    private val listenBrainzClient: ListenBrainzClient,
 ) : ViewModel() {
 
     companion object {
@@ -255,7 +255,7 @@ class ConcertsViewModel constructor(
         try {
             val lbUsername = settingsStore.getListenBrainzUsername()
             if (lbUsername != null) {
-                val lbArtists = listenBrainzApi.getUserTopArtists(
+                val lbArtists = listenBrainzClient.getUserTopArtists(
                     username = lbUsername,
                     range = "half_yearly",
                     count = 40,
