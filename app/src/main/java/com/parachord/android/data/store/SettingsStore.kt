@@ -544,16 +544,15 @@ class SettingsStore constructor(
 
     // --- Sync Settings ---
 
-    data class SyncSettings(
-        val enabled: Boolean = false,
-        val provider: String = "spotify",
-        val syncTracks: Boolean = true,
-        val syncAlbums: Boolean = true,
-        val syncArtists: Boolean = true,
-        val syncPlaylists: Boolean = true,
-        val selectedPlaylistIds: Set<String> = emptySet(),
-        val pushLocalPlaylists: Boolean = true,
-    )
+    /*
+     * The `SyncSettings` data class moved to
+     * [com.parachord.shared.sync.SyncSettings] during sync extraction so
+     * `SyncEngine` (in shared/commonMain) can consume it without depending
+     * on this Android-only DataStore wrapper. A file-scoped typealias at
+     * the bottom of this file preserves source compat — existing call
+     * sites that wrote `SettingsStore.SyncSettings(...)` were updated to
+     * the bare `SyncSettings` name in the same commit.
+     */
 
     val syncEnabledFlow: Flow<Boolean> = dataStore.data.map { it[SYNC_ENABLED] ?: false }
 
@@ -811,3 +810,12 @@ class SettingsStore constructor(
         dataStore.edit { it[DISABLED_PLUGINS] = current.joinToString(",") }
     }
 }
+
+/**
+ * File-scoped typealias for source compatibility with code that still
+ * writes `SyncSettings(...)` after importing
+ * `com.parachord.android.data.store.SyncSettings`. The original
+ * `SettingsStore.SyncSettings` nested class moved to
+ * [com.parachord.shared.sync.SyncSettings] during sync extraction.
+ */
+typealias SyncSettings = com.parachord.shared.sync.SyncSettings

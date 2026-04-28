@@ -5,6 +5,7 @@ import com.parachord.shared.db.ParachordDb
 import com.parachord.android.data.db.dao.*
 import com.parachord.android.data.db.entity.*
 import com.parachord.android.data.store.SettingsStore
+import com.parachord.shared.sync.SyncSettings
 import kotlinx.coroutines.sync.Mutex
 
 class SyncEngine constructor(
@@ -801,7 +802,7 @@ class SyncEngine constructor(
     // ── Playlist sync ────────────────────────────────────────────
 
     private suspend fun syncPlaylists(
-        settings: SettingsStore.SyncSettings,
+        settings: SyncSettings,
         onProgress: (SyncProgress) -> Unit,
         providerFilter: String? = null,
     ): TypeSyncResult {
