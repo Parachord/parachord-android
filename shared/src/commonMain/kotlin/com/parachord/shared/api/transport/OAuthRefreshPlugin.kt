@@ -1,5 +1,6 @@
 package com.parachord.shared.api.transport
 
+import com.parachord.shared.api.auth.AuthCredential
 import com.parachord.shared.api.auth.AuthRealm
 import com.parachord.shared.api.auth.AuthTokenProvider
 import com.parachord.shared.api.auth.OAuthTokenRefresher
@@ -9,10 +10,12 @@ import io.ktor.client.plugins.api.createClientPlugin
 import io.ktor.client.plugins.plugin
 import io.ktor.http.HttpHeaders
 import io.ktor.http.HttpStatusCode
+import kotlinx.coroutines.sync.Mutex
+import kotlinx.coroutines.sync.withLock
 
 /**
  * Global Ktor plugin that intercepts 401 responses from registered OAuth realms,
- * refreshes the token, and retries the original request.
+ * refreshes the token (single-flight per realm), and retries the original request.
  *
  * Configured per HttpClient via:
  *   install(OAuthRefreshPlugin) {
@@ -24,7 +27,10 @@ import io.ktor.http.HttpStatusCode
  * Bearer-only swap on retry — works for Spotify and SoundCloud (the only
  * OAuth-refreshable realms, both Bearer).
  *
- * Single-flight semantics + two-strikes escalation arrive in subsequent tasks.
+ * Single-flight per realm: N concurrent 401s for the same realm only
+ * trigger ONE refresh request; followers reuse the freshly cached token.
+ *
+ * Two-strikes escalation arrives in the next task.
  *
  * @see docs/plans/2026-04-25-phase-9e-http-architecture-design.md Section 4
  */
@@ -35,21 +41,41 @@ class OAuthRefreshPluginConfig {
 }
 
 val OAuthRefreshPlugin = createClientPlugin("OAuthRefreshPlugin", ::OAuthRefreshPluginConfig) {
-    @Suppress("UNUSED_VARIABLE")
     val provider = requireNotNull(pluginConfig.tokenProvider) { "tokenProvider required" }
     val refresher = requireNotNull(pluginConfig.tokenRefresher) { "tokenRefresher required" }
     val refreshableHosts = pluginConfig.refreshableHosts
+
+    val mutexes = mutableMapOf<AuthRealm, Mutex>()
+    val mutexesGuard = Mutex()
+
+    suspend fun mutexFor(realm: AuthRealm): Mutex = mutexesGuard.withLock {
+        mutexes.getOrPut(realm) { Mutex() }
+    }
+
+    suspend fun singleFlightRefresh(
+        realm: AuthRealm,
+        originalToken: String?,
+    ): AuthCredential.BearerToken? {
+        return mutexFor(realm).withLock {
+            // Thundering-herd check: did a previous holder of this mutex refresh?
+            val current = provider.tokenFor(realm) as? AuthCredential.BearerToken
+            if (current != null && current.accessToken != originalToken) {
+                return@withLock current
+            }
+            refresher.refresh(realm)
+        }
+    }
 
     client.plugin(HttpSend).intercept { request ->
         val firstAttempt = execute(request)
         if (firstAttempt.response.status != HttpStatusCode.Unauthorized) return@intercept firstAttempt
 
         val realm = refreshableHosts[request.url.host] ?: return@intercept firstAttempt
+        val originalAuth = request.headers[HttpHeaders.Authorization]?.removePrefix("Bearer ")
 
-        val newToken = refresher.refresh(realm) ?: throw ReauthRequiredException(realm)
+        val newToken = singleFlightRefresh(realm, originalAuth)
+            ?: throw ReauthRequiredException(realm)
 
-        // Replace Authorization header on the retry. Bearer-only swap — works for
-        // Spotify and SoundCloud (the only OAuth-refreshable realms, both Bearer).
         request.headers.remove(HttpHeaders.Authorization)
         request.headers.append(HttpHeaders.Authorization, "Bearer ${newToken.accessToken}")
 

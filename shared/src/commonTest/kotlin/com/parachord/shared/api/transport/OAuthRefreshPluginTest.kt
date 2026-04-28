@@ -11,6 +11,8 @@ import io.ktor.client.request.get
 import io.ktor.client.request.headers
 import io.ktor.client.statement.bodyAsText
 import io.ktor.http.HttpStatusCode
+import kotlinx.coroutines.async
+import kotlinx.coroutines.awaitAll
 import kotlinx.coroutines.runBlocking
 import kotlin.test.Test
 import kotlin.test.assertEquals
@@ -81,6 +83,38 @@ class OAuthRefreshPluginTest {
         assertEquals(HttpStatusCode.OK, response.status)
         assertEquals(2, requestCount)
         assertEquals(1, refresher.refreshCalls)
+    }
+
+    @Test
+    fun concurrent401s_singleFlight_oneRefreshCallForFiveConcurrentRequests() = runBlocking {
+        val mock = MockEngine { request ->
+            val auth = request.headers["Authorization"] ?: ""
+            if (auth.contains("stale")) respond("", HttpStatusCode.Unauthorized)
+            else respond("ok", HttpStatusCode.OK)
+        }
+        provider.setToken(AuthRealm.Spotify, "stale")
+        refresher.nextResult = AuthCredential.BearerToken("refreshed")
+
+        val client = HttpClient(mock) {
+            install(OAuthRefreshPlugin) {
+                tokenProvider = provider
+                tokenRefresher = refresher
+                refreshableHosts = mapOf("api.spotify.com" to AuthRealm.Spotify)
+            }
+        }
+
+        // Fire 5 concurrent requests — all will 401 first, then need refresh
+        val results = (1..5).map {
+            async {
+                client.get("https://api.spotify.com/v1/me/$it") {
+                    headers { append("Authorization", "Bearer stale") }
+                }.status
+            }
+        }.awaitAll()
+
+        assertEquals(5, results.size)
+        assertEquals(true, results.all { it == HttpStatusCode.OK })
+        assertEquals(1, refresher.refreshCalls, "expected single-flight: only one refresh call")
     }
 }
 
