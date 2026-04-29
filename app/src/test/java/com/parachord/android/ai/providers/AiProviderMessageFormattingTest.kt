@@ -3,6 +3,9 @@ package com.parachord.android.ai.providers
 import com.parachord.android.ai.ChatMessage
 import com.parachord.android.ai.ChatRole
 import com.parachord.android.ai.ToolCall
+import com.parachord.shared.ai.jsonElementToMap
+import com.parachord.shared.ai.jsonElementToValue
+import com.parachord.shared.ai.mapToJsonElement
 import kotlinx.serialization.json.*
 import org.junit.Assert.*
 import org.junit.Test
