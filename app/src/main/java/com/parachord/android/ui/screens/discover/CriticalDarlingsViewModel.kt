@@ -6,6 +6,7 @@ import com.parachord.android.data.repository.CriticalDarlingsRepository
 import com.parachord.android.data.repository.CriticsPickAlbum
 import com.parachord.shared.model.Resource
 import kotlinx.coroutines.Job
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.launch
@@ -89,10 +90,25 @@ class CriticalDarlingsViewModel constructor(
                 _albums.value = Resource.Success(cached)
             }
             _isRefreshing.value = true
-            repository.getCriticsPicks(forceRefresh).collect {
-                _albums.value = it
+            val started = com.parachord.shared.platform.currentTimeMillis()
+            try {
+                repository.getCriticsPicks(forceRefresh).collect {
+                    _albums.value = it
+                }
+            } finally {
+                // Minimum visible-spin duration. The full RSS+enrich
+                // round-trip can finish in <300ms when the network is
+                // fast and most albums already have art carried over,
+                // which is shorter than a single rotation of the
+                // SpinningRefreshIcon (1s/rev) — without this guard the
+                // icon barely twitches and the refresh tap feels
+                // unresponsive. 700ms gives a clear visible rotation
+                // even on the fast path.
+                val elapsed = com.parachord.shared.platform.currentTimeMillis() - started
+                val minDuration = 700L
+                if (elapsed < minDuration) delay(minDuration - elapsed)
+                _isRefreshing.value = false
             }
-            _isRefreshing.value = false
         }
     }
 }
