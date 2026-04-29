@@ -308,7 +308,15 @@ val androidModule = module {
 
     singleOf(::MetadataService)
     singleOf(::MusicBrainzProvider)
-    singleOf(::LastFmProvider)
+    // LastFmProvider takes the api key as a constructor parameter so the
+    // shared class doesn't depend on Android BuildConfig. Sourced here from
+    // the same BuildConfig field that previously lived inside the provider.
+    single {
+        com.parachord.shared.metadata.LastFmProvider(
+            api = get(),
+            apiKey = com.parachord.android.BuildConfig.LASTFM_API_KEY,
+        )
+    }
     singleOf(::SpotifyProvider)
     singleOf(::WikipediaProvider)
     singleOf(::DiscogsProvider)
