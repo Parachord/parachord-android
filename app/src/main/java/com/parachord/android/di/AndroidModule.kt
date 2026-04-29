@@ -431,7 +431,41 @@ val androidModule = module {
         )
     }
     singleOf(::RecommendationsRepository)
-    singleOf(::FreshDropsRepository)
+    // FreshDropsRepository takes file I/O + MBID lookups as suspend lambdas
+    // so the shared class doesn't depend on `Context` or the (Android-only)
+    // `MbidEnrichmentService`. Two cache files + two enrichment-service forwards.
+    single {
+        val context = androidContext()
+        val cacheFile = java.io.File(context.filesDir, "fresh_drops_cache.json")
+        val rotationFile = java.io.File(context.filesDir, "fresh_drops_rotation.json")
+        val mbidEnrichment: com.parachord.android.data.metadata.MbidEnrichmentService = get()
+        com.parachord.shared.repository.FreshDropsRepository(
+            musicBrainzClient = get(),
+            lastFmClient = get(),
+            listenBrainzClient = get(),
+            settingsStore = get(),
+            trackDao = get(),
+            cacheRead = {
+                try {
+                    if (cacheFile.exists()) cacheFile.readText() else null
+                } catch (_: Exception) { null }
+            },
+            cacheWrite = { json ->
+                try { cacheFile.writeText(json) } catch (_: Exception) { /* swallow */ }
+            },
+            rotationRead = {
+                try {
+                    if (rotationFile.exists()) rotationFile.readText() else null
+                } catch (_: Exception) { null }
+            },
+            rotationWrite = { json ->
+                try { rotationFile.writeText(json) } catch (_: Exception) { /* swallow */ }
+            },
+            mbidLookupCached = { artistName -> mbidEnrichment.getCachedArtistMbid(artistName) },
+            mbidLookupViaMapper = { artist, title -> mbidEnrichment.getArtistMbid(artist, title) },
+            lastFmApiKey = com.parachord.android.BuildConfig.LASTFM_API_KEY,
+        )
+    }
     singleOf(::CriticalDarlingsRepository)
     singleOf(::WeeklyPlaylistsRepository)
     // ConcertsRepository takes file I/O as suspend lambdas + per-API
