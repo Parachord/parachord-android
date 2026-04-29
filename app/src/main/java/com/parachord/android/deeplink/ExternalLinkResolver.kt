@@ -1,6 +1,6 @@
 package com.parachord.android.deeplink
 
-import android.util.Log
+import com.parachord.shared.platform.Log
 import com.parachord.shared.api.AppleMusicClient
 import com.parachord.shared.api.SpotifyClient
 import com.parachord.shared.api.bestImageUrl

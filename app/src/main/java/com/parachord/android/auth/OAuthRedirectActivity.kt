@@ -3,7 +3,7 @@ package com.parachord.android.auth
 import android.app.Activity
 import android.content.Intent
 import android.os.Bundle
-import android.util.Log
+import com.parachord.shared.platform.Log
 import com.parachord.android.ui.MainActivity
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers

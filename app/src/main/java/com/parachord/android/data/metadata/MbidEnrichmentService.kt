@@ -1,7 +1,7 @@
 package com.parachord.android.data.metadata
 
 import android.content.Context
-import android.util.Log
+import com.parachord.shared.platform.Log
 import com.parachord.shared.api.ListenBrainzClient
 import com.parachord.shared.api.MbidMapperResult
 import com.parachord.android.data.db.dao.TrackDao

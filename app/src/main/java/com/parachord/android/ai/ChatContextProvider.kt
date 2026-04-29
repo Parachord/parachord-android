@@ -1,6 +1,6 @@
 package com.parachord.android.ai
 
-import android.util.Log
+import com.parachord.shared.platform.Log
 import com.parachord.android.data.repository.HistoryRepository
 import com.parachord.android.data.repository.LibraryRepository
 import com.parachord.android.data.repository.Resource

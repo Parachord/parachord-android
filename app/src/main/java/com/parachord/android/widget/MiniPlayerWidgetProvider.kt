@@ -8,7 +8,7 @@ import android.content.Context
 import android.content.Intent
 import android.graphics.Bitmap
 import android.graphics.BitmapFactory
-import android.util.Log
+import com.parachord.shared.platform.Log
 import android.widget.RemoteViews
 import com.parachord.android.R
 import kotlinx.coroutines.CoroutineScope

@@ -1,7 +1,7 @@
 package com.parachord.android.data.repository
 
 import android.content.Context
-import android.util.Log
+import com.parachord.shared.platform.Log
 import com.parachord.shared.api.MusicBrainzClient
 import com.parachord.android.data.metadata.MusicBrainzProvider
 import kotlinx.coroutines.Dispatchers

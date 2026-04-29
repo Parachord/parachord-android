@@ -1,7 +1,7 @@
 package com.parachord.android.data.repository
 
 import android.content.Context
-import android.util.Log
+import com.parachord.shared.platform.Log
 import com.parachord.android.BuildConfig
 import com.parachord.shared.api.SeatGeekClient
 import com.parachord.shared.api.TicketmasterClient

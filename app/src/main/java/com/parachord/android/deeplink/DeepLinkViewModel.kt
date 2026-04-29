@@ -1,7 +1,7 @@
 package com.parachord.android.deeplink
 
 import android.net.Uri
-import android.util.Log
+import com.parachord.shared.platform.Log
 import com.parachord.shared.deeplink.DeepLinkAction
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope

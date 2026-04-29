@@ -1,6 +1,6 @@
 package com.parachord.android.data.metadata
 
-import android.util.Log
+import com.parachord.shared.platform.Log
 import com.parachord.android.data.store.SettingsStore
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext

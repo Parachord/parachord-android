@@ -1,7 +1,7 @@
 package com.parachord.android.playlist
 
 import android.content.Context
-import android.util.Log
+import com.parachord.shared.platform.Log
 import androidx.work.CoroutineWorker
 import androidx.work.WorkerParameters
 import org.koin.core.component.KoinComponent

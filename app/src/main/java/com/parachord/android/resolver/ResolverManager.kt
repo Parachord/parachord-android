@@ -1,6 +1,6 @@
 package com.parachord.android.resolver
 
-import android.util.Log
+import com.parachord.shared.platform.Log
 import com.parachord.android.auth.OAuthManager
 import com.parachord.shared.api.SpotifyClient
 import com.parachord.android.data.db.dao.TrackDao

@@ -1,6 +1,6 @@
 package com.parachord.android.data.repository
 
-import android.util.Log
+import com.parachord.shared.platform.Log
 import com.parachord.android.BuildConfig
 import com.parachord.shared.api.LastFmClient
 import com.parachord.shared.api.bestImageUrl

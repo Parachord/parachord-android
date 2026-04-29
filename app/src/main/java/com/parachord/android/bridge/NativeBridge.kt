@@ -1,6 +1,6 @@
 package com.parachord.android.bridge
 
-import android.util.Log
+import com.parachord.shared.platform.Log
 import android.webkit.JavascriptInterface
 import androidx.datastore.core.DataStore
 import androidx.datastore.preferences.core.Preferences
