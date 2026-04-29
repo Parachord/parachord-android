@@ -588,13 +588,14 @@ val androidModule = module {
 
     // ── AI ────────────────────────────────────────────────────────────
 
-    // AiChatService — shared. DjToolExecutor stays Android-only (it
-    // dispatches to PlaybackController / MCP server / Parachord
-    // controls); it's forwarded via a suspend `executeTool` lambda.
+    // AiChatService — shared. DjToolExecutor is now a shared interface;
+    // the Android `DjToolExecutor` class implements it (its concrete
+    // dispatch reaches into PlaybackController / MCP / Parachord
+    // controls — those stay Android-only). Koin auto-resolves through
+    // the interface since the concrete class is bound below.
     single {
-        val toolExecutor: com.parachord.android.ai.tools.DjToolExecutor = get()
         com.parachord.shared.ai.AiChatService(
-            executeTool = { name, args -> toolExecutor.execute(name, args) },
+            toolExecutor = get<DjToolExecutor>(),
             contextProvider = get(),
             chatMessageDao = get(),
             json = get(),
