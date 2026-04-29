@@ -69,7 +69,7 @@ import org.koin.androidx.compose.koinViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import coil.compose.AsyncImage
 import com.parachord.android.data.repository.ConcertEvent
-import com.parachord.android.data.repository.Resource
+import com.parachord.shared.model.Resource
 import com.parachord.android.data.repository.TicketSource
 import java.time.LocalDate
 import java.time.format.DateTimeFormatter

@@ -3,7 +3,7 @@ package com.parachord.android.ai
 import com.parachord.shared.platform.Log
 import com.parachord.android.data.repository.HistoryRepository
 import com.parachord.android.data.repository.LibraryRepository
-import com.parachord.android.data.repository.Resource
+import com.parachord.shared.model.Resource
 import com.parachord.android.data.store.SettingsStore
 import com.parachord.android.playback.PlaybackStateHolder
 import kotlinx.coroutines.flow.firstOrNull

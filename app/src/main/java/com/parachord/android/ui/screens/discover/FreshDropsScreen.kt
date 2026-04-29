@@ -58,7 +58,7 @@ import androidx.compose.ui.unit.em
 import androidx.compose.ui.unit.sp
 import org.koin.androidx.compose.koinViewModel
 import com.parachord.android.data.repository.FreshDrop
-import com.parachord.android.data.repository.Resource
+import com.parachord.shared.model.Resource
 import com.parachord.android.ui.components.AlbumArtCard
 import com.parachord.android.ui.components.SpinningRefreshIcon
 import com.parachord.android.ui.components.shimmerBrush

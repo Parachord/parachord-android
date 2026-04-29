@@ -12,7 +12,7 @@ import com.parachord.android.data.db.entity.TrackEntity
 import com.parachord.android.data.repository.ConcertEvent
 import com.parachord.android.data.repository.ConcertsRepository
 import com.parachord.android.data.repository.LibraryRepository
-import com.parachord.android.data.repository.Resource
+import com.parachord.shared.model.Resource
 import com.parachord.android.data.metadata.AlbumSearchResult
 import com.parachord.android.data.metadata.ArtistInfo
 import com.parachord.android.data.metadata.MetadataService

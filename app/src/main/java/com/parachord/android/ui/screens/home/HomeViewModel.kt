@@ -17,7 +17,7 @@ import com.parachord.android.data.repository.FreshDropsRepository
 import com.parachord.android.data.repository.FriendsRepository
 import com.parachord.android.data.repository.LibraryRepository
 import com.parachord.android.data.repository.RecommendationsRepository
-import com.parachord.android.data.repository.Resource
+import com.parachord.shared.model.Resource
 import com.parachord.android.data.repository.WeeklyPlaylistEntry
 import com.parachord.android.data.repository.WeeklyPlaylistsRepository
 import com.parachord.android.data.scanner.MediaScanner

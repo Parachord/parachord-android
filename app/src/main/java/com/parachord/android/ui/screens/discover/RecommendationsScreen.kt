@@ -50,7 +50,7 @@ import androidx.compose.ui.unit.em
 import org.koin.androidx.compose.koinViewModel
 import com.parachord.android.data.repository.RecommendedArtist
 import com.parachord.android.data.repository.RecommendedTrack
-import com.parachord.android.data.repository.Resource
+import com.parachord.shared.model.Resource
 import com.parachord.android.ui.components.AlbumArtCard
 import com.parachord.android.ui.components.ShimmerTrackRow
 import com.parachord.android.ui.components.SwipeableTabLayout

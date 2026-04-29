@@ -8,7 +8,7 @@ import com.parachord.android.ai.providers.GeminiProvider
 import com.parachord.android.data.metadata.MetadataService
 import com.parachord.android.data.repository.HistoryRepository
 import com.parachord.android.data.repository.LibraryRepository
-import com.parachord.android.data.repository.Resource
+import com.parachord.shared.model.Resource
 import com.parachord.android.data.store.SettingsStore
 import kotlinx.coroutines.async
 import kotlinx.coroutines.awaitAll

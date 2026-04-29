@@ -62,7 +62,7 @@ import androidx.compose.ui.unit.sp
 import org.koin.androidx.compose.koinViewModel
 import coil.compose.SubcomposeAsyncImage
 import com.parachord.android.data.db.entity.FriendEntity
-import com.parachord.android.data.repository.Resource
+import com.parachord.shared.model.Resource
 import com.parachord.android.ui.components.AlbumArtCard
 import com.parachord.android.ui.components.ModalBg
 import com.parachord.android.ui.components.ModalTextActive

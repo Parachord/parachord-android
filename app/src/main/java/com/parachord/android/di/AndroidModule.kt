@@ -77,12 +77,65 @@ import org.koin.core.module.dsl.singleOf
 import org.koin.core.module.dsl.viewModelOf
 import org.koin.dsl.bind
 import org.koin.dsl.module
+import kotlinx.coroutines.async
+import kotlinx.coroutines.awaitAll
+import kotlinx.coroutines.coroutineScope
 import retrofit2.Retrofit
 import retrofit2.converter.kotlinx.serialization.asConverterFactory
 import okhttp3.MediaType.Companion.toMediaType
 import java.util.concurrent.TimeUnit
 
 private val Context.dataStore: DataStore<Preferences> by preferencesDataStore(name = "settings")
+
+/**
+ * iTunes Search API enrichment for album artwork. Used by the shared
+ * [com.parachord.shared.metadata.MetadataService] when an album's
+ * `artworkUrl` points at Cover Art Archive (which 404s frequently).
+ *
+ * Looks up the album by `"<artist> <title>"` against the iTunes Search
+ * `/search?media=music&entity=album` endpoint and substitutes the 600x600
+ * artwork URL on a successful match. Failures fall through to the
+ * original album record — never propagates exceptions back to the
+ * caller.
+ *
+ * Lives in `AndroidModule.kt` next to its only dependency
+ * (`AppleMusicClient`) so the shared metadata module stays free of
+ * iTunes-specific logic. The previous Android `MetadataService`
+ * wrapper class hosted this function as a private method; eliminating
+ * the wrapper relocated the helper here.
+ */
+private suspend fun enrichAlbumArtworkViaItunes(
+    appleMusicClient: com.parachord.shared.api.AppleMusicClient,
+    artistName: String,
+    albums: List<com.parachord.shared.metadata.AlbumSearchResult>,
+): List<com.parachord.shared.metadata.AlbumSearchResult> = coroutineScope {
+    albums.map { album ->
+        async {
+            val url = album.artworkUrl
+            if (url != null && url.contains("coverartarchive.org")) {
+                try {
+                    val term = "$artistName ${album.title}"
+                    val response = appleMusicClient.search(
+                        term = term,
+                        entity = "album",
+                        limit = 3,
+                    )
+                    val match = response.results.firstOrNull { item ->
+                        item.collectionName != null &&
+                            item.artistName?.lowercase()
+                                ?.contains(artistName.lowercase()) == true
+                    }
+                    val itunesArt = match?.artworkUrl100?.replace("100x100", "600x600")
+                    if (itunesArt != null) album.copy(artworkUrl = itunesArt) else album
+                } catch (_: Exception) {
+                    album
+                }
+            } else {
+                album
+            }
+        }
+    }.awaitAll()
+}
 
 /**
  * Android Koin module — provides all Android-specific dependencies.
@@ -306,7 +359,32 @@ val androidModule = module {
 
     // ── Metadata ─────────────────────────────────────────────────────
 
-    singleOf(::MetadataService)
+    // MetadataService is constructed directly from the shared cascading
+    // orchestrator. The Android wrapper class was eliminated in favor of
+    // building the shared service inline here — the only meaningful
+    // contribution of the old wrapper was the iTunes-search artwork
+    // enrichment lambda that fixes Cover Art Archive 404s, which now
+    // lives next to its only dependency (AppleMusicClient).
+    single {
+        val musicBrainz: MusicBrainzProvider = get()
+        val wikipedia: WikipediaProvider = get()
+        val lastFm: LastFmProvider = get()
+        val discogs: DiscogsProvider = get()
+        val spotify: SpotifyProvider = get()
+        val settingsStore: com.parachord.shared.settings.SettingsStore = get()
+        val appleMusicClient: com.parachord.shared.api.AppleMusicClient = get()
+
+        val providers = listOf(musicBrainz, wikipedia, lastFm, discogs, spotify)
+            .sortedBy { it.priority }
+
+        com.parachord.shared.metadata.MetadataService(
+            providers = providers,
+            getDisabledProviders = { settingsStore.getDisabledMetaProviders() },
+            enrichAlbumArtwork = { artistName, albums ->
+                enrichAlbumArtworkViaItunes(appleMusicClient, artistName, albums)
+            },
+        )
+    }
     singleOf(::MusicBrainzProvider)
     // LastFmProvider takes the api key as a constructor parameter so the
     // shared class doesn't depend on Android BuildConfig. Sourced here from
@@ -333,8 +411,28 @@ val androidModule = module {
 
     singleOf(::LibraryRepository)
     singleOf(::ChartsRepository)
-    singleOf(::HistoryRepository)
-    singleOf(::FriendsRepository)
+    // History + Friends repositories take `lastFmApiKey` as a constructor
+    // parameter so the shared classes don't depend on Android BuildConfig.
+    // Sourced from the same field that previously lived inline in the repo bodies.
+    single {
+        com.parachord.shared.repository.HistoryRepository(
+            lastFmClient = get(),
+            listenBrainzClient = get(),
+            settingsStore = get(),
+            metadataService = get(),
+            lastFmApiKey = com.parachord.android.BuildConfig.LASTFM_API_KEY,
+        )
+    }
+    single {
+        com.parachord.shared.repository.FriendsRepository(
+            friendDao = get(),
+            lastFmClient = get(),
+            listenBrainzClient = get(),
+            metadataService = get(),
+            settingsStore = get(),
+            lastFmApiKey = com.parachord.android.BuildConfig.LASTFM_API_KEY,
+        )
+    }
     singleOf(::RecommendationsRepository)
     singleOf(::FreshDropsRepository)
     singleOf(::CriticalDarlingsRepository)
