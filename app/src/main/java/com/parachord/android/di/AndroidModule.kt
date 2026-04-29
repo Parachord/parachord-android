@@ -466,7 +466,25 @@ val androidModule = module {
             lastFmApiKey = com.parachord.android.BuildConfig.LASTFM_API_KEY,
         )
     }
-    singleOf(::CriticalDarlingsRepository)
+    // CriticalDarlingsRepository takes file I/O as suspend lambdas + a Ktor
+    // HttpClient (replacing the prior OkHttp `Request.Builder` for the RSS
+    // fetch). Cache lives at `<filesDir>/critical_darlings_cache.json`.
+    single {
+        val context = androidContext()
+        val cacheFile = java.io.File(context.filesDir, "critical_darlings_cache.json")
+        com.parachord.shared.repository.CriticalDarlingsRepository(
+            httpClient = get(),
+            musicBrainzClient = get(),
+            cacheRead = {
+                try {
+                    if (cacheFile.exists()) cacheFile.readText() else null
+                } catch (_: Exception) { null }
+            },
+            cacheWrite = { json ->
+                try { cacheFile.writeText(json) } catch (_: Exception) { /* swallow */ }
+            },
+        )
+    }
     singleOf(::WeeklyPlaylistsRepository)
     // ConcertsRepository takes file I/O as suspend lambdas + per-API
     // BuildConfig key fallbacks (the shared class is platform-agnostic).
