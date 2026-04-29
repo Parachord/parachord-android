@@ -69,6 +69,9 @@ import org.koin.androidx.compose.koinViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import coil.compose.AsyncImage
 import com.parachord.android.data.repository.ConcertEvent
+import com.parachord.android.data.repository.displayDate
+import com.parachord.android.data.repository.displayTime
+import com.parachord.android.data.repository.locationString
 import com.parachord.shared.model.Resource
 import com.parachord.android.data.repository.TicketSource
 import java.time.LocalDate
@@ -621,9 +624,10 @@ private fun ConcertEventCard(
             }
 
             // Venue
-            if (event.venueName != null) {
+            val venueName = event.venueName
+            if (venueName != null) {
                 Text(
-                    text = event.venueName,
+                    text = venueName,
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                     maxLines = 1,
