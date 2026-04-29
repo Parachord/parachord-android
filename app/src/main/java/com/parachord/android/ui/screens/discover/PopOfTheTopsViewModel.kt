@@ -6,9 +6,9 @@ import androidx.lifecycle.viewModelScope
 import com.parachord.android.data.db.entity.AlbumEntity
 import com.parachord.android.data.db.entity.TrackEntity
 import com.parachord.android.data.metadata.MetadataService
-import com.parachord.android.data.repository.CHARTS_COUNTRIES
-import com.parachord.android.data.repository.ChartAlbum
-import com.parachord.android.data.repository.ChartSong
+import com.parachord.shared.model.CHARTS_COUNTRIES
+import com.parachord.shared.model.ChartAlbum
+import com.parachord.shared.model.ChartSong
 import com.parachord.android.data.repository.ChartsRepository
 import com.parachord.android.data.repository.LibraryRepository
 import com.parachord.android.playback.PlaybackContext

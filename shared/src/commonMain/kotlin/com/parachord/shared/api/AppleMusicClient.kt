@@ -38,6 +38,19 @@ class AppleMusicClient(private val httpClient: HttpClient) {
             parameter("entity", entity)
             parameter("limit", limit)
         }.body()
+
+    /**
+     * Apple Music "most-played" charts via the public marketing-tools RSS endpoint
+     * (separate host from itunes.apple.com — no auth, but returns a different
+     * `feed.results` shape).
+     *
+     * Powers the Pop of the Tops / Charts screen.
+     */
+    suspend fun mostPlayedAlbums(country: String = "us", limit: Int = 50): AppleChartsFeedResponse =
+        httpClient.get("https://rss.marketingtools.apple.com/api/v2/$country/music/most-played/$limit/albums.json").body()
+
+    suspend fun mostPlayedSongs(country: String = "us", limit: Int = 50): AppleChartsFeedResponse =
+        httpClient.get("https://rss.marketingtools.apple.com/api/v2/$country/music/most-played/$limit/songs.json").body()
 }
 
 // ── Response Models ──────────────────────────────────────────────────
@@ -78,3 +91,31 @@ fun AppleMusicItem.highResArtworkUrl(): String? =
 /** Extension: best image URL from a list of lookup results. */
 fun List<AppleMusicItem>.bestImageUrl(): String? =
     firstOrNull()?.artworkUrl100?.replace("100x100", "600x600")
+
+// ── Marketing-Tools RSS feed models (most-played charts) ─────────────
+//
+// Different shape from the iTunes Search/Lookup responses above —
+// `feed.results` is the relevant array. Genres are objects with `name`,
+// `genreId`, `url`, but only `name` matters for our chart entries.
+
+@Serializable
+data class AppleChartsFeedResponse(
+    val feed: AppleChartsFeed? = null,
+)
+
+@Serializable
+data class AppleChartsFeed(
+    val results: List<AppleChartsItem> = emptyList(),
+)
+
+@Serializable
+data class AppleChartsItem(
+    val name: String = "",
+    val artistName: String = "",
+    @SerialName("artworkUrl100") val artworkUrl100: String? = null,
+    val url: String? = null,
+    val genres: List<AppleChartsGenre> = emptyList(),
+)
+
+@Serializable
+data class AppleChartsGenre(val name: String = "")

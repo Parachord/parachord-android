@@ -60,9 +60,9 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.em
 import androidx.compose.ui.unit.sp
 import org.koin.androidx.compose.koinViewModel
-import com.parachord.android.data.repository.ChartAlbum
-import com.parachord.android.data.repository.ChartSong
-import com.parachord.android.data.repository.CHARTS_COUNTRIES
+import com.parachord.shared.model.ChartAlbum
+import com.parachord.shared.model.ChartSong
+import com.parachord.shared.model.CHARTS_COUNTRIES
 import com.parachord.android.ui.components.AlbumArtCard
 import com.parachord.android.ui.components.SwipeableTabLayout
 import com.parachord.android.ui.components.TrackRow
