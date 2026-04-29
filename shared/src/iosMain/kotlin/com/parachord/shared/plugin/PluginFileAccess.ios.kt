@@ -1,23 +1,47 @@
 package com.parachord.shared.plugin
 
+import kotlinx.cinterop.ExperimentalForeignApi
+import platform.Foundation.NSApplicationSupportDirectory
 import platform.Foundation.NSBundle
+import platform.Foundation.NSData
 import platform.Foundation.NSFileManager
-import platform.Foundation.NSSearchPathDirectory
-import platform.Foundation.NSSearchPathDomainMask
 import platform.Foundation.NSString
-import platform.Foundation.stringWithContentsOfFile
+import platform.Foundation.NSURL
+import platform.Foundation.NSUTF8StringEncoding
+import platform.Foundation.NSUserDomainMask
+import platform.Foundation.create
+import platform.Foundation.dataUsingEncoding
+import platform.Foundation.dataWithContentsOfFile
 import platform.Foundation.writeToFile
 
+/**
+ * iOS implementation of [PluginFileAccess].
+ *
+ * - **Bundled** plugins live under `Bundle.main/plugins/` (added at build
+ *   time when the iOS app shell ships).
+ * - **Cached** plugins live under `<NSApplicationSupportDirectory>/plugins/`
+ *   so PluginSyncService can write hot-reload updates between app launches.
+ *
+ * Filename validation matches the Android implementation (security: H2)
+ * — the same `^[A-Za-z0-9_.-]+\.axe$` regex prevents path traversal via
+ * attacker-controlled manifest IDs.
+ */
+@OptIn(ExperimentalForeignApi::class)
 actual class PluginFileAccess {
 
     private val pluginsCacheDir: String by lazy {
         val paths = NSFileManager.defaultManager.URLsForDirectory(
-            NSSearchPathDirectory.NSApplicationSupportDirectory,
-            NSSearchPathDomainMask.NSUserDomainMask
+            directory = NSApplicationSupportDirectory,
+            inDomains = NSUserDomainMask,
         )
-        val appSupport = (paths.firstOrNull() as? platform.Foundation.NSURL)?.path ?: ""
+        val appSupport = (paths.firstOrNull() as? NSURL)?.path ?: ""
         val dir = "$appSupport/plugins"
-        NSFileManager.defaultManager.createDirectoryAtPath(dir, true, null, null)
+        NSFileManager.defaultManager.createDirectoryAtPath(
+            path = dir,
+            withIntermediateDirectories = true,
+            attributes = null,
+            error = null,
+        )
         dir
     }
 
@@ -28,46 +52,68 @@ actual class PluginFileAccess {
     private val safeFilenameRegex = Regex("^[A-Za-z0-9_.-]+\\.axe$")
 
     private fun validateSafeFilename(filename: String) {
+        // Kotlin/Native has no `SecurityException`; use `IllegalArgumentException`.
+        // The exception type isn't load-bearing — callers catch generic Exception.
         if (!safeFilenameRegex.matches(filename)) {
-            throw SecurityException("Unsafe plugin filename: '$filename'")
+            throw IllegalArgumentException("Unsafe plugin filename: '$filename'")
         }
         if (filename.contains("..") || filename.startsWith(".")) {
-            throw SecurityException("Unsafe plugin filename: '$filename'")
+            throw IllegalArgumentException("Unsafe plugin filename: '$filename'")
         }
     }
 
     actual fun listBundledPlugins(): List<String> {
-        val bundlePath = NSBundle.mainBundle.pathForResource("plugins", ofType = null) ?: return emptyList()
+        val bundlePath = NSBundle.mainBundle.pathForResource("plugins", ofType = null)
+            ?: return emptyList()
         val contents = NSFileManager.defaultManager.contentsOfDirectoryAtPath(bundlePath, null)
+            ?: return emptyList()
         @Suppress("UNCHECKED_CAST")
-        return (contents as? List<String>)?.filter { safeFilenameRegex.matches(it) } ?: emptyList()
+        return (contents as List<String>).filter { safeFilenameRegex.matches(it) }
     }
 
     actual fun readBundledPlugin(filename: String): String {
         validateSafeFilename(filename)
-        val bundlePath = NSBundle.mainBundle.pathForResource("plugins", ofType = null) ?: return ""
+        val bundlePath = NSBundle.mainBundle.pathForResource("plugins", ofType = null)
+            ?: return ""
         val filePath = "$bundlePath/$filename"
-        return NSString.stringWithContentsOfFile(filePath) ?: ""
+        return readFileAsString(filePath)
     }
 
     actual fun listCachedPlugins(): List<String> {
         val contents = NSFileManager.defaultManager.contentsOfDirectoryAtPath(pluginsCacheDir, null)
+            ?: return emptyList()
         @Suppress("UNCHECKED_CAST")
-        return (contents as? List<String>)?.filter { safeFilenameRegex.matches(it) } ?: emptyList()
+        return (contents as List<String>).filter { safeFilenameRegex.matches(it) }
     }
 
     actual fun readCachedPlugin(filename: String): String {
         validateSafeFilename(filename)
         val filePath = "$pluginsCacheDir/$filename"
-        return NSString.stringWithContentsOfFile(filePath) ?: ""
+        return readFileAsString(filePath)
     }
 
     actual fun writeCachedPlugin(filename: String, content: String) {
         validateSafeFilename(filename)
         val filePath = "$pluginsCacheDir/$filename"
-        (content as NSString).writeToFile(filePath, true)
+        // Encode to NSData and atomically write. Going through NSData (rather
+        // than `NSString.writeToFile`) avoids the ambiguous Objective-C overload
+        // and gives us explicit UTF-8 control.
+        val data = (content as platform.Foundation.NSString)
+            .dataUsingEncoding(NSUTF8StringEncoding)
+        data?.writeToFile(filePath, atomically = true)
     }
 
     actual val cacheDir: String
         get() = pluginsCacheDir
+
+    /**
+     * Read a file as a UTF-8 string via NSData → NSString. Avoids the
+     * `NSString.stringWithContentsOfFile:encoding:error:` overload which
+     * doesn't resolve cleanly in the Kotlin/Native bridge.
+     */
+    private fun readFileAsString(path: String): String {
+        val data: NSData = NSData.dataWithContentsOfFile(path) ?: return ""
+        @Suppress("CAST_NEVER_SUCCEEDS")
+        return NSString.create(data = data, encoding = NSUTF8StringEncoding) as? String ?: ""
+    }
 }

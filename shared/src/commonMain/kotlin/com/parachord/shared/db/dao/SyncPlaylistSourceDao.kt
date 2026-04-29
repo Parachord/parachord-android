@@ -1,6 +1,7 @@
 package com.parachord.shared.db.dao
 
 import com.parachord.shared.db.ParachordDb
+import com.parachord.shared.platform.currentTimeMillis
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 
@@ -44,7 +45,7 @@ class SyncPlaylistSourceDao(private val db: ParachordDb) {
         externalId: String,
         snapshotId: String?,
         ownerId: String?,
-        syncedAt: Long = System.currentTimeMillis(),
+        syncedAt: Long = currentTimeMillis(),
     ): Unit = withContext(Dispatchers.Default) {
         queries.upsert(localPlaylistId, providerId, externalId, snapshotId, ownerId, syncedAt)
     }

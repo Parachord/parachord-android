@@ -23,6 +23,7 @@ import com.parachord.shared.model.Playlist
 import com.parachord.shared.model.PlaylistTrack
 import com.parachord.shared.model.Track
 import com.parachord.shared.sync.DeleteResult
+import kotlin.concurrent.Volatile
 import com.parachord.shared.sync.ProviderFeatures
 import com.parachord.shared.sync.RemoteCreated
 import com.parachord.shared.sync.SnapshotKind
