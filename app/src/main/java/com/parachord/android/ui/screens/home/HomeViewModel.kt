@@ -194,7 +194,7 @@ class HomeViewModel constructor(
     private fun loadAiRecommendations(forceRefresh: Boolean = false) {
         viewModelScope.launch {
             // Show cached results immediately (stale-while-revalidate)
-            aiRecommendationService.cachedRecommendations?.let { cached ->
+            aiRecommendationService.getCachedRecommendations()?.let { cached ->
                 _aiRecommendations.value = cached
                 // Skip re-fetching if cache exists and this isn't a manual refresh.
                 // AI calls take 30-60s and generate entirely new albums each time,
