@@ -6,6 +6,7 @@ import app.cash.sqldelight.coroutines.mapToOneOrNull
 import com.parachord.shared.db.ParachordDb
 import com.parachord.shared.db.Playlists
 import com.parachord.shared.model.Playlist
+import com.parachord.shared.platform.currentTimeMillis
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.map
@@ -164,7 +165,7 @@ class PlaylistDao(private val db: ParachordDb) {
         playlistId: String,
         contentHash: String,
         trackCount: Int,
-        lastModified: Long = System.currentTimeMillis(),
+        lastModified: Long = currentTimeMillis(),
     ): Unit = withContext(Dispatchers.Default) {
         queries.updateHostedSnapshot(
             sourceContentHash = contentHash,

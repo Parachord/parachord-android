@@ -3,6 +3,7 @@ package com.parachord.shared.settings
 import com.parachord.shared.store.KvStore
 import com.parachord.shared.store.SecureTokenStore
 import com.parachord.shared.store.SettingsMigration
+import kotlin.concurrent.Volatile
 import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.combine

@@ -407,7 +407,8 @@ class FreshDropsRepository(
         // always processing the same source order.
         val sorted = artists
             .groupBy { artistLastChecked[it.name.lowercase().trim()] ?: 0L }
-            .toSortedMap()
+            .entries
+            .sortedBy { it.key }
             .flatMap { (_, group) -> group.shuffled() }
 
         Log.d(TAG, "Gathered ${sorted.size} unique artists, checking ${minOf(sorted.size, MAX_ARTISTS_TO_CHECK)}")

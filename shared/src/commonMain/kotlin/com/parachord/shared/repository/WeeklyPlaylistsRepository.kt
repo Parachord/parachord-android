@@ -6,6 +6,7 @@ import com.parachord.shared.api.ListenBrainzClient
 import com.parachord.shared.platform.Log
 import com.parachord.shared.platform.currentTimeMillis
 import com.parachord.shared.settings.SettingsStore
+import kotlin.concurrent.Volatile
 import kotlinx.coroutines.async
 import kotlinx.coroutines.coroutineScope
 

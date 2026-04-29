@@ -19,7 +19,8 @@ fun lastFmSignature(params: Map<String, String>, sharedSecret: String): String {
     val concat = buildString {
         params
             .filterKeys { it != "api_sig" && it != "format" }
-            .toSortedMap()
+            .entries
+            .sortedBy { it.key }
             .forEach { (k, v) -> append(k).append(v) }
         append(sharedSecret)
     }
