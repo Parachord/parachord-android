@@ -588,9 +588,74 @@ val androidModule = module {
 
     // ── AI ────────────────────────────────────────────────────────────
 
-    singleOf(::AiChatService)
-    singleOf(::AiRecommendationService)
-    singleOf(::ChatContextProvider)
+    // AiChatService — shared. DjToolExecutor stays Android-only (it
+    // dispatches to PlaybackController / MCP server / Parachord
+    // controls); it's forwarded via a suspend `executeTool` lambda.
+    single {
+        val toolExecutor: com.parachord.android.ai.tools.DjToolExecutor = get()
+        com.parachord.shared.ai.AiChatService(
+            executeTool = { name, args -> toolExecutor.execute(name, args) },
+            contextProvider = get(),
+            chatMessageDao = get(),
+            json = get(),
+        )
+    }
+    // AiRecommendationService — shared. Concrete provider classes are
+    // assembled into a Map<String, AiProviderEntry> so the shared service
+    // doesn't depend on Android-only provider implementations directly.
+    // Disk cache wired in via suspend lambdas pointing at filesDir.
+    single {
+        val context = androidContext()
+        val cacheFile = java.io.File(context.filesDir, "ai_suggestions_cache.json")
+        com.parachord.shared.ai.AiRecommendationService(
+            settingsStore = get(),
+            historyRepository = get(),
+            libraryRepository = get(),
+            providers = mapOf(
+                "chatgpt" to com.parachord.shared.ai.AiProviderEntry(
+                    provider = get<ChatGptProvider>(),
+                    defaultModel = "gpt-4o-mini",
+                ),
+                "claude" to com.parachord.shared.ai.AiProviderEntry(
+                    provider = get<ClaudeProvider>(),
+                    defaultModel = "claude-sonnet-4-6-20250320",
+                ),
+                "gemini" to com.parachord.shared.ai.AiProviderEntry(
+                    provider = get<GeminiProvider>(),
+                    defaultModel = "gemini-2.0-flash",
+                ),
+            ),
+            metadataService = get(),
+            cacheRead = {
+                try {
+                    if (cacheFile.exists()) cacheFile.readText() else null
+                } catch (_: Exception) { null }
+            },
+            cacheWrite = { json ->
+                try { cacheFile.writeText(json) } catch (_: Exception) { /* swallow */ }
+            },
+        )
+    }
+    // ChatContextProvider — shared. PlaybackStateHolder stays Android-only
+    // (PlaybackState carries Android-specific types); the chat context
+    // receives only a small snapshot via a suspend lambda.
+    single {
+        val playbackStateHolder: com.parachord.android.playback.PlaybackStateHolder = get()
+        com.parachord.shared.ai.ChatContextProvider(
+            getPlaybackSnapshot = {
+                val s = playbackStateHolder.state.value
+                com.parachord.shared.ai.ChatPlaybackSnapshot(
+                    currentTrack = s.currentTrack,
+                    isPlaying = s.isPlaying,
+                    upNext = s.upNext,
+                    shuffleEnabled = s.shuffleEnabled,
+                )
+            },
+            settingsStore = get(),
+            historyRepository = get(),
+            libraryRepository = get(),
+        )
+    }
     singleOf(::ChatCardEnricher)
     singleOf(::ChatGptProvider)
     singleOf(::ClaudeProvider)
