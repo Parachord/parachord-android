@@ -879,7 +879,7 @@ class PlaybackController constructor(
             /* handleAudioFocus= */ true,
         )
 
-        val mediaItem = track.toMediaItem()
+        val mediaItem = track.toAutoMediaItem()
         ctrl.stop()
         ctrl.setMediaItems(listOf(mediaItem), 0, 0L)
         ctrl.prepare()
@@ -1772,19 +1772,3 @@ class PlaybackController constructor(
     }
 }
 
-private fun TrackEntity.toMediaItem(): MediaItem {
-    val metadata = MediaMetadata.Builder()
-        .setTitle(title)
-        .setArtist(artist)
-        .setAlbumTitle(album)
-        .apply {
-            artworkUrl?.let { setArtworkUri(android.net.Uri.parse(it)) }
-        }
-        .build()
-
-    return MediaItem.Builder()
-        .setMediaId(id)
-        .setUri(sourceUrl ?: "")
-        .setMediaMetadata(metadata)
-        .build()
-}

@@ -104,6 +104,8 @@ android {
             // that calls into android.util.Log fails the test — and mocking
             // every such call-site in every test is not worth the churn.
             isReturnDefaultValues = true
+            // Robolectric needs Android resources to be available in unit tests.
+            isIncludeAndroidResources = true
         }
     }
 }
@@ -182,6 +184,7 @@ dependencies {
     testImplementation(libs.sqldelight.sqlite.driver)
     testImplementation(libs.sqlite.jdbc)
     testImplementation(libs.okhttp.mockwebserver)
+    testImplementation(libs.robolectric)
     androidTestImplementation(libs.androidx.test.ext)
     androidTestImplementation(libs.androidx.espresso.core)
     androidTestImplementation(platform(libs.androidx.compose.bom))
