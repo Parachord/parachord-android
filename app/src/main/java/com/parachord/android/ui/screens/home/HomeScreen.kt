@@ -97,8 +97,12 @@ import com.parachord.android.data.db.entity.AlbumEntity
 import com.parachord.android.data.db.entity.FriendEntity
 import com.parachord.android.data.db.entity.PlaylistEntity
 import com.parachord.android.ui.components.AlbumArtCard
+import android.widget.Toast
+import androidx.compose.ui.platform.LocalContext
+import com.parachord.android.share.rememberSharePlaylistById
 import com.parachord.android.ui.components.AlbumContextMenu
 import com.parachord.android.ui.components.ContextMenuItem
+import com.parachord.android.ui.components.PlaylistContextMenu
 import com.parachord.android.ui.components.hapticCombinedClickable
 import com.parachord.android.ui.components.ModalBg
 import com.parachord.android.ui.components.ModalBgDarker
@@ -163,6 +167,17 @@ fun HomeScreen(
     val trackResolvers by viewModel.trackResolvers.collectAsStateWithLifecycle()
     val trackResolverConfidences by viewModel.trackResolverConfidences.collectAsStateWithLifecycle()
     val contextMenuState = rememberTrackContextMenuState()
+    val sharePlaylistById = rememberSharePlaylistById()
+    val context = LocalContext.current
+
+    // Surface playlist-action toasts (e.g. "Apple Music doesn't allow
+    // deletion via the API…" from `deletePlaylistWithSync` returning
+    // `DeleteResult.Unsupported`). Same pattern as PlaylistsScreen.
+    LaunchedEffect(viewModel) {
+        viewModel.toastEvents.collect { msg ->
+            Toast.makeText(context, msg, Toast.LENGTH_LONG).show()
+        }
+    }
 
     // Track context menu host (for Recent Loves long-press)
     TrackContextMenuHost(
@@ -173,6 +188,15 @@ fun HomeScreen(
         onAddToPlaylist = { playlist, track -> viewModel.addToPlaylist(playlist, track) },
         onNavigateToArtist = onNavigateToArtist,
         onNavigateToAlbum = onNavigateToAlbum,
+        // Recent Loves passes `isInCollection = true` on every long-press
+        // (everything in the section is, by definition, in the
+        // collection), so the menu always shows "Remove from collection".
+        // Without wiring this lambda the menu item rendered, the toast
+        // fired ("Removed from collection"), but the actual delete was
+        // a silent no-op — `onToggleCollection` on the host is optional.
+        onToggleCollection = { track, isInCollection ->
+            if (isInCollection) viewModel.removeTrackFromCollection(track)
+        },
     )
 
     val audioPermission = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
@@ -342,6 +366,11 @@ fun HomeScreen(
                                 PlaylistCard(
                                     playlist = playlist,
                                     onClick = { onNavigateToPlaylist(playlist.id) },
+                                    onPlayPlaylist = {
+                                        viewModel.playPlaylist(playlist.id, playlist.name)
+                                    },
+                                    onSharePlaylist = { sharePlaylistById(playlist.id) },
+                                    onDeletePlaylist = { viewModel.deletePlaylist(playlist) },
                                 )
                             }
                         }
@@ -375,6 +404,12 @@ fun HomeScreen(
                             trackCounts = weeklyTrackCounts,
                             onOpenPlaylist = { entry, contextType ->
                                 onNavigateToWeeklyPlaylist(entry.id, contextType)
+                            },
+                            onPlayWeekly = { entry, contextType ->
+                                viewModel.playWeeklyPlaylist(entry, contextType)
+                            },
+                            onSaveWeekly = { entry, contextType ->
+                                viewModel.saveWeeklyPlaylist(entry, contextType)
                             },
                         )
                         Spacer(modifier = Modifier.height(8.dp))
@@ -532,11 +567,18 @@ private fun RecentAlbumCard(
 private fun PlaylistCard(
     playlist: PlaylistEntity,
     onClick: () -> Unit,
+    onPlayPlaylist: () -> Unit = {},
+    onSharePlaylist: () -> Unit = {},
+    onDeletePlaylist: () -> Unit = {},
 ) {
+    var showMenu by remember { mutableStateOf(false) }
     Column(
         modifier = Modifier
             .width(130.dp)
-            .hapticClickable(onClick = onClick),
+            .hapticCombinedClickable(
+                onClick = onClick,
+                onLongClick = { showMenu = true },
+            ),
     ) {
         AlbumArtCard(
             artworkUrl = playlist.artworkUrl,
@@ -557,6 +599,18 @@ private fun PlaylistCard(
             style = MaterialTheme.typography.labelSmall,
             color = MaterialTheme.colorScheme.onSurfaceVariant,
             maxLines = 1,
+        )
+    }
+
+    if (showMenu) {
+        PlaylistContextMenu(
+            playlistName = playlist.name,
+            artworkUrl = playlist.artworkUrl,
+            trackCount = playlist.trackCount,
+            onDismiss = { showMenu = false },
+            onPlayPlaylist = onPlayPlaylist,
+            onShare = onSharePlaylist,
+            onDeletePlaylist = onDeletePlaylist,
         )
     }
 }
@@ -736,6 +790,8 @@ private fun WeeklyPlaylistsSection(
     covers: Map<String, List<String>>,
     trackCounts: Map<String, Int>,
     onOpenPlaylist: (WeeklyPlaylistEntry, String) -> Unit,
+    onPlayWeekly: (WeeklyPlaylistEntry, String) -> Unit,
+    onSaveWeekly: (WeeklyPlaylistEntry, String) -> Unit,
 ) {
     Column(verticalArrangement = Arrangement.spacedBy(16.dp)) {
         if (!jams.isNullOrEmpty()) {
@@ -746,6 +802,8 @@ private fun WeeklyPlaylistsSection(
                 covers = covers,
                 trackCounts = trackCounts,
                 onOpen = onOpenPlaylist,
+                onPlay = onPlayWeekly,
+                onSave = onSaveWeekly,
             )
         }
         if (!exploration.isNullOrEmpty()) {
@@ -756,6 +814,8 @@ private fun WeeklyPlaylistsSection(
                 covers = covers,
                 trackCounts = trackCounts,
                 onOpen = onOpenPlaylist,
+                onPlay = onPlayWeekly,
+                onSave = onSaveWeekly,
             )
         }
     }
@@ -769,6 +829,8 @@ private fun WeeklyCarouselRow(
     covers: Map<String, List<String>>,
     trackCounts: Map<String, Int>,
     onOpen: (WeeklyPlaylistEntry, String) -> Unit,
+    onPlay: (WeeklyPlaylistEntry, String) -> Unit,
+    onSave: (WeeklyPlaylistEntry, String) -> Unit,
 ) {
     val isDark = ParachordTheme.isDark
     val badgeBg = if (isDark) Color(0xFFE8702A).copy(alpha = 0.20f) else Color(0xFFFFF3E0)
@@ -812,6 +874,8 @@ private fun WeeklyCarouselRow(
                     trackCount = trackCounts[entry.id],
                     contextType = contextType,
                     onClick = { onOpen(entry, contextType) },
+                    onPlay = { onPlay(entry, contextType) },
+                    onSave = { onSave(entry, contextType) },
                     modifier = Modifier.width(140.dp),
                 )
             }
@@ -826,16 +890,22 @@ private fun WeeklyPlaylistCard(
     trackCount: Int?,
     contextType: String,
     onClick: () -> Unit,
+    onPlay: () -> Unit = {},
+    onSave: () -> Unit = {},
     modifier: Modifier = Modifier,
 ) {
     val isDark = ParachordTheme.isDark
     val cardBg = if (isDark) Color(0xFF1E1E1E) else Color(0xFFF3F4F6)
+    var showMenu by remember { mutableStateOf(false) }
 
     Column(
         modifier = modifier
             .clip(RoundedCornerShape(12.dp))
             .background(cardBg)
-            .hapticClickable(onClick = onClick),
+            .hapticCombinedClickable(
+                onClick = onClick,
+                onLongClick = { showMenu = true },
+            ),
     ) {
         // 2x2 mosaic album art area
         Box(
@@ -903,6 +973,26 @@ private fun WeeklyPlaylistCard(
                 maxLines = 1,
             )
         }
+    }
+
+    if (showMenu) {
+        // Ephemeral playlist — no Delete (it's not a saved row), no
+        // Share yet (smart-link payload would need the full track list,
+        // which is async — defer to the detail screen). Save uses the
+        // first cover URL for the saved playlist's artwork; full mosaic
+        // is rebuilt by `ImageEnrichmentService.regenerateAllPlaylistMosaics`
+        // on next app start.
+        val previewName = "${entry.weekLabel}'s ${
+            if (contextType == "weekly-jam") "Weekly Jams" else "Weekly Exploration"
+        }"
+        PlaylistContextMenu(
+            playlistName = previewName,
+            artworkUrl = covers.firstOrNull(),
+            trackCount = trackCount ?: 0,
+            onDismiss = { showMenu = false },
+            onPlayPlaylist = onPlay,
+            onSavePlaylist = onSave,
+        )
     }
 }
 

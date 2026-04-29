@@ -29,11 +29,15 @@ import com.parachord.android.playback.PlaybackStateHolder
 import com.parachord.android.resolver.ResolverManager
 import com.parachord.android.resolver.ResolverScoring
 import com.parachord.android.resolver.TrackResolverCache
+import kotlinx.coroutines.channels.Channel
+import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.combine
+import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.map
+import kotlinx.coroutines.flow.receiveAsFlow
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
 data class CollectionStats(
@@ -366,6 +370,118 @@ class HomeViewModel constructor(
     fun addToPlaylist(playlist: PlaylistEntity, track: TrackEntity) {
         viewModelScope.launch {
             repository.addTracksToPlaylist(playlist.id, listOf(track))
+        }
+    }
+
+    /**
+     * Remove a track from the user's collection. Wired into the Recent
+     * Loves long-press context menu — without this, the toggle item in
+     * the menu rendered ("Remove from collection") and the toast fired
+     * unconditionally, but the action itself was a silent no-op because
+     * `TrackContextMenuHost`'s `onToggleCollection` parameter wasn't
+     * passed at the call site. Same `deleteTrackWithSync` plumbing as
+     * `LibraryViewModel.removeTrackFromCollection` so multi-provider
+     * sync removal still propagates.
+     */
+    fun removeTrackFromCollection(track: TrackEntity) {
+        viewModelScope.launch {
+            repository.deleteTrackWithSync(track)
+        }
+    }
+
+    /**
+     * One-shot toast surface for Home — currently fed by
+     * [deletePlaylist] when an Apple Music mirror returns
+     * `DeleteResult.Unsupported` (Decision D8). The screen collects this
+     * as `LaunchedEffect` and forwards to a Toast, mirroring the
+     * `PlaylistsViewModel` pattern.
+     */
+    private val _toastEvents = Channel<String>(Channel.BUFFERED)
+    val toastEvents: Flow<String> = _toastEvents.receiveAsFlow()
+
+    /**
+     * Play all tracks in a saved playlist. Mirrors
+     * [PlaylistsViewModel.playPlaylist] so the Home → Your Playlists
+     * carousel's long-press menu can fire playback without forcing
+     * the user to first navigate into the playlist detail screen.
+     */
+    fun playPlaylist(playlistId: String, playlistName: String) {
+        viewModelScope.launch {
+            val tracks = repository.getPlaylistTracks(playlistId).first()
+            if (tracks.isEmpty()) return@launch
+            val entities = tracks.map { repository.playlistTrackToTrackEntity(it) }
+            playbackController.playQueue(
+                entities,
+                startIndex = 0,
+                context = PlaybackContext(type = "playlist", name = playlistName),
+            )
+        }
+    }
+
+    /**
+     * Sync-aware delete from the Home → Your Playlists long-press menu.
+     * Routes through `deletePlaylistWithSync` so any linked Spotify /
+     * Apple Music mirrors get the deletion attempt too. AM returns 401
+     * for `DELETE /me/library/playlists/{id}` — surface that to the
+     * user via the toast channel rather than swallowing it (Decision
+     * D8 — same pattern as PlaylistsViewModel/PlaylistDetailViewModel).
+     */
+    fun deletePlaylist(playlist: PlaylistEntity) {
+        viewModelScope.launch {
+            val attempts = repository.deletePlaylistWithSync(playlist)
+            val unsupported = attempts.filter {
+                it.result is com.parachord.shared.sync.DeleteResult.Unsupported
+            }
+            if (unsupported.isNotEmpty()) {
+                val names = unsupported.joinToString(", ") { it.providerDisplayName }
+                _toastEvents.trySend(
+                    "Removed from Parachord. $names doesn't allow deletion via the API — " +
+                        "remove manually in the $names app."
+                )
+            }
+        }
+    }
+
+    /**
+     * Save an ephemeral ListenBrainz weekly playlist to the local
+     * library. Mirrors `WeeklyPlaylistViewModel.saveToLibrary` so the
+     * Home Weekly Jams / Exploration carousel's long-press menu can
+     * save a playlist directly without first opening the detail screen.
+     * Quietly no-ops when the entry has no resolved tracks yet (the
+     * card hasn't finished progressive enrichment) — saving an empty
+     * playlist would create a useless library row.
+     */
+    fun saveWeeklyPlaylist(entry: WeeklyPlaylistEntry, contextType: String) {
+        viewModelScope.launch {
+            val tracks = weeklyPlaylistsRepository.loadPlaylistTracks(entry.id)
+            if (tracks.isEmpty()) {
+                _toastEvents.trySend("Couldn't save — no tracks loaded yet")
+                return@launch
+            }
+            val trackEntities = tracks.map { lbTrack ->
+                TrackEntity(
+                    id = lbTrack.id,
+                    title = lbTrack.title,
+                    artist = lbTrack.artist,
+                    album = lbTrack.album ?: "",
+                    duration = lbTrack.durationMs?.let { it / 1000 } ?: 0,
+                    artworkUrl = lbTrack.albumArt,
+                )
+            }
+            val savedPlaylistId = "listenbrainz-${entry.id}"
+            val playlistName = "${entry.weekLabel}'s ${
+                if (contextType == "weekly-jam") "Weekly Jams" else "Weekly Exploration"
+            }"
+            val playlist = PlaylistEntity(
+                id = savedPlaylistId,
+                name = playlistName,
+                description = "",
+                trackCount = trackEntities.size,
+                artworkUrl = trackEntities.firstNotNullOfOrNull { it.artworkUrl },
+                ownerName = "ListenBrainz",
+            )
+            repository.createPlaylistWithTracks(playlist, trackEntities)
+            _toastEvents.trySend("Saved \"$playlistName\" to library")
         }
     }
 
