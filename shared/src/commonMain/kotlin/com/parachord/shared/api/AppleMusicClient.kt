@@ -4,8 +4,19 @@ import io.ktor.client.HttpClient
 import io.ktor.client.call.body
 import io.ktor.client.request.get
 import io.ktor.client.request.parameter
+import io.ktor.client.statement.HttpResponse
+import io.ktor.http.isSuccess
 import kotlinx.serialization.SerialName
 import kotlinx.serialization.Serializable
+
+/**
+ * Thrown by [AppleMusicClient.search] when iTunes Search responds with
+ * HTTP 429. Callers (notably [com.parachord.shared.sync.AppleMusicSyncProvider])
+ * use this to flip a session kill-switch so subsequent searches no-op
+ * for the remainder of the sync — better N-1 hydrated tracks now than
+ * hammering Apple until they black-list us.
+ */
+class ItunesRateLimitedException : Exception("iTunes Search returned HTTP 429")
 
 /**
  * iTunes Search/Lookup API client — no authentication required.
@@ -31,13 +42,27 @@ class AppleMusicClient(private val httpClient: HttpClient) {
         media: String = "music",
         entity: String = "song",
         limit: Int = 25,
-    ): AppleMusicSearchResponse =
-        httpClient.get("$BASE_URL/search") {
+    ): AppleMusicSearchResponse {
+        val response: HttpResponse = httpClient.get("$BASE_URL/search") {
             parameter("term", term)
             parameter("media", media)
             parameter("entity", entity)
             parameter("limit", limit)
-        }.body()
+        }
+        // iTunes Search returns 429 with an HTML body when rate-limited.
+        // Surface a typed exception so [AppleMusicSyncProvider] can flip
+        // its session kill-switch instead of letting the body parser
+        // throw NoTransformationFoundException on every retry.
+        if (response.status.value == 429) {
+            throw ItunesRateLimitedException()
+        }
+        // Non-429 non-success: return empty so the caller treats it as
+        // "no match" rather than throwing during body parsing.
+        if (!response.status.isSuccess()) {
+            return AppleMusicSearchResponse()
+        }
+        return response.body()
+    }
 
     /**
      * Apple Music "most-played" charts via the public marketing-tools RSS endpoint
