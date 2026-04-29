@@ -347,12 +347,27 @@ class FriendsRepository(
             apiKey = lastFmApiKey,
         )
         val track = response.recenttracks?.track?.firstOrNull()
+        // Last.fm omits the `date` field on the currently-playing track
+        // (the row marked `attr.nowplaying = "true"`). Stamp the
+        // timestamp as "now" ONLY in that explicit case — for any other
+        // null-date scenario fall back to 0 (unknown / not on air). The
+        // previous unconditional `currentTimeMillis() / 1000` fallback
+        // meant every refresh tagged every friend's
+        // `cachedTrackTimestamp = now`, which made `Friend.isOnAir`
+        // return true for everyone (within the 10-min window) and
+        // auto-pinned every friend to the sidebar.
+        val isNowPlaying = track?.attr?.nowplaying == "true"
+        val timestamp = when {
+            track == null -> 0L
+            isNowPlaying -> currentTimeMillis() / 1000
+            else -> track.date?.uts?.toLongOrNull() ?: 0L
+        }
         friendDao.updateCachedTrack(
             id = friend.id,
             name = track?.name,
             artist = track?.artist?.name,
             album = track?.album?.name,
-            timestamp = track?.date?.uts?.toLongOrNull() ?: (currentTimeMillis() / 1000),
+            timestamp = timestamp,
             artworkUrl = track?.image?.bestImageUrl(),
             fetchedAt = currentTimeMillis(),
         )
