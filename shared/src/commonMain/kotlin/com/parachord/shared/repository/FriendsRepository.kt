@@ -341,26 +341,48 @@ class FriendsRepository(
     }
 
     private suspend fun refreshLastFmActivity(friend: Friend) {
+        // Fetch 2 tracks so we can sanity-check the `attr.nowplaying`
+        // flag against an actual scrobble timestamp. Last.fm leaves the
+        // flag set on the most recent track for hours after the user
+        // actually stopped playing — without a backing recent scrobble
+        // we'd keep treating them as on-air indefinitely. Two tracks is
+        // also cheap (~one extra row in the response).
         val response = lastFmClient.getUserRecentTracks(
             user = friend.username,
-            limit = 1,
+            limit = 2,
             apiKey = lastFmApiKey,
         )
-        val track = response.recenttracks?.track?.firstOrNull()
-        // Last.fm omits the `date` field on the currently-playing track
-        // (the row marked `attr.nowplaying = "true"`). Stamp the
-        // timestamp as "now" ONLY in that explicit case — for any other
-        // null-date scenario fall back to 0 (unknown / not on air). The
-        // previous unconditional `currentTimeMillis() / 1000` fallback
-        // meant every refresh tagged every friend's
-        // `cachedTrackTimestamp = now`, which made `Friend.isOnAir`
-        // return true for everyone (within the 10-min window) and
-        // auto-pinned every friend to the sidebar.
-        val isNowPlaying = track?.attr?.nowplaying == "true"
+        val tracks = response.recenttracks?.track.orEmpty()
+        val track = tracks.firstOrNull()
+        // The most recent track with a real scrobble timestamp. When
+        // track[0] is the now-playing entry (no `date`), this is
+        // track[1]. When track[0] is a historical scrobble, it IS
+        // track[0]. Either way, `latestScrobble` represents the most
+        // recent definitive listen.
+        val latestScrobble = tracks.firstNotNullOfOrNull {
+            it.date?.uts?.toLongOrNull()
+        } ?: 0L
+        val now = currentTimeMillis() / 1000
+        // Last.fm's `attr.nowplaying = "true"` flag is set on the most
+        // recent track when the user is currently scrobbling, BUT it's
+        // also left in place after they stop — hours later the same row
+        // can still come back marked nowplaying. Only trust the flag if
+        // it's backed by a recent scrobble (within ~30 min): a truly
+        // active listener will have completed at least one full song in
+        // that window, putting that scrobble's `date.uts` in the second
+        // slot of the response.
+        val nowPlayingFlag = track?.attr?.nowplaying == "true"
+        val recentScrobble = latestScrobble > 0 && (now - latestScrobble) < 1800
+        val trulyOnAir = nowPlayingFlag && recentScrobble
         val timestamp = when {
             track == null -> 0L
-            isNowPlaying -> currentTimeMillis() / 1000
-            else -> track.date?.uts?.toLongOrNull() ?: 0L
+            // Currently playing AND backed by a real recent scrobble —
+            // safe to stamp now so isOnAir returns true.
+            trulyOnAir -> now
+            // Use the latest definitive scrobble timestamp. `isOnAir`'s
+            // 10-min window keeps an active listener showing as on-air
+            // for that long after their last full song completes.
+            else -> latestScrobble
         }
         friendDao.updateCachedTrack(
             id = friend.id,
