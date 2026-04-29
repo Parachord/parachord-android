@@ -5,6 +5,9 @@ import com.parachord.shared.db.dao.ArtistDao
 import com.parachord.shared.db.dao.PlaylistDao
 import com.parachord.shared.db.dao.PlaylistTrackDao
 import com.parachord.shared.db.dao.TrackDao
+import io.ktor.client.HttpClient
+import io.ktor.client.request.head
+import io.ktor.http.isSuccess
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Deferred
 import kotlinx.coroutines.Dispatchers
@@ -45,6 +48,12 @@ class ImageEnrichmentService(
     private val trackDao: TrackDao,
     private val playlistDao: PlaylistDao,
     private val playlistTrackDao: PlaylistTrackDao,
+    /**
+     * Used by [resolveAlbumArtUrl] to HEAD-check candidate art URLs. The
+     * shared Ktor client follows redirects (CAA → IA CDN) so a 2xx
+     * response is sufficient evidence the URL serves an image.
+     */
+    private val httpClient: HttpClient,
     /**
      * Compose a 2x2 mosaic from the given image URLs (already padded to 4)
      * and persist it locally. Returns a URI/path the UI can render, or null
@@ -103,6 +112,107 @@ class ImageEnrichmentService(
                 }
             }
             artistFetches[key] = d
+            d
+        }
+        return deferred.await()
+    }
+
+    /**
+     * HEAD-check an image URL. Returns true on a 2xx response, false on
+     * 4xx/5xx or any network/timeout error.
+     *
+     * Used by [resolveAlbumArtUrl] to verify Cover Art Archive URLs
+     * before surfacing them to the UI — CAA returns 404 for release
+     * groups whose front cover hasn't been uploaded, and Coil renders
+     * those as a placeholder rather than retrying the cascade.
+     */
+    suspend fun verifyArtUrl(url: String): Boolean {
+        return try {
+            // Ktor follows redirects by default — a HEAD that resolves
+            // to 2xx after the CAA → IA CDN redirect chain means an
+            // image exists at the final location.
+            httpClient.head(url).status.isSuccess()
+        } catch (_: Exception) {
+            false
+        }
+    }
+
+    /**
+     * Resolve a "best-effort" album art URL with a verify-then-cascade
+     * retry strategy. Used by repositories surfacing external albums
+     * (Critical Darlings, Fresh Drops) where the first-attempt URL
+     * (typically a Cover Art Archive URL constructed from a release
+     * group MBID) sometimes 404s — those albums then sat with a broken
+     * image and no path to recovery.
+     *
+     * Strategy:
+     *   1. If [hint] is non-null, [verifyArtUrl] it. On 2xx, return
+     *      the hint as-is — we trust providers' first answers when
+     *      they actually serve an image.
+     *   2. Otherwise (or if the hint failed verification), fall through
+     *      to [lookupAlbumArt] which cascades the full
+     *      MetadataService stack (MusicBrainz → Last.fm → Spotify) to
+     *      find an art URL from a richer provider.
+     *
+     * Returns null only if every stage failed.
+     */
+    suspend fun resolveAlbumArtUrl(
+        albumTitle: String,
+        artistName: String,
+        hint: String? = null,
+    ): String? {
+        if (hint != null && verifyArtUrl(hint)) return hint
+        return lookupAlbumArt(albumTitle, artistName)
+    }
+
+    /**
+     * Cascade-lookup album art *without* writing to any DAO. Used by
+     * repositories that surface external albums (Critical Darlings,
+     * Fresh Drops) where the album isn't in the user's library and an
+     * `albumDao.updateArtworkByTitleAndArtist` write would be a no-op
+     * at best and stomp the wrong row at worst.
+     *
+     * Same provider cascade as [enrichAlbumArt] — `getAlbumTracks` first
+     * (full tracklist + artwork from MB→Last.fm→Spotify), `searchAlbums`
+     * second (when detail lookup yields no artwork). In-flight dedup
+     * shares the [albumFetches] map with the enriching variant since
+     * the work is identical until the DAO step.
+     *
+     * Returns the first non-null artwork URL across the cascade, or null
+     * if no provider had art for this title/artist combination.
+     */
+    suspend fun lookupAlbumArt(albumTitle: String, artistName: String): String? {
+        val key = "${albumTitle.lowercase().trim()}|${artistName.lowercase().trim()}"
+        val deferred = albumMutex.withLock {
+            val cur = albumFetches[key]
+            if (cur != null && cur.isActive) return@withLock cur
+            val d = scope.async {
+                try {
+                    // Detail lookup first (preferred — gets richer providers'
+                    // artwork through the full track-list response).
+                    val detail = metadataService.getAlbumTracks(albumTitle, artistName)
+                    val detailArt = detail?.artworkUrl
+                    if (detailArt != null) return@async detailArt
+
+                    // Fall back to album search across the same cascade.
+                    val searchResults = metadataService.searchAlbums(
+                        "$albumTitle $artistName",
+                        limit = 5,
+                    )
+                    searchResults
+                        .firstOrNull {
+                            it.title.equals(albumTitle, ignoreCase = true) &&
+                                it.artist.equals(artistName, ignoreCase = true)
+                        }
+                        ?.artworkUrl
+                        ?: searchResults.firstOrNull()?.artworkUrl
+                } catch (_: Exception) {
+                    null
+                } finally {
+                    albumMutex.withLock { albumFetches.remove(key) }
+                }
+            }
+            albumFetches[key] = d
             d
         }
         return deferred.await()

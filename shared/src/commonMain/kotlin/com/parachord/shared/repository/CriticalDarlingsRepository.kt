@@ -1,6 +1,7 @@
 package com.parachord.shared.repository
 
 import com.parachord.shared.api.MusicBrainzClient
+import com.parachord.shared.metadata.ImageEnrichmentService
 import com.parachord.shared.metadata.MusicBrainzProvider
 import com.parachord.shared.model.Resource
 import com.parachord.shared.platform.Log
@@ -41,6 +42,14 @@ import kotlinx.serialization.json.Json
 class CriticalDarlingsRepository(
     private val httpClient: HttpClient,
     private val musicBrainzClient: MusicBrainzClient,
+    /**
+     * Cascade fallback when the strict MusicBrainz search returns no
+     * release for a given album/artist (or returns one whose CAA URL is
+     * empty). Routes through `metadataService.getAlbumTracks` which
+     * pulls Last.fm + Spotify in addition to MB, so the few albums that
+     * MB doesn't index still get art from image-rich providers.
+     */
+    private val imageEnrichmentService: ImageEnrichmentService,
     /** Read JSON from `critical_darlings_cache.json`; null if missing/fails. */
     private val cacheRead: suspend () -> String?,
     /** Write JSON to `critical_darlings_cache.json`. Failures are swallowed. */
@@ -196,7 +205,16 @@ class CriticalDarlingsRepository(
 
             for (itemMatch in itemRegex.findAll(xml)) {
                 val itemXml = itemMatch.groupValues[1]
-                val title = titleRegex.find(itemXml)?.groupValues?.get(1)?.let(::stripCdata)?.trim() ?: continue
+                // Decode HTML entities BEFORE parsing — RSS escapes
+                // ampersands (and friends) inside the title element, so
+                // a title like "Foo by Nine Inch Nails &amp; Boys
+                // Noize" would otherwise carry through to the displayed
+                // artist name AND poison the MB search query (which
+                // looks up the literal `&amp;` and finds nothing).
+                val title = titleRegex.find(itemXml)?.groupValues?.get(1)
+                    ?.let(::stripCdata)
+                    ?.let(::decodeHtmlEntities)
+                    ?.trim() ?: continue
                 val link = linkRegex.find(itemXml)?.groupValues?.get(1)?.let(::stripCdata)?.trim()
                 val description = descRegex.find(itemXml)?.groupValues?.get(1)?.let(::stripCdata)?.trim() ?: ""
 
@@ -249,36 +267,53 @@ class CriticalDarlingsRepository(
         return regex.find(html)?.value
     }
 
-    /** Strip HTML tags, decode entities, and remove leftover URLs. */
-    private fun cleanHtml(html: String): String {
-        return html
-            .replace(Regex("<[^>]+>"), "")
-            .replace("&amp;", "&")
-            .replace("&lt;", "<")
+    /**
+     * Decode the small set of HTML entities that the RSS feed actually
+     * uses. We decode ampersand last so we don't accidentally double-
+     * decode something like `&amp;lt;` (which should become `&lt;`,
+     * not `<`).
+     */
+    private fun decodeHtmlEntities(s: String): String =
+        s.replace("&lt;", "<")
             .replace("&gt;", ">")
             .replace("&quot;", "\"")
             .replace("&#39;", "'")
             .replace("&apos;", "'")
+            .replace("&amp;", "&")
+
+    /** Strip HTML tags, decode entities, and remove leftover URLs. */
+    private fun cleanHtml(html: String): String {
+        return decodeHtmlEntities(html.replace(Regex("<[^>]+>"), ""))
             .replace(Regex("""https?://\S+"""), "")
             .replace(Regex("""\s{2,}"""), " ")
             .trim()
     }
 
     /**
-     * Fetch album art via MusicBrainz release search → Cover Art Archive.
-     * Mirrors desktop's `getAlbumArt()` approach.
+     * Fetch album art with a verify-then-cascade strategy:
+     *   1. MusicBrainz release search → Cover Art Archive URL (fast,
+     *      cheap — one HTTP call, well-indexed albums hit this).
+     *   2. [ImageEnrichmentService.resolveAlbumArtUrl] HEAD-checks the
+     *      CAA URL; on 404 it falls through to the full
+     *      MetadataService cascade (Last.fm + Spotify in addition to
+     *      MB), which catches albums MB doesn't index well or release
+     *      groups CAA hasn't received a front cover for yet.
+     *
+     * Mirrors desktop's `getAlbumArt()` for stage 1; the verify +
+     * cascade fallback are the "retry on first-attempt failure"
+     * extension — without them, every album with a missing CAA cover
+     * sat with a placeholder forever.
      */
     private suspend fun fetchAlbumArt(albumTitle: String, artistName: String): String? {
-        return try {
+        val caaUrl: String? = try {
             val query = "\"$albumTitle\" AND artist:\"$artistName\""
             val results = musicBrainzClient.searchReleases(query, limit = 1)
-            val release = results.releases.firstOrNull() ?: return null
-            // Coil follows the redirect to the actual image
-            MusicBrainzProvider.coverArtUrl(release.id)
+            results.releases.firstOrNull()?.let { MusicBrainzProvider.coverArtUrl(it.id) }
         } catch (e: Exception) {
-            Log.w(TAG, "Failed to fetch art for '$albumTitle' by '$artistName'", e)
+            Log.w(TAG, "MB search failed for '$albumTitle' by '$artistName': ${e.message}")
             null
         }
+        return imageEnrichmentService.resolveAlbumArtUrl(albumTitle, artistName, hint = caaUrl)
     }
 }
 
