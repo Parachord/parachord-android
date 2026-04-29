@@ -844,9 +844,13 @@ class PlaybackController constructor(
         // Pre-resolve the next few queue tracks so their resolver IDs
         // (spotifyId, appleMusicId, etc.) are ready before we need them.
         // This eliminates resolver latency from track transitions.
+        // Marked non-priority — these aren't on screen yet (the user
+        // is looking at the current track / their current screen), so
+        // they shouldn't compete with foreground track-list resolution
+        // for the priority lane.
         val upcoming = snapshot.upNext.take(3)
         if (upcoming.isNotEmpty()) {
-            trackResolverCache.resolveInBackground(upcoming)
+            trackResolverCache.resolveInBackground(upcoming, priority = false)
         }
 
         // Check spinoff availability for the new track (unless in spinoff mode)

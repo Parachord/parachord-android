@@ -42,12 +42,39 @@ class TrackResolverCache constructor(
 ) {
     companion object {
         private const val TAG = "TrackResolverCache"
-        /** Max concurrent resolutions — matches desktop's 4 workers. */
-        private const val MAX_CONCURRENCY = 4
+        /**
+         * Permits for the priority lane — used by foreground screens
+         * (the playlist the user just opened, the now-playing queue).
+         * Matches desktop's 4 workers so a freshly-opened playlist gets
+         * the same concurrency it would on desktop.
+         */
+        private const val MAX_PRIORITY_CONCURRENCY = 4
+        /**
+         * Permits for the background lane — Home recents, Library
+         * sweeps, anything kicked off when the user is NOT looking at
+         * the result. Lower so a 200-track library refresh can't starve
+         * a freshly-opened playlist of bandwidth.
+         */
+        private const val MAX_BACKGROUND_CONCURRENCY = 2
     }
 
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
-    private val semaphore = Semaphore(MAX_CONCURRENCY)
+
+    /**
+     * Two semaphores instead of one shared `Semaphore(4)`. A single FIFO
+     * lane meant that when a user opened a playlist after Home/Library
+     * had already submitted ~200 tracks for resolution, those 200 sat
+     * ahead of the playlist's tracks in the queue — visible badges took
+     * 30+ seconds to appear, even though MusicBrainz/Last.fm/Spotify
+     * could have answered almost immediately.
+     *
+     * The priority lane is reserved for whatever the user is currently
+     * looking at; the background lane handles the rest. Total throughput
+     * goes up from 4 → 6 concurrent, and the foreground always has its
+     * own dedicated 4 permits regardless of background queue depth.
+     */
+    private val prioritySemaphore = Semaphore(MAX_PRIORITY_CONCURRENCY)
+    private val backgroundSemaphore = Semaphore(MAX_BACKGROUND_CONCURRENCY)
 
     /** All cached resolved sources, keyed by "title|artist" */
     private val _trackSources = MutableStateFlow<Map<String, List<ResolvedSource>>>(emptyMap())
@@ -103,12 +130,31 @@ class TrackResolverCache constructor(
      * @param tracks TrackEntities to resolve
      * @param backfillDb If true, persist newly-discovered resolver IDs back to the DB
      */
+    /**
+     * Submit tracks for resolution.
+     *
+     * Defaults to [priority] = true: the overwhelming majority of
+     * callers are ViewModels resolving the track list the user is
+     * currently looking at — desktop matches this pattern with its
+     * "page priority 4 > queue priority 1" ordering. The few callers
+     * that pre-resolve tracks the user can't see yet (e.g.
+     * [com.parachord.android.playback.PlaybackController] warming up
+     * upcoming queue items, sync sweeps) opt into the lower-priority
+     * lane by explicitly passing `priority = false`.
+     */
     fun resolveInBackground(
         tracks: List<TrackEntity>,
         backfillDb: Boolean = true,
+        priority: Boolean = true,
     ): Job = scope.launch {
         // Fire MBID mapper lookups in parallel with resolver resolution
         enrichTracksWithMbids(tracks)
+
+        // Pick the lane based on whether the caller marks this batch as
+        // user-visible. Priority lane gets dedicated permits so a 200-
+        // track library sweep can't push a freshly-opened playlist to
+        // the back of the queue.
+        val sem = if (priority) prioritySemaphore else backgroundSemaphore
 
         for (track in tracks) {
             val key = trackKey(track.title, track.artist)
@@ -118,10 +164,10 @@ class TrackResolverCache constructor(
             val shouldResolve = synchronized(inFlight) { inFlight.add(key) }
             if (!shouldResolve) continue
 
-            // Launch concurrent resolution (bounded by semaphore)
+            // Launch concurrent resolution (bounded by chosen semaphore)
             launch {
                 try {
-                    semaphore.withPermit {
+                    sem.withPermit {
                         val sources = resolverManager.resolveWithHints(
                             query = "${track.title} ${track.artist}",
                             spotifyId = track.spotifyId,
@@ -150,9 +196,18 @@ class TrackResolverCache constructor(
      * Submit playlist tracks (PlaylistTrackEntity doesn't extend TrackEntity,
      * so we accept the raw fields).
      */
+    /**
+     * Same as [resolveInBackground] but accepts the lighter
+     * [PlaylistTrackInfo] (no full TrackEntity row available for
+     * playlist track rows). Defaults to [priority] = true for the
+     * same reason — playlist detail screens always want their tracks
+     * resolved fast, ahead of background sweeps.
+     */
     fun resolvePlaylistTracksInBackground(
         tracks: List<PlaylistTrackInfo>,
+        priority: Boolean = true,
     ): Job = scope.launch {
+        val sem = if (priority) prioritySemaphore else backgroundSemaphore
         for (track in tracks) {
             val key = trackKey(track.title, track.artist)
             if (_trackSources.value.containsKey(key)) continue
@@ -161,7 +216,7 @@ class TrackResolverCache constructor(
 
             launch {
                 try {
-                    semaphore.withPermit {
+                    sem.withPermit {
                         val sources = resolverManager.resolveWithHints(
                             query = "${track.title} ${track.artist}",
                             spotifyId = track.spotifyId,

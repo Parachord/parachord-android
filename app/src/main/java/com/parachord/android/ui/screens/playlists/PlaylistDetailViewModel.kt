@@ -97,7 +97,12 @@ class PlaylistDetailViewModel constructor(
                                 playlistId = pt.playlistId,
                                 position = pt.position,
                             )
-                        }
+                        },
+                        // The playlist the user just opened is the most
+                        // user-visible track list possible — it goes on
+                        // the priority lane so it doesn't sit behind any
+                        // background sweeps already in flight.
+                        priority = true,
                     )
                 }
             }

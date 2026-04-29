@@ -58,13 +58,11 @@ import org.koin.androidx.compose.koinViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import kotlinx.coroutines.launch
 import com.parachord.android.ui.components.AlbumArtCard
-import com.parachord.android.ui.components.ContextMenuItem
 import com.parachord.android.ui.components.HostedBadge
 import com.parachord.android.ui.components.ModalBg
-import com.parachord.android.ui.components.ModalBgDarker
-import com.parachord.android.ui.components.ModalDivider
 import com.parachord.android.ui.components.ModalTextActive
 import com.parachord.android.ui.components.ModalTextPrimary
+import com.parachord.android.ui.components.PlaylistContextMenu
 import com.parachord.android.ui.screens.library.CollectionFilterBar
 
 @OptIn(ExperimentalMaterial3Api::class)
@@ -356,100 +354,6 @@ fun PlaylistsScreen(
                     }
                 }
             }
-        }
-    }
-}
-
-// ── Playlist context menu ────────────────────────────────────────
-
-@OptIn(ExperimentalMaterial3Api::class)
-@Composable
-private fun PlaylistContextMenu(
-    playlistName: String,
-    artworkUrl: String?,
-    trackCount: Int,
-    onDismiss: () -> Unit,
-    onPlayPlaylist: () -> Unit,
-    onDeletePlaylist: () -> Unit,
-    onShare: (() -> Unit)? = null,
-) {
-    ModalBottomSheet(
-        onDismissRequest = onDismiss,
-        sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true),
-        containerColor = ModalBg,
-        scrimColor = Color.Black.copy(alpha = 0.4f),
-        dragHandle = {
-            Box(
-                modifier = Modifier
-                    .padding(vertical = 10.dp)
-                    .size(width = 32.dp, height = 4.dp)
-                    .background(
-                        color = Color.White.copy(alpha = 0.2f),
-                        shape = RoundedCornerShape(2.dp),
-                    ),
-            )
-        },
-    ) {
-        Column(
-            modifier = Modifier
-                .background(Brush.verticalGradient(listOf(ModalBg, ModalBgDarker)))
-                .padding(bottom = 32.dp),
-        ) {
-            // Header
-            Row(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .padding(horizontal = 20.dp, vertical = 8.dp),
-                verticalAlignment = Alignment.CenterVertically,
-            ) {
-                AlbumArtCard(
-                    artworkUrl = artworkUrl,
-                    size = 48.dp,
-                    cornerRadius = 4.dp,
-                    elevation = 1.dp,
-                )
-                Spacer(modifier = Modifier.width(12.dp))
-                Column(modifier = Modifier.weight(1f)) {
-                    Text(
-                        text = playlistName,
-                        fontSize = 15.sp,
-                        fontWeight = FontWeight.Medium,
-                        color = ModalTextActive,
-                        maxLines = 1,
-                        overflow = TextOverflow.Ellipsis,
-                    )
-                    Text(
-                        text = "$trackCount tracks",
-                        fontSize = 13.sp,
-                        color = ModalTextPrimary,
-                    )
-                }
-            }
-
-            HorizontalDivider(color = ModalDivider, modifier = Modifier.padding(vertical = 8.dp))
-
-            ContextMenuItem(
-                icon = Icons.Filled.PlayArrow,
-                label = "Play Playlist",
-                onClick = onPlayPlaylist,
-            )
-
-            if (onShare != null) {
-                HorizontalDivider(color = ModalDivider, modifier = Modifier.padding(vertical = 4.dp))
-                ContextMenuItem(
-                    icon = Icons.Filled.Share,
-                    label = "Share",
-                    onClick = { onShare(); onDismiss() },
-                )
-            }
-
-            HorizontalDivider(color = ModalDivider, modifier = Modifier.padding(vertical = 4.dp))
-
-            ContextMenuItem(
-                icon = Icons.Filled.Delete,
-                label = "Delete Playlist",
-                onClick = onDeletePlaylist,
-            )
         }
     }
 }
