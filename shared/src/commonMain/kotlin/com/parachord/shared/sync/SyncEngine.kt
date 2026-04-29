@@ -754,19 +754,36 @@ class SyncEngine constructor(
         if (fixed > 0) {
             Log.d(TAG, "repairAppleMusicArtworkPlaceholders: fixed $fixed playlist row(s)")
         }
-        // playlist_tracks repair is bulk SQL — fast even for thousands
-        // of rows. Raw driver execute because SQLDelight's UPDATE
-        // setter parser doesn't accept REPLACE() function calls.
-        try {
-            driver.execute(
-                null,
-                "UPDATE playlist_tracks " +
-                    "SET trackArtworkUrl = REPLACE(REPLACE(trackArtworkUrl, '{w}', '600'), '{h}', '600') " +
-                    "WHERE trackArtworkUrl LIKE '%{w}%' OR trackArtworkUrl LIKE '%{h}%'",
-                0,
-            )
-        } catch (e: Exception) {
-            Log.w(TAG, "playlist_tracks artwork-placeholder repair failed", e)
+        // Bulk SQL for the row-y tables (playlist_tracks, albums, tracks,
+        // artists). Raw driver execute because SQLDelight's UPDATE setter
+        // parser doesn't accept REPLACE() function calls. Each statement
+        // is idempotent — rows without `{w}`/`{h}` are excluded by the
+        // WHERE clause and untouched. Originally only walked
+        // playlist_tracks; extended 2026-04-29 after a user reported
+        // 7,318 AM albums with literal `.../{w}x{h}bb.jpg` URLs in their
+        // collection (artwork was never resolved at sync time on those
+        // rows; possibly imported via a path that bypassed
+        // AppleMusicSyncProvider.resolveArtworkUrl, possibly Apple
+        // returned the raw template for some albums). Walk all four
+        // entity tables defensively.
+        val placeholderRepairs = listOf(
+            "playlist_tracks" to "trackArtworkUrl",
+            "albums" to "artworkUrl",
+            "tracks" to "artworkUrl",
+            "artists" to "imageUrl",
+        )
+        for ((table, column) in placeholderRepairs) {
+            try {
+                driver.execute(
+                    null,
+                    "UPDATE $table " +
+                        "SET $column = REPLACE(REPLACE($column, '{w}', '600'), '{h}', '600') " +
+                        "WHERE $column LIKE '%{w}%' OR $column LIKE '%{h}%'",
+                    0,
+                )
+            } catch (e: Exception) {
+                Log.w(TAG, "$table.$column artwork-placeholder repair failed", e)
+            }
         }
     }
 

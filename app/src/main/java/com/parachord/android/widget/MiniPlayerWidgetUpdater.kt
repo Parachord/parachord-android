@@ -13,6 +13,7 @@ import com.parachord.shared.platform.Log
 import android.util.LruCache
 import com.parachord.android.playback.PlaybackController
 import com.parachord.android.playback.PlaybackStateHolder
+import com.parachord.android.playback.effectiveTrack
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
@@ -79,7 +80,16 @@ class MiniPlayerWidgetUpdater constructor(
 
         observeJob = scope.launch {
             stateHolder.state.collectLatest { state ->
-                val track = state.currentTrack
+                // Use effectiveTrack (currentTrack overlaid with streaming
+                // metadata from Spotify Connect / Apple Music MusicKit) so
+                // the widget shows the same title/artist/artwork that the
+                // Now Playing screen and MediaSession notification show.
+                // Reading state.currentTrack directly meant the widget got
+                // whatever the resolver guessed at queue-time — possibly
+                // null artwork (local file with no embedded art waiting on
+                // ImageEnrichmentService) or a wrong-track placeholder
+                // when the streaming source corrected the metadata.
+                val track = state.effectiveTrack
                 val title = track?.title
                 val artist = track?.artist
                 val isPlaying = state.isPlaying
