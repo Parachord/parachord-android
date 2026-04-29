@@ -2226,33 +2226,155 @@ class SyncEngine constructor(
             "playlists" -> "playlist"
             else -> return 0
         }
-        var purged = 0
-        val sources = syncSourceDao.getByProvider(providerId, itemType)
-        for (source in sources) {
-            val others = syncSourceDao.getByItem(source.itemId, itemType)
-                .filter { it.providerId != providerId }
-            syncSourceDao.deleteByKey(source.itemId, itemType, providerId)
-            if (others.isEmpty()) {
-                when (itemType) {
-                    "track" -> trackDao.getById(source.itemId)?.let { trackDao.delete(it) }
-                    "album" -> albumDao.getById(source.itemId)?.let { albumDao.delete(it) }
-                    "artist" -> artistDao.deleteById(source.itemId)
-                    "playlist" -> {
-                        playlistDao.getById(source.itemId)?.let { playlistDao.delete(it) }
-                        playlistTrackDao.deleteByPlaylistId(source.itemId)
-                        // Also drop any per-provider link / source rows so
-                        // the playlist-level invariants stay clean.
-                        syncPlaylistLinkDao.deleteForLocal(source.itemId)
-                        syncPlaylistSourceDao.deleteForLocal(source.itemId)
+        val table = when (itemType) {
+            "track" -> "tracks"
+            "album" -> "albums"
+            "artist" -> "artists"
+            "playlist" -> "playlists"
+            else -> return 0
+        }
+
+        // Snapshot how many sync_source rows we're about to act on.
+        // Used for the return value AND for logging.
+        val scanned = syncSourceDao.getByProvider(providerId, itemType).size
+        if (scanned == 0) return 0
+
+        // Bulk SQL inside a single transaction. The previous implementation
+        // walked sources in a Kotlin for-loop calling 4 DAO methods per
+        // iteration (`getByItem`, `deleteByKey`, `getById`, `delete`). For
+        // 7,000+ rows that meant ~30,000 sequential DB round-trips, taking
+        // 30+ seconds during which Flow observers (`albumDao.getAll()` etc.)
+        // re-emitted continuously while the table was mid-mutation. That
+        // race produced an NPE in the SQLDelight cursor mapper —
+        // `AlbumQueries.getAll$lambda$0` reading a transient null `id` from
+        // a cursor pointing at a row in flight.
+        //
+        // The bulk approach: one transaction, three SQL statements, ~10ms
+        // for any axis size. Observers see the table go from "before" to
+        // "after" atomically — no intermediate state, no race window.
+        //
+        // Cross-provider survival: the entity-table delete uses NOT EXISTS
+        // against `sync_sources` filtered by other-provider rows, so an
+        // album that's ALSO synced from Spotify survives the AM purge
+        // (only its `sync_sources` row for `providerId` gets deleted).
+        // Spotify and AM use disjoint id prefixes (`spotify-*` /
+        // `applemusic-*`), so in practice nothing survives — but the guard
+        // matters for any future provider that might share ids.
+        try {
+            db.transaction {
+                // 1. Delete entity rows that have no OTHER-provider sync_source
+                //    pointing at them.
+                driver.execute(
+                    null,
+                    """
+                    DELETE FROM $table
+                    WHERE id IN (
+                        SELECT s.itemId FROM sync_sources s
+                        WHERE s.providerId = ? AND s.itemType = ?
+                          AND NOT EXISTS (
+                              SELECT 1 FROM sync_sources s2
+                              WHERE s2.itemId = s.itemId
+                                AND s2.itemType = ?
+                                AND s2.providerId != ?
+                          )
+                    )
+                    """.trimIndent(),
+                    4,
+                ) {
+                    bindString(0, providerId)
+                    bindString(1, itemType)
+                    bindString(2, itemType)
+                    bindString(3, providerId)
+                }
+
+                // 2. Playlist-only side effects: drop tracks + per-provider
+                //    link / source rows whose local playlist row was just
+                //    deleted. Skip-if-not-deleted is implicit since FK
+                //    targets are already gone.
+                if (itemType == "playlist") {
+                    driver.execute(
+                        null,
+                        """
+                        DELETE FROM playlist_tracks
+                        WHERE playlistId IN (
+                            SELECT s.itemId FROM sync_sources s
+                            WHERE s.providerId = ? AND s.itemType = 'playlist'
+                              AND NOT EXISTS (
+                                  SELECT 1 FROM sync_sources s2
+                                  WHERE s2.itemId = s.itemId
+                                    AND s2.itemType = 'playlist'
+                                    AND s2.providerId != ?
+                              )
+                        )
+                        """.trimIndent(),
+                        2,
+                    ) {
+                        bindString(0, providerId)
+                        bindString(1, providerId)
+                    }
+                    driver.execute(
+                        null,
+                        """
+                        DELETE FROM sync_playlist_link
+                        WHERE localPlaylistId IN (
+                            SELECT s.itemId FROM sync_sources s
+                            WHERE s.providerId = ? AND s.itemType = 'playlist'
+                              AND NOT EXISTS (
+                                  SELECT 1 FROM sync_sources s2
+                                  WHERE s2.itemId = s.itemId
+                                    AND s2.itemType = 'playlist'
+                                    AND s2.providerId != ?
+                              )
+                        )
+                        """.trimIndent(),
+                        2,
+                    ) {
+                        bindString(0, providerId)
+                        bindString(1, providerId)
+                    }
+                    driver.execute(
+                        null,
+                        """
+                        DELETE FROM sync_playlist_source
+                        WHERE localPlaylistId IN (
+                            SELECT s.itemId FROM sync_sources s
+                            WHERE s.providerId = ? AND s.itemType = 'playlist'
+                              AND NOT EXISTS (
+                                  SELECT 1 FROM sync_sources s2
+                                  WHERE s2.itemId = s.itemId
+                                    AND s2.itemType = 'playlist'
+                                    AND s2.providerId != ?
+                              )
+                        )
+                        """.trimIndent(),
+                        2,
+                    ) {
+                        bindString(0, providerId)
+                        bindString(1, providerId)
                     }
                 }
-                purged++
+
+                // 3. Delete this provider's sync_source rows (always last,
+                //    so the NOT EXISTS subqueries above still see them).
+                driver.execute(
+                    null,
+                    "DELETE FROM sync_sources WHERE providerId = ? AND itemType = ?",
+                    2,
+                ) {
+                    bindString(0, providerId)
+                    bindString(1, itemType)
+                }
             }
+        } catch (e: Exception) {
+            Log.e(TAG, "removeItemsForProviderAxis bulk delete failed " +
+                "(provider=$providerId axis=$axis): ${e.message}", e)
+            return 0
         }
+
         Log.d(TAG, "Per-axis purge: provider=$providerId axis=$axis " +
-            "scanned=${sources.size} purged=$purged " +
-            "(others kept survived under another provider's link)")
-        return purged
+            "scanned=$scanned (atomic bulk delete; entities tracked under " +
+            "another provider survived via NOT EXISTS guard)")
+        return scanned
     }
 
     /** Quick count for the wizard's confirmation prompt — number of

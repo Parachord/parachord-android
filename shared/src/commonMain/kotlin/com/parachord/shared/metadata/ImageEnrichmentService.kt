@@ -60,6 +60,12 @@ class ImageEnrichmentService(
          *  [enrichPlaylistArt] — keeps a 200-track XSPF from slamming
          *  Last.fm / MusicBrainz with simultaneous requests. */
         const val MAX_TRACK_SEARCH_CONCURRENCY = 4
+
+        /** Bounded concurrency for [regenerateAllPlaylistMosaics] — at
+         *  most this many mosaic builds running in parallel. Each mosaic
+         *  fetches up to 4 album-art tiles, so 4 parallel = up to 16
+         *  concurrent image fetches. */
+        const val MAX_PLAYLIST_REGEN_CONCURRENCY = 4
     }
 
     // In-flight deduplication maps (Mutex-guarded since commonMain has no
@@ -334,5 +340,57 @@ class ImageEnrichmentService(
             d
         }
         return deferred.await()
+    }
+
+    /**
+     * Walk every playlist and regenerate the mosaic for any whose artwork
+     * is NOT a locally-generated `file://` URL. Treats provider stock art
+     * (Spotify's `mosaic.scdn.co/...`, Apple Music's `is1-ssl.mzstatic.com/
+     * .../AM.PDCXS11.jpg` patterns) and missing artwork the same way: kick
+     * off `enrichPlaylistArt` to generate a 2x2 album-art mosaic from the
+     * playlist's tracks.
+     *
+     * Mosaic = "the sum of what's actually IN the playlist". Even when a
+     * playlist is synced from a remote provider, we want the mosaic, not
+     * the provider's auto-generated stock cover.
+     *
+     * Idempotent and bounded:
+     * - Skips playlists already showing a `file://` mosaic (canonical state).
+     * - Each call dedups against in-flight `enrichPlaylistArt` invocations
+     *   via the existing `playlistFetches` mutex map.
+     * - Bounded concurrency = [MAX_PLAYLIST_REGEN_CONCURRENCY] so a library
+     *   with 100 synced playlists doesn't slam the network.
+     *
+     * Run from app start (`ParachordApplication.onCreate`) and after every
+     * sync completion to keep mosaics fresh as new playlists arrive.
+     */
+    suspend fun regenerateAllPlaylistMosaics() {
+        val playlists = playlistDao.getAllSync()
+        val needsMosaic = playlists.filter { p ->
+            val art = p.artworkUrl
+            art.isNullOrBlank() || !art.startsWith("file://")
+        }
+        if (needsMosaic.isEmpty()) return
+
+        val sem = Semaphore(MAX_PLAYLIST_REGEN_CONCURRENCY)
+        coroutineScope {
+            needsMosaic.map { p ->
+                async {
+                    sem.withPermit {
+                        try {
+                            // cacheBustToken = null: first-time generation
+                            // case. The mosaic file is written under
+                            // `filesDir/playlist_mosaics/<playlistId>.jpg`.
+                            // Coil keys on URL; subsequent rewrites need a
+                            // cache-bust, but a fresh write to a new path
+                            // doesn't.
+                            enrichPlaylistArt(p.id, cacheBustToken = null)
+                        } catch (_: Exception) {
+                            // Per-playlist failure is fine — try others.
+                        }
+                    }
+                }
+            }.awaitAll()
+        }
     }
 }
