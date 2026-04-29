@@ -16,6 +16,7 @@ import com.parachord.shared.api.AmUpdatePlaylistRequest
 import com.parachord.shared.api.AppleMusicClient
 import com.parachord.shared.api.AppleMusicLibraryClient
 import com.parachord.shared.api.AppleMusicLibraryClient.AmHttpException
+import com.parachord.shared.api.ItunesRateLimitedException
 import io.ktor.http.isSuccess
 import com.parachord.shared.model.Album
 import com.parachord.shared.model.Artist
@@ -124,6 +125,21 @@ class AppleMusicSyncProvider(
      */
     @Volatile
     internal var amPatchUnsupportedForSession: Boolean = false
+
+    /**
+     * iTunes Search rate-limit kill-switch. Flipped on the first HTTP 429
+     * response from `itunes.apple.com/search` and never reset within the
+     * process — Apple's throttle backoff is not documented, and continued
+     * hammering after a 429 just earns a longer cooldown. Subsequent
+     * [searchForTrackId] calls short-circuit to `null` so push paths
+     * silently skip un-hydrated tracks rather than turning every track
+     * into a wasted 429-throwing request.
+     *
+     * Reset on app restart so a long-lived session can re-probe iTunes
+     * Search after the user backgrounds the app.
+     */
+    @Volatile
+    internal var iTunesSearchRateLimited: Boolean = false
 
     // ── Read methods ─────────────────────────────────────────────────
 
@@ -369,6 +385,10 @@ class AppleMusicSyncProvider(
      * (0.60) using [com.parachord.shared.resolver.scoreConfidence].
      */
     override suspend fun searchForTrackId(title: String, artist: String, album: String?): String? {
+        // Session kill-switch: if we've already hit a 429 from iTunes Search,
+        // don't bother asking again until the user restarts the app. Apple
+        // doesn't publish the throttle window and stacked 429s just extend it.
+        if (iTunesSearchRateLimited) return null
         delay(INTER_REQUEST_DELAY_MS)
         // iTunes Search has no field qualifiers; just concat the metadata
         // and let its ranking find the best song match.
@@ -391,6 +411,16 @@ class AppleMusicSyncProvider(
                 return null
             }
             candidate.trackId.toString()
+        } catch (e: ItunesRateLimitedException) {
+            // First 429: flip the kill-switch and silently skip. Subsequent
+            // tracks in this sync session will short-circuit at the top of
+            // this method.
+            if (!iTunesSearchRateLimited) {
+                Log.w(TAG, "iTunes Search rate-limited (HTTP 429) — disabling " +
+                    "track-id hydration for the rest of this session")
+                iTunesSearchRateLimited = true
+            }
+            null
         } catch (e: Exception) {
             Log.w(TAG, "searchForTrackId failed for '$title' by '$artist'", e)
             null

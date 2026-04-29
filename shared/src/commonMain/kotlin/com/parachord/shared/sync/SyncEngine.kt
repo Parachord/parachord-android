@@ -21,6 +21,8 @@ import kotlinx.coroutines.async
 import kotlinx.coroutines.awaitAll
 import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.sync.Mutex
+import kotlinx.coroutines.sync.Semaphore
+import kotlinx.coroutines.sync.withPermit
 
 class SyncEngine constructor(
     private val db: ParachordDb,
@@ -63,6 +65,15 @@ class SyncEngine constructor(
          *  Spotify dedup migration's gating. Idempotent: runs once
          *  per install. */
         private const val MIGRATION_DEDUP_LOCAL_V1 = 5
+
+        /**
+         * Maximum concurrent catalog-search requests during track-id
+         * hydration ([hydrateMissingTrackIds]). Apple's iTunes Search
+         * starts returning HTTP 429 around 10+ parallel requests; Spotify's
+         * catalog search has per-token quotas. 4 keeps us well below either
+         * threshold while still hydrating a 100-track playlist in ~30s.
+         */
+        private const val HYDRATE_MAX_CONCURRENCY = 4
 
         /**
          * Backfill `sync_playlist_source` from playlist rows whose id prefix
@@ -1860,18 +1871,26 @@ class SyncEngine constructor(
         Log.d(TAG, "Hydrating ${needsHydration.size}/${tracks.size} track IDs for " +
             "$playlistId on ${provider.id}")
 
+        // Bound concurrency: unbounded parallel `awaitAll` against a 100-track
+        // playlist trips iTunes Search rate-limiting (HTTP 429) instantly,
+        // and Spotify's catalog search has its own per-token quotas. 4
+        // concurrent requests is enough to keep latency reasonable without
+        // burning through quota in seconds.
+        val hydrationSem = Semaphore(HYDRATE_MAX_CONCURRENCY)
         val resolved: List<Pair<Int, String?>> = coroutineScope {
             needsHydration.map { track ->
                 async {
-                    val resolvedId = try {
-                        provider.searchForTrackId(
-                            title = track.trackTitle,
-                            artist = track.trackArtist,
-                            album = track.trackAlbum,
-                        )
-                    } catch (e: Exception) {
-                        Log.w(TAG, "hydrate: search threw for '${track.trackTitle}'", e)
-                        null
+                    val resolvedId = hydrationSem.withPermit {
+                        try {
+                            provider.searchForTrackId(
+                                title = track.trackTitle,
+                                artist = track.trackArtist,
+                                album = track.trackAlbum,
+                            )
+                        } catch (e: Exception) {
+                            Log.w(TAG, "hydrate: search threw for '${track.trackTitle}'", e)
+                            null
+                        }
                     }
                     track.position to resolvedId
                 }
