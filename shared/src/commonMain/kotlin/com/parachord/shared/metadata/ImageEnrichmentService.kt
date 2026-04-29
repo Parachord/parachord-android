@@ -199,13 +199,36 @@ class ImageEnrichmentService(
                         "$albumTitle $artistName",
                         limit = 5,
                     )
-                    searchResults
+                    val albumSearchArt = searchResults
                         .firstOrNull {
                             it.title.equals(albumTitle, ignoreCase = true) &&
                                 it.artist.equals(artistName, ignoreCase = true)
                         }
                         ?.artworkUrl
                         ?: searchResults.firstOrNull()?.artworkUrl
+                    if (albumSearchArt != null) return@async albumSearchArt
+
+                    // Last resort: track-level search. Some obscure
+                    // singles (e.g. one-off bandcamp drops) aren't
+                    // indexed as albums on MusicBrainz / Last.fm, and
+                    // Spotify's `album.search` may also miss them, but
+                    // Spotify's `track.search` finds them and returns
+                    // the parent album's `images[]`. This mirrors what
+                    // [enrichTrackArt] does on the playback path — Now
+                    // Playing reliably gets art for these albums while
+                    // album-level callers (Album detail screen, Critical
+                    // Darlings, Fresh Drops) used to come up empty.
+                    val trackResults = metadataService.searchTracks(
+                        "$artistName $albumTitle",
+                        limit = 5,
+                    )
+                    trackResults
+                        .firstOrNull {
+                            it.album?.equals(albumTitle, ignoreCase = true) == true &&
+                                it.artist.equals(artistName, ignoreCase = true)
+                        }
+                        ?.artworkUrl
+                        ?: trackResults.firstOrNull()?.artworkUrl
                 } catch (_: Exception) {
                     null
                 } finally {

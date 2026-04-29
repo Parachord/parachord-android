@@ -250,6 +250,19 @@ class FreshDropsRepository(
         if (!forceRefresh && !isStale && cachedReleases != null) {
             Log.d(TAG, "Using ${cachedReleases!!.size} cached fresh drops")
             emit(Resource.Success(cachedReleases!!))
+            // Even on the cache-hit path, run the art repair pass —
+            // entries cached with a broken Cover Art Archive URL (CAA
+            // 404 for release groups with no uploaded front cover) would
+            // otherwise sit broken for the full 6-hour TTL. The pass is
+            // idempotent: once a release's URL has been swapped to a
+            // non-CAA cascade result, subsequent passes skip it
+            // (`needsCheck = url == null || url.contains("coverartarchive.org")`).
+            val repaired = verifyAndRepairArt(cachedReleases!!)
+            if (repaired != cachedReleases) {
+                cachedReleases = repaired
+                saveDiskCache(repaired, lastFetchedAt)
+                emit(Resource.Success(repaired))
+            }
             return@flow
         }
 

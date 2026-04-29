@@ -32,6 +32,7 @@ class AlbumViewModel constructor(
     private val libraryRepository: com.parachord.android.data.repository.LibraryRepository,
     private val playbackStateHolder: com.parachord.android.playback.PlaybackStateHolder,
     private val trackResolverCache: TrackResolverCache,
+    private val imageEnrichmentService: com.parachord.android.data.metadata.ImageEnrichmentService,
 ) : ViewModel() {
 
     companion object {
@@ -106,6 +107,24 @@ class AlbumViewModel constructor(
                     _albumDetail.value = enriched
                     // Kick off resolver resolution on each update (idempotent — already-resolved tracks are skipped)
                     resolveTracksInBackground(enriched.tracks)
+                }
+
+                // Final fallback: if every metadata provider missed art
+                // for this album (e.g. obscure singles like one-off
+                // bandcamp drops that aren't in MB / Last.fm / Spotify's
+                // album catalogs), fall through to the track-level
+                // search inside `lookupAlbumArt`. That catches it via
+                // Spotify's permissive `track.search` endpoint, which
+                // returns the parent album's `images[]` even when
+                // `album.search` came up empty — the same path Now
+                // Playing's `enrichTrackArt` uses to pull art for these
+                // tracks during playback.
+                val current = _albumDetail.value
+                if (current != null && current.artworkUrl == null) {
+                    val fallback = imageEnrichmentService.lookupAlbumArt(albumTitle, artistName)
+                    if (fallback != null) {
+                        _albumDetail.value = current.copy(artworkUrl = fallback)
+                    }
                 }
             } catch (_: Exception) {
                 // partial results still shown
