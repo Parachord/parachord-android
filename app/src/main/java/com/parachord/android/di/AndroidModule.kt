@@ -396,7 +396,34 @@ val androidModule = module {
 
     // ── Repositories ─────────────────────────────────────────────────
 
-    singleOf(::LibraryRepository)
+    // LibraryRepository — shared. MbidEnrichmentService is Android-only
+    // (its disk cache is tied to `Context+File`), so it's forwarded via
+    // two non-suspend fire-and-forget lambdas.
+    single {
+        val mbidEnrichment: com.parachord.android.data.metadata.MbidEnrichmentService = get()
+        com.parachord.shared.repository.LibraryRepository(
+            trackDao = get(),
+            albumDao = get(),
+            artistDao = get(),
+            playlistDao = get(),
+            playlistTrackDao = get(),
+            syncEngine = get(),
+            syncPlaylistLinkDao = get(),
+            syncPlaylistSourceDao = get(),
+            mbidEnrichTrack = { trackId, artist, title ->
+                mbidEnrichment.enrichInBackground(trackId, artist, title)
+            },
+            mbidEnrichBatch = { tracks ->
+                mbidEnrichment.enrichBatchInBackground(
+                    tracks.map {
+                        com.parachord.android.data.metadata.TrackEnrichmentRequest(
+                            it.id, it.artist, it.title,
+                        )
+                    }
+                )
+            },
+        )
+    }
     // ChartsRepository takes `lastFmApiKey` as a constructor parameter
     // (sourced here from BuildConfig). Apple Music marketing-tools RSS
     // feeds + Last.fm chart endpoints all flow through shared Ktor clients
