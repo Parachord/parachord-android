@@ -25,13 +25,13 @@ class DjToolExecutor constructor(
     private val settingsStore: SettingsStore,
     private val resolverManager: ResolverManager,
     private val resolverScoring: ResolverScoring,
-) {
+) : com.parachord.shared.ai.tools.DjToolExecutor {
 
     /**
      * Execute a DJ tool by name with the given arguments.
      * Returns a result map that will be serialized as the tool response to the AI.
      */
-    suspend fun execute(name: String, args: Map<String, Any?>): Map<String, Any?> {
+    override suspend fun execute(name: String, args: Map<String, Any?>): Map<String, Any?> {
         return try {
             when (name) {
                 "play" -> executPlay(args)

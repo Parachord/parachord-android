@@ -1,6 +1,7 @@
 package com.parachord.shared.ai
 
 import com.parachord.shared.ai.tools.DjToolDefinitions
+import com.parachord.shared.ai.tools.DjToolExecutor
 import com.parachord.shared.db.dao.ChatMessageDao
 import com.parachord.shared.model.ChatMessageRecord
 import com.parachord.shared.platform.currentTimeMillis
@@ -22,9 +23,9 @@ import kotlinx.serialization.json.buildJsonObject
  * Messages are persisted to Room and retained for 30 days.
  *
  * KMP migration notes:
- *  - `DjToolExecutor` (Android-only, dispatches to Parachord MCP / playback
- *    actions) is forwarded via a `executeTool` suspend lambda. The shared
- *    service only knows the tool name + args + result shape.
+ *  - [DjToolExecutor] is now a shared interface; the concrete tool
+ *    dispatch (which reaches into PlaybackController / MCP / Parachord
+ *    controls) is platform-specific. iOS supplies its own implementation.
  *  - JSON helpers `mapToJsonElement` / `jsonElementToMap` were extracted
  *    from `ChatGptProvider` to shared (`JsonHelpers.kt`) so the chat
  *    service can encode tool results without depending on Android provider
@@ -34,9 +35,7 @@ import kotlinx.serialization.json.buildJsonObject
  *    explicit `withContext(Dispatchers.IO)` wrapper is no longer needed.
  */
 class AiChatService(
-    /** Execute a DJ tool by name with JSON-decoded arguments. Returns a
-     *  map representing the tool's result; encoded as JSON for the AI. */
-    private val executeTool: suspend (name: String, arguments: Map<String, Any?>) -> Map<String, Any?>,
+    private val toolExecutor: DjToolExecutor,
     private val contextProvider: ChatContextProvider,
     private val chatMessageDao: ChatMessageDao,
     private val json: Json,
@@ -182,7 +181,7 @@ class AiChatService(
             for (toolCall in currentResponse.toolCalls.orEmpty()) {
                 onProgress(toolProgressText(toolCall.name))
 
-                val result = executeTool(toolCall.name, toolCall.arguments)
+                val result = toolExecutor.execute(toolCall.name, toolCall.arguments)
                 val resultJson = json.encodeToString(
                     JsonElement.serializer(),
                     mapToJsonElement(result),
