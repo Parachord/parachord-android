@@ -1,5 +1,7 @@
 package com.parachord.android.data.repository
 
+import com.parachord.shared.model.Resource
+
 import android.content.Context
 import com.parachord.shared.platform.Log
 import com.parachord.shared.api.MusicBrainzClient

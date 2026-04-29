@@ -1,7 +1,5 @@
 package com.parachord.android.data.metadata
 
-import com.parachord.shared.api.AppleMusicClient
-import com.parachord.android.data.store.SettingsStore
 import io.mockk.coEvery
 import io.mockk.mockk
 import kotlinx.coroutines.test.runTest
@@ -16,8 +14,7 @@ class MetadataServiceTest {
     private lateinit var lastFm: LastFmProvider
     private lateinit var discogs: DiscogsProvider
     private lateinit var spotify: SpotifyProvider
-    private lateinit var settingsStore: SettingsStore
-    private lateinit var appleMusicClient: AppleMusicClient
+    private var disabledProviders: Set<String> = emptySet()
     private lateinit var service: MetadataService
 
     @Before
@@ -27,8 +24,7 @@ class MetadataServiceTest {
         lastFm = mockk()
         discogs = mockk()
         spotify = mockk()
-        settingsStore = mockk()
-        appleMusicClient = mockk(relaxed = true)
+        disabledProviders = emptySet()
 
         coEvery { musicBrainz.priority } returns 0
         coEvery { musicBrainz.name } returns "musicbrainz"
@@ -50,9 +46,17 @@ class MetadataServiceTest {
         coEvery { spotify.name } returns "spotify"
         coEvery { spotify.isAvailable() } returns false
 
-        coEvery { settingsStore.getDisabledMetaProviders() } returns emptySet()
-
-        service = MetadataService(musicBrainz, wikipedia, lastFm, discogs, spotify, settingsStore, appleMusicClient)
+        // Android `MetadataService` is now a typealias to the shared cascading
+        // orchestrator — see `app/data/metadata/MetadataService.kt`. The shared
+        // constructor takes `(providers, getDisabledProviders, enrichAlbumArtwork)`;
+        // the test passes a null enrichment lambda since none of these tests
+        // exercise the iTunes-search artwork-enrichment path.
+        service = MetadataService(
+            providers = listOf(musicBrainz, wikipedia, lastFm, discogs, spotify)
+                .sortedBy { it.priority },
+            getDisabledProviders = { disabledProviders },
+            enrichAlbumArtwork = null,
+        )
     }
 
     // -- searchTracks --
@@ -89,7 +93,7 @@ class MetadataServiceTest {
 
     @Test
     fun `searchTracks skips disabled providers`() = runTest {
-        coEvery { settingsStore.getDisabledMetaProviders() } returns setOf("musicbrainz")
+        disabledProviders = setOf("musicbrainz")
         coEvery { wikipedia.searchTracks(any(), any()) } returns emptyList()
         coEvery { lastFm.searchTracks(any(), any()) } returns listOf(
             TrackSearchResult(title = "Song", artist = "Artist", provider = "lastfm")

@@ -54,11 +54,11 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.em
 import org.koin.androidx.compose.koinViewModel
-import com.parachord.android.data.repository.HistoryAlbum
-import com.parachord.android.data.repository.HistoryArtist
-import com.parachord.android.data.repository.HistoryTrack
-import com.parachord.android.data.repository.RecentTrack
-import com.parachord.android.data.repository.Resource
+import com.parachord.shared.model.HistoryAlbum
+import com.parachord.shared.model.HistoryArtist
+import com.parachord.shared.model.HistoryTrack
+import com.parachord.shared.model.RecentTrack
+import com.parachord.shared.model.Resource
 import com.parachord.android.ui.components.AlbumArtCard
 import com.parachord.android.ui.components.ShimmerTrackRow
 import com.parachord.android.ui.components.SwipeableTabLayout

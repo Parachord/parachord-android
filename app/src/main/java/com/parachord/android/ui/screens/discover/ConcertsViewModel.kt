@@ -14,7 +14,7 @@ import com.parachord.android.data.db.dao.AlbumDao
 import com.parachord.android.data.repository.ConcertArtist
 import com.parachord.android.data.repository.ConcertEvent
 import com.parachord.android.data.repository.ConcertsRepository
-import com.parachord.android.data.repository.Resource
+import com.parachord.shared.model.Resource
 import com.parachord.android.data.store.SettingsStore
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.flow.MutableStateFlow

@@ -95,7 +95,7 @@ import com.parachord.android.data.metadata.AlbumSearchResult
 import com.parachord.android.data.metadata.SimilarArtist
 import com.parachord.android.data.metadata.TrackSearchResult
 import com.parachord.android.data.repository.ConcertEvent
-import com.parachord.android.data.repository.Resource
+import com.parachord.shared.model.Resource
 
 @OptIn(ExperimentalMaterial3Api::class, ExperimentalLayoutApi::class)
 @Composable

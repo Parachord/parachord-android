@@ -10,11 +10,11 @@ import com.parachord.android.data.db.entity.TrackEntity
 import com.parachord.android.data.metadata.MetadataService
 import com.parachord.android.data.repository.FriendsRepository
 import com.parachord.android.data.repository.LibraryRepository
-import com.parachord.android.data.repository.HistoryAlbum
-import com.parachord.android.data.repository.HistoryArtist
-import com.parachord.android.data.repository.HistoryTrack
-import com.parachord.android.data.repository.RecentTrack
-import com.parachord.android.data.repository.Resource
+import com.parachord.shared.model.HistoryAlbum
+import com.parachord.shared.model.HistoryArtist
+import com.parachord.shared.model.HistoryTrack
+import com.parachord.shared.model.RecentTrack
+import com.parachord.shared.model.Resource
 import com.parachord.android.playback.PlaybackContext
 import com.parachord.android.playback.PlaybackController
 import com.parachord.android.resolver.ResolvedSource
