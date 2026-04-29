@@ -553,7 +553,7 @@ The desktop supports dark/light mode toggle. Android should follow system theme 
 - **Database:** SQLDelight (KMP, replaced Room in April 2026)
 - **Preferences:** Jetpack DataStore (non-sensitive prefs) + EncryptedSharedPreferences via `SecureTokenStore` (OAuth tokens, API keys — AES-256-GCM backed by Android Keystore)
 - **DI:** Koin (KMP, replaced Hilt in April 2026)
-- **Networking:** OkHttp + Retrofit (APIs), Ktor (shared module API clients, not yet wired into app)
+- **Networking:** Ktor `HttpClient` (all API calls — shared between Android + iOS). OkHttp engine on Android (Darwin on iOS). Retrofit was fully dropped (April 2026). OkHttp standalone is still used by scrobblers, AI .axe wrappers, OAuth flows, and the JS bridge.
 - **Image loading:** Coil 2
 - **Spotify:** Web API only — Spotify App Remote SDK and Spotify Auth SDK were removed (April 2026). All Spotify interaction is via the Connect HTTP API.
 
@@ -636,13 +636,13 @@ static let darkAccentPurple = Color(hex: "#a78bfa")
 | Resolver cache | `resolver/TrackResolverCache.kt` |
 | Playback routing | `playback/PlaybackRouter.kt`, `PlaybackController.kt` |
 | Metadata cascade | `data/metadata/MetadataService.kt`, `*Provider.kt` |
-| MBID enrichment | `data/metadata/MbidEnrichmentService.kt`, `data/api/ListenBrainzApi.kt` (mapper lookup) |
-| Image enrichment | `data/metadata/ImageEnrichmentService.kt` |
+| MBID enrichment | `shared/.../metadata/MbidEnrichmentService.kt` (typealias shim in `data/metadata/`), `shared/.../api/ListenBrainzClient.kt` (`mbidMapperLookup`) |
+| Image enrichment | `shared/.../metadata/ImageEnrichmentService.kt` (typealias shim in `data/metadata/`); platform-specific 2x2 mosaic via `composeMosaicAndroid` lambda |
 | Scrobbling | `playback/ScrobbleManager.kt`, `playback/scrobbler/ListenBrainzScrobbler.kt`, `LastFmScrobbler.kt`, `LibreFmScrobbler.kt` |
 | Local file scanning | `data/scanner/MediaScanner.kt` |
 | Playback handlers | `playback/handlers/SpotifyPlaybackHandler.kt`, `AppleMusicPlaybackHandler.kt`, `SoundCloudPlaybackHandler.kt` |
 | Apple Music bridge | `playback/handlers/MusicKitWebBridge.kt`, `assets/js/musickit-bridge.html` |
-| Settings/defaults | `data/store/SettingsStore.kt` |
+| Settings/defaults | `shared/.../settings/SettingsStore.kt` (typealias shim in `data/store/`); `shared/.../store/KvStore.kt` + `KvStoreFactory` (Android: SharedPreferences, iOS: NSUserDefaults) |
 | Theme | `ui/theme/Theme.kt` |
 | Shared UI components | `ui/components/AlbumContextMenu.kt`, `ui/components/ArtistContextMenu.kt`, `ui/components/TrackContextMenu.kt`, `ui/components/TrackRow.kt`, `ui/components/ResolverIconRow.kt` |
 | Weekly playlists | `data/repository/WeeklyPlaylistsRepository.kt`, `ui/screens/playlists/WeeklyPlaylistScreen.kt`, `WeeklyPlaylistViewModel.kt` |
@@ -653,10 +653,11 @@ static let darkAccentPurple = Color(hex: "#a78bfa")
 | .axe scrobbler wrapper | `playback/scrobbler/AxeScrobbler.kt` |
 | Bundled plugins | `assets/plugins/*.axe` (19 files) |
 | OAuth | `auth/OAuthManager.kt`, `auth/OAuthRedirectActivity.kt` |
-| Secure token storage | `data/store/SecureTokenStore.kt` (EncryptedSharedPreferences wrapper) |
+| Secure token storage | `shared/.../store/SecureTokenStore.kt` (interface), `AndroidSecureTokenStore` (EncryptedSharedPreferences via Keystore), `IosSecureTokenStore` (Keychain via multiplatform-settings) |
 | Activity tracking | `app/CurrentActivityHolder.kt` |
 | Security policy | `SECURITY.md` |
-| KMP shared module | `shared/src/commonMain/kotlin/com/parachord/shared/` (models, API clients, DI, DB, plugins, resolver, metadata, AI, playback, deeplink, config, platform) |
+| KMP shared module | `shared/src/commonMain/kotlin/com/parachord/shared/` — models, API clients (Ktor), DI, DB (SQLDelight), plugins, resolver, metadata, AI orchestration + providers, playback queue, sync engine + providers, repositories (all 9), settings, deeplink, config, platform abstractions |
+| KMP iOS actuals | `shared/src/iosMain/kotlin/com/parachord/shared/` — `Platform.ios.kt`, `DriverFactory.ios.kt`, `HttpClientFactory.ios.kt`, `PluginFileAccess.ios.kt`, `KvStoreFactory.kt`, `IosSecureTokenStore.kt` |
 | DI module | `di/AndroidModule.kt` (Koin — ~200 bindings replacing 4 Hilt modules) |
 | Security configs | `res/xml/network_security_config.xml`, `res/xml/data_extraction_rules.xml` |
 
@@ -664,24 +665,50 @@ static let darkAccentPurple = Color(hex: "#a78bfa")
 
 The `:shared` module (`shared/`) contains Kotlin Multiplatform code shared between Android and a future iOS app. The `:app` module depends on `:shared`.
 
+**Status (April 29, 2026): KMP migration is feature-complete.** All business logic lives in `shared/commonMain/`. Both `iosArm64` and `iosSimulatorArm64` compile green. iOS just needs a Swift app shell — repositories, AI, sync, resolvers, etc. are all callable from `import shared`.
+
 **What lives in shared/commonMain:**
 - Platform abstractions: `Log`, `randomUUID()`, `currentTimeMillis()` (expect/actual in androidMain/iosMain)
-- Models: `Track`, `Album`, `Artist`, `Playlist`, `PlaylistTrack`, `Friend`, `ChatMessage`, `SearchHistory`, `SyncSource` + charts/history/recommendation models
-- API clients: Ktor-based clients for Spotify, Last.fm, MusicBrainz, Apple Music, Ticketmaster, SeatGeek (infrastructure-ready but app still uses Retrofit — see issue #100)
-- Database: SQLDelight `.sq` files matching the old Room v12 schema (9 tables). SQLDelight is the live database; Room was removed.
-- DI: Koin `sharedModule` with Ktor client bindings
+- Models: `Track`, `Album`, `Artist`, `Playlist`, `PlaylistTrack`, `Friend`, `ChatMessage`, `SearchHistory`, `SyncSource` + charts/history/recommendation models, `AiAlbumSuggestion`/`AiArtistSuggestion`, `RecommendedTrack`/`RecommendedArtist`
+- API clients (Ktor): Spotify, Last.fm, MusicBrainz, AppleMusic, Ticketmaster, SeatGeek, ListenBrainz, Discogs, Wikipedia, SmartLinks. Single shared `HttpClient` with 60s `requestTimeoutMillis`, `OAuthRefreshPlugin` for 401-driven token refresh, `User-Agent` injection. Retrofit fully dropped from `:app`.
+- Database: SQLDelight `.sq` files matching the old Room v12 schema (9 tables). SQLDelight is the live database; Room was removed. DAOs (`TrackDao`, `AlbumDao`, etc.) are concrete shared classes wrapping `*Queries`.
+- DI: Koin `sharedModule` with Ktor client + DAO + repository bindings
 - Plugin system: `JsRuntime` interface, `PluginManager`, `PluginSyncService`, `PluginFileAccess` (expect/actual)
-- Business logic: `ResolverScoring`, `ResolverModels`, `MetadataService`, `MetadataProvider` interface, `DjToolDefinitions`, `QueueManager`, `DeepLinkAction`, `PlaybackEngine` interface, `AppConfig`
+- All 9 repositories: `ChartsRepository`, `ConcertsRepository`, `CriticalDarlingsRepository`, `FreshDropsRepository`, `FriendsRepository`, `HistoryRepository`, `LibraryRepository`, `RecommendationsRepository`, `WeeklyPlaylistsRepository`. App-side files are typealias shims.
+- Sync engine: `SyncEngine`, `SyncProvider` interface, `SpotifySyncProvider`, `AppleMusicSyncProvider`, multi-provider iteration, three-layer dedup, four-piece mirror propagation rules.
+- Metadata enrichment: `MbidEnrichmentService` (Mapper cache via `cacheRead`/`cacheWrite` lambdas), `ImageEnrichmentService` (mosaic composite via platform `composeMosaic` lambda).
+- AI orchestration: `AiChatService`, `AiRecommendationService`, `ChatContextProvider`, `ChatCardEnricher`. System prompts and tool-call protocol live in shared.
+- AI providers (Ktor): `ChatGptProvider`, `ClaudeProvider`, `GeminiProvider`. Identical wire formats and prompt handling on both platforms.
+- AI tool surface: `DjToolDefinitions` (schemas), `DjToolExecutor` interface (single-method dispatch).
+- Settings: `SettingsStore` backed by `KvStore` (multiplatform-settings) + `SecureTokenStore` (encrypted tokens).
+- Business logic: `ResolverScoring`, `ResolverModels`, `MetadataService`, `MetadataProvider` interface, `QueueManager`, `DeepLinkAction`, `PlaybackEngine` interface, `AppConfig`.
 
-**What stays in :app (Android-only):**
-- All Compose UI (82 files), PlaybackService/MediaSession, PlaybackController, PlaybackRouter
-- SpotifyPlaybackHandler, AppleMusicPlaybackHandler (MusicKitWebBridge), SoundCloudPlaybackHandler
-- JsBridge (WebView), NativeBridge, MediaScanner, NetworkMonitor (Android ConnectivityManager)
-- Room entities → typealiases to shared models, Room DAOs → SQLDelight wrapper classes
-- Retrofit API interfaces (still used, typealiased to shared Ktor clients)
-- OAuthManager, OAuthRedirectActivity, SettingsStore (DataStore-backed)
+**iOS actuals (`shared/iosMain/`):**
+- `Platform.ios.kt` — `Log` (NSLog), `randomUUID` (NSUUID), `currentTimeMillis` (NSDate)
+- `DriverFactory.ios.kt` — SQLDelight Native driver
+- `HttpClientFactory.ios.kt` — Ktor Darwin engine
+- `PluginFileAccess.ios.kt` — `NSBundle` (bundled) + `NSApplicationSupportDirectory/plugins/` (cached)
+- `KvStoreFactory.kt` — `NSUserDefaults` suite (`parachord_kmp_prefs`)
+- `IosSecureTokenStore.kt` — Keychain via multiplatform-settings `KeychainSettings` (service `com.parachord.tokens`)
 
-**Bridge pattern:** App-module files that were moved to shared become thin typealiases (e.g., `typealias TrackEntity = com.parachord.shared.model.Track`). This preserves all existing imports across the app without mass-renaming. The typealiases live in the original packages: `data/db/entity/`, `resolver/`, `data/metadata/`, `ai/`, `plugin/`, `deeplink/`.
+**What stays in :app (genuinely Android-only):**
+- All Compose UI (~82 files), Android `ViewModel`s + `viewModelScope`
+- Media3 stack: `PlaybackService`/`MediaSessionService`, `PlaybackController`, `PlaybackRouter`
+- `SpotifyPlaybackHandler`, `AppleMusicPlaybackHandler` (`MusicKitWebBridge`), `SoundCloudPlaybackHandler`
+- `JsBridge` (WebView), `NativeBridge`, `MediaScanner` (ContentResolver), `NetworkMonitor` (ConnectivityManager)
+- `OAuthManager`, `OAuthRedirectActivity` (Custom Tabs), `CurrentActivityHolder`
+- `PluginSyncService` (WorkManager scheduling — the underlying sync runs in shared)
+- The Android `DjToolExecutor` concrete class (dispatches into `PlaybackController`); the interface lives in shared
+- Entity files → typealiases to shared models (`TrackEntity = Track`, etc.)
+- The `composeMosaicAndroid` function (Coil + Bitmap) forwarded into the shared `ImageEnrichmentService`
+
+**Bridge pattern:** App-module files that were moved to shared become thin typealiases (e.g., `typealias TrackEntity = com.parachord.shared.model.Track`). This preserves all existing imports across the app without mass-renaming. The typealiases live in the original packages: `data/db/entity/`, `data/repository/`, `data/metadata/`, `ai/`, `ai/providers/`, `ai/tools/`, `plugin/`, `deeplink/`.
+
+**Lambda forwarding pattern:** When a shared class needs platform-specific resources (file I/O, image decoding, MBID lookups), the shared signature takes a `suspend (...) -> X` lambda and the platform-specific Koin binding wires the closure. Examples:
+- `cacheRead`/`cacheWrite: suspend () -> String?` for disk caches (`CriticalDarlingsRepository`, `RecommendationsRepository`, `FreshDropsRepository`, `LibraryRepository`, `MbidEnrichmentService`, `AiRecommendationService`).
+- `composeMosaic: suspend (playlistId, urls) -> String?` for the Coil-based 2x2 mosaic in `ImageEnrichmentService`.
+- `getPlaybackSnapshot: suspend () -> ChatPlaybackSnapshot` for `ChatContextProvider` reading from `PlaybackStateHolder`.
+- `mbidEnrichTrack`/`mbidEnrichBatch` in `LibraryRepository` (kept for symmetry; `MbidEnrichmentService` is now itself shared).
 
 ## OAuth Architecture
 
@@ -724,6 +751,21 @@ A full security review was completed April 2026. The review plan is at `.claude/
 3. **Don't skip the resolver pipeline.** Even if you have a direct URL, route through `ResolverManager` → `ResolverScoring` → `PlaybackRouter` to maintain consistent behavior.
 4. **Don't use blue as the accent color.** The brand accent is purple (`#7c3aed` light / `#a78bfa` dark).
 5. **Don't return or select sources below the confidence floor.** `ResolverScoring.selectBest()` filters out sources with confidence < `MIN_CONFIDENCE_THRESHOLD` (0.60). `scoreConfidence()` returns 0.50 for "no match" (neither title nor artist matched) — these are wrong-song results and must not be played, even from a high-priority resolver. The desktop handles this via `noMatch:true` sentinel filtering; we use an equivalent confidence floor. If porting to iOS, replicate this filter.
+
+### KMP / shared/commonMain rules
+
+When writing or editing code in `shared/src/commonMain/`, the JVM stdlib is NOT available — only Kotlin stdlib + Kotlin/Native bridges + the dependencies declared in `shared/build.gradle.kts`. These JVM-isms compile fine on Android then break the iOS build:
+
+1. **Don't use `System.currentTimeMillis()`.** Use the shared `com.parachord.shared.platform.currentTimeMillis()` expect (which delegates to `System.currentTimeMillis()` on Android and `NSDate().timeIntervalSince1970 * 1000` on iOS).
+2. **Don't use `java.util.UUID.randomUUID().toString()`.** Use the shared `com.parachord.shared.platform.randomUUID()` expect.
+3. **Don't use `@Volatile` without an import.** The default-resolved `kotlin.jvm.Volatile` is JVM-only. Add `import kotlin.concurrent.Volatile` (the KMP version).
+4. **Don't use `Map<K,V>.toSortedMap()`.** It returns `java.util.TreeMap` and doesn't exist on Native. Use `.entries.sortedBy { it.key }` instead.
+5. **Don't use `java.util.concurrent.ConcurrentHashMap` / `newKeySet()`.** Replace with `kotlinx.coroutines.sync.Mutex` + a plain `MutableMap` / `MutableSet` (suspend lock around access). The 5 enrichment + repository moves all follow this pattern.
+6. **Don't use `Dispatchers.IO`.** commonMain only has `Default` and `Main`. The shared DAOs already wrap their queries in `withContext(Dispatchers.Default)`, and Ktor is async by default — most call sites can just drop the `withContext(Dispatchers.IO)` wrapper.
+7. **Don't use `SecurityException`, `IOException`, `IllegalThreadStateException`, etc.** Stick to Kotlin's `IllegalArgumentException` / `IllegalStateException` / generic `Exception`. The exception type rarely matters — callers usually catch `Exception` anyway.
+8. **Don't use `java.io.File` / `java.text.SimpleDateFormat` / `java.util.Date` / `java.util.Locale`.** For dates, use `kotlinx-datetime` (`Clock.System.todayIn`, `LocalDate`, `DateTimeUnit`). For file I/O, see the lambda forwarding pattern below.
+9. **Lambda forwarding for platform-specific resources.** When a shared class needs file I/O, image decoding, MBID lookups, or anything else that's platform-tied, the shared signature takes a `suspend (...) -> X` lambda and the platform-specific Koin binding wires the closure. See the "Lambda forwarding pattern" section under "KMP Shared Module" for examples (`cacheRead`/`cacheWrite`, `composeMosaic`, `getPlaybackSnapshot`, etc.).
+10. **Use `internal` sparingly across modules.** `internal` in `shared/commonMain` means visible within the `:shared` module. Code in `:app` (different Gradle module) can't see internals. If a helper needs to be tested from `:app` tests, make it `public` (or move the test into shared).
 
 ### Android-Specific
 
@@ -814,15 +856,20 @@ Spotify URLs contain opaque IDs (`/artist/4Z8W4fKeB5YxbusRwVAqVK`) with no human
 
 ### Key AI Files
 
-| Area | Files |
-|------|-------|
-| Recommendation generation | `ai/AiRecommendationService.kt` |
-| DJ chat orchestration | `ai/AiChatService.kt` |
-| Provider interface | `ai/AiChatProvider.kt` |
-| ChatGPT provider | `ai/providers/ChatGptProvider.kt` |
-| Claude provider | `ai/providers/ClaudeProvider.kt` |
-| Gemini provider | `ai/providers/GeminiProvider.kt` |
-| DJ tool schemas | `ai/tools/DjToolDefinitions.kt` |
-| Tool execution | `ai/tools/DjToolExecutor.kt` |
-| Listening history context | `ai/ChatContextProvider.kt` |
-| Recommendations UI | `ui/screens/discover/RecommendationsScreen.kt`, `RecommendationsViewModel.kt` |
+The full AI surface is in `shared/.../ai/` (April 2026). App-side files in `app/.../ai/` are typealias shims.
+
+| Area | Shared file | App shim |
+|------|-------------|----------|
+| Recommendation generation | `shared/.../ai/AiRecommendationService.kt` | `ai/AiRecommendationService.kt` |
+| DJ chat orchestration | `shared/.../ai/AiChatService.kt` | `ai/AiChatService.kt` |
+| Provider interface + models | `shared/.../ai/AiChatProvider.kt` | `ai/AiChatProvider.kt` |
+| ChatGPT provider (Ktor) | `shared/.../ai/providers/ChatGptProvider.kt` | `ai/providers/ChatGptProvider.kt` |
+| Claude provider (Ktor) | `shared/.../ai/providers/ClaudeProvider.kt` | `ai/providers/ClaudeProvider.kt` |
+| Gemini provider (Ktor) | `shared/.../ai/providers/GeminiProvider.kt` | `ai/providers/GeminiProvider.kt` |
+| DJ tool schemas | `shared/.../ai/tools/DjToolDefinitions.kt` | `ai/tools/DjToolDefinitions.kt` |
+| DJ tool executor (interface) | `shared/.../ai/tools/DjToolExecutor.kt` | — |
+| DJ tool executor (Android impl) | — | `ai/tools/DjToolExecutor.kt` |
+| Listening history context | `shared/.../ai/ChatContextProvider.kt` | `ai/ChatContextProvider.kt` |
+| Card artwork enrichment | `shared/.../ai/ChatCardEnricher.kt` | `ai/ChatCardEnricher.kt` |
+| JSON helpers (mapToJsonElement) | `shared/.../ai/JsonHelpers.kt` | — |
+| Recommendations UI | — | `ui/screens/discover/RecommendationsScreen.kt`, `RecommendationsViewModel.kt` |

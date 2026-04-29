@@ -9,16 +9,26 @@ The Android app (191 files, ~51K lines) needs to share ~73% of its code with a f
 **Target code sharing: ~73%** (all business logic, data layer, networking, AI, resolver, plugin system)
 **Stays platform-specific:** Compose UI (82 files), PlaybackService/MediaSession, MediaScanner, Android widgets, JsBridge, NetworkMonitor
 
-> **Current status (April 2026, last verified 2026-04-25):**
-> - Phases 0–7: ✅ complete. The `:shared` KMP module contains platform abstractions, models, API client infrastructure, SQLDelight schema, Koin DI, resolver scoring, metadata service, AI models/tools, plugin system, deep link parsing, and config.
-> - Phase 8 (Coil 2 → Coil 3): ⏳ pending.
-> - **Phase 9A (TrackEntity → Track): ✅ complete.** `TrackEntity` is now `typealias TrackEntity = com.parachord.shared.model.Track`. All app code using `TrackEntity` is operating on the shared model under the hood. The original phase plan called for a 3-5 day migration; the typealias-bridge approach (per the "Bridge pattern" section in CLAUDE.md) absorbed most of that work as part of Phases 1 + 5.
-> - **Phase 9B (SettingsStore → multiplatform-settings): ⏳ pending.** `SettingsStore` is still in `app/` and DataStore-backed. The `multiplatform-settings` library is in `gradle/libs.versions.toml` (1.3.0) but not wired in. Required for iOS feature parity beyond playback MVP.
-> - **Phase 9C (QueueManager → shared): ✅ complete.** `QueueManager` and `QueueSnapshot` are typealiases re-exporting `com.parachord.shared.playback.*`. Pure queue logic runs cross-platform with JVM-runnable tests.
-> - **Phase 9D (Room → SQLDelight actual): ✅ complete.** Room is fully removed (no `room` dependency in `app/build.gradle.kts`). The `data/db/dao/*Dao.kt` files are now SQLDelight wrapper *classes* (not Room `@Dao` interfaces) that delegate to `ParachordDb.*Queries` and map row types to shared models. Drop-in replacement; consumer code unchanged.
-> - **Phase 9E (Retrofit → Ktor actual): ⏳ pending.** Retrofit is still present (`AppleMusicLibraryApi.kt`, all Spotify / Last.fm / etc. API interfaces). The Ktor clients in `:shared` from Phase 2 are infrastructure-ready but not consumed by the app. Required for `SyncEngine` and the provider classes to move to `commonMain` for iOS sync parity. **Not** required for iOS playback MVP.
+> **Current status (April 2026, last verified 2026-04-29):**
+> - **Phases 0–7: ✅ complete.** Platform abstractions, models, API client infrastructure, SQLDelight schema, Koin DI, resolver scoring, metadata service, AI models/tools, plugin system, deep link parsing, config.
+> - **Phase 8 (Coil 2 → Coil 3): ⏳ pending.** Optional — only relevant for sharing Compose Multiplatform UI. Not blocking iOS; the shared business logic doesn't reference Coil. The single remaining Coil call lives in `composeMosaicAndroid` (the platform-specific 2x2 mosaic composite forwarded into `ImageEnrichmentService` via lambda).
+> - **Phase 9A (TrackEntity → Track): ✅ complete.** `typealias TrackEntity = com.parachord.shared.model.Track`. All app code operates on the shared model.
+> - **Phase 9B (SettingsStore → multiplatform-settings): ✅ complete.** `SettingsStore` lives in `shared/.../settings/` backed by `KvStore` (multiplatform-settings) + `SecureTokenStore`. Android `KvStoreFactory` wraps `SharedPreferences`; iOS `KvStoreFactory` wraps `NSUserDefaults`. The DataStore→KvStore migration runs once on first launch.
+> - **Phase 9C (QueueManager → shared): ✅ complete.**
+> - **Phase 9D (Room → SQLDelight actual): ✅ complete.** Room fully removed.
+> - **Phase 9E (Retrofit → Ktor actual): ✅ complete.** Retrofit dropped from `app/build.gradle.kts`. All API clients live in `shared/.../api/` as Ktor `HttpClient` callers (Spotify, Last.fm, MusicBrainz, AppleMusic, Ticketmaster, SeatGeek, ListenBrainz). The shared client has 60s `requestTimeoutMillis` (covers AI generation), `OAuthRefreshPlugin` for 401-driven token refresh, `User-Agent` injection.
+> - **Repositories: ✅ all 9 in shared.** Charts, Concerts, CriticalDarlings, FreshDrops, Friends, History, Library, Recommendations, WeeklyPlaylists. App-side files are typealias shims.
+> - **Sync engine: ✅ shared.** `SyncEngine`, `SpotifySyncProvider`, `AppleMusicSyncProvider`, multi-provider iteration, three-layer dedup, four-piece mirror propagation rules — all `commonMain`.
+> - **Metadata enrichment: ✅ shared.** `MbidEnrichmentService` (Keychain/cacheRead/cacheWrite lambdas), `ImageEnrichmentService` (mosaic via `composeMosaic` lambda).
+> - **AI orchestration: ✅ shared.** `AiChatService`, `AiRecommendationService`, `ChatContextProvider`, `ChatCardEnricher`, `AiChatProvider` interface, `DjToolDefinitions`.
+> - **AI providers: ✅ shared (Ktor).** `ChatGptProvider`, `ClaudeProvider`, `GeminiProvider` ported from OkHttp to the shared Ktor client. Identical system prompts, JSON parsing, tool-call protocols on both platforms.
+> - **`DjToolExecutor`: ✅ shared interface.** Single-method `execute(name, args): Map<String, Any?>`. The Android concrete class implements it; iOS provides its own implementation that dispatches into AVPlayer / SPTAppRemote / MusicKit.
+> - **iOS actuals: ✅ all 8 written + verified.** `Log`, `randomUUID`, `currentTimeMillis`, `DriverFactory`, `HttpClientFactory`, `PluginFileAccess`, `KvStoreFactory`, `IosSecureTokenStore` (Keychain via multiplatform-settings).
+> - **Build verification:** `iosArm64`, `iosSimulatorArm64`, `androidDebug`, all unit tests — green.
 >
-> **iOS development can begin now.** The data-layer foundation (Track model, QueueManager, SQLDelight wiring) is in place. iOS playback MVP per `docs/plans/2026-04-25-ios-playback-design.md` requires no further KMP migration work. iOS sync parity additionally requires Phase 9E (Retrofit → Ktor) and Phase 9B (SettingsStore → multiplatform-settings).
+> **What stays in `:app` (genuinely Android-only):** all Compose UI (~82 files), Android `ViewModel`s + `viewModelScope`, Media3 stack (`PlaybackController`, `PlaybackService`, `PlaybackRouter`, all handlers, `MusicKitWebBridge`), `JsBridge` (WebView), `MediaScanner` (ContentResolver), `NetworkMonitor` (ConnectivityManager), `OAuthManager` + `OAuthRedirectActivity` (Custom Tabs), `PluginSyncService` (WorkManager), the Android `DjToolExecutor` concrete class (dispatches to `PlaybackController`).
+>
+> **What's left for iOS:** the Swift app shell — UI (SwiftUI), navigation (`NavigationStack`), `@Observable` ViewModels, playback adapters (AVPlayer + SPTAppRemote + MusicKit), OAuth via `ASWebAuthenticationSession`, a Swift class implementing `DjToolExecutor` to dispatch DJ tool calls. The shared module is feature-complete for that work — `import shared` and call into every repository, AI service, sync engine, etc.
 
 ---
 
