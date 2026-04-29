@@ -1,6 +1,6 @@
 package com.parachord.android.playback
 
-import android.util.Log
+import com.parachord.shared.platform.Log
 import com.parachord.android.data.db.entity.TrackEntity
 import com.parachord.android.playback.handlers.DirectStreamHandler
 import com.parachord.android.playback.handlers.ExternalPlaybackHandler

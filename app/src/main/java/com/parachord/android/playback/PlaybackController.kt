@@ -5,7 +5,7 @@ import android.content.Context
 import android.content.Intent
 import android.net.wifi.WifiManager
 import android.os.PowerManager
-import android.util.Log
+import com.parachord.shared.platform.Log
 import android.widget.Toast
 import androidx.media3.common.C
 import androidx.media3.common.MediaItem

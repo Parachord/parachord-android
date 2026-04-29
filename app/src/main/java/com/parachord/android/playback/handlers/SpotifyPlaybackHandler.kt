@@ -3,7 +3,7 @@ package com.parachord.android.playback.handlers
 import android.content.Context
 import android.content.Intent
 import android.os.Build
-import android.util.Log
+import com.parachord.shared.platform.Log
 import android.view.KeyEvent
 import com.parachord.android.auth.OAuthManager
 import com.parachord.shared.api.SpPlaybackRequest

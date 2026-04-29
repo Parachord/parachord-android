@@ -1,7 +1,7 @@
 package com.parachord.android.sync
 
 import android.content.Context
-import android.util.Log
+import com.parachord.shared.platform.Log
 import android.widget.Toast
 import androidx.work.*
 import com.parachord.android.data.store.SettingsStore

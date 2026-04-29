@@ -3,7 +3,7 @@ package com.parachord.android.auth
 import android.content.Context
 import android.content.Intent
 import android.net.Uri
-import android.util.Log
+import com.parachord.shared.platform.Log
 import androidx.browser.customtabs.CustomTabsIntent
 import com.parachord.android.BuildConfig
 import com.parachord.android.data.store.SettingsStore

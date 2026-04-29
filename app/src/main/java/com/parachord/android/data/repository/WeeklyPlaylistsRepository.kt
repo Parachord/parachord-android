@@ -1,6 +1,6 @@
 package com.parachord.android.data.repository
 
-import android.util.Log
+import com.parachord.shared.platform.Log
 import com.parachord.shared.api.LbPlaylistTrack
 import com.parachord.shared.api.ListenBrainzClient
 import com.parachord.android.data.store.SettingsStore

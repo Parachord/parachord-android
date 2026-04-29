@@ -1,7 +1,7 @@
 package com.parachord.android.playlist
 
 import android.content.Context
-import android.util.Log
+import com.parachord.shared.platform.Log
 import androidx.work.BackoffPolicy
 import androidx.work.Constraints
 import androidx.work.ExistingPeriodicWorkPolicy

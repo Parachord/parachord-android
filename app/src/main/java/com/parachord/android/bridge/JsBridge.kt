@@ -2,7 +2,7 @@ package com.parachord.android.bridge
 
 import android.annotation.SuppressLint
 import android.content.Context
-import android.util.Log
+import com.parachord.shared.platform.Log
 import android.webkit.WebView
 import android.webkit.WebViewClient
 import androidx.datastore.core.DataStore

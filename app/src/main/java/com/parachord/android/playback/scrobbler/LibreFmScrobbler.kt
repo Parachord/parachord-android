@@ -1,6 +1,6 @@
 package com.parachord.android.playback.scrobbler
 
-import android.util.Log
+import com.parachord.shared.platform.Log
 import com.parachord.android.data.db.entity.TrackEntity
 import com.parachord.android.data.store.SettingsStore
 import okhttp3.OkHttpClient

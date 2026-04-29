@@ -1,6 +1,6 @@
 package com.parachord.android.ai.providers
 
-import android.util.Log
+import com.parachord.shared.platform.Log
 import com.parachord.android.ai.AiChatProvider
 import com.parachord.android.ai.AiChatResponse
 import com.parachord.android.ai.AiProviderConfig

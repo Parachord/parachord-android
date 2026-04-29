@@ -5,7 +5,7 @@ import android.app.Activity
 import android.app.AlertDialog
 import android.content.Context
 import android.os.Message
-import android.util.Log
+import com.parachord.shared.platform.Log
 import android.view.View
 import android.view.ViewGroup
 import android.webkit.CookieManager

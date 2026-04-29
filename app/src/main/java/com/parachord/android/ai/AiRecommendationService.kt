@@ -1,7 +1,7 @@
 package com.parachord.android.ai
 
 import android.content.Context
-import android.util.Log
+import com.parachord.shared.platform.Log
 import com.parachord.android.ai.providers.ChatGptProvider
 import com.parachord.android.ai.providers.ClaudeProvider
 import com.parachord.android.ai.providers.GeminiProvider

@@ -1,7 +1,7 @@
 package com.parachord.android.share
 
 import android.net.Uri
-import android.util.Log
+import com.parachord.shared.platform.Log
 import com.parachord.android.data.db.dao.PlaylistDao
 import com.parachord.android.data.db.dao.PlaylistTrackDao
 import com.parachord.android.data.db.entity.PlaylistEntity
