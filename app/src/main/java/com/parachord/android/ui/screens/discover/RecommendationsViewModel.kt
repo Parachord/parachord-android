@@ -8,8 +8,8 @@ import com.parachord.android.data.db.entity.TrackEntity
 import com.parachord.android.data.metadata.MetadataService
 import com.parachord.android.data.repository.LibraryRepository
 import com.parachord.android.data.repository.RecommendationsRepository
-import com.parachord.android.data.repository.RecommendedArtist
-import com.parachord.android.data.repository.RecommendedTrack
+import com.parachord.shared.model.RecommendedArtist
+import com.parachord.shared.model.RecommendedTrack
 import com.parachord.shared.model.Resource
 import com.parachord.android.playback.PlaybackController
 import com.parachord.android.resolver.ResolverManager

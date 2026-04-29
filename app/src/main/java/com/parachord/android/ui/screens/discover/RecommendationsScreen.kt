@@ -48,8 +48,8 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.em
 import org.koin.androidx.compose.koinViewModel
-import com.parachord.android.data.repository.RecommendedArtist
-import com.parachord.android.data.repository.RecommendedTrack
+import com.parachord.shared.model.RecommendedArtist
+import com.parachord.shared.model.RecommendedTrack
 import com.parachord.shared.model.Resource
 import com.parachord.android.ui.components.AlbumArtCard
 import com.parachord.android.ui.components.ShimmerTrackRow
@@ -309,9 +309,10 @@ private fun RecommendedArtistItem(
             textAlign = TextAlign.Center,
             modifier = Modifier.fillMaxWidth(),
         )
-        if (artist.reason != null) {
+        val reason = artist.reason
+        if (reason != null) {
             Text(
-                text = artist.reason,
+                text = reason,
                 style = MaterialTheme.typography.labelSmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
                 maxLines = 1,

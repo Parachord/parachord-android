@@ -430,7 +430,25 @@ val androidModule = module {
             lastFmApiKey = com.parachord.android.BuildConfig.LASTFM_API_KEY,
         )
     }
-    singleOf(::RecommendationsRepository)
+    // RecommendationsRepository — shared (Ktor for Last.fm web endpoint, file I/O via lambdas).
+    single {
+        val context = androidContext()
+        val cacheFile = java.io.File(context.filesDir, "recommendations_cache.json")
+        com.parachord.shared.repository.RecommendationsRepository(
+            httpClient = get(),
+            listenBrainzClient = get(),
+            settingsStore = get(),
+            metadataService = get(),
+            cacheRead = {
+                try {
+                    if (cacheFile.exists()) cacheFile.readText() else null
+                } catch (_: Exception) { null }
+            },
+            cacheWrite = { json ->
+                try { cacheFile.writeText(json) } catch (_: Exception) { /* swallow */ }
+            },
+        )
+    }
     // FreshDropsRepository takes file I/O + MBID lookups as suspend lambdas
     // so the shared class doesn't depend on `Context` or the (Android-only)
     // `MbidEnrichmentService`. Two cache files + two enrichment-service forwards.
