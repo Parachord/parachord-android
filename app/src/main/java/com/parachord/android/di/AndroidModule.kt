@@ -434,7 +434,28 @@ val androidModule = module {
     singleOf(::FreshDropsRepository)
     singleOf(::CriticalDarlingsRepository)
     singleOf(::WeeklyPlaylistsRepository)
-    singleOf(::ConcertsRepository)
+    // ConcertsRepository takes file I/O as suspend lambdas + per-API
+    // BuildConfig key fallbacks (the shared class is platform-agnostic).
+    // Cache lives at `<filesDir>/concerts_cache.json`; failures are swallowed.
+    single {
+        val context = androidContext()
+        val cacheFile = java.io.File(context.filesDir, "concerts_cache.json")
+        com.parachord.shared.repository.ConcertsRepository(
+            ticketmasterClient = get(),
+            seatGeekClient = get(),
+            settingsStore = get(),
+            cacheRead = {
+                try {
+                    if (cacheFile.exists()) cacheFile.readText() else null
+                } catch (_: Exception) { null }
+            },
+            cacheWrite = { json ->
+                try { cacheFile.writeText(json) } catch (_: Exception) { /* swallow */ }
+            },
+            ticketmasterApiKeyFallback = com.parachord.android.BuildConfig.TICKETMASTER_API_KEY,
+            seatGeekClientIdFallback = com.parachord.android.BuildConfig.SEATGEEK_CLIENT_ID,
+        )
+    }
 
     // ── AI ────────────────────────────────────────────────────────────
 
