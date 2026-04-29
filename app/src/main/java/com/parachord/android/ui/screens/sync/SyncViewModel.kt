@@ -22,6 +22,14 @@ class SyncViewModel constructor(
     private val providers: List<SyncProvider>,
 ) : ViewModel() {
 
+    private companion object {
+        /** Universal axis set used for orphan detection. Compared against the
+         *  user's NEW opt-in (not the prior stored opt-in) so the wizard
+         *  surfaces orphaned items even when they were dropped in a previous
+         *  run that never completed cleanup. See `startSync` comment. */
+        val ALL_SYNC_AXES = setOf("tracks", "albums", "artists", "playlists")
+    }
+
     /** Which provider this wizard instance is configuring. Mutable so the
      *  same VM can be reused between Spotify-config and AM-config flows
      *  (the Settings screen swaps it before opening the sheet). Defaults
@@ -188,14 +196,28 @@ class SyncViewModel constructor(
                 if (_syncPlaylists.value) add("playlists")
             }
 
-            // Compare against the previously-stored axis set. If the
-            // user un-checked an axis they had on (and there are
-            // existing items for it), pause and ask "Keep or Remove?".
-            // The Confirm step calls confirmRemovalKeep() or
-            // confirmRemovalRemove() which both end by re-entering
-            // continueStartSync() with `newCollections` finalized.
-            val oldCollections = settingsStore.getSyncCollectionsForProvider(activeId)
-            val droppedAxes = (oldCollections - newCollections)
+            // Compare against the universal axis set, NOT the previously-stored
+            // opt-in. Detect every axis that:
+            //   (a) the user is NOT opting into this round, AND
+            //   (b) still has items in the user's library (sync_sources count > 0)
+            // and surface them in the Keep/Remove confirm dialog.
+            //
+            // Why universal not oldCollections: a prior wizard run could have
+            // updated the stored opt-in (e.g. dropped to `{playlists}`) without
+            // its `removeItemsForProviderAxis` call actually completing —
+            // coroutine cancelled mid-loop, app backgrounded, the user picked
+            // Keep instead of Remove, or the user simply never unchecked that
+            // axis in the first place. After that, the persisted opt-in says
+            // `{playlists}` but the sync_sources table still has thousands of
+            // orphan rows for the dropped axes. Subsequent wizard runs that
+            // compute `oldCollections - newCollections` see `{}` and skip the
+            // dialog entirely — orphans are invisible forever.
+            //
+            // The universal-set comparison is self-healing: every wizard run
+            // re-checks every axis against current item counts, so orphans
+            // surface on the very next pass through the wizard regardless of
+            // how the user got there.
+            val droppedAxes = (ALL_SYNC_AXES - newCollections)
                 .filter { axis -> syncEngine.countItemsForProviderAxis(activeId, axis) > 0 }
             if (droppedAxes.isNotEmpty()) {
                 val counts = droppedAxes.associateWith {
