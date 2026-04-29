@@ -158,11 +158,13 @@ dependencies {
     implementation(libs.koin.android)
     implementation(libs.koin.compose)
 
-    // Networking
+    // Networking — Retrofit was dropped in the Smart Links Ktor cutover.
+    // OkHttp stays: directly used by scrobblers, AI providers, the JS bridge,
+    // OAuth flows, and the still-Retrofit-free `MbidEnrichmentService` (~20
+    // files). The shared Ktor clients use OkHttp under the hood as their
+    // engine, so dropping OkHttp itself isn't a goal.
     implementation(libs.okhttp)
     implementation(libs.okhttp.logging)
-    implementation(libs.retrofit)
-    implementation(libs.retrofit.kotlinx.serialization)
     implementation(libs.kotlinx.serialization.json)
 
     // Image Loading

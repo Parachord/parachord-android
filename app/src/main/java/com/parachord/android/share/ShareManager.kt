@@ -1,12 +1,15 @@
 package com.parachord.android.share
 
 import android.net.Uri
-import com.parachord.shared.platform.Log
 import com.parachord.android.data.db.dao.PlaylistDao
 import com.parachord.android.data.db.dao.PlaylistTrackDao
 import com.parachord.android.data.db.entity.PlaylistEntity
 import com.parachord.android.data.db.entity.PlaylistTrackEntity
 import com.parachord.android.data.db.entity.TrackEntity
+import com.parachord.shared.api.SmartLinkCreateRequest
+import com.parachord.shared.api.SmartLinkTrack
+import com.parachord.shared.api.SmartLinksClient
+import com.parachord.shared.platform.Log
 import kotlinx.coroutines.TimeoutCancellationException
 import kotlinx.coroutines.withTimeout
 
@@ -27,7 +30,7 @@ import kotlinx.coroutines.withTimeout
  * hold up the share sheet — we silently fall back to the deeplink wrapper.
  */
 class ShareManager constructor(
-    private val smartLinkApi: SmartLinkApi,
+    private val smartLinksClient: SmartLinksClient,
     private val playlistDao: PlaylistDao,
     private val playlistTrackDao: PlaylistTrackDao,
 ) {
@@ -152,7 +155,7 @@ class ShareManager constructor(
     private suspend fun tryCreateSmartLink(request: SmartLinkCreateRequest): String? {
         return try {
             withTimeout(SMART_LINK_TIMEOUT_MS) {
-                smartLinkApi.create(request).url
+                smartLinksClient.create(request).url
             }
         } catch (e: TimeoutCancellationException) {
             Log.w(TAG, "Smart link create timed out; falling back to deeplink for '${request.title}'")

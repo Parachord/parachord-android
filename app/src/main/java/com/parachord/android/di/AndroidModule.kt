@@ -80,9 +80,6 @@ import org.koin.dsl.module
 import kotlinx.coroutines.async
 import kotlinx.coroutines.awaitAll
 import kotlinx.coroutines.coroutineScope
-import retrofit2.Retrofit
-import retrofit2.converter.kotlinx.serialization.asConverterFactory
-import okhttp3.MediaType.Companion.toMediaType
 import java.util.concurrent.TimeUnit
 
 private val Context.dataStore: DataStore<Preferences> by preferencesDataStore(name = "settings")
@@ -260,22 +257,12 @@ val androidModule = module {
         com.parachord.shared.db.ParachordDb(driver)
     }
 
-    // ── Retrofit API Clients (kept for backward compatibility during migration) ──
-
-    // Smart Links — desktop's Cloudflare Pages backend that mints rich
-    // share landing pages. Public, CORS-open, no auth. The production custom
-    // domain is `go.parachord.com` (the smart-links README documents
-    // `links.parachord.app` and the Pages default `parachord-links.pages.dev`,
-    // but desktop's actual short URLs land on `go.parachord.com/<id>`, so
-    // matching that here keeps Android shares brand-consistent with desktop).
-    single<com.parachord.android.share.SmartLinkApi> {
-        Retrofit.Builder()
-            .baseUrl("https://go.parachord.com/")
-            .client(get())
-            .addConverterFactory(get<Json>().asConverterFactory("application/json".toMediaType()))
-            .build()
-            .create(com.parachord.android.share.SmartLinkApi::class.java)
-    }
+    // ShareManager binds the shared `SmartLinksClient` (Ktor) — the Retrofit
+    // `SmartLinkApi` was the last Retrofit footprint and went away in the
+    // Smart Links cutover. `SmartLinksClient` itself is registered in
+    // `sharedModule`; per-platform `OkHttp`/`Darwin` Ktor engines + global
+    // User-Agent + sanitized Authorization-stripping logging come for free
+    // through the shared `HttpClientFactory`.
     single { com.parachord.android.share.ShareManager(get(), get(), get()) }
 
     // Spotify Web API — migrated to shared Ktor client (SpotifyClient) in

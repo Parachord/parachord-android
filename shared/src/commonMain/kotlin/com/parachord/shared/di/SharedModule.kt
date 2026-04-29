@@ -7,6 +7,7 @@ import com.parachord.shared.api.LastFmClient
 import com.parachord.shared.api.ListenBrainzClient
 import com.parachord.shared.api.MusicBrainzClient
 import com.parachord.shared.api.SeatGeekClient
+import com.parachord.shared.api.SmartLinksClient
 import com.parachord.shared.api.SpotifyClient
 import com.parachord.shared.api.TicketmasterClient
 import com.parachord.shared.api.createHttpClient
@@ -50,4 +51,8 @@ val sharedModule = module {
     single { AppleMusicLibraryClient(get(), get()) }
     single { GeoLocationClient(get()) }
     single { ListenBrainzClient(get()) }
+    // Smart Links — desktop's Cloudflare Pages share-link backend. Public, no
+    // auth, CORS-open. Migrated from Retrofit → Ktor in the Smart Links cutover
+    // (closes the last Retrofit footprint).
+    single { SmartLinksClient(get()) }
 }
