@@ -1,6 +1,7 @@
 package com.parachord.shared.repository
 
 import com.parachord.shared.api.MusicBrainzClient
+import com.parachord.shared.metadata.ImageEnrichmentService
 import com.parachord.shared.metadata.MusicBrainzProvider
 import com.parachord.shared.model.Resource
 import com.parachord.shared.platform.Log
@@ -11,6 +12,7 @@ import io.ktor.client.statement.bodyAsText
 import io.ktor.http.isSuccess
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.flow.FlowCollector
 import kotlinx.coroutines.flow.flow
 import kotlinx.serialization.Serializable
 import kotlinx.serialization.encodeToString
@@ -41,6 +43,14 @@ import kotlinx.serialization.json.Json
 class CriticalDarlingsRepository(
     private val httpClient: HttpClient,
     private val musicBrainzClient: MusicBrainzClient,
+    /**
+     * Cascade fallback when the strict MusicBrainz search returns no
+     * release for a given album/artist (or returns one whose CAA URL is
+     * empty). Routes through `metadataService.getAlbumTracks` which
+     * pulls Last.fm + Spotify in addition to MB, so the few albums that
+     * MB doesn't index still get art from image-rich providers.
+     */
+    private val imageEnrichmentService: ImageEnrichmentService,
     /** Read JSON from `critical_darlings_cache.json`; null if missing/fails. */
     private val cacheRead: suspend () -> String?,
     /** Write JSON to `critical_darlings_cache.json`. Failures are swallowed. */
@@ -72,7 +82,20 @@ class CriticalDarlingsRepository(
         try {
             val body = cacheRead() ?: return
             val wrapper = diskJson.decodeFromString<CriticalDarlingsDiskCache>(body)
-            cachedAlbums = wrapper.albums
+            // Heal any stale `&amp;` (and friends) that previous app
+            // versions saved into the cache before the parse-time
+            // entity-decode fix landed. Without this, "Nine Inch Nails
+            // &amp; Boys Noize" rows would persist with the literal
+            // `&amp;` in the artist field forever — display-broken AND
+            // unable to match the MB query (which would search for the
+            // literal `&amp;` and return nothing).
+            cachedAlbums = wrapper.albums.map { album ->
+                val cleanTitle = decodeHtmlEntities(album.title)
+                val cleanArtist = decodeHtmlEntities(album.artist)
+                if (cleanTitle != album.title || cleanArtist != album.artist) {
+                    album.copy(title = cleanTitle, artist = cleanArtist)
+                } else album
+            }
             lastFetchedAt = wrapper.fetchedAt
             Log.d(TAG, "Loaded ${wrapper.albums.size} cached critics' picks from disk")
         } catch (e: Exception) {
@@ -105,8 +128,14 @@ class CriticalDarlingsRepository(
                 emit(Resource.Loading)
             }
 
-            // Skip re-fetch if we fetched very recently (prevents hammering on quick nav)
+            // Skip RSS re-fetch if we fetched very recently (prevents
+            // hammering on quick nav) — but still try to repair any
+            // albums whose art came back null on a previous attempt.
+            // Without this loop, an album that failed art lookup once
+            // would sit broken until the next 5-minute window expired,
+            // even though the cascade fallback could resolve it now.
             if (!forceRefresh && recentlyFetched && cachedAlbums != null) {
+                enrichMissingArt()
                 return@flow
             }
 
@@ -135,29 +164,44 @@ class CriticalDarlingsRepository(
             saveDiskCache(mergedAlbums, now)
             emit(Resource.Success(mergedAlbums))
 
-            // Progressively fetch album art only for albums that still need it
-            val mutableAlbums = mergedAlbums.toMutableList()
-            val toEnrich = mutableAlbums.withIndex().filter { it.value.albumArt == null }
-            if (toEnrich.isEmpty()) return@flow
-
-            for ((index, album) in toEnrich) {
-                try {
-                    val artUrl = fetchAlbumArt(album.title, album.artist)
-                    if (artUrl != null) {
-                        mutableAlbums[index] = album.copy(albumArt = artUrl)
-                        cachedAlbums = mutableAlbums.toList()
-                        emit(Resource.Success(mutableAlbums.toList()))
-                    }
-                    // Rate limit MusicBrainz requests (1 req/sec policy)
-                    delay(200)
-                } catch (_: Exception) { /* skip art for this album */ }
-            }
-            // Save final enriched data to disk
-            cachedAlbums?.let { saveDiskCache(it, lastFetchedAt) }
+            enrichMissingArt()
         } catch (e: Exception) {
             Log.e(TAG, "Failed to load critics' picks", e)
             emit(Resource.Error("Failed to load critics' picks"))
         }
+    }
+
+    /**
+     * Progressively fetch album art for any cached album with a null
+     * `albumArt`, emitting after each successful resolution. Idempotent
+     * — re-running with everything filled in is a no-op (the
+     * `albumArt == null` filter short-circuits). Rate-limited at 200ms
+     * between requests to honour MusicBrainz's 1-req/sec average.
+     *
+     * Run from both the post-RSS-fetch path AND the stale-cache path
+     * (when the 5-min refetch throttle would otherwise prevent any
+     * recovery for albums whose first art lookup failed).
+     */
+    private suspend fun FlowCollector<Resource<List<CriticsPickAlbum>>>.enrichMissingArt() {
+        val current = cachedAlbums ?: return
+        val mutableAlbums = current.toMutableList()
+        val toEnrich = mutableAlbums.withIndex().filter { it.value.albumArt == null }
+        if (toEnrich.isEmpty()) return
+
+        for ((index, album) in toEnrich) {
+            try {
+                val artUrl = fetchAlbumArt(album.title, album.artist)
+                if (artUrl != null) {
+                    mutableAlbums[index] = album.copy(albumArt = artUrl)
+                    cachedAlbums = mutableAlbums.toList()
+                    emit(Resource.Success(mutableAlbums.toList()))
+                }
+                // Rate limit MusicBrainz requests (1 req/sec policy)
+                delay(200)
+            } catch (_: Exception) { /* skip art for this album */ }
+        }
+        // Save final enriched data to disk
+        cachedAlbums?.let { saveDiskCache(it, lastFetchedAt) }
     }
 
     /**
@@ -196,7 +240,16 @@ class CriticalDarlingsRepository(
 
             for (itemMatch in itemRegex.findAll(xml)) {
                 val itemXml = itemMatch.groupValues[1]
-                val title = titleRegex.find(itemXml)?.groupValues?.get(1)?.let(::stripCdata)?.trim() ?: continue
+                // Decode HTML entities BEFORE parsing — RSS escapes
+                // ampersands (and friends) inside the title element, so
+                // a title like "Foo by Nine Inch Nails &amp; Boys
+                // Noize" would otherwise carry through to the displayed
+                // artist name AND poison the MB search query (which
+                // looks up the literal `&amp;` and finds nothing).
+                val title = titleRegex.find(itemXml)?.groupValues?.get(1)
+                    ?.let(::stripCdata)
+                    ?.let(::decodeHtmlEntities)
+                    ?.trim() ?: continue
                 val link = linkRegex.find(itemXml)?.groupValues?.get(1)?.let(::stripCdata)?.trim()
                 val description = descRegex.find(itemXml)?.groupValues?.get(1)?.let(::stripCdata)?.trim() ?: ""
 
@@ -249,36 +302,53 @@ class CriticalDarlingsRepository(
         return regex.find(html)?.value
     }
 
-    /** Strip HTML tags, decode entities, and remove leftover URLs. */
-    private fun cleanHtml(html: String): String {
-        return html
-            .replace(Regex("<[^>]+>"), "")
-            .replace("&amp;", "&")
-            .replace("&lt;", "<")
+    /**
+     * Decode the small set of HTML entities that the RSS feed actually
+     * uses. We decode ampersand last so we don't accidentally double-
+     * decode something like `&amp;lt;` (which should become `&lt;`,
+     * not `<`).
+     */
+    private fun decodeHtmlEntities(s: String): String =
+        s.replace("&lt;", "<")
             .replace("&gt;", ">")
             .replace("&quot;", "\"")
             .replace("&#39;", "'")
             .replace("&apos;", "'")
+            .replace("&amp;", "&")
+
+    /** Strip HTML tags, decode entities, and remove leftover URLs. */
+    private fun cleanHtml(html: String): String {
+        return decodeHtmlEntities(html.replace(Regex("<[^>]+>"), ""))
             .replace(Regex("""https?://\S+"""), "")
             .replace(Regex("""\s{2,}"""), " ")
             .trim()
     }
 
     /**
-     * Fetch album art via MusicBrainz release search → Cover Art Archive.
-     * Mirrors desktop's `getAlbumArt()` approach.
+     * Fetch album art with a verify-then-cascade strategy:
+     *   1. MusicBrainz release search → Cover Art Archive URL (fast,
+     *      cheap — one HTTP call, well-indexed albums hit this).
+     *   2. [ImageEnrichmentService.resolveAlbumArtUrl] HEAD-checks the
+     *      CAA URL; on 404 it falls through to the full
+     *      MetadataService cascade (Last.fm + Spotify in addition to
+     *      MB), which catches albums MB doesn't index well or release
+     *      groups CAA hasn't received a front cover for yet.
+     *
+     * Mirrors desktop's `getAlbumArt()` for stage 1; the verify +
+     * cascade fallback are the "retry on first-attempt failure"
+     * extension — without them, every album with a missing CAA cover
+     * sat with a placeholder forever.
      */
     private suspend fun fetchAlbumArt(albumTitle: String, artistName: String): String? {
-        return try {
+        val caaUrl: String? = try {
             val query = "\"$albumTitle\" AND artist:\"$artistName\""
             val results = musicBrainzClient.searchReleases(query, limit = 1)
-            val release = results.releases.firstOrNull() ?: return null
-            // Coil follows the redirect to the actual image
-            MusicBrainzProvider.coverArtUrl(release.id)
+            results.releases.firstOrNull()?.let { MusicBrainzProvider.coverArtUrl(it.id) }
         } catch (e: Exception) {
-            Log.w(TAG, "Failed to fetch art for '$albumTitle' by '$artistName'", e)
+            Log.w(TAG, "MB search failed for '$albumTitle' by '$artistName': ${e.message}")
             null
         }
+        return imageEnrichmentService.resolveAlbumArtUrl(albumTitle, artistName, hint = caaUrl)
     }
 }
 

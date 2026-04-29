@@ -60,6 +60,18 @@ class ArtistViewModel constructor(
     private val _isLoading = MutableStateFlow(true)
     val isLoading: StateFlow<Boolean> = _isLoading.asStateFlow()
 
+    /**
+     * Discography-specific loading flag. The shared [_isLoading] flips
+     * to false as soon as ANY section (artist info, top tracks,
+     * discography) completes — that's correct for the page-level spinner
+     * but wrong for the discography empty-state guard, which would
+     * otherwise flash "No discography available" while MusicBrainz is
+     * still mid-fetch. Track this flag separately so the Discography tab
+     * can show skeletons until the discography call actually returns.
+     */
+    private val _albumsLoading = MutableStateFlow(true)
+    val albumsLoading: StateFlow<Boolean> = _albumsLoading.asStateFlow()
+
     private val _tourDates = MutableStateFlow<Resource<List<ConcertEvent>>>(Resource.Loading)
     val tourDates: StateFlow<Resource<List<ConcertEvent>>> = _tourDates.asStateFlow()
 
@@ -150,6 +162,11 @@ class ArtistViewModel constructor(
                 }
             } catch (e: Exception) {
                 Log.e("ArtistVM", "Failed loading albums for '$artistName'", e)
+            } finally {
+                // Always clear the discography-specific flag — even on
+                // error/empty result we want the empty-state to render
+                // instead of staying in the skeleton forever.
+                _albumsLoading.value = false
             }
         }
 

@@ -114,6 +114,7 @@ fun ArtistScreen(
     val topTracks by viewModel.topTracks.collectAsStateWithLifecycle()
     val albums by viewModel.albums.collectAsStateWithLifecycle()
     val isLoading by viewModel.isLoading.collectAsStateWithLifecycle()
+    val albumsLoading by viewModel.albumsLoading.collectAsStateWithLifecycle()
     val trackResolvers by viewModel.trackResolvers.collectAsStateWithLifecycle()
     val trackResolverConfidences by viewModel.trackResolverConfidences.collectAsStateWithLifecycle()
     val isSaved by viewModel.isSaved.collectAsStateWithLifecycle()
@@ -301,7 +302,13 @@ fun ArtistScreen(
                     when (tabName) {
                         "Discography" -> DiscographyTab(
                             albums = albums,
-                            isLoading = isLoading,
+                            // Use the discography-specific flag, NOT the
+                            // page-wide [isLoading] — the latter flips
+                            // false as soon as ANY section completes
+                            // (artist info / top tracks), causing the
+                            // empty state to flash before MusicBrainz
+                            // returns the actual album list.
+                            isLoading = albumsLoading,
                             onNavigateToAlbum = onNavigateToAlbum,
                             onNavigateToArtist = onNavigateToArtist,
                             onQueueAlbum = { title, artist -> viewModel.queueAlbumByName(title, artist) },

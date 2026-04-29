@@ -387,6 +387,9 @@ val androidModule = module {
     singleOf(::DiscogsProvider)
     // ImageEnrichmentService — shared. The 2x2 mosaic composite step is
     // platform-specific (Coil + Bitmap), forwarded via a suspend lambda.
+    // The Ktor HttpClient is also injected so the service can HEAD-check
+    // candidate art URLs (used by Critical Darlings + Fresh Drops to
+    // verify CAA URLs before showing them to the user).
     single {
         val context = androidContext()
         com.parachord.shared.metadata.ImageEnrichmentService(
@@ -396,6 +399,7 @@ val androidModule = module {
             trackDao = get(),
             playlistDao = get(),
             playlistTrackDao = get(),
+            httpClient = get(),
             composeMosaic = { playlistId, urls ->
                 com.parachord.android.data.metadata.composeMosaicAndroid(context, playlistId, urls)
             },
@@ -540,6 +544,7 @@ val androidModule = module {
             },
             mbidLookupCached = { artistName -> mbidEnrichment.getCachedArtistMbid(artistName) },
             mbidLookupViaMapper = { artist, title -> mbidEnrichment.getArtistMbid(artist, title) },
+            imageEnrichmentService = get(),
             lastFmApiKey = com.parachord.android.BuildConfig.LASTFM_API_KEY,
         )
     }
@@ -552,6 +557,7 @@ val androidModule = module {
         com.parachord.shared.repository.CriticalDarlingsRepository(
             httpClient = get(),
             musicBrainzClient = get(),
+            imageEnrichmentService = get(),
             cacheRead = {
                 try {
                     if (cacheFile.exists()) cacheFile.readText() else null

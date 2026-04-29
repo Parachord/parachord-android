@@ -5,14 +5,20 @@ import com.parachord.shared.api.ListenBrainzClient
 import com.parachord.shared.api.MbReleaseGroupEntry
 import com.parachord.shared.api.MusicBrainzClient
 import com.parachord.shared.db.dao.TrackDao
+import com.parachord.shared.metadata.ImageEnrichmentService
 import com.parachord.shared.metadata.MusicBrainzProvider
 import com.parachord.shared.model.Resource
 import com.parachord.shared.platform.Log
 import com.parachord.shared.platform.currentTimeMillis
 import com.parachord.shared.settings.SettingsStore
+import kotlinx.coroutines.async
+import kotlinx.coroutines.awaitAll
+import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.flow
+import kotlinx.coroutines.sync.Semaphore
+import kotlinx.coroutines.sync.withPermit
 import kotlinx.datetime.Clock
 import kotlinx.datetime.DateTimeUnit
 import kotlinx.datetime.LocalDate
@@ -74,12 +80,28 @@ class FreshDropsRepository(
      * `MbidEnrichmentService.getArtistMbid` on Android.
      */
     private val mbidLookupViaMapper: suspend (artist: String, title: String) -> String?,
+    /**
+     * Used by [verifyAndRepairArt] to HEAD-check Cover Art Archive URLs
+     * after [mergeAndDedupe] eagerly assigns them, and to fall through
+     * to the full Last.fm + Spotify cascade for release groups whose
+     * CAA front cover hasn't been uploaded.
+     */
+    private val imageEnrichmentService: ImageEnrichmentService,
     private val lastFmApiKey: String,
 ) {
     companion object {
         private const val TAG = "FreshDropsRepo"
         private const val MAX_ARTISTS_TO_CHECK = 50
         private const val STALE_THRESHOLD = 6 * 60 * 60 * 1000L // 6 hours
+
+        /**
+         * Bounded concurrency for the post-merge art-verify pass. CAA's
+         * CDN handles modest fan-out fine, but 50-wide parallel HEAD
+         * requests would be impolite (and could trigger throttling on
+         * the IA-hosted backend). 4 keeps the verify pass under ~5s
+         * for a typical 20-50 release refresh.
+         */
+        private const val ART_VERIFY_CONCURRENCY = 4
     }
 
     private val diskJson = Json { ignoreUnknownKeys = true; encodeDefaults = true }
@@ -308,12 +330,77 @@ class FreshDropsRepository(
             lastFetchedAt = currentTimeMillis()
             saveDiskCache(finalReleases, lastFetchedAt)
             emit(Resource.Success(finalReleases))
+
+            // Stage 4: HEAD-verify each release's Cover Art Archive URL.
+            // CAA returns 404 for release groups whose front cover
+            // hasn't been uploaded — those rendered as broken-image
+            // placeholders before this pass. For each 404, fall through
+            // to the metadata cascade (Last.fm + Spotify) for a richer
+            // provider's URL. Bounded concurrency keeps a refresh from
+            // slamming CAA with 50 simultaneous HEADs.
+            val repaired = verifyAndRepairArt(finalReleases)
+            if (repaired != finalReleases) {
+                cachedReleases = repaired
+                saveDiskCache(repaired, lastFetchedAt)
+                emit(Resource.Success(repaired))
+            }
         } catch (e: Exception) {
             Log.e(TAG, "Failed to load fresh drops", e)
             if (cachedReleases == null) {
                 emit(Resource.Error("Failed to load new releases"))
             }
         }
+    }
+
+    /**
+     * For each release with a Cover Art Archive URL, verify the URL
+     * actually serves an image; on 404 fall through to the metadata
+     * cascade for a Last.fm/Spotify alternative. Releases with no
+     * `albumArt` (no MBID was found) also get a cascade attempt — no
+     * eager URL means the album sat with a placeholder, exactly the
+     * case the user reported.
+     *
+     * Bounded at [ART_VERIFY_CONCURRENCY] (4) to avoid slamming CAA's
+     * CDN with 50 simultaneous HEAD requests on a refresh.
+     *
+     * Releases whose URL is non-CAA (e.g. previously cascade-resolved
+     * to a Last.fm CDN URL) skip the verify step — those URLs are
+     * already from a reliable provider, no need to re-check on every
+     * refresh.
+     */
+    private suspend fun verifyAndRepairArt(
+        releases: List<FreshDrop>,
+    ): List<FreshDrop> = coroutineScope {
+        val sem = Semaphore(ART_VERIFY_CONCURRENCY)
+        releases.map { release ->
+            async {
+                sem.withPermit {
+                    val current = release.albumArt
+                    val needsCheck = current == null || current.contains("coverartarchive.org")
+                    if (!needsCheck) return@withPermit release
+
+                    // CAA hint present → verify, replace on 404.
+                    // No hint at all → straight cascade.
+                    val replacement = if (current != null) {
+                        imageEnrichmentService.resolveAlbumArtUrl(
+                            albumTitle = release.title,
+                            artistName = release.artist,
+                            hint = current,
+                        )
+                    } else {
+                        imageEnrichmentService.lookupAlbumArt(
+                            albumTitle = release.title,
+                            artistName = release.artist,
+                        )
+                    }
+                    if (replacement != null && replacement != current) {
+                        release.copy(albumArt = replacement)
+                    } else {
+                        release
+                    }
+                }
+            }
+        }.awaitAll()
     }
 
     /**
