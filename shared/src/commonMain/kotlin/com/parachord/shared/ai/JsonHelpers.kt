@@ -14,12 +14,16 @@ import kotlinx.serialization.json.longOrNull
 
 /**
  * Shared JSON conversion helpers for AI provider payloads (tool args/results).
- * Originally lived next to the Android-only `ChatGptProvider`; promoted to
- * shared so [AiChatService] can encode/decode tool messages without
- * depending on Android provider impls. Marked `internal` so plugin/UI code
- * doesn't reach in — they should go through `Json` directly.
+ * Used by [AiChatService] to encode/decode tool messages, and by the three
+ * concrete provider implementations (ChatGPT/Claude/Gemini) to translate
+ * between their respective wire formats and the canonical `Map<String,Any?>`
+ * tool-arg shape carried in [com.parachord.shared.ai.ToolCall].
+ *
+ * Public visibility (originally `internal`) so the Android `:app` provider
+ * tests in `app/src/test/.../ai/providers/AiProviderMessageFormattingTest.kt`
+ * can roundtrip through the same code paths without duplicating the helpers.
  */
-internal fun mapToJsonElement(map: Map<String, Any?>): JsonElement = buildJsonObject {
+fun mapToJsonElement(map: Map<String, Any?>): JsonElement = buildJsonObject {
     for ((key, value) in map) {
         put(key, valueToJsonElement(value))
     }
@@ -43,12 +47,12 @@ private fun valueToJsonElement(value: Any?): JsonElement = when (value) {
     else -> JsonPrimitive(value.toString())
 }
 
-internal fun jsonElementToMap(element: JsonElement): Map<String, Any?> {
+fun jsonElementToMap(element: JsonElement): Map<String, Any?> {
     if (element !is JsonObject) return emptyMap()
     return element.entries.associate { (key, value) -> key to jsonElementToValue(value) }
 }
 
-internal fun jsonElementToValue(element: JsonElement): Any? = when (element) {
+fun jsonElementToValue(element: JsonElement): Any? = when (element) {
     is JsonNull -> null
     is JsonPrimitive -> {
         element.booleanOrNull
