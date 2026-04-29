@@ -12,6 +12,7 @@ import io.ktor.client.statement.bodyAsText
 import io.ktor.http.isSuccess
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.flow.FlowCollector
 import kotlinx.coroutines.flow.flow
 import kotlinx.serialization.Serializable
 import kotlinx.serialization.encodeToString
@@ -81,7 +82,20 @@ class CriticalDarlingsRepository(
         try {
             val body = cacheRead() ?: return
             val wrapper = diskJson.decodeFromString<CriticalDarlingsDiskCache>(body)
-            cachedAlbums = wrapper.albums
+            // Heal any stale `&amp;` (and friends) that previous app
+            // versions saved into the cache before the parse-time
+            // entity-decode fix landed. Without this, "Nine Inch Nails
+            // &amp; Boys Noize" rows would persist with the literal
+            // `&amp;` in the artist field forever — display-broken AND
+            // unable to match the MB query (which would search for the
+            // literal `&amp;` and return nothing).
+            cachedAlbums = wrapper.albums.map { album ->
+                val cleanTitle = decodeHtmlEntities(album.title)
+                val cleanArtist = decodeHtmlEntities(album.artist)
+                if (cleanTitle != album.title || cleanArtist != album.artist) {
+                    album.copy(title = cleanTitle, artist = cleanArtist)
+                } else album
+            }
             lastFetchedAt = wrapper.fetchedAt
             Log.d(TAG, "Loaded ${wrapper.albums.size} cached critics' picks from disk")
         } catch (e: Exception) {
@@ -114,8 +128,14 @@ class CriticalDarlingsRepository(
                 emit(Resource.Loading)
             }
 
-            // Skip re-fetch if we fetched very recently (prevents hammering on quick nav)
+            // Skip RSS re-fetch if we fetched very recently (prevents
+            // hammering on quick nav) — but still try to repair any
+            // albums whose art came back null on a previous attempt.
+            // Without this loop, an album that failed art lookup once
+            // would sit broken until the next 5-minute window expired,
+            // even though the cascade fallback could resolve it now.
             if (!forceRefresh && recentlyFetched && cachedAlbums != null) {
+                enrichMissingArt()
                 return@flow
             }
 
@@ -144,29 +164,44 @@ class CriticalDarlingsRepository(
             saveDiskCache(mergedAlbums, now)
             emit(Resource.Success(mergedAlbums))
 
-            // Progressively fetch album art only for albums that still need it
-            val mutableAlbums = mergedAlbums.toMutableList()
-            val toEnrich = mutableAlbums.withIndex().filter { it.value.albumArt == null }
-            if (toEnrich.isEmpty()) return@flow
-
-            for ((index, album) in toEnrich) {
-                try {
-                    val artUrl = fetchAlbumArt(album.title, album.artist)
-                    if (artUrl != null) {
-                        mutableAlbums[index] = album.copy(albumArt = artUrl)
-                        cachedAlbums = mutableAlbums.toList()
-                        emit(Resource.Success(mutableAlbums.toList()))
-                    }
-                    // Rate limit MusicBrainz requests (1 req/sec policy)
-                    delay(200)
-                } catch (_: Exception) { /* skip art for this album */ }
-            }
-            // Save final enriched data to disk
-            cachedAlbums?.let { saveDiskCache(it, lastFetchedAt) }
+            enrichMissingArt()
         } catch (e: Exception) {
             Log.e(TAG, "Failed to load critics' picks", e)
             emit(Resource.Error("Failed to load critics' picks"))
         }
+    }
+
+    /**
+     * Progressively fetch album art for any cached album with a null
+     * `albumArt`, emitting after each successful resolution. Idempotent
+     * — re-running with everything filled in is a no-op (the
+     * `albumArt == null` filter short-circuits). Rate-limited at 200ms
+     * between requests to honour MusicBrainz's 1-req/sec average.
+     *
+     * Run from both the post-RSS-fetch path AND the stale-cache path
+     * (when the 5-min refetch throttle would otherwise prevent any
+     * recovery for albums whose first art lookup failed).
+     */
+    private suspend fun FlowCollector<Resource<List<CriticsPickAlbum>>>.enrichMissingArt() {
+        val current = cachedAlbums ?: return
+        val mutableAlbums = current.toMutableList()
+        val toEnrich = mutableAlbums.withIndex().filter { it.value.albumArt == null }
+        if (toEnrich.isEmpty()) return
+
+        for ((index, album) in toEnrich) {
+            try {
+                val artUrl = fetchAlbumArt(album.title, album.artist)
+                if (artUrl != null) {
+                    mutableAlbums[index] = album.copy(albumArt = artUrl)
+                    cachedAlbums = mutableAlbums.toList()
+                    emit(Resource.Success(mutableAlbums.toList()))
+                }
+                // Rate limit MusicBrainz requests (1 req/sec policy)
+                delay(200)
+            } catch (_: Exception) { /* skip art for this album */ }
+        }
+        // Save final enriched data to disk
+        cachedAlbums?.let { saveDiskCache(it, lastFetchedAt) }
     }
 
     /**
