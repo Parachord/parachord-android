@@ -397,7 +397,17 @@ val androidModule = module {
     // ── Repositories ─────────────────────────────────────────────────
 
     singleOf(::LibraryRepository)
-    singleOf(::ChartsRepository)
+    // ChartsRepository takes `lastFmApiKey` as a constructor parameter
+    // (sourced here from BuildConfig). Apple Music marketing-tools RSS
+    // feeds + Last.fm chart endpoints all flow through shared Ktor clients
+    // — no more raw OkHttp/JSONObject in the chart pipeline.
+    single {
+        com.parachord.shared.repository.ChartsRepository(
+            appleMusicClient = get(),
+            lastFmClient = get(),
+            lastFmApiKey = com.parachord.android.BuildConfig.LASTFM_API_KEY,
+        )
+    }
     // History + Friends repositories take `lastFmApiKey` as a constructor
     // parameter so the shared classes don't depend on Android BuildConfig.
     // Sourced from the same field that previously lived inline in the repo bodies.
