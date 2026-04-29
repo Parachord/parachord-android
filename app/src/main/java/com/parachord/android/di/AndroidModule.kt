@@ -385,8 +385,40 @@ val androidModule = module {
     singleOf(::SpotifyProvider)
     singleOf(::WikipediaProvider)
     singleOf(::DiscogsProvider)
-    singleOf(::ImageEnrichmentService)
-    singleOf(::MbidEnrichmentService)
+    // ImageEnrichmentService — shared. The 2x2 mosaic composite step is
+    // platform-specific (Coil + Bitmap), forwarded via a suspend lambda.
+    single {
+        val context = androidContext()
+        com.parachord.shared.metadata.ImageEnrichmentService(
+            metadataService = get(),
+            artistDao = get(),
+            albumDao = get(),
+            trackDao = get(),
+            playlistDao = get(),
+            playlistTrackDao = get(),
+            composeMosaic = { playlistId, urls ->
+                com.parachord.android.data.metadata.composeMosaicAndroid(context, playlistId, urls)
+            },
+        )
+    }
+    // MbidEnrichmentService — shared. Disk cache lives at
+    // `<filesDir>/mbid_mapper_cache.json` and is wired in via suspend lambdas.
+    single {
+        val context = androidContext()
+        val cacheFile = java.io.File(context.filesDir, "mbid_mapper_cache.json")
+        com.parachord.shared.metadata.MbidEnrichmentService(
+            listenBrainzClient = get(),
+            trackDao = get(),
+            cacheRead = {
+                try {
+                    if (cacheFile.exists()) cacheFile.readText() else null
+                } catch (_: Exception) { null }
+            },
+            cacheWrite = { json ->
+                try { cacheFile.writeText(json) } catch (_: Exception) { /* swallow */ }
+            },
+        )
+    }
 
     // ── Resolvers ────────────────────────────────────────────────────
 
@@ -396,9 +428,9 @@ val androidModule = module {
 
     // ── Repositories ─────────────────────────────────────────────────
 
-    // LibraryRepository — shared. MbidEnrichmentService is Android-only
-    // (its disk cache is tied to `Context+File`), so it's forwarded via
-    // two non-suspend fire-and-forget lambdas.
+    // LibraryRepository — shared. MbidEnrichmentService is also shared,
+    // but LibraryRepository keeps the lambda forwards for symmetry / so
+    // the shared-side signature isn't tightly coupled to MbidEnrichmentService.
     single {
         val mbidEnrichment: com.parachord.android.data.metadata.MbidEnrichmentService = get()
         com.parachord.shared.repository.LibraryRepository(
