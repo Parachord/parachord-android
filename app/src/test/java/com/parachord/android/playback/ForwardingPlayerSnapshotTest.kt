@@ -1,6 +1,7 @@
 package com.parachord.android.playback
 
 import android.app.Application
+import androidx.media3.common.C
 import androidx.media3.common.MediaItem
 import androidx.media3.common.Player
 import androidx.media3.common.Timeline
@@ -10,6 +11,7 @@ import io.mockk.mockk
 import io.mockk.slot
 import io.mockk.verify
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertNull
 import org.junit.Test
 import org.junit.runner.RunWith
 import org.robolectric.RobolectricTestRunner
@@ -161,6 +163,100 @@ class ForwardingPlayerSnapshotTest {
         wrapper.updateQueueSnapshot(track("second"), emptyList())
 
         verify(exactly = 2) { listener.onMediaItemTransition(any(), Player.MEDIA_ITEM_TRANSITION_REASON_AUTO) }
+    }
+
+    @Test fun `empty snapshot reports zero count and null current item`() {
+        val delegate = mockk<androidx.media3.exoplayer.ExoPlayer>(relaxed = true)
+        every { delegate.currentTimeline } returns Timeline.EMPTY
+        val controller = mockk<PlaybackController>(relaxed = true)
+        val stateHolder = PlaybackStateHolder()
+        val wrapper = PlaybackService.ExternalPlaybackForwardingPlayer(delegate, controller, stateHolder)
+
+        wrapper.updateQueueSnapshot(currentTrack = null, upNext = emptyList())
+        assertEquals(0, wrapper.mediaItemCount)
+        assertNull(wrapper.currentMediaItem)
+        assertEquals(C.INDEX_UNSET, wrapper.currentMediaItemIndex)
+    }
+
+    @Test fun `current to null transition fires onMediaItemTransition with null item`() {
+        val delegate = mockk<androidx.media3.exoplayer.ExoPlayer>(relaxed = true)
+        every { delegate.currentTimeline } returns Timeline.EMPTY
+        val controller = mockk<PlaybackController>(relaxed = true)
+        val stateHolder = PlaybackStateHolder()
+        val wrapper = PlaybackService.ExternalPlaybackForwardingPlayer(delegate, controller, stateHolder)
+
+        val listener = mockk<Player.Listener>(relaxed = true)
+        wrapper.addListener(listener)
+
+        wrapper.updateQueueSnapshot(track("c"), emptyList())  // current: c → c (was null)
+        wrapper.updateQueueSnapshot(currentTrack = null, upNext = emptyList())  // current: c → null
+
+        verify(exactly = 2) { listener.onMediaItemTransition(any(), Player.MEDIA_ITEM_TRANSITION_REASON_AUTO) }
+    }
+
+    @Test fun `getMediaItemAt returns the right item for valid index`() {
+        val delegate = mockk<androidx.media3.exoplayer.ExoPlayer>(relaxed = true)
+        every { delegate.currentTimeline } returns Timeline.EMPTY
+        val controller = mockk<PlaybackController>(relaxed = true)
+        val stateHolder = PlaybackStateHolder()
+        val wrapper = PlaybackService.ExternalPlaybackForwardingPlayer(delegate, controller, stateHolder)
+
+        wrapper.updateQueueSnapshot(track("c"), listOf(track("u1"), track("u2")))
+        assertEquals("c", wrapper.getMediaItemAt(0).mediaId)
+        assertEquals("u1", wrapper.getMediaItemAt(1).mediaId)
+        assertEquals("u2", wrapper.getMediaItemAt(2).mediaId)
+    }
+
+    @Test fun `addMediaItems is a no-op (snapshot unchanged)`() {
+        val delegate = mockk<androidx.media3.exoplayer.ExoPlayer>(relaxed = true)
+        every { delegate.currentTimeline } returns Timeline.EMPTY
+        val controller = mockk<PlaybackController>(relaxed = true)
+        val stateHolder = PlaybackStateHolder()
+        val wrapper = PlaybackService.ExternalPlaybackForwardingPlayer(delegate, controller, stateHolder)
+        wrapper.updateQueueSnapshot(track("c"), listOf(track("u1")))
+        val countBefore = wrapper.mediaItemCount
+
+        wrapper.addMediaItems(0, listOf(track("new").toAutoMediaItem()))
+
+        assertEquals(countBefore, wrapper.mediaItemCount)  // snapshot didn't change
+    }
+
+    @Test fun `addListener after updateQueueSnapshot does NOT replay last event`() {
+        val delegate = mockk<androidx.media3.exoplayer.ExoPlayer>(relaxed = true)
+        every { delegate.currentTimeline } returns Timeline.EMPTY
+        val controller = mockk<PlaybackController>(relaxed = true)
+        val stateHolder = PlaybackStateHolder()
+        val wrapper = PlaybackService.ExternalPlaybackForwardingPlayer(delegate, controller, stateHolder)
+
+        wrapper.updateQueueSnapshot(track("c"), listOf(track("u1")))
+
+        val lateListener = mockk<Player.Listener>(relaxed = true)
+        wrapper.addListener(lateListener)
+
+        // No replay: lateListener has not seen the previous snapshot.
+        verify(exactly = 0) { lateListener.onTimelineChanged(any(), any()) }
+        verify(exactly = 0) { lateListener.onMediaItemTransition(any(), any()) }
+
+        // Next snapshot does fire on the late listener.
+        wrapper.updateQueueSnapshot(track("c2"), emptyList())
+        verify(exactly = 1) { lateListener.onTimelineChanged(any(), Player.TIMELINE_CHANGE_REASON_PLAYLIST_CHANGED) }
+        verify(exactly = 1) { lateListener.onMediaItemTransition(any(), Player.MEDIA_ITEM_TRANSITION_REASON_AUTO) }
+    }
+
+    @Test fun `getMediaItemAt out of bounds throws`() {
+        val delegate = mockk<androidx.media3.exoplayer.ExoPlayer>(relaxed = true)
+        every { delegate.currentTimeline } returns Timeline.EMPTY
+        val controller = mockk<PlaybackController>(relaxed = true)
+        val stateHolder = PlaybackStateHolder()
+        val wrapper = PlaybackService.ExternalPlaybackForwardingPlayer(delegate, controller, stateHolder)
+        wrapper.updateQueueSnapshot(track("c"), listOf(track("u1")))
+        // Pin Media3-conformant behavior: out-of-bounds throws (matches Timeline.getWindow contract).
+        try {
+            wrapper.getMediaItemAt(2)
+            org.junit.Assert.fail("expected IndexOutOfBoundsException")
+        } catch (e: IndexOutOfBoundsException) {
+            // expected
+        }
     }
 
     @Test fun `same current track does not re-fire onMediaItemTransition`() {

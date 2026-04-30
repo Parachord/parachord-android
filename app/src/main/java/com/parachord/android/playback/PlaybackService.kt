@@ -656,6 +656,9 @@ class PlaybackService : MediaLibraryService() {
         @Volatile
         private var queueSnapshot: QueueSnapshotState = QueueSnapshotState.EMPTY
 
+        /** Re-entrancy guard for [updateQueueSnapshot]. See KDoc on that method. */
+        private var dispatching = false
+
         /** External listeners we re-emit synthesized timeline events to.
          *  Tracked separately from delegate listeners so we can swallow the
          *  delegate's silence-loop timeline changes. */
@@ -784,6 +787,7 @@ class PlaybackService : MediaLibraryService() {
         override fun getCurrentMediaItemIndex(): Int =
             if (queueSnapshot.currentMediaId != null) 0 else C.INDEX_UNSET
 
+        /** Always 1 when upNext is non-empty (current is at slot 0). */
         override fun getNextMediaItemIndex(): Int =
             if (queueSnapshot.items.size > 1) 1 else C.INDEX_UNSET
 
@@ -834,6 +838,7 @@ class PlaybackService : MediaLibraryService() {
         }
 
         override fun addMediaItems(index: Int, mediaItems: List<MediaItem>) {
+            Log.w(TAG, "addMediaItems ignored — Auto voice search not yet wired (got ${mediaItems.size} items at index $index)")
             // No-op for v1 — Auto only invokes this for voice search, and we
             // don't have a browse tree resolved from MediaItem to our
             // resolver pipeline yet.
@@ -859,45 +864,59 @@ class PlaybackService : MediaLibraryService() {
          * and dispatches synthesized [Player.Listener] events.
          *
          * **Main-thread invariant.** Caller must invoke on Looper.getMainLooper().
+         *
+         * **Re-entrancy.** Listener callbacks must NOT synchronously call back
+         * into this method. Re-entrant calls are detected and dropped (with a
+         * warning log) to avoid clobbering the snapshot mid-dispatch. Auto's
+         * typical usage doesn't trigger this; the guard is defensive.
          */
         fun updateQueueSnapshot(currentTrack: TrackEntity?, upNext: List<TrackEntity>) {
-            val combined = buildList {
-                currentTrack?.let { add(it) }
-                addAll(upNext)
+            if (dispatching) {
+                Log.w(TAG, "updateQueueSnapshot called re-entrantly from a listener callback; ignoring inner call to avoid clobbering snapshot state")
+                return
             }
-            val items = combined.map { it.toAutoMediaItem() }
-            val durationsUs = LongArray(combined.size) { i ->
-                val durMs = combined[i].duration ?: 0L
-                if (durMs > 0L) durMs * 1000L else C.TIME_UNSET
-            }
-            val newTimeline = QueueTimeline(items, durationsUs)
-            val previousMediaId = queueSnapshot.currentMediaId
-            val newCurrentId = currentTrack?.id
-            queueSnapshot = QueueSnapshotState(
-                items = items,
-                durationsUs = durationsUs,
-                timeline = newTimeline,
-                currentMediaId = newCurrentId,
-            )
-
-            // Re-emit timeline change to all external listeners.
-            for (listener in externalListeners) {
-                listener.onTimelineChanged(
-                    newTimeline,
-                    Player.TIMELINE_CHANGE_REASON_PLAYLIST_CHANGED,
+            dispatching = true
+            try {
+                val combined = buildList {
+                    currentTrack?.let { add(it) }
+                    addAll(upNext)
+                }
+                val items = combined.map { it.toAutoMediaItem() }
+                val durationsUs = LongArray(combined.size) { i ->
+                    val durMs = combined[i].duration ?: 0L
+                    if (durMs > 0L) durMs * 1000L else C.TIME_UNSET
+                }
+                val newTimeline = QueueTimeline(items, durationsUs)
+                val previousMediaId = queueSnapshot.currentMediaId
+                val newCurrentId = currentTrack?.id
+                queueSnapshot = QueueSnapshotState(
+                    items = items,
+                    durationsUs = durationsUs,
+                    timeline = newTimeline,
+                    currentMediaId = newCurrentId,
                 )
-            }
-            // Fire onMediaItemTransition only when the current track actually
-            // changed (an upNext-only mutation is a timeline change, not a
-            // transition).
-            if (newCurrentId != previousMediaId) {
-                val newItem = items.firstOrNull()
+
+                // Re-emit timeline change to all external listeners.
                 for (listener in externalListeners) {
-                    listener.onMediaItemTransition(
-                        newItem,
-                        Player.MEDIA_ITEM_TRANSITION_REASON_AUTO,
+                    listener.onTimelineChanged(
+                        newTimeline,
+                        Player.TIMELINE_CHANGE_REASON_PLAYLIST_CHANGED,
                     )
                 }
+                // Fire onMediaItemTransition only when the current track actually
+                // changed (an upNext-only mutation is a timeline change, not a
+                // transition).
+                if (newCurrentId != previousMediaId) {
+                    val newItem = items.firstOrNull()
+                    for (listener in externalListeners) {
+                        listener.onMediaItemTransition(
+                            newItem,
+                            Player.MEDIA_ITEM_TRANSITION_REASON_AUTO,
+                        )
+                    }
+                }
+            } finally {
+                dispatching = false
             }
         }
 
