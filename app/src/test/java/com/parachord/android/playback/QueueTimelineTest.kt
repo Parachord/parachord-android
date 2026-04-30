@@ -5,6 +5,8 @@ import androidx.media3.common.C
 import androidx.media3.common.Timeline
 import com.parachord.shared.model.Track
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertNotNull
+import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Test
 import org.junit.runner.RunWith
@@ -32,7 +34,7 @@ class QueueTimelineTest {
         val window = Timeline.Window()
         tl.getWindow(0, window)
         assertEquals(item, window.mediaItem)
-        assertEquals("t1", window.uid)
+        assertEquals("t1#0", window.uid)
         assertEquals(30_000_000L, window.durationUs)
         assertTrue(window.isPlaceholder.not())
     }
@@ -44,23 +46,33 @@ class QueueTimelineTest {
         val window = Timeline.Window()
         for (i in 0..2) {
             tl.getWindow(i, window)
-            assertEquals("t${i + 1}", window.uid)
+            assertEquals("t${i + 1}#$i", window.uid)
         }
     }
 
     @Test fun `getIndexOfPeriod resolves uid back to index`() {
         val items = listOf("a", "b", "c").map { track(it).toAutoMediaItem() }
         val tl = QueueTimeline(items, LongArray(3) { C.TIME_UNSET })
-        assertEquals(0, tl.getIndexOfPeriod("a"))
-        assertEquals(1, tl.getIndexOfPeriod("b"))
-        assertEquals(2, tl.getIndexOfPeriod("c"))
-        assertEquals(C.INDEX_UNSET, tl.getIndexOfPeriod("missing"))
+        assertEquals(0, tl.getIndexOfPeriod("a#0"))
+        assertEquals(1, tl.getIndexOfPeriod("b#1"))
+        assertEquals(2, tl.getIndexOfPeriod("c#2"))
+        assertEquals(C.INDEX_UNSET, tl.getIndexOfPeriod("missing#0"))
+        assertEquals(C.INDEX_UNSET, tl.getIndexOfPeriod("a#5"))
+        assertEquals(C.INDEX_UNSET, tl.getIndexOfPeriod("nohash"))
     }
 
-    @Test fun `getUidOfPeriod returns mediaId`() {
+    @Test fun `getUidOfPeriod returns positional uid`() {
         val item = track("the-uid").toAutoMediaItem()
         val tl = QueueTimeline(listOf(item), longArrayOf(C.TIME_UNSET))
-        assertEquals("the-uid", tl.getUidOfPeriod(0))
+        assertEquals("the-uid#0", tl.getUidOfPeriod(0))
+    }
+
+    @Test fun `duplicate mediaIds at different positions resolve distinct indices`() {
+        val itemA = track("dup").toAutoMediaItem()
+        val itemB = track("dup").toAutoMediaItem()
+        val tl = QueueTimeline(listOf(itemA, itemB), longArrayOf(C.TIME_UNSET, C.TIME_UNSET))
+        assertEquals(0, tl.getIndexOfPeriod("dup#0"))
+        assertEquals(1, tl.getIndexOfPeriod("dup#1"))
     }
 
     @Test fun `period delegates duration to window`() {
@@ -69,5 +81,25 @@ class QueueTimelineTest {
         val period = Timeline.Period()
         tl.getPeriod(0, period)
         assertEquals(60_000_000L, period.durationUs)
+    }
+
+    @Test fun `getPeriod with setIds=true populates id and uid`() {
+        val item = track("the-id").toAutoMediaItem()
+        val tl = QueueTimeline(listOf(item), longArrayOf(C.TIME_UNSET))
+        val period = Timeline.Period()
+        tl.getPeriod(0, period, setIds = true)
+        assertEquals("the-id#0", period.id)
+        assertEquals("the-id#0", period.uid)
+        assertNotNull(period.id)
+        assertNotNull(period.uid)
+    }
+
+    @Test fun `getPeriod with setIds=false leaves id and uid null`() {
+        val item = track("the-id").toAutoMediaItem()
+        val tl = QueueTimeline(listOf(item), longArrayOf(C.TIME_UNSET))
+        val period = Timeline.Period()
+        tl.getPeriod(0, period, setIds = false)
+        assertNull(period.id)
+        assertNull(period.uid)
     }
 }
