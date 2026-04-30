@@ -243,6 +243,46 @@ class ForwardingPlayerSnapshotTest {
         verify(exactly = 1) { lateListener.onMediaItemTransition(any(), Player.MEDIA_ITEM_TRANSITION_REASON_AUTO) }
     }
 
+    @Test fun `delegate isPlayingChanged is forwarded to external listeners`() {
+        val delegate = mockk<androidx.media3.exoplayer.ExoPlayer>(relaxed = true)
+        every { delegate.currentTimeline } returns Timeline.EMPTY
+        val forwarderSlot = slot<Player.Listener>()
+        every { delegate.addListener(capture(forwarderSlot)) } returns Unit
+        val controller = mockk<PlaybackController>(relaxed = true)
+        val stateHolder = PlaybackStateHolder()
+        val wrapper = PlaybackService.ExternalPlaybackForwardingPlayer(delegate, controller, stateHolder)
+
+        val external = mockk<Player.Listener>(relaxed = true)
+        wrapper.addListener(external)
+        // Wrapper installed the internal forwarder on delegate. Simulate a
+        // delegate-side state change.
+        forwarderSlot.captured.onIsPlayingChanged(true)
+        verify { external.onIsPlayingChanged(true) }
+    }
+
+    @Test fun `delegate timeline events are NOT forwarded to external listeners`() {
+        val delegate = mockk<androidx.media3.exoplayer.ExoPlayer>(relaxed = true)
+        every { delegate.currentTimeline } returns Timeline.EMPTY
+        val forwarderSlot = slot<Player.Listener>()
+        every { delegate.addListener(capture(forwarderSlot)) } returns Unit
+        val controller = mockk<PlaybackController>(relaxed = true)
+        val stateHolder = PlaybackStateHolder()
+        val wrapper = PlaybackService.ExternalPlaybackForwardingPlayer(delegate, controller, stateHolder)
+
+        val external = mockk<Player.Listener>(relaxed = true)
+        wrapper.addListener(external)
+        // Simulate the silence-loop timeline change firing on the delegate.
+        // The wrapper's forwarder does NOT override onTimelineChanged or
+        // onMediaItemTransition (no-op pass-through), so external listeners
+        // see neither.
+        val fakeTimeline = mockk<Timeline>(relaxed = true)
+        val fakeItem = track("delegate-item").toAutoMediaItem()
+        forwarderSlot.captured.onTimelineChanged(fakeTimeline, Player.TIMELINE_CHANGE_REASON_SOURCE_UPDATE)
+        forwarderSlot.captured.onMediaItemTransition(fakeItem, Player.MEDIA_ITEM_TRANSITION_REASON_AUTO)
+        verify(exactly = 0) { external.onTimelineChanged(any(), any()) }
+        verify(exactly = 0) { external.onMediaItemTransition(any(), any()) }
+    }
+
     @Test fun `getMediaItemAt out of bounds throws`() {
         val delegate = mockk<androidx.media3.exoplayer.ExoPlayer>(relaxed = true)
         every { delegate.currentTimeline } returns Timeline.EMPTY

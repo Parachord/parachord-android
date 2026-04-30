@@ -694,11 +694,82 @@ class PlaybackService : MediaLibraryService() {
         /** Re-entrancy guard for [updateQueueSnapshot]. See KDoc on that method. */
         private var dispatching = false
 
-        /** External listeners we re-emit synthesized timeline events to.
-         *  Tracked separately from delegate listeners so we can swallow the
-         *  delegate's silence-loop timeline changes. */
+        /** External listeners that receive both delegate-forwarded non-timeline
+         *  events AND our synthesized timeline events. Tracked separately so we
+         *  can install a single internal forwarder on the delegate, filter its
+         *  output to drop silence-loop timeline noise, and re-emit the rest. */
         private val externalListeners =
             java.util.concurrent.CopyOnWriteArraySet<Player.Listener>()
+
+        /** Single forwarder registered on the delegate. Forwards every callback
+         *  EXCEPT [Player.Listener.onTimelineChanged] and
+         *  [Player.Listener.onMediaItemTransition] — those describe the
+         *  silence-loop's single-item timeline and would corrupt Auto's view of
+         *  our synthetic queue if forwarded. We synthesize replacements via
+         *  [updateQueueSnapshot]. Everything else (`onIsPlayingChanged`,
+         *  `onPlaybackStateChanged`, `onPositionDiscontinuity`, `onPlayerError`,
+         *  `onPlayWhenReadyChanged`, …) is essential for Media3's MediaSession
+         *  to drive the Now Playing notification, lock-screen UI, and Android
+         *  Auto's playback metadata — must be forwarded. */
+        private val delegateForwarder = object : Player.Listener {
+            override fun onIsPlayingChanged(isPlaying: Boolean) {
+                externalListeners.forEach { it.onIsPlayingChanged(isPlaying) }
+            }
+            override fun onPlaybackStateChanged(playbackState: Int) {
+                externalListeners.forEach { it.onPlaybackStateChanged(playbackState) }
+            }
+            override fun onPlayWhenReadyChanged(playWhenReady: Boolean, reason: Int) {
+                externalListeners.forEach { it.onPlayWhenReadyChanged(playWhenReady, reason) }
+            }
+            override fun onPlaybackParametersChanged(playbackParameters: androidx.media3.common.PlaybackParameters) {
+                externalListeners.forEach { it.onPlaybackParametersChanged(playbackParameters) }
+            }
+            override fun onPositionDiscontinuity(
+                oldPosition: Player.PositionInfo,
+                newPosition: Player.PositionInfo,
+                reason: Int,
+            ) {
+                externalListeners.forEach { it.onPositionDiscontinuity(oldPosition, newPosition, reason) }
+            }
+            override fun onPlayerError(error: androidx.media3.common.PlaybackException) {
+                externalListeners.forEach { it.onPlayerError(error) }
+            }
+            override fun onPlayerErrorChanged(error: androidx.media3.common.PlaybackException?) {
+                externalListeners.forEach { it.onPlayerErrorChanged(error) }
+            }
+            override fun onRepeatModeChanged(repeatMode: Int) {
+                externalListeners.forEach { it.onRepeatModeChanged(repeatMode) }
+            }
+            override fun onShuffleModeEnabledChanged(shuffleModeEnabled: Boolean) {
+                externalListeners.forEach { it.onShuffleModeEnabledChanged(shuffleModeEnabled) }
+            }
+            override fun onPlaybackSuppressionReasonChanged(reason: Int) {
+                externalListeners.forEach { it.onPlaybackSuppressionReasonChanged(reason) }
+            }
+            override fun onMediaMetadataChanged(mediaMetadata: androidx.media3.common.MediaMetadata) {
+                externalListeners.forEach { it.onMediaMetadataChanged(mediaMetadata) }
+            }
+            override fun onPlaylistMetadataChanged(mediaMetadata: androidx.media3.common.MediaMetadata) {
+                externalListeners.forEach { it.onPlaylistMetadataChanged(mediaMetadata) }
+            }
+            override fun onAudioAttributesChanged(audioAttributes: androidx.media3.common.AudioAttributes) {
+                externalListeners.forEach { it.onAudioAttributesChanged(audioAttributes) }
+            }
+            override fun onVolumeChanged(volume: Float) {
+                externalListeners.forEach { it.onVolumeChanged(volume) }
+            }
+            override fun onAvailableCommandsChanged(availableCommands: Player.Commands) {
+                externalListeners.forEach { it.onAvailableCommandsChanged(availableCommands) }
+            }
+            override fun onEvents(player: Player, events: Player.Events) {
+                externalListeners.forEach { it.onEvents(player, events) }
+            }
+            // Intentionally NOT overridden (= no-op pass-through, swallowing
+            // delegate's silence-loop timeline noise):
+            // - onTimelineChanged
+            // - onMediaItemTransition
+        }
+        private var delegateForwarderInstalled = false
 
         /** Internal data holder so reads of timeline + index are atomic. */
         data class QueueSnapshotState(
@@ -882,30 +953,42 @@ class PlaybackService : MediaLibraryService() {
         // ── Listener registry ───────────────────────────────────────────
 
         /**
-         * Register a listener for synthesized player events.
+         * Register a listener for player events.
          *
-         * **Intentionally does NOT forward to the underlying delegate.** This
-         * is broader than just suppressing the silence-loop's timeline
-         * events — ALL delegate-emitted Player.Listener callbacks
-         * (`onPlaybackStateChanged`, `onIsPlayingChanged`,
-         * `onPositionDiscontinuity`, etc.) are also suppressed. The wrapper
-         * synthesizes its own `onTimelineChanged` / `onMediaItemTransition`
-         * via [updateQueueSnapshot]; everything else that callers might need
-         * (notification updates, position polling for external playback) is
-         * driven separately by [startStateObserver] reading
-         * [PlaybackStateHolder].
+         * **Hybrid forwarding strategy.** The wrapper installs a single
+         * internal [delegateForwarder] on the underlying ExoPlayer the first
+         * time any external listener registers. That forwarder relays every
+         * non-timeline event from the delegate to the registered external
+         * listeners. We also synthesize our own `onTimelineChanged` and
+         * `onMediaItemTransition` via [updateQueueSnapshot] — these REPLACE
+         * the delegate's silence-loop timeline events (which describe the
+         * single-item silence loop, not the real queue, and would corrupt
+         * Auto's queue display if forwarded).
          *
-         * **DO NOT** add `super.addListener(listener)` here without first
-         * confirming every now-forwarded delegate event is filtered to
-         * exclude silence-loop noise. The current "swallow everything"
-         * approach is the safer default.
+         * The non-timeline events (`onIsPlayingChanged`,
+         * `onPlaybackStateChanged`, `onPositionDiscontinuity`,
+         * `onPlayerError`, etc.) are essential for Media3's MediaSession to
+         * drive the Now Playing notification, lock screen, and Android Auto's
+         * playback metadata — without them, Auto shows "no media".
+         *
+         * **DO NOT** call `super.addListener(listener)` here. The delegate
+         * forwards every event including the silence-loop timeline noise
+         * we're trying to suppress. Always go through the forwarder.
          */
         override fun addListener(listener: Player.Listener) {
             externalListeners.add(listener)
+            if (!delegateForwarderInstalled) {
+                delegate.addListener(delegateForwarder)
+                delegateForwarderInstalled = true
+            }
         }
 
         override fun removeListener(listener: Player.Listener) {
             externalListeners.remove(listener)
+            // Note: we leave the single delegateForwarder installed for the
+            // lifetime of the wrapper. Removing it on the last external
+            // listener and re-adding on the next would create a window where
+            // delegate events are missed; the forwarder is cheap to keep.
         }
 
         /**
