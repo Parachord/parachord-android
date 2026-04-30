@@ -306,12 +306,26 @@ class PlaybackService : MediaLibraryService() {
             controller: MediaSession.ControllerInfo,
             mediaItems: List<MediaItem>,
         ): ListenableFuture<List<MediaItem>> {
-            // v1: voice search and "play X" intents are out of scope. Returning
-            // an empty list signals to Media3 that we accepted no items, so
-            // the default Player.setMediaItems() pipeline no-ops without
-            // overwriting our synthetic timeline. Future work: resolve the
-            // requested MediaItem against our catalog/library.
-            Log.d(TAG, "onAddMediaItems called with ${mediaItems.size} items — ignoring (v1)")
+            // CRITICAL: this callback fires for EVERY MediaController.setMediaItems —
+            // including our own internal `PlaybackController.playTrackInternal()` calls
+            // that need to actually reach ExoPlayer. We must distinguish:
+            //
+            //   - Internal: our app's own MediaController is loading a track for
+            //     playback. Forward the items unchanged so ExoPlayer plays them.
+            //
+            //   - External: Android Auto voice search ("Hey Google, play X") sends
+            //     arbitrary MediaItems via this same callback. Resolving those
+            //     against our catalog is out of scope for v1, so we drop them
+            //     rather than letting random items hijack the queue.
+            //
+            // Distinguishing by controller.packageName: our process's own
+            // MediaController reports our packageName; external sources (Auto,
+            // Assistant, Wear) report theirs.
+            val isInternal = controller.packageName == packageName
+            if (isInternal) {
+                return Futures.immediateFuture(mediaItems)
+            }
+            Log.d(TAG, "onAddMediaItems: ${mediaItems.size} items from ${controller.packageName} — ignoring (v1)")
             return Futures.immediateFuture(emptyList())
         }
     }
@@ -694,82 +708,17 @@ class PlaybackService : MediaLibraryService() {
         /** Re-entrancy guard for [updateQueueSnapshot]. See KDoc on that method. */
         private var dispatching = false
 
-        /** External listeners that receive both delegate-forwarded non-timeline
-         *  events AND our synthesized timeline events. Tracked separately so we
-         *  can install a single internal forwarder on the delegate, filter its
-         *  output to drop silence-loop timeline noise, and re-emit the rest. */
+        /** Listeners we synthesize queue-related events to via
+         *  [updateQueueSnapshot]. Listeners are ALSO registered on the
+         *  delegate (via super.addListener) so they receive normal player
+         *  events (state, position, errors) directly. We just additionally
+         *  emit synthesized `onTimelineChanged` / `onMediaItemTransition`
+         *  for our queue. The delegate's silence-loop timeline events
+         *  arrive too, but our synthesized emissions are dispatched after
+         *  state changes propagate, so the synthetic timeline wins as
+         *  MediaSession's latest known state. */
         private val externalListeners =
             java.util.concurrent.CopyOnWriteArraySet<Player.Listener>()
-
-        /** Single forwarder registered on the delegate. Forwards every callback
-         *  EXCEPT [Player.Listener.onTimelineChanged] and
-         *  [Player.Listener.onMediaItemTransition] — those describe the
-         *  silence-loop's single-item timeline and would corrupt Auto's view of
-         *  our synthetic queue if forwarded. We synthesize replacements via
-         *  [updateQueueSnapshot]. Everything else (`onIsPlayingChanged`,
-         *  `onPlaybackStateChanged`, `onPositionDiscontinuity`, `onPlayerError`,
-         *  `onPlayWhenReadyChanged`, …) is essential for Media3's MediaSession
-         *  to drive the Now Playing notification, lock-screen UI, and Android
-         *  Auto's playback metadata — must be forwarded. */
-        private val delegateForwarder = object : Player.Listener {
-            override fun onIsPlayingChanged(isPlaying: Boolean) {
-                externalListeners.forEach { it.onIsPlayingChanged(isPlaying) }
-            }
-            override fun onPlaybackStateChanged(playbackState: Int) {
-                externalListeners.forEach { it.onPlaybackStateChanged(playbackState) }
-            }
-            override fun onPlayWhenReadyChanged(playWhenReady: Boolean, reason: Int) {
-                externalListeners.forEach { it.onPlayWhenReadyChanged(playWhenReady, reason) }
-            }
-            override fun onPlaybackParametersChanged(playbackParameters: androidx.media3.common.PlaybackParameters) {
-                externalListeners.forEach { it.onPlaybackParametersChanged(playbackParameters) }
-            }
-            override fun onPositionDiscontinuity(
-                oldPosition: Player.PositionInfo,
-                newPosition: Player.PositionInfo,
-                reason: Int,
-            ) {
-                externalListeners.forEach { it.onPositionDiscontinuity(oldPosition, newPosition, reason) }
-            }
-            override fun onPlayerError(error: androidx.media3.common.PlaybackException) {
-                externalListeners.forEach { it.onPlayerError(error) }
-            }
-            override fun onPlayerErrorChanged(error: androidx.media3.common.PlaybackException?) {
-                externalListeners.forEach { it.onPlayerErrorChanged(error) }
-            }
-            override fun onRepeatModeChanged(repeatMode: Int) {
-                externalListeners.forEach { it.onRepeatModeChanged(repeatMode) }
-            }
-            override fun onShuffleModeEnabledChanged(shuffleModeEnabled: Boolean) {
-                externalListeners.forEach { it.onShuffleModeEnabledChanged(shuffleModeEnabled) }
-            }
-            override fun onPlaybackSuppressionReasonChanged(reason: Int) {
-                externalListeners.forEach { it.onPlaybackSuppressionReasonChanged(reason) }
-            }
-            override fun onMediaMetadataChanged(mediaMetadata: androidx.media3.common.MediaMetadata) {
-                externalListeners.forEach { it.onMediaMetadataChanged(mediaMetadata) }
-            }
-            override fun onPlaylistMetadataChanged(mediaMetadata: androidx.media3.common.MediaMetadata) {
-                externalListeners.forEach { it.onPlaylistMetadataChanged(mediaMetadata) }
-            }
-            override fun onAudioAttributesChanged(audioAttributes: androidx.media3.common.AudioAttributes) {
-                externalListeners.forEach { it.onAudioAttributesChanged(audioAttributes) }
-            }
-            override fun onVolumeChanged(volume: Float) {
-                externalListeners.forEach { it.onVolumeChanged(volume) }
-            }
-            override fun onAvailableCommandsChanged(availableCommands: Player.Commands) {
-                externalListeners.forEach { it.onAvailableCommandsChanged(availableCommands) }
-            }
-            override fun onEvents(player: Player, events: Player.Events) {
-                externalListeners.forEach { it.onEvents(player, events) }
-            }
-            // Intentionally NOT overridden (= no-op pass-through, swallowing
-            // delegate's silence-loop timeline noise):
-            // - onTimelineChanged
-            // - onMediaItemTransition
-        }
-        private var delegateForwarderInstalled = false
 
         /** Internal data holder so reads of timeline + index are atomic. */
         data class QueueSnapshotState(
@@ -1028,18 +977,25 @@ class PlaybackService : MediaLibraryService() {
          */
         override fun addListener(listener: Player.Listener) {
             externalListeners.add(listener)
-            if (!delegateForwarderInstalled) {
-                delegate.addListener(delegateForwarder)
-                delegateForwarderInstalled = true
-            }
+            // Forward to delegate so MediaSession + MediaController receive
+            // playback-state events (onIsPlayingChanged, onPlaybackStateChanged,
+            // onPositionDiscontinuity, etc.) needed to drive Now Playing UI
+            // and trigger PlaybackController's STATE_ENDED → skipNextInternal
+            // logic correctly. Without this, ExoPlayer-native playback breaks
+            // because the listener never sees the delegate's state machine.
+            //
+            // The trade-off: delegate's onTimelineChanged + onMediaItemTransition
+            // events also flow through (1-item silence-loop timeline). They
+            // arrive BEFORE our synthetic events fired by updateQueueSnapshot,
+            // and MediaSession uses the latest emission, so the synthetic
+            // queue wins. Auto may briefly see a 1-item timeline during
+            // external→external transitions; acceptable trade-off.
+            super.addListener(listener)
         }
 
         override fun removeListener(listener: Player.Listener) {
             externalListeners.remove(listener)
-            // Note: we leave the single delegateForwarder installed for the
-            // lifetime of the wrapper. Removing it on the last external
-            // listener and re-adding on the next would create a window where
-            // delegate events are missed; the forwarder is cheap to keep.
+            super.removeListener(listener)
         }
 
         /**

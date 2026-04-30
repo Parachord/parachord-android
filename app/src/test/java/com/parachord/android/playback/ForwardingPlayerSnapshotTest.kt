@@ -260,7 +260,7 @@ class ForwardingPlayerSnapshotTest {
         verify { external.onIsPlayingChanged(true) }
     }
 
-    @Test fun `delegate timeline events are NOT forwarded to external listeners`() {
+    @Test fun `delegate timeline events ARE forwarded to external listeners`() {
         val delegate = mockk<androidx.media3.exoplayer.ExoPlayer>(relaxed = true)
         every { delegate.currentTimeline } returns Timeline.EMPTY
         val forwarderSlot = slot<Player.Listener>()
@@ -271,16 +271,24 @@ class ForwardingPlayerSnapshotTest {
 
         val external = mockk<Player.Listener>(relaxed = true)
         wrapper.addListener(external)
-        // Simulate the silence-loop timeline change firing on the delegate.
-        // The wrapper's forwarder does NOT override onTimelineChanged or
-        // onMediaItemTransition (no-op pass-through), so external listeners
-        // see neither.
+        // The wrapper's addListener calls super.addListener (ForwardingPlayer's
+        // default), which installs a forwarding listener on the delegate. So
+        // delegate-side timeline + media-item-transition events DO reach
+        // external listeners. We accept this trade-off: the silence-loop
+        // timeline arrives first, then our synthetic updateQueueSnapshot
+        // emissions land after and become MediaSession's latest known state
+        // (Auto reads the wrapper's overrides for current state queries, so
+        // the synthetic queue still wins for display purposes).
+        //
+        // This test pins that contract — if it fails because forwarding got
+        // suppressed, ExoPlayer-native playback regresses (no STATE_ENDED →
+        // skipNext flow, no Now Playing UI updates).
         val fakeTimeline = mockk<Timeline>(relaxed = true)
         val fakeItem = track("delegate-item").toAutoMediaItem()
         forwarderSlot.captured.onTimelineChanged(fakeTimeline, Player.TIMELINE_CHANGE_REASON_SOURCE_UPDATE)
         forwarderSlot.captured.onMediaItemTransition(fakeItem, Player.MEDIA_ITEM_TRANSITION_REASON_AUTO)
-        verify(exactly = 0) { external.onTimelineChanged(any(), any()) }
-        verify(exactly = 0) { external.onMediaItemTransition(any(), any()) }
+        verify { external.onTimelineChanged(fakeTimeline, Player.TIMELINE_CHANGE_REASON_SOURCE_UPDATE) }
+        verify { external.onMediaItemTransition(fakeItem, Player.MEDIA_ITEM_TRANSITION_REASON_AUTO) }
     }
 
     @Test fun `getMediaItemAt out of bounds throws`() {
