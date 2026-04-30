@@ -54,12 +54,28 @@ private fun stringsMatch(a: String, b: String): Boolean {
 
 /**
  * Calculate match confidence by comparing the resolver's result against the
- * target track. Matches the desktop's calculateConfidence():
+ * target track.
  *
- * - Title + artist match → 0.95
- * - Title match only     → 0.85
- * - Artist match only    → 0.70
+ * Models the desktop's two-stage gate: validation first
+ * (`validateResolvedTrack` — requires BOTH title AND artist substring match),
+ * then confidence within validated sources (`calculateConfidence`). On
+ * desktop, a result that fails `validateResolvedTrack` is not added to
+ * `track.sources` at all, so it never reaches the priority sort. We
+ * mirror that here by collapsing single-axis matches to 0.50 (a "no match"
+ * sentinel that the [ResolverScoring.MIN_CONFIDENCE_THRESHOLD] = 0.60 floor
+ * then filters out before priority-based selection runs).
+ *
+ * - Title + artist match → 0.95   (validated; enters the priority sort)
+ * - Title match only     → 0.50   (artist mismatch — wrong-song candidate, dropped)
+ * - Artist match only    → 0.50   (wrong song by the right artist, dropped)
  * - No match             → 0.50
+ *
+ * **Why this matters:** without the both-axes gate, Apple Music returning
+ * a different artist's "Mariana" (title-only match → 0.85) was outranking
+ * the correct local file (both-axes match → 0.95), because applemusic sits
+ * above localfiles in the priority order and confidence is only a tiebreaker
+ * within the same priority tier. Tightening the gate filters wrong-song
+ * matches before they enter the sort, restoring desktop parity.
  *
  * Direct ID matches (spotifyId, appleMusicId, soundcloudId) bypass this and
  * keep their 0.95 confidence since the ID is authoritative.
@@ -78,10 +94,6 @@ fun scoreConfidence(
     val titleMatch = stringsMatch(normTarget, normMatchTitle)
     val artistMatch = stringsMatch(normArtist, normMatchArtist)
 
-    return when {
-        titleMatch && artistMatch -> 0.95
-        titleMatch -> 0.85
-        artistMatch -> 0.70
-        else -> 0.50
-    }
+    // Desktop's validateResolvedTrack: both must match.
+    return if (titleMatch && artistMatch) 0.95 else 0.50
 }

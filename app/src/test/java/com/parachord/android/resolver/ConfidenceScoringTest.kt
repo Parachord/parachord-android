@@ -55,13 +55,18 @@ class ConfidenceScoringTest {
     }
 
     @Test
-    fun `scoreConfidence returns 0_85 for title match only`() {
-        assertEquals(0.85, scoreConfidence("Creep", "Radiohead", "Creep", "Stone Temple Pilots"), 0.001)
+    fun `scoreConfidence returns 0_50 for title match only (artist mismatch is wrong song)`() {
+        // Mirrors desktop's validateResolvedTrack — both axes must match.
+        // A title-only match (e.g., Apple Music returning a different artist's
+        // "Mariana") should be treated as noMatch so the 0.60 floor filters it
+        // out before priority sort.
+        assertEquals(0.50, scoreConfidence("Creep", "Radiohead", "Creep", "Stone Temple Pilots"), 0.001)
     }
 
     @Test
-    fun `scoreConfidence returns 0_70 for artist match only`() {
-        assertEquals(0.70, scoreConfidence("Creep", "Radiohead", "Karma Police", "Radiohead"), 0.001)
+    fun `scoreConfidence returns 0_50 for artist match only (title mismatch is wrong song)`() {
+        // Same artist, different track — also a wrong-song candidate.
+        assertEquals(0.50, scoreConfidence("Creep", "Radiohead", "Karma Police", "Radiohead"), 0.001)
     }
 
     @Test

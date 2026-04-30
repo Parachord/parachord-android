@@ -24,6 +24,8 @@ import androidx.media3.common.MediaMetadata
 import androidx.media3.common.Player
 import androidx.media3.common.ForwardingPlayer
 import androidx.media3.common.Player.Commands
+import androidx.media3.common.Timeline
+import com.parachord.android.data.db.entity.TrackEntity
 import androidx.media3.exoplayer.ExoPlayer
 import androidx.media3.session.CommandButton
 import androidx.media3.session.LibraryResult
@@ -37,6 +39,7 @@ import com.google.common.util.concurrent.Futures
 import com.google.common.util.concurrent.ListenableFuture
 import com.parachord.android.R
 import com.parachord.android.playback.handlers.SpotifyPlaybackHandler
+import com.parachord.shared.playback.QueueManager
 import org.koin.android.ext.android.inject
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -44,6 +47,9 @@ import kotlinx.coroutines.Job
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.cancel
 import kotlinx.coroutines.flow.collectLatest
+import kotlinx.coroutines.flow.combine
+import kotlinx.coroutines.flow.distinctUntilChanged
+import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import java.net.URL
@@ -73,6 +79,7 @@ class PlaybackService : MediaLibraryService() {
     private val spotifyHandler: SpotifyPlaybackHandler by inject()
     private val playbackController: PlaybackController by inject()
     private val stateHolder: PlaybackStateHolder by inject()
+    private val queueManager: QueueManager by inject()
 
     private var mediaSession: MediaLibrarySession? = null
     private var player: ExoPlayer? = null
@@ -81,6 +88,7 @@ class PlaybackService : MediaLibraryService() {
 
     private val serviceScope = CoroutineScope(SupervisorJob() + Dispatchers.Main)
     private var stateObserverJob: Job? = null
+    private var queueSnapshotJob: Job? = null
 
     /**
      * Pause playback when an audio output device disconnects (Bluetooth,
@@ -172,6 +180,20 @@ class PlaybackService : MediaLibraryService() {
         noisyReceiverRegistered = true
 
         startStateObserver()
+
+        // Feed QueueManager snapshots + current-track changes into the
+        // wrapper's synthetic timeline. Combines two flows so a change in
+        // either side triggers a re-emit. Runs on Dispatchers.Main per
+        // Media3 main-thread invariant — wrapper.updateQueueSnapshot fires
+        // listeners synchronously.
+        queueSnapshotJob = serviceScope.launch {
+            combine(
+                queueManager.snapshot,
+                stateHolder.state.map { it.currentTrack }.distinctUntilChanged(),
+            ) { qs, current -> Pair(qs, current) }.collect { (qs, current) ->
+                wrapper.updateQueueSnapshot(currentTrack = current, upNext = qs.upNext)
+            }
+        }
     }
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
@@ -278,6 +300,34 @@ class PlaybackService : MediaLibraryService() {
                 LibraryResult.ofItemList(ImmutableList.of(), params)
             )
         }
+
+        override fun onAddMediaItems(
+            mediaSession: MediaSession,
+            controller: MediaSession.ControllerInfo,
+            mediaItems: List<MediaItem>,
+        ): ListenableFuture<List<MediaItem>> {
+            // CRITICAL: this callback fires for EVERY MediaController.setMediaItems —
+            // including our own internal `PlaybackController.playTrackInternal()` calls
+            // that need to actually reach ExoPlayer. We must distinguish:
+            //
+            //   - Internal: our app's own MediaController is loading a track for
+            //     playback. Forward the items unchanged so ExoPlayer plays them.
+            //
+            //   - External: Android Auto voice search ("Hey Google, play X") sends
+            //     arbitrary MediaItems via this same callback. Resolving those
+            //     against our catalog is out of scope for v1, so we drop them
+            //     rather than letting random items hijack the queue.
+            //
+            // Distinguishing by controller.packageName: our process's own
+            // MediaController reports our packageName; external sources (Auto,
+            // Assistant, Wear) report theirs.
+            val isInternal = controller.packageName == packageName
+            if (isInternal) {
+                return Futures.immediateFuture(mediaItems)
+            }
+            Log.d(TAG, "onAddMediaItems: ${mediaItems.size} items from ${controller.packageName} — ignoring (v1)")
+            return Futures.immediateFuture(emptyList())
+        }
     }
 
     /**
@@ -333,6 +383,7 @@ class PlaybackService : MediaLibraryService() {
             noisyReceiverRegistered = false
         }
         stateObserverJob?.cancel()
+        queueSnapshotJob?.cancel()
         serviceScope.cancel()
         spotifyHandler.disconnect()
         isExternalForeground = false
@@ -651,19 +702,64 @@ class PlaybackService : MediaLibraryService() {
         /** When true, next/prev commands are available and routed to PlaybackController. */
         var externalMode = false
 
+        @Volatile
+        private var queueSnapshot: QueueSnapshotState = QueueSnapshotState.EMPTY
+
+        /** Re-entrancy guard for [updateQueueSnapshot]. See KDoc on that method. */
+        private var dispatching = false
+
+        /** Listeners we synthesize queue-related events to via
+         *  [updateQueueSnapshot]. Listeners are ALSO registered on the
+         *  delegate (via super.addListener) so they receive normal player
+         *  events (state, position, errors) directly. We just additionally
+         *  emit synthesized `onTimelineChanged` / `onMediaItemTransition`
+         *  for our queue. The delegate's silence-loop timeline events
+         *  arrive too, but our synthesized emissions are dispatched after
+         *  state changes propagate, so the synthetic timeline wins as
+         *  MediaSession's latest known state. */
+        private val externalListeners =
+            java.util.concurrent.CopyOnWriteArraySet<Player.Listener>()
+
+        /** Internal data holder so reads of timeline + index are atomic. */
+        data class QueueSnapshotState(
+            val items: List<MediaItem>,
+            val durationsUs: LongArray,
+            val timeline: Timeline,
+            val currentMediaId: String?,
+        ) {
+            companion object {
+                val EMPTY = QueueSnapshotState(
+                    items = emptyList(),
+                    durationsUs = LongArray(0),
+                    timeline = QueueTimeline(emptyList(), LongArray(0)),
+                    currentMediaId = null,
+                )
+            }
+        }
+
         override fun isCommandAvailable(command: Int): Boolean {
+            if (command == COMMAND_GET_TIMELINE ||
+                command == COMMAND_GET_CURRENT_MEDIA_ITEM ||
+                command == COMMAND_SEEK_TO_MEDIA_ITEM
+            ) return true
             if (externalMode && command in EXTERNAL_COMMANDS) return true
             return super.isCommandAvailable(command)
         }
 
         override fun getAvailableCommands(): Commands {
+            val builder = super.getAvailableCommands().buildUpon()
+                .addAll(
+                    COMMAND_GET_TIMELINE,
+                    COMMAND_GET_CURRENT_MEDIA_ITEM,
+                    COMMAND_SEEK_TO_MEDIA_ITEM,
+                )
             if (externalMode) {
-                return super.getAvailableCommands().buildUpon()
-                    .addAll(COMMAND_SEEK_TO_NEXT, COMMAND_SEEK_TO_PREVIOUS,
-                        COMMAND_SEEK_TO_NEXT_MEDIA_ITEM, COMMAND_SEEK_TO_PREVIOUS_MEDIA_ITEM)
-                    .build()
+                builder.addAll(
+                    COMMAND_SEEK_TO_NEXT, COMMAND_SEEK_TO_PREVIOUS,
+                    COMMAND_SEEK_TO_NEXT_MEDIA_ITEM, COMMAND_SEEK_TO_PREVIOUS_MEDIA_ITEM,
+                )
             }
-            return super.getAvailableCommands()
+            return builder.build()
         }
 
         /**
@@ -686,6 +782,57 @@ class PlaybackService : MediaLibraryService() {
                 if (real > 0L) return real
             }
             return super.getContentDuration()
+        }
+
+        // ── External-mode playback-state overrides ──────────────────────
+        // During external playback (Spotify Connect, Apple Music) the
+        // underlying ExoPlayer plays a silent loop or stays IDLE. Without
+        // these overrides, the system MediaSession (and Android Auto)
+        // would see "STOPPED" and hide the Now Playing UI even when the
+        // external app is actually producing audio. We surface the real
+        // playback state from [PlaybackStateHolder], which is kept in sync
+        // by the platform-specific handlers (SpotifyPlaybackHandler,
+        // MusicKitWebBridge polling).
+
+        override fun isPlaying(): Boolean {
+            if (externalMode) return stateHolder.state.value.isPlaying
+            return super.isPlaying()
+        }
+
+        override fun getPlayWhenReady(): Boolean {
+            if (externalMode) return stateHolder.state.value.isPlaying
+            return super.getPlayWhenReady()
+        }
+
+        override fun getPlaybackState(): Int {
+            if (externalMode) {
+                // Map external state → Player state. We only ever report
+                // READY (whether playing or paused) or IDLE (no track).
+                // External handlers don't expose buffering/ended states
+                // distinctly enough to map here.
+                return if (stateHolder.state.value.currentTrack != null) {
+                    Player.STATE_READY
+                } else {
+                    Player.STATE_IDLE
+                }
+            }
+            return super.getPlaybackState()
+        }
+
+        override fun getCurrentPosition(): Long {
+            if (externalMode) {
+                val real = stateHolder.state.value.position
+                if (real >= 0L) return real
+            }
+            return super.getCurrentPosition()
+        }
+
+        override fun getContentPosition(): Long {
+            if (externalMode) {
+                val real = stateHolder.state.value.position
+                if (real >= 0L) return real
+            }
+            return super.getContentPosition()
         }
 
         override fun play() {
@@ -739,20 +886,187 @@ class PlaybackService : MediaLibraryService() {
             super.seekToPreviousMediaItem()
         }
 
-        override fun hasNextMediaItem(): Boolean {
-            if (externalMode) return true
-            return super.hasNextMediaItem()
+        // ── Synthetic timeline overrides ────────────────────────────────
+
+        override fun getCurrentTimeline(): Timeline = queueSnapshot.timeline
+
+        override fun getCurrentMediaItemIndex(): Int =
+            if (queueSnapshot.currentMediaId != null) 0 else C.INDEX_UNSET
+
+        /** Always 1 when upNext is non-empty (current is at slot 0). */
+        override fun getNextMediaItemIndex(): Int =
+            if (queueSnapshot.items.size > 1) 1 else C.INDEX_UNSET
+
+        override fun getPreviousMediaItemIndex(): Int = C.INDEX_UNSET
+
+        override fun getMediaItemCount(): Int = queueSnapshot.items.size
+
+        override fun getCurrentMediaItem(): MediaItem? = queueSnapshot.items.firstOrNull()
+
+        override fun getMediaItemAt(index: Int): MediaItem = queueSnapshot.items[index]
+
+        override fun hasNextMediaItem(): Boolean = queueSnapshot.items.size > 1
+
+        // hasPreviousMediaItem stays false for v1 (no history surface).
+        override fun hasPreviousMediaItem(): Boolean = false
+
+        override fun seekTo(mediaItemIndex: Int, positionMs: Long) {
+            if (mediaItemIndex == 0) {
+                // No-op for tapping the current track. Don't forward to the
+                // delegate because that would seek inside the silence loop.
+                return
+            }
+            val queueIndex = mediaItemIndex - 1
+            if (queueIndex >= 0) {
+                playbackController.playFromQueue(queueIndex)
+            }
         }
 
-        override fun hasPreviousMediaItem(): Boolean {
-            if (externalMode) return true
-            return super.hasPreviousMediaItem()
+        override fun seekToDefaultPosition(mediaItemIndex: Int) = seekTo(mediaItemIndex, 0L)
+
+        // ── Auto reorder / remove ───────────────────────────────────────
+
+        override fun moveMediaItem(currentIndex: Int, newIndex: Int) {
+            // Both indices include the current track at slot 0; queue
+            // mutations operate on upNext, so subtract 1.
+            val from = currentIndex - 1
+            val to = newIndex - 1
+            if (from >= 0 && to >= 0) {
+                playbackController.moveInQueue(from, to)
+            }
+        }
+
+        override fun removeMediaItem(index: Int) {
+            val queueIndex = index - 1
+            if (queueIndex >= 0) {
+                playbackController.removeFromQueue(queueIndex)
+            }
+        }
+
+        override fun addMediaItems(index: Int, mediaItems: List<MediaItem>) {
+            Log.w(TAG, "addMediaItems ignored — Auto voice search not yet wired (got ${mediaItems.size} items at index $index)")
+            // No-op for v1 — Auto only invokes this for voice search, and we
+            // don't have a browse tree resolved from MediaItem to our
+            // resolver pipeline yet.
+        }
+
+        // ── Listener registry ───────────────────────────────────────────
+
+        /**
+         * Register a listener for player events.
+         *
+         * **Hybrid forwarding strategy.** The wrapper installs a single
+         * internal [delegateForwarder] on the underlying ExoPlayer the first
+         * time any external listener registers. That forwarder relays every
+         * non-timeline event from the delegate to the registered external
+         * listeners. We also synthesize our own `onTimelineChanged` and
+         * `onMediaItemTransition` via [updateQueueSnapshot] — these REPLACE
+         * the delegate's silence-loop timeline events (which describe the
+         * single-item silence loop, not the real queue, and would corrupt
+         * Auto's queue display if forwarded).
+         *
+         * The non-timeline events (`onIsPlayingChanged`,
+         * `onPlaybackStateChanged`, `onPositionDiscontinuity`,
+         * `onPlayerError`, etc.) are essential for Media3's MediaSession to
+         * drive the Now Playing notification, lock screen, and Android Auto's
+         * playback metadata — without them, Auto shows "no media".
+         *
+         * **DO NOT** call `super.addListener(listener)` here. The delegate
+         * forwards every event including the silence-loop timeline noise
+         * we're trying to suppress. Always go through the forwarder.
+         */
+        override fun addListener(listener: Player.Listener) {
+            externalListeners.add(listener)
+            // Forward to delegate so MediaSession + MediaController receive
+            // playback-state events (onIsPlayingChanged, onPlaybackStateChanged,
+            // onPositionDiscontinuity, etc.) needed to drive Now Playing UI
+            // and trigger PlaybackController's STATE_ENDED → skipNextInternal
+            // logic correctly. Without this, ExoPlayer-native playback breaks
+            // because the listener never sees the delegate's state machine.
+            //
+            // The trade-off: delegate's onTimelineChanged + onMediaItemTransition
+            // events also flow through (1-item silence-loop timeline). They
+            // arrive BEFORE our synthetic events fired by updateQueueSnapshot,
+            // and MediaSession uses the latest emission, so the synthetic
+            // queue wins. Auto may briefly see a 1-item timeline during
+            // external→external transitions; acceptable trade-off.
+            super.addListener(listener)
+        }
+
+        override fun removeListener(listener: Player.Listener) {
+            externalListeners.remove(listener)
+            super.removeListener(listener)
+        }
+
+        /**
+         * Public entry point invoked by [PlaybackService] when a new queue
+         * snapshot arrives or [PlaybackStateHolder.state.currentTrack]
+         * changes. Rebuilds the [QueueTimeline], swaps the volatile snapshot,
+         * and dispatches synthesized [Player.Listener] events.
+         *
+         * **Main-thread invariant.** Caller must invoke on Looper.getMainLooper().
+         *
+         * **Re-entrancy.** Listener callbacks must NOT synchronously call back
+         * into this method. Re-entrant calls are detected and dropped (with a
+         * warning log) to avoid clobbering the snapshot mid-dispatch. Auto's
+         * typical usage doesn't trigger this; the guard is defensive.
+         */
+        fun updateQueueSnapshot(currentTrack: TrackEntity?, upNext: List<TrackEntity>) {
+            if (dispatching) {
+                Log.w(TAG, "updateQueueSnapshot called re-entrantly from a listener callback; ignoring inner call to avoid clobbering snapshot state")
+                return
+            }
+            dispatching = true
+            try {
+                val combined = buildList {
+                    currentTrack?.let { add(it) }
+                    addAll(upNext)
+                }
+                val items = combined.map { it.toAutoMediaItem() }
+                val durationsUs = LongArray(combined.size) { i ->
+                    val durMs = combined[i].duration ?: 0L
+                    if (durMs > 0L) durMs * 1000L else C.TIME_UNSET
+                }
+                val newTimeline = QueueTimeline(items, durationsUs)
+                val previousMediaId = queueSnapshot.currentMediaId
+                val newCurrentId = currentTrack?.id
+                queueSnapshot = QueueSnapshotState(
+                    items = items,
+                    durationsUs = durationsUs,
+                    timeline = newTimeline,
+                    currentMediaId = newCurrentId,
+                )
+
+                // Re-emit timeline change to all external listeners.
+                for (listener in externalListeners) {
+                    listener.onTimelineChanged(
+                        newTimeline,
+                        Player.TIMELINE_CHANGE_REASON_PLAYLIST_CHANGED,
+                    )
+                }
+                // Fire onMediaItemTransition only when the current track actually
+                // changed (an upNext-only mutation is a timeline change, not a
+                // transition).
+                if (newCurrentId != previousMediaId) {
+                    val newItem = items.firstOrNull()
+                    for (listener in externalListeners) {
+                        listener.onMediaItemTransition(
+                            newItem,
+                            Player.MEDIA_ITEM_TRANSITION_REASON_AUTO,
+                        )
+                    }
+                }
+            } finally {
+                dispatching = false
+            }
         }
 
         companion object {
             private val EXTERNAL_COMMANDS = setOf(
                 COMMAND_SEEK_TO_NEXT, COMMAND_SEEK_TO_PREVIOUS,
                 COMMAND_SEEK_TO_NEXT_MEDIA_ITEM, COMMAND_SEEK_TO_PREVIOUS_MEDIA_ITEM,
+                COMMAND_GET_TIMELINE, COMMAND_GET_CURRENT_MEDIA_ITEM,
+                COMMAND_SEEK_TO_MEDIA_ITEM,
             )
         }
     }
