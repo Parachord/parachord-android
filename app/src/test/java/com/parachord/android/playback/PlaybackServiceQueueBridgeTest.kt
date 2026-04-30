@@ -15,6 +15,7 @@ import kotlinx.coroutines.launch
 import kotlinx.coroutines.test.advanceUntilIdle
 import kotlinx.coroutines.test.runTest
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertNotNull
 import org.junit.Test
 import org.junit.runner.RunWith
 import org.robolectric.RobolectricTestRunner
@@ -75,5 +76,18 @@ class PlaybackServiceQueueBridgeTest {
         assertEquals("c2#0", window.uid)
 
         job.cancel()
+    }
+
+    @Test fun `onAddMediaItems exists on LibraryCallback`() {
+        // We can't easily instantiate LibraryCallback without the service,
+        // but we can verify the override exists by reflecting the class
+        // surface. The actual behavior is exercised end-to-end in DHU
+        // testing (Task 6); here we just lock the contract so future
+        // refactoring doesn't accidentally drop the override.
+        val method = PlaybackService::class.java.declaredClasses
+            .firstOrNull { it.simpleName == "LibraryCallback" }
+            ?.declaredMethods
+            ?.firstOrNull { it.name == "onAddMediaItems" }
+        assertNotNull("onAddMediaItems must exist on LibraryCallback", method)
     }
 }

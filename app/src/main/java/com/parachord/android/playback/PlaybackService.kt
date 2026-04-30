@@ -300,6 +300,20 @@ class PlaybackService : MediaLibraryService() {
                 LibraryResult.ofItemList(ImmutableList.of(), params)
             )
         }
+
+        override fun onAddMediaItems(
+            mediaSession: MediaSession,
+            controller: MediaSession.ControllerInfo,
+            mediaItems: List<MediaItem>,
+        ): ListenableFuture<List<MediaItem>> {
+            // v1: voice search and "play X" intents are out of scope. Returning
+            // an empty list signals to Media3 that we accepted no items, so
+            // the default Player.setMediaItems() pipeline no-ops without
+            // overwriting our synthetic timeline. Future work: resolve the
+            // requested MediaItem against our catalog/library.
+            Log.d(TAG, "onAddMediaItems called with ${mediaItems.size} items — ignoring (v1)")
+            return Futures.immediateFuture(emptyList())
+        }
     }
 
     /**
