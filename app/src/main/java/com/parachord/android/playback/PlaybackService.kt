@@ -24,6 +24,8 @@ import androidx.media3.common.MediaMetadata
 import androidx.media3.common.Player
 import androidx.media3.common.ForwardingPlayer
 import androidx.media3.common.Player.Commands
+import androidx.media3.common.Timeline
+import com.parachord.android.data.db.entity.TrackEntity
 import androidx.media3.exoplayer.ExoPlayer
 import androidx.media3.session.CommandButton
 import androidx.media3.session.LibraryResult
@@ -651,19 +653,55 @@ class PlaybackService : MediaLibraryService() {
         /** When true, next/prev commands are available and routed to PlaybackController. */
         var externalMode = false
 
+        @Volatile
+        private var queueSnapshot: QueueSnapshotState = QueueSnapshotState.EMPTY
+
+        /** External listeners we re-emit synthesized timeline events to.
+         *  Tracked separately from delegate listeners so we can swallow the
+         *  delegate's silence-loop timeline changes. */
+        private val externalListeners =
+            java.util.concurrent.CopyOnWriteArraySet<Player.Listener>()
+
+        /** Internal data holder so reads of timeline + index are atomic. */
+        data class QueueSnapshotState(
+            val items: List<MediaItem>,
+            val durationsUs: LongArray,
+            val timeline: Timeline,
+            val currentMediaId: String?,
+        ) {
+            companion object {
+                val EMPTY = QueueSnapshotState(
+                    items = emptyList(),
+                    durationsUs = LongArray(0),
+                    timeline = QueueTimeline(emptyList(), LongArray(0)),
+                    currentMediaId = null,
+                )
+            }
+        }
+
         override fun isCommandAvailable(command: Int): Boolean {
+            if (command == COMMAND_GET_TIMELINE ||
+                command == COMMAND_GET_CURRENT_MEDIA_ITEM ||
+                command == COMMAND_SEEK_TO_MEDIA_ITEM
+            ) return true
             if (externalMode && command in EXTERNAL_COMMANDS) return true
             return super.isCommandAvailable(command)
         }
 
         override fun getAvailableCommands(): Commands {
+            val builder = super.getAvailableCommands().buildUpon()
+                .addAll(
+                    COMMAND_GET_TIMELINE,
+                    COMMAND_GET_CURRENT_MEDIA_ITEM,
+                    COMMAND_SEEK_TO_MEDIA_ITEM,
+                )
             if (externalMode) {
-                return super.getAvailableCommands().buildUpon()
-                    .addAll(COMMAND_SEEK_TO_NEXT, COMMAND_SEEK_TO_PREVIOUS,
-                        COMMAND_SEEK_TO_NEXT_MEDIA_ITEM, COMMAND_SEEK_TO_PREVIOUS_MEDIA_ITEM)
-                    .build()
+                builder.addAll(
+                    COMMAND_SEEK_TO_NEXT, COMMAND_SEEK_TO_PREVIOUS,
+                    COMMAND_SEEK_TO_NEXT_MEDIA_ITEM, COMMAND_SEEK_TO_PREVIOUS_MEDIA_ITEM,
+                )
             }
-            return super.getAvailableCommands()
+            return builder.build()
         }
 
         /**
@@ -739,20 +777,136 @@ class PlaybackService : MediaLibraryService() {
             super.seekToPreviousMediaItem()
         }
 
-        override fun hasNextMediaItem(): Boolean {
-            if (externalMode) return true
-            return super.hasNextMediaItem()
+        // ── Synthetic timeline overrides ────────────────────────────────
+
+        override fun getCurrentTimeline(): Timeline = queueSnapshot.timeline
+
+        override fun getCurrentMediaItemIndex(): Int =
+            if (queueSnapshot.currentMediaId != null) 0 else C.INDEX_UNSET
+
+        override fun getNextMediaItemIndex(): Int =
+            if (queueSnapshot.items.size > 1) 1 else C.INDEX_UNSET
+
+        override fun getPreviousMediaItemIndex(): Int = C.INDEX_UNSET
+
+        override fun getMediaItemCount(): Int = queueSnapshot.items.size
+
+        override fun getCurrentMediaItem(): MediaItem? = queueSnapshot.items.firstOrNull()
+
+        override fun getMediaItemAt(index: Int): MediaItem = queueSnapshot.items[index]
+
+        override fun hasNextMediaItem(): Boolean = queueSnapshot.items.size > 1
+
+        // hasPreviousMediaItem stays false for v1 (no history surface).
+        override fun hasPreviousMediaItem(): Boolean = false
+
+        override fun seekTo(mediaItemIndex: Int, positionMs: Long) {
+            if (mediaItemIndex == 0) {
+                // No-op for tapping the current track. Don't forward to the
+                // delegate because that would seek inside the silence loop.
+                return
+            }
+            val queueIndex = mediaItemIndex - 1
+            if (queueIndex >= 0) {
+                playbackController.playFromQueue(queueIndex)
+            }
         }
 
-        override fun hasPreviousMediaItem(): Boolean {
-            if (externalMode) return true
-            return super.hasPreviousMediaItem()
+        override fun seekToDefaultPosition(mediaItemIndex: Int) = seekTo(mediaItemIndex, 0L)
+
+        // ── Auto reorder / remove ───────────────────────────────────────
+
+        override fun moveMediaItem(currentIndex: Int, newIndex: Int) {
+            // Both indices include the current track at slot 0; queue
+            // mutations operate on upNext, so subtract 1.
+            val from = currentIndex - 1
+            val to = newIndex - 1
+            if (from >= 0 && to >= 0) {
+                playbackController.moveInQueue(from, to)
+            }
+        }
+
+        override fun removeMediaItem(index: Int) {
+            val queueIndex = index - 1
+            if (queueIndex >= 0) {
+                playbackController.removeFromQueue(queueIndex)
+            }
+        }
+
+        override fun addMediaItems(index: Int, mediaItems: List<MediaItem>) {
+            // No-op for v1 — Auto only invokes this for voice search, and we
+            // don't have a browse tree resolved from MediaItem to our
+            // resolver pipeline yet.
+        }
+
+        // ── Listener registry ───────────────────────────────────────────
+
+        override fun addListener(listener: Player.Listener) {
+            externalListeners.add(listener)
+            // Don't forward to delegate — we'll synthesize the events the
+            // listener needs. (super.addListener would register on the
+            // delegate, which would leak the silence-loop timeline events.)
+        }
+
+        override fun removeListener(listener: Player.Listener) {
+            externalListeners.remove(listener)
+        }
+
+        /**
+         * Public entry point invoked by [PlaybackService] when a new queue
+         * snapshot arrives or [PlaybackStateHolder.state.currentTrack]
+         * changes. Rebuilds the [QueueTimeline], swaps the volatile snapshot,
+         * and dispatches synthesized [Player.Listener] events.
+         *
+         * **Main-thread invariant.** Caller must invoke on Looper.getMainLooper().
+         */
+        fun updateQueueSnapshot(currentTrack: TrackEntity?, upNext: List<TrackEntity>) {
+            val combined = buildList {
+                currentTrack?.let { add(it) }
+                addAll(upNext)
+            }
+            val items = combined.map { it.toAutoMediaItem() }
+            val durationsUs = LongArray(combined.size) { i ->
+                val durMs = combined[i].duration ?: 0L
+                if (durMs > 0L) durMs * 1000L else C.TIME_UNSET
+            }
+            val newTimeline = QueueTimeline(items, durationsUs)
+            val previousMediaId = queueSnapshot.currentMediaId
+            val newCurrentId = currentTrack?.id
+            queueSnapshot = QueueSnapshotState(
+                items = items,
+                durationsUs = durationsUs,
+                timeline = newTimeline,
+                currentMediaId = newCurrentId,
+            )
+
+            // Re-emit timeline change to all external listeners.
+            for (listener in externalListeners) {
+                listener.onTimelineChanged(
+                    newTimeline,
+                    Player.TIMELINE_CHANGE_REASON_PLAYLIST_CHANGED,
+                )
+            }
+            // Fire onMediaItemTransition only when the current track actually
+            // changed (an upNext-only mutation is a timeline change, not a
+            // transition).
+            if (newCurrentId != previousMediaId) {
+                val newItem = items.firstOrNull()
+                for (listener in externalListeners) {
+                    listener.onMediaItemTransition(
+                        newItem,
+                        Player.MEDIA_ITEM_TRANSITION_REASON_AUTO,
+                    )
+                }
+            }
         }
 
         companion object {
             private val EXTERNAL_COMMANDS = setOf(
                 COMMAND_SEEK_TO_NEXT, COMMAND_SEEK_TO_PREVIOUS,
                 COMMAND_SEEK_TO_NEXT_MEDIA_ITEM, COMMAND_SEEK_TO_PREVIOUS_MEDIA_ITEM,
+                COMMAND_GET_TIMELINE, COMMAND_GET_CURRENT_MEDIA_ITEM,
+                COMMAND_SEEK_TO_MEDIA_ITEM,
             )
         }
     }
