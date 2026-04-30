@@ -881,11 +881,27 @@ class PlaybackService : MediaLibraryService() {
 
         // ── Listener registry ───────────────────────────────────────────
 
+        /**
+         * Register a listener for synthesized player events.
+         *
+         * **Intentionally does NOT forward to the underlying delegate.** This
+         * is broader than just suppressing the silence-loop's timeline
+         * events — ALL delegate-emitted Player.Listener callbacks
+         * (`onPlaybackStateChanged`, `onIsPlayingChanged`,
+         * `onPositionDiscontinuity`, etc.) are also suppressed. The wrapper
+         * synthesizes its own `onTimelineChanged` / `onMediaItemTransition`
+         * via [updateQueueSnapshot]; everything else that callers might need
+         * (notification updates, position polling for external playback) is
+         * driven separately by [startStateObserver] reading
+         * [PlaybackStateHolder].
+         *
+         * **DO NOT** add `super.addListener(listener)` here without first
+         * confirming every now-forwarded delegate event is filtered to
+         * exclude silence-loop noise. The current "swallow everything"
+         * approach is the safer default.
+         */
         override fun addListener(listener: Player.Listener) {
             externalListeners.add(listener)
-            // Don't forward to delegate — we'll synthesize the events the
-            // listener needs. (super.addListener would register on the
-            // delegate, which would leak the silence-loop timeline events.)
         }
 
         override fun removeListener(listener: Player.Listener) {
