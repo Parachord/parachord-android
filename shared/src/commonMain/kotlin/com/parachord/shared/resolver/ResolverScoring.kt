@@ -32,12 +32,18 @@ class ResolverScoring constructor(
          * Minimum confidence threshold for a source to be considered in selection.
          * Sources below this are filtered out before priority sorting.
          *
-         * scoreConfidence() returns 0.50 for "no match" (neither title nor artist
-         * matched). Without this threshold, a wrong-song Spotify result at 0.50
-         * would beat a correct local file at 0.95 due to priority ordering.
+         * `scoreConfidence()` returns 0.50 unless BOTH title AND artist
+         * substring-match the target — single-axis matches (wrong artist, or
+         * wrong title) are collapsed to 0.50 so this floor filters them out
+         * before priority sorting runs. This mirrors desktop's two-stage gate
+         * (`validateResolvedTrack` validation → `calculateConfidence` scoring):
+         * desktop never adds a single-axis match to `track.sources`, so it
+         * never reaches the priority sort.
          *
-         * The desktop app handles this via noMatch:true sentinel filtering;
-         * we use an equivalent confidence floor.
+         * Without the gate, a wrong-song Apple Music result at 0.85 (title
+         * matched, artist mismatched) would outrank a correct local file at
+         * 0.95 because applemusic sits above localfiles in priority and
+         * confidence is only a tiebreaker WITHIN the same priority tier.
          */
         const val MIN_CONFIDENCE_THRESHOLD = 0.60
     }

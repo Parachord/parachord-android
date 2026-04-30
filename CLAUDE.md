@@ -26,7 +26,7 @@ The desktop uses a cascading provider pattern. Each provider has a specialty:
 
 Source selection uses priority-first, confidence-second sorting:
 
-1. **Minimum confidence filter** — sources below `MIN_CONFIDENCE_THRESHOLD` (0.60) are discarded. This filters out "no match" results (0.50 confidence from `scoreConfidence()`) where neither title nor artist matched, preventing wrong-song playback. The desktop handles this via `noMatch:true` sentinel filtering; we use an equivalent confidence floor.
+1. **Minimum confidence filter** — sources below `MIN_CONFIDENCE_THRESHOLD` (0.60) are discarded. `scoreConfidence()` returns 0.95 only when BOTH title and artist substring-match the target; single-axis matches (wrong artist, or wrong title) collapse to 0.50 and get filtered. This is the equivalent of desktop's `validateResolvedTrack` gate (`app.js:14257-14267`) — desktop never adds a single-axis match to `track.sources`, so it never reaches the priority sort. Without this gate, a wrong-song Apple Music result at 0.85 (title matched, artist didn't) would outrank a correct local file at 0.95 because applemusic sits above localfiles in the priority order and confidence is only a tiebreaker WITHIN the same priority tier.
 2. **Resolver priority** — user-configurable ordering (lower index = higher priority)
 3. **Confidence score** — tiebreaker within same priority (0.0–1.0, default 0.9)
 
@@ -750,7 +750,7 @@ A full security review was completed April 2026. The review plan is at `.claude/
 2. **Don't use `sources.firstOrNull()` / `sources.first`.** Always use `ResolverScoring.selectBest()` (or its iOS equivalent) for source selection.
 3. **Don't skip the resolver pipeline.** Even if you have a direct URL, route through `ResolverManager` → `ResolverScoring` → `PlaybackRouter` to maintain consistent behavior.
 4. **Don't use blue as the accent color.** The brand accent is purple (`#7c3aed` light / `#a78bfa` dark).
-5. **Don't return or select sources below the confidence floor.** `ResolverScoring.selectBest()` filters out sources with confidence < `MIN_CONFIDENCE_THRESHOLD` (0.60). `scoreConfidence()` returns 0.50 for "no match" (neither title nor artist matched) — these are wrong-song results and must not be played, even from a high-priority resolver. The desktop handles this via `noMatch:true` sentinel filtering; we use an equivalent confidence floor. If porting to iOS, replicate this filter.
+5. **Don't return or select sources below the confidence floor.** `ResolverScoring.selectBest()` filters out sources with confidence < `MIN_CONFIDENCE_THRESHOLD` (0.60). `scoreConfidence()` returns 0.95 ONLY when BOTH title AND artist substring-match — single-axis matches (wrong artist, or wrong title) collapse to 0.50 so the floor filters them. This mirrors desktop's `validateResolvedTrack` two-stage gate exactly: validation pass + priority sort. A title-only match (e.g., a different artist's "Mariana") must NOT win against a correct local file just because applemusic has higher priority. If porting to iOS, replicate this gate.
 
 ### KMP / shared/commonMain rules
 
