@@ -39,6 +39,7 @@ import com.google.common.util.concurrent.Futures
 import com.google.common.util.concurrent.ListenableFuture
 import com.parachord.android.R
 import com.parachord.android.playback.handlers.SpotifyPlaybackHandler
+import com.parachord.shared.playback.QueueManager
 import org.koin.android.ext.android.inject
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -46,6 +47,9 @@ import kotlinx.coroutines.Job
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.cancel
 import kotlinx.coroutines.flow.collectLatest
+import kotlinx.coroutines.flow.combine
+import kotlinx.coroutines.flow.distinctUntilChanged
+import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import java.net.URL
@@ -75,6 +79,7 @@ class PlaybackService : MediaLibraryService() {
     private val spotifyHandler: SpotifyPlaybackHandler by inject()
     private val playbackController: PlaybackController by inject()
     private val stateHolder: PlaybackStateHolder by inject()
+    private val queueManager: QueueManager by inject()
 
     private var mediaSession: MediaLibrarySession? = null
     private var player: ExoPlayer? = null
@@ -83,6 +88,7 @@ class PlaybackService : MediaLibraryService() {
 
     private val serviceScope = CoroutineScope(SupervisorJob() + Dispatchers.Main)
     private var stateObserverJob: Job? = null
+    private var queueSnapshotJob: Job? = null
 
     /**
      * Pause playback when an audio output device disconnects (Bluetooth,
@@ -174,6 +180,20 @@ class PlaybackService : MediaLibraryService() {
         noisyReceiverRegistered = true
 
         startStateObserver()
+
+        // Feed QueueManager snapshots + current-track changes into the
+        // wrapper's synthetic timeline. Combines two flows so a change in
+        // either side triggers a re-emit. Runs on Dispatchers.Main per
+        // Media3 main-thread invariant — wrapper.updateQueueSnapshot fires
+        // listeners synchronously.
+        queueSnapshotJob = serviceScope.launch {
+            combine(
+                queueManager.snapshot,
+                stateHolder.state.map { it.currentTrack }.distinctUntilChanged(),
+            ) { qs, current -> Pair(qs, current) }.collect { (qs, current) ->
+                wrapper.updateQueueSnapshot(currentTrack = current, upNext = qs.upNext)
+            }
+        }
     }
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
@@ -335,6 +355,7 @@ class PlaybackService : MediaLibraryService() {
             noisyReceiverRegistered = false
         }
         stateObserverJob?.cancel()
+        queueSnapshotJob?.cancel()
         serviceScope.cancel()
         spotifyHandler.disconnect()
         isExternalForeground = false
