@@ -233,6 +233,12 @@ class ResolverManager constructor(
         } catch (e: com.parachord.shared.api.auth.ReauthRequiredException) {
             Log.w(TAG, "Spotify resolve: reauth required for '$query' — user must reconnect")
             null
+        } catch (e: com.parachord.shared.api.SpotifyRateLimitedException) {
+            // 429 (rate limit). Silently skip — `SpotifyClient` already logged
+            // the first 429 of the cooldown cycle; logging per-track here would
+            // produce hundreds of identical lines while a hosted XSPF's
+            // resolver fan-out drains through the cooldown.
+            null
         } catch (e: Exception) {
             Log.w(TAG, "Spotify resolve failed for '$query': ${e.message}")
             null
