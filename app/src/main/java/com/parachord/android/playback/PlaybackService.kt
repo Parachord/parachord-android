@@ -835,6 +835,57 @@ class PlaybackService : MediaLibraryService() {
             return super.getContentDuration()
         }
 
+        // ── External-mode playback-state overrides ──────────────────────
+        // During external playback (Spotify Connect, Apple Music) the
+        // underlying ExoPlayer plays a silent loop or stays IDLE. Without
+        // these overrides, the system MediaSession (and Android Auto)
+        // would see "STOPPED" and hide the Now Playing UI even when the
+        // external app is actually producing audio. We surface the real
+        // playback state from [PlaybackStateHolder], which is kept in sync
+        // by the platform-specific handlers (SpotifyPlaybackHandler,
+        // MusicKitWebBridge polling).
+
+        override fun isPlaying(): Boolean {
+            if (externalMode) return stateHolder.state.value.isPlaying
+            return super.isPlaying()
+        }
+
+        override fun getPlayWhenReady(): Boolean {
+            if (externalMode) return stateHolder.state.value.isPlaying
+            return super.getPlayWhenReady()
+        }
+
+        override fun getPlaybackState(): Int {
+            if (externalMode) {
+                // Map external state → Player state. We only ever report
+                // READY (whether playing or paused) or IDLE (no track).
+                // External handlers don't expose buffering/ended states
+                // distinctly enough to map here.
+                return if (stateHolder.state.value.currentTrack != null) {
+                    Player.STATE_READY
+                } else {
+                    Player.STATE_IDLE
+                }
+            }
+            return super.getPlaybackState()
+        }
+
+        override fun getCurrentPosition(): Long {
+            if (externalMode) {
+                val real = stateHolder.state.value.position
+                if (real >= 0L) return real
+            }
+            return super.getCurrentPosition()
+        }
+
+        override fun getContentPosition(): Long {
+            if (externalMode) {
+                val real = stateHolder.state.value.position
+                if (real >= 0L) return real
+            }
+            return super.getContentPosition()
+        }
+
         override fun play() {
             // Suppress spurious external-playback resumes that arrive shortly
             // after a user pause. Specifically catches the
