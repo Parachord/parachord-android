@@ -3,8 +3,6 @@ package com.parachord.shared.api
 import com.parachord.shared.api.auth.AuthCredential
 import com.parachord.shared.api.auth.AuthRealm
 import com.parachord.shared.api.auth.AuthTokenProvider
-import com.parachord.shared.platform.Log
-import com.parachord.shared.platform.currentTimeMillis
 import io.ktor.client.HttpClient
 import io.ktor.client.call.body
 import io.ktor.client.request.HttpRequestBuilder
@@ -20,10 +18,6 @@ import io.ktor.http.ContentType
 import io.ktor.http.HttpHeaders
 import io.ktor.http.contentType
 import io.ktor.http.isSuccess
-import kotlin.concurrent.Volatile
-import kotlinx.coroutines.delay
-import kotlinx.coroutines.sync.Semaphore
-import kotlinx.coroutines.sync.withPermit
 import kotlinx.serialization.SerialName
 import kotlinx.serialization.Serializable
 
@@ -77,97 +71,29 @@ class SpotifyClient(
 ) {
 
     companion object {
-        private const val TAG = "SpotifyClient"
         private const val BASE = "https://api.spotify.com"
-        /**
-         * Hard cap on cooldown duration. Spotify's punishment escalation can
-         * legitimately ask for 30+ minutes (we've observed `Retry-After: 1997s`
-         * after sustained abuse during the regression window). Capping below
-         * the real `Retry-After` is actively counterproductive — calls that
-         * fire after our too-short cooldown elapses just trigger another 429
-         * (Spotify's actual window hasn't closed) and re-set the cooldown,
-         * so the cycle never breaks.
-         *
-         * 1 hour is a generous outer guardrail against a misbehaving server
-         * sending `Retry-After: 86400` while still respecting Spotify's
-         * realistic worst case.
-         */
-        private const val MAX_COOLDOWN_MS = 60L * 60L * 1000L
-        /** Default cooldown when Spotify omits `Retry-After`. Spotify's published 429
-         *  windows are typically 1–60s; 30s is a safe middle ground. */
-        private const val DEFAULT_COOLDOWN_MS = 30_000L
-        /**
-         * Max concurrent Spotify calls in flight. Combined with [INTER_REQUEST_DELAY_MS]
-         * caps throughput at ~13 RPS — well under Spotify's typical per-app limit
-         * (~30+ RPS) and crucially keeps post-cooldown bursts from re-tripping 429.
-         * AM's analogous fix (commit `16884d1`) used 4 for iTunes Search; Spotify
-         * is harsher in practice (we've seen `Retry-After: 102` from a 288-track
-         * resolver fan-out), so we go more conservative.
-         */
-        private const val MAX_CONCURRENT = 2
-        /** Spacing between successive Spotify calls (per-call, after acquiring permit).
-         *  Mirrors AM's `INTER_REQUEST_DELAY_MS` from commit `16884d1`. */
-        private const val INTER_REQUEST_DELAY_MS = 150L
     }
 
     /**
-     * Bounds simultaneous Spotify HTTP calls. The cooldown alone (see
-     * [rateLimitedUntilMs]) prevents storms WHILE a 429 is active, but
-     * once the cooldown expires, the resolver pipeline's queued tasks
-     * (one per track in a hosted-XSPF fan-out) burst against Spotify
-     * simultaneously and re-trip 429 within milliseconds — restarting
-     * the cooldown indefinitely. The semaphore breaks the cycle by
-     * letting at most [MAX_CONCURRENT] calls run at a time, so calls
-     * trickle out at a sustainable rate after each cooldown.
-     */
-    private val concurrencyLimiter = Semaphore(MAX_CONCURRENT)
-
-    /**
-     * Epoch-ms timestamp at which Spotify calls may resume. Spotify's rate
-     * limit is per-account/per-app, shared across ALL endpoints — once one
-     * call returns 429, every subsequent call to any endpoint also 429s
-     * until the window expires. So this cooldown is global to the client,
-     * not per-method: a 429 from `search` sets it, and `getCurrentUser` /
-     * `getPlaylistTracks` / etc. all check and short-circuit on it.
+     * Per-client rate-limit gate. See [RateLimitGate] for design notes.
      *
-     * `@Volatile` so writes from one coroutine are seen by readers on other
-     * dispatchers without a memory-model surprise.
+     * Covers ALL Spotify GET endpoints below — Spotify's 429s are
+     * account-wide (one endpoint hits 429, every subsequent call to any
+     * endpoint also 429s until the window expires), so a single shared
+     * gate is the right shape. PR #115 originally protected only `search`,
+     * `getCurrentUser`, `getPlaylistTracks`; we extend coverage here
+     * because `getTrack` (used by [com.parachord.android.resolver.ResolverManager.verifyTrack]
+     * to fan out per-track checks for stored `spotifyId`s) was the actual
+     * volume offender on hosted-XSPF playlists — every cached `spotifyId`
+     * triggered an unprotected `/v1/tracks/{id}` call that 429'd, each one
+     * extending Spotify's punishment window indefinitely.
+     *
+     * Playback-control PUT/DELETE methods (startPlayback, pausePlayback,
+     * etc.) intentionally **do not** route through the gate — the user
+     * needs to be able to skip / pause even during a throttle window. The
+     * gate is for high-volume read traffic, not interactive control.
      */
-    @Volatile
-    private var rateLimitedUntilMs: Long = 0L
-
-    /**
-     * Throws [SpotifyRateLimitedException] without making a network call if
-     * we're currently inside a cooldown window. Call at the top of any
-     * 429-aware method — keeps a depleted bucket from being made worse by
-     * additional in-flight requests during the throttle window.
-     */
-    private fun checkCooldown() {
-        val now = currentTimeMillis()
-        if (now < rateLimitedUntilMs) {
-            throw SpotifyRateLimitedException(
-                retryAfterSeconds = ((rateLimitedUntilMs - now + 999L) / 1000L).coerceAtLeast(1L),
-            )
-        }
-    }
-
-    /**
-     * Promote a 429 [HttpResponse] into a typed exception, sizing the
-     * cooldown from the `Retry-After` header (or 30s default), capped at
-     * [MAX_COOLDOWN_MS]. Logs ONLY on the first 429 of each cooldown cycle —
-     * a 288-track playlist generates hundreds of cooldown short-circuits
-     * after the first 429, and logging each one would drown out the signal.
-     */
-    private fun handleRateLimited(response: HttpResponse): Nothing {
-        val retryAfterSec = response.headers["Retry-After"]?.toLongOrNull()
-        val backoffMs = ((retryAfterSec ?: (DEFAULT_COOLDOWN_MS / 1000L)) * 1000L).coerceAtMost(MAX_COOLDOWN_MS)
-        val wasAlreadyLimited = currentTimeMillis() < rateLimitedUntilMs
-        rateLimitedUntilMs = currentTimeMillis() + backoffMs
-        if (!wasAlreadyLimited) {
-            Log.w(TAG, "Spotify rate-limited (HTTP 429). Backing off ${backoffMs / 1000}s; subsequent calls in this window will short-circuit.")
-        }
-        throw SpotifyRateLimitedException(retryAfterSec)
-    }
+    private val gate = RateLimitGate(tag = "SpotifyClient")
 
     /**
      * Apply the Spotify bearer token from [AuthTokenProvider]. If no
@@ -180,68 +106,59 @@ class SpotifyClient(
         if (token != null) builder.header(HttpHeaders.Authorization, "Bearer $token")
     }
 
+    /**
+     * Wraps every GET in the rate-limit gate. Reads response status BEFORE
+     * `.body()` deserialization so a 429 surfaces as a typed
+     * [SpotifyRateLimitedException] (instead of a `NoTransformationFoundException`
+     * from Ktor's body parser trying to deserialize the empty 429 body).
+     *
+     * Other non-success responses fall through to `.body()` — Ktor will
+     * throw, which preserves the existing per-call exception handling at
+     * caller sites (e.g. `ResolverManager.verifyTrack`'s try/catch → null).
+     */
+    private suspend inline fun <reified T> gatedGet(
+        url: String,
+        crossinline configure: suspend HttpRequestBuilder.() -> Unit,
+    ): T = gate.withPermit(exceptionFactory = { SpotifyRateLimitedException(it) }) {
+        val response: HttpResponse = httpClient.get(url) { configure() }
+        gate.handleResponse(response) { SpotifyRateLimitedException(it) }
+        response.body()
+    }
+
     // ── Search + Lookup ──────────────────────────────────────────────
 
     /**
-     * Search the Spotify catalog. **Reads response status before body
-     * deserialization** so a 429 surfaces as a typed
-     * [SpotifyRateLimitedException] instead of a
-     * `NoTransformationFoundException` from Ktor's body parser trying to
-     * deserialize an empty 429 body. This lets [ResolverManager.resolveSpotify]
-     * back off cleanly instead of treating every rate-limited request as
-     * a generic failure and continuing to slam Spotify.
-     *
-     * The KMP cutover (commit 92ed9eb) lost Retrofit/OkHttp's interceptor-
-     * chain 429 retry; opening a 288-track hosted XSPF then fans out enough
-     * concurrent searches to trigger the storm — symptoms include missing
-     * Spotify resolver badges, missing track-search-cascade artwork, and
-     * a non-responsive "Pull from Spotify" banner whose `getPlaylistTracks`
-     * call inherits the depleted bucket.
+     * Search the Spotify catalog. The gate handles 429 → typed exception;
+     * other non-success responses are mapped to an empty [SpSearchResponse]
+     * so the resolver doesn't crash on transient 5xx (mirrors
+     * [AppleMusicClient.search]).
      */
-    suspend fun search(query: String, type: String, limit: Int = 20, market: String = "from_token"): SpSearchResponse {
-        checkCooldown()
-        return concurrencyLimiter.withPermit {
-            // Re-check cooldown inside the permit — the wait to acquire could
-            // have spanned a freshly-set cooldown from a sibling call.
-            checkCooldown()
-            delay(INTER_REQUEST_DELAY_MS)
+    suspend fun search(query: String, type: String, limit: Int = 20, market: String = "from_token"): SpSearchResponse =
+        gate.withPermit(exceptionFactory = { SpotifyRateLimitedException(it) }) {
             val response: HttpResponse = httpClient.get("$BASE/v1/search") {
                 applyAuth(this)
                 parameter("q", query); parameter("type", type); parameter("limit", limit); parameter("market", market)
             }
-            if (response.status.value == 429) handleRateLimited(response)
-            // Non-429 non-success: return an empty search response rather than
-            // letting body parsing throw. Mirrors [AppleMusicClient.search].
-            if (!response.status.isSuccess()) {
-                SpSearchResponse()
-            } else {
-                response.body()
-            }
+            gate.handleResponse(response) { SpotifyRateLimitedException(it) }
+            if (!response.status.isSuccess()) SpSearchResponse() else response.body()
         }
-    }
 
     suspend fun getTrack(trackId: String, market: String = "from_token"): SpTrack =
-        httpClient.get("$BASE/v1/tracks/$trackId") {
-            applyAuth(this); parameter("market", market)
-        }.body()
+        gatedGet("$BASE/v1/tracks/$trackId") { applyAuth(this); parameter("market", market) }
 
     suspend fun getArtist(artistId: String): SpArtist =
-        httpClient.get("$BASE/v1/artists/$artistId") { applyAuth(this) }.body()
+        gatedGet("$BASE/v1/artists/$artistId") { applyAuth(this) }
 
     suspend fun getArtistTopTracks(artistId: String, market: String = "US"): SpTopTracksResponse =
-        httpClient.get("$BASE/v1/artists/$artistId/top-tracks") {
-            applyAuth(this); parameter("market", market)
-        }.body()
+        gatedGet("$BASE/v1/artists/$artistId/top-tracks") { applyAuth(this); parameter("market", market) }
 
     suspend fun getArtistAlbums(artistId: String, includeGroups: String = "album,single,compilation", limit: Int = 50): SpPaginated<SpAlbum> =
-        httpClient.get("$BASE/v1/artists/$artistId/albums") {
+        gatedGet("$BASE/v1/artists/$artistId/albums") {
             applyAuth(this); parameter("include_groups", includeGroups); parameter("limit", limit)
-        }.body()
+        }
 
     suspend fun getAlbumTracks(albumId: String, limit: Int = 50): SpPaginated<SpSimpleTrack> =
-        httpClient.get("$BASE/v1/albums/$albumId/tracks") {
-            applyAuth(this); parameter("limit", limit)
-        }.body()
+        gatedGet("$BASE/v1/albums/$albumId/tracks") { applyAuth(this); parameter("limit", limit) }
 
     // ── Playback Control (Spotify Connect) ───────────────────────────
 
@@ -283,68 +200,38 @@ class SpotifyClient(
     // ── Library (Sync Read) ──────────────────────────────────────────
 
     suspend fun getLikedTracks(limit: Int = 50, offset: Int = 0, market: String = "from_token"): SpSavedTracksResponse =
-        httpClient.get("$BASE/v1/me/tracks") {
+        gatedGet("$BASE/v1/me/tracks") {
             applyAuth(this); parameter("limit", limit); parameter("offset", offset); parameter("market", market)
-        }.body()
+        }
 
     suspend fun getSavedAlbums(limit: Int = 50, offset: Int = 0, market: String = "from_token"): SpSavedAlbumsResponse =
-        httpClient.get("$BASE/v1/me/albums") {
+        gatedGet("$BASE/v1/me/albums") {
             applyAuth(this); parameter("limit", limit); parameter("offset", offset); parameter("market", market)
-        }.body()
+        }
 
     suspend fun getFollowedArtists(limit: Int = 50, after: String? = null): SpFollowedArtistsResponse =
-        httpClient.get("$BASE/v1/me/following") {
+        gatedGet("$BASE/v1/me/following") {
             applyAuth(this); parameter("type", "artist"); parameter("limit", limit)
             if (after != null) parameter("after", after)
-        }.body()
+        }
 
     suspend fun getUserPlaylists(limit: Int = 50, offset: Int = 0): SpPaginatedPlaylists =
-        httpClient.get("$BASE/v1/me/playlists") {
+        gatedGet("$BASE/v1/me/playlists") {
             applyAuth(this); parameter("limit", limit); parameter("offset", offset)
-        }.body()
-
-    /**
-     * 429-aware: shares the global cooldown from [search]. Used by the
-     * Pull-from-Spotify banner via [com.parachord.shared.sync.SpotifySyncProvider.fetchPlaylistTracks].
-     * Without cooldown gating, Pull would 429 directly while a search storm
-     * was depleting the user's Spotify rate-limit bucket.
-     */
-    suspend fun getPlaylistTracks(playlistId: String, limit: Int = 100, offset: Int = 0, market: String = "from_token"): SpPlaylistTracksResponse {
-        checkCooldown()
-        return concurrencyLimiter.withPermit {
-            checkCooldown()
-            delay(INTER_REQUEST_DELAY_MS)
-            val response: HttpResponse = httpClient.get("$BASE/v1/playlists/$playlistId/tracks") {
-                applyAuth(this); parameter("limit", limit); parameter("offset", offset); parameter("market", market)
-            }
-            if (response.status.value == 429) handleRateLimited(response)
-            response.body()
         }
-    }
+
+    suspend fun getPlaylistTracks(playlistId: String, limit: Int = 100, offset: Int = 0, market: String = "from_token"): SpPlaylistTracksResponse =
+        gatedGet("$BASE/v1/playlists/$playlistId/tracks") {
+            applyAuth(this); parameter("limit", limit); parameter("offset", offset); parameter("market", market)
+        }
 
     suspend fun getPlaylist(playlistId: String, fields: String? = null): SpPlaylistFull =
-        httpClient.get("$BASE/v1/playlists/$playlistId") {
+        gatedGet("$BASE/v1/playlists/$playlistId") {
             applyAuth(this); if (fields != null) parameter("fields", fields)
-        }.body()
-
-    /**
-     * 429-aware: shares the global cooldown. Called early in
-     * [com.parachord.shared.sync.SpotifySyncProvider.getMarket] (which the
-     * Pull banner uses for market-aware playlist fetches), so a 429 here
-     * blocks the entire Pull flow. Promoting it to a typed exception means
-     * the catch in `pullRemoteChanges` can react cleanly instead of
-     * surfacing `NoTransformationFoundException`.
-     */
-    suspend fun getCurrentUser(): SpUser {
-        checkCooldown()
-        return concurrencyLimiter.withPermit {
-            checkCooldown()
-            delay(INTER_REQUEST_DELAY_MS)
-            val response: HttpResponse = httpClient.get("$BASE/v1/me") { applyAuth(this) }
-            if (response.status.value == 429) handleRateLimited(response)
-            response.body()
         }
-    }
+
+    suspend fun getCurrentUser(): SpUser =
+        gatedGet("$BASE/v1/me") { applyAuth(this) }
 
     // ── Library Write ────────────────────────────────────────────────
 

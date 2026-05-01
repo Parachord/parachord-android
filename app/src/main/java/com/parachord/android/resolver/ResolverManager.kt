@@ -292,6 +292,12 @@ class ResolverManager constructor(
                 spotifyId = track.id,
                 confidence = 0.95, // High confidence — verified ID match
             )
+        } catch (e: com.parachord.shared.api.SpotifyRateLimitedException) {
+            // Cooldown active — silently skip. SpotifyClient logs the first 429
+            // of each cooldown cycle; logging per-track here would produce
+            // hundreds of identical lines while a hosted-XSPF playlist's cached
+            // spotifyIds drain through the cooldown.
+            null
         } catch (e: Exception) {
             Log.w(TAG, "Failed to verify Spotify track $spotifyId: ${e.message}")
             null

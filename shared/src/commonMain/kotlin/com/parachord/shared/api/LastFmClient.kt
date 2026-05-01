@@ -2,8 +2,10 @@ package com.parachord.shared.api
 
 import io.ktor.client.HttpClient
 import io.ktor.client.call.body
+import io.ktor.client.request.HttpRequestBuilder
 import io.ktor.client.request.get
 import io.ktor.client.request.parameter
+import io.ktor.client.statement.HttpResponse
 import kotlinx.serialization.KSerializer
 import kotlinx.serialization.SerialName
 import kotlinx.serialization.Serializable
@@ -18,10 +20,36 @@ import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.jsonObject
 
 /**
+ * Thrown by [LastFmClient] methods when Last.fm responds with HTTP 429.
+ * Callers (notably the metadata cascade in [com.parachord.shared.metadata.LastFmProvider])
+ * already swallow generic exceptions and fall through to the next provider,
+ * so a typed exception lets us short-circuit cleanly without log spam.
+ *
+ * Last.fm publishes a 5 RPS per-API-key limit. The rate-limit window is
+ * usually short (seconds), but during sustained abuse the bucket stays
+ * empty for longer. Mirrors [SpotifyRateLimitedException] / [ItunesRateLimitedException].
+ *
+ * @property retryAfterSeconds the value of the `Retry-After` header if
+ *   Last.fm sent one; null otherwise. The fallback is the gate's default.
+ */
+class LastFmRateLimitedException(val retryAfterSeconds: Long? = null) : Exception(
+    "Last.fm returned HTTP 429" + (retryAfterSeconds?.let { " (Retry-After: ${it}s)" } ?: "")
+)
+
+/**
  * Last.fm API client.
  * Base URL: https://ws.audioscrobbler.com/2.0/
  * Auth: API key as query parameter.
  * All endpoints are GET requests to the same URL with different method params.
+ *
+ * **429 handling.** All GET methods route through [gate], which provides
+ * cooldown + bounded concurrency + inter-request pacing — the same pattern
+ * as [SpotifyClient]. The image-enrichment cascade in
+ * `ImageEnrichmentService.enrichPlaylistArt` Pass 2 fans out per-track
+ * Last.fm searches; without the gate, opening a 288-track XSPF playlist
+ * trivially overruns Last.fm's 5 RPS limit. The KMP cutover (Phase 9E.1.6,
+ * commit `79c5ed5`) lost the Retrofit/OkHttp interceptor 429 retry that
+ * previously protected against this.
  */
 class LastFmClient(private val httpClient: HttpClient) {
 
@@ -29,59 +57,78 @@ class LastFmClient(private val httpClient: HttpClient) {
         private const val BASE_URL = "https://ws.audioscrobbler.com/2.0/"
     }
 
+    /** Per-client rate-limit gate. See [RateLimitGate]'s KDoc. */
+    private val gate = RateLimitGate(tag = "LastFmClient")
+
+    /**
+     * Wraps every GET against [BASE_URL] in the rate-limit gate. Methods
+     * just supply their `method=` + endpoint params — `format=json` is
+     * always set here so it can't be forgotten at a callsite.
+     */
+    private suspend inline fun <reified T> guardedGet(
+        crossinline build: HttpRequestBuilder.() -> Unit,
+    ): T = gate.withPermit(exceptionFactory = { LastFmRateLimitedException(it) }) {
+        val response: HttpResponse = httpClient.get(BASE_URL) {
+            build()
+            parameter("format", "json")
+        }
+        gate.handleResponse(response) { LastFmRateLimitedException(it) }
+        response.body()
+    }
+
     suspend fun searchTracks(track: String, apiKey: String, limit: Int = 20): LfmTrackSearchResponse =
-        httpClient.get(BASE_URL) { parameter("method", "track.search"); parameter("track", track); parameter("api_key", apiKey); parameter("limit", limit); parameter("format", "json") }.body()
+        guardedGet { parameter("method", "track.search"); parameter("track", track); parameter("api_key", apiKey); parameter("limit", limit) }
 
     suspend fun searchAlbums(album: String, apiKey: String, limit: Int = 10): LfmAlbumSearchResponse =
-        httpClient.get(BASE_URL) { parameter("method", "album.search"); parameter("album", album); parameter("api_key", apiKey); parameter("limit", limit); parameter("format", "json") }.body()
+        guardedGet { parameter("method", "album.search"); parameter("album", album); parameter("api_key", apiKey); parameter("limit", limit) }
 
     suspend fun searchArtists(artist: String, apiKey: String, limit: Int = 10): LfmArtistSearchResponse =
-        httpClient.get(BASE_URL) { parameter("method", "artist.search"); parameter("artist", artist); parameter("api_key", apiKey); parameter("limit", limit); parameter("format", "json") }.body()
+        guardedGet { parameter("method", "artist.search"); parameter("artist", artist); parameter("api_key", apiKey); parameter("limit", limit) }
 
     suspend fun getArtistInfo(artist: String, apiKey: String): LfmArtistInfoResponse =
-        httpClient.get(BASE_URL) { parameter("method", "artist.getinfo"); parameter("artist", artist); parameter("api_key", apiKey); parameter("format", "json") }.body()
+        guardedGet { parameter("method", "artist.getinfo"); parameter("artist", artist); parameter("api_key", apiKey) }
 
     suspend fun getSimilarArtists(artist: String, apiKey: String, limit: Int = 20): LfmSimilarArtistsResponse =
-        httpClient.get(BASE_URL) { parameter("method", "artist.getsimilar"); parameter("artist", artist); parameter("api_key", apiKey); parameter("limit", limit); parameter("format", "json") }.body()
+        guardedGet { parameter("method", "artist.getsimilar"); parameter("artist", artist); parameter("api_key", apiKey); parameter("limit", limit) }
 
     suspend fun getArtistTopTracks(artist: String, apiKey: String, limit: Int = 10): LfmTopTracksResponse =
-        httpClient.get(BASE_URL) { parameter("method", "artist.gettoptracks"); parameter("artist", artist); parameter("api_key", apiKey); parameter("limit", limit); parameter("format", "json") }.body()
+        guardedGet { parameter("method", "artist.gettoptracks"); parameter("artist", artist); parameter("api_key", apiKey); parameter("limit", limit) }
 
     suspend fun getArtistTopAlbums(artist: String, apiKey: String, limit: Int = 50): LfmTopAlbumsResponse =
-        httpClient.get(BASE_URL) { parameter("method", "artist.gettopalbums"); parameter("artist", artist); parameter("api_key", apiKey); parameter("limit", limit); parameter("format", "json") }.body()
+        guardedGet { parameter("method", "artist.gettopalbums"); parameter("artist", artist); parameter("api_key", apiKey); parameter("limit", limit) }
 
     suspend fun getTrackInfo(track: String, artist: String, apiKey: String): LfmTrackInfoResponse =
-        httpClient.get(BASE_URL) { parameter("method", "track.getInfo"); parameter("track", track); parameter("artist", artist); parameter("api_key", apiKey); parameter("format", "json") }.body()
+        guardedGet { parameter("method", "track.getInfo"); parameter("track", track); parameter("artist", artist); parameter("api_key", apiKey) }
 
     suspend fun getSimilarTracks(track: String, artist: String, apiKey: String, limit: Int = 20): LfmSimilarTracksResponse =
-        httpClient.get(BASE_URL) { parameter("method", "track.getsimilar"); parameter("track", track); parameter("artist", artist); parameter("api_key", apiKey); parameter("limit", limit); parameter("format", "json") }.body()
+        guardedGet { parameter("method", "track.getsimilar"); parameter("track", track); parameter("artist", artist); parameter("api_key", apiKey); parameter("limit", limit) }
 
     suspend fun getAlbumInfo(album: String, artist: String, apiKey: String): LfmAlbumInfoResponse =
-        httpClient.get(BASE_URL) { parameter("method", "album.getinfo"); parameter("album", album); parameter("artist", artist); parameter("api_key", apiKey); parameter("format", "json") }.body()
+        guardedGet { parameter("method", "album.getinfo"); parameter("album", album); parameter("artist", artist); parameter("api_key", apiKey) }
 
     suspend fun getUserInfo(user: String, apiKey: String): LfmUserInfoResponse =
-        httpClient.get(BASE_URL) { parameter("method", "user.getinfo"); parameter("user", user); parameter("api_key", apiKey); parameter("format", "json") }.body()
+        guardedGet { parameter("method", "user.getinfo"); parameter("user", user); parameter("api_key", apiKey) }
 
     suspend fun getUserTopTracks(user: String, apiKey: String, period: String = "overall", limit: Int = 50): LfmUserTopTracksResponse =
-        httpClient.get(BASE_URL) { parameter("method", "user.gettoptracks"); parameter("user", user); parameter("period", period); parameter("limit", limit); parameter("api_key", apiKey); parameter("format", "json") }.body()
+        guardedGet { parameter("method", "user.gettoptracks"); parameter("user", user); parameter("period", period); parameter("limit", limit); parameter("api_key", apiKey) }
 
     suspend fun getUserTopAlbums(user: String, apiKey: String, period: String = "overall", limit: Int = 50): LfmUserTopAlbumsResponse =
-        httpClient.get(BASE_URL) { parameter("method", "user.gettopalbums"); parameter("user", user); parameter("period", period); parameter("limit", limit); parameter("api_key", apiKey); parameter("format", "json") }.body()
+        guardedGet { parameter("method", "user.gettopalbums"); parameter("user", user); parameter("period", period); parameter("limit", limit); parameter("api_key", apiKey) }
 
     suspend fun getUserTopArtists(user: String, apiKey: String, period: String = "overall", limit: Int = 50): LfmUserTopArtistsResponse =
-        httpClient.get(BASE_URL) { parameter("method", "user.gettopartists"); parameter("user", user); parameter("period", period); parameter("limit", limit); parameter("api_key", apiKey); parameter("format", "json") }.body()
+        guardedGet { parameter("method", "user.gettopartists"); parameter("user", user); parameter("period", period); parameter("limit", limit); parameter("api_key", apiKey) }
 
     suspend fun getUserRecentTracks(user: String, apiKey: String, limit: Int = 50): LfmUserRecentTracksResponse =
-        httpClient.get(BASE_URL) { parameter("method", "user.getrecenttracks"); parameter("user", user); parameter("limit", limit); parameter("api_key", apiKey); parameter("format", "json") }.body()
+        guardedGet { parameter("method", "user.getrecenttracks"); parameter("user", user); parameter("limit", limit); parameter("api_key", apiKey) }
 
     suspend fun getUserFriends(user: String, apiKey: String, limit: Int = 200): LfmUserFriendsResponse =
-        httpClient.get(BASE_URL) { parameter("method", "user.getfriends"); parameter("user", user); parameter("limit", limit); parameter("api_key", apiKey); parameter("format", "json") }.body()
+        guardedGet { parameter("method", "user.getfriends"); parameter("user", user); parameter("limit", limit); parameter("api_key", apiKey) }
 
     suspend fun getChartTopTracks(apiKey: String, limit: Int = 50): LfmChartTopTracksResponse =
-        httpClient.get(BASE_URL) { parameter("method", "chart.gettoptracks"); parameter("limit", limit); parameter("api_key", apiKey); parameter("format", "json") }.body()
+        guardedGet { parameter("method", "chart.gettoptracks"); parameter("limit", limit); parameter("api_key", apiKey) }
 
     suspend fun getGeoTopTracks(country: String, apiKey: String, limit: Int = 50): LfmGeoTopTracksResponse =
-        httpClient.get(BASE_URL) { parameter("method", "geo.gettoptracks"); parameter("country", country); parameter("limit", limit); parameter("api_key", apiKey); parameter("format", "json") }.body()
+        guardedGet { parameter("method", "geo.gettoptracks"); parameter("country", country); parameter("limit", limit); parameter("api_key", apiKey) }
 }
 
 // ── Response Models ──────────────────────────────────────────────────
