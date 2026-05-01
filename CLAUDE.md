@@ -545,6 +545,61 @@ The desktop supports dark/light mode toggle. Android should follow system theme 
 - **Clean build if all else fails:** `./gradlew clean installDebug`
 - **adb path** (not in shell PATH by default): `/Users/jherskowitz/Library/Android/sdk/platform-tools/adb`
 
+### Working in a git worktree (`.worktrees/<branch>/`) — MANDATORY rules
+
+This project uses git worktrees for in-progress branches. Cost: every cwd-sensitive command requires explicit attention. Skipping these checks burns hours of debugging "why aren't my changes deploying?" — multiple confirmed instances on this codebase, May 2026. **The general agent guidance to "avoid `cd` and use absolute paths" does NOT apply when the workspace is a worktree** — it's actively dangerous, because `./gradlew` resolves the project from cwd.
+
+**Rule 1 — Every gradle (or any project-rooted) command MUST cd into the worktree first.**
+
+```bash
+cd /Users/jherskowitz/Development/parachord/parachord-android/.worktrees/<branch> && ./gradlew installDebug
+```
+
+Do NOT rely on the Bash tool's "working directory persists between commands" behavior — empirically, it does not reliably hold across multi-call sessions in this environment. Re-`cd` on every gradle invocation. The 30-character prefix is cheap; silently building the wrong tree is not. If you need to run several commands in the worktree, chain them with `&&` in a single Bash call rather than relying on persistence.
+
+**Alternative if `cd` is genuinely impossible:** `./gradlew --project-dir <worktree-path> <task>` — explicitly tells gradle which project to build. Equivalent safety, slightly more verbose.
+
+**Rule 2 — Verify the APK was actually rebuilt before claiming success.**
+
+The output of `./gradlew installDebug` reports `<N> actionable tasks: <X> executed, <Y> up-to-date`. After source edits:
+- `1 executed, 57 up-to-date` ⇒ **only `installDebug` ran**, gradle thinks nothing else changed. Almost always means it's building from the wrong project root (your edits are in a different worktree). **STOP. Do not trust this build.**
+- `<5 executed` after non-trivial source edits ⇒ suspicious. Investigate.
+- `<full-count> executed` (e.g. `58 executed`) on a small edit ⇒ also suspicious — may indicate the build is on a different worktree where gradle's cache is cold.
+
+Cross-check the APK file mtime:
+
+```bash
+ls -la <worktree>/app/build/outputs/apk/debug/app-debug.apk
+```
+
+If mtime is older than your most recent source edit, the build did not include your changes regardless of what gradle's exit code said.
+
+**Rule 3 — Warning paths in gradle output are diagnostic.**
+
+Gradle prints compile warnings as `file:///<absolute-path>/...`. Scan one or two:
+- `file:///.../parachord-android/.worktrees/<branch>/app/...` ⇒ correct (worktree)
+- `file:///.../parachord-android/app/...` (no `.worktrees/`) ⇒ wrong (main repo) — your build is going to the wrong tree
+
+This is the fastest tell that you ran gradle from the wrong dir. Look at it on every build.
+
+**Rule 4 — UI-visible state is NOT a signal that fresh code deployed.**
+
+DB columns persist across APK reinstalls (SQLite lives in app data, untouched by `installDebug`). DataStore / SharedPreferences also persist. So if some piece of UI is reading from a previously-populated DB column or a cached pref, it will display correctly even if the APK has zero current code. **"Feature X is visible on the device" is consistent with both "new code deployed" and "old data still in DB."**
+
+To verify a build deployed, choose a signal the new code is *required* to actively produce:
+- A new logcat tag/string that didn't exist before (`adb logcat | grep <new-string>`)
+- A behavior change observable only when the new code runs (a new badge appearing, a previously-broken interaction working)
+- Process PID change (`adb shell pidof <package>`) confirming the install restarted the process — but this only confirms restart, not that the APK contents changed
+
+Do NOT use as deployment confirmation:
+- Cached UI state (artwork loading, persisted preferences, DB-row-derived chips)
+- Logs from before the install timestamp
+- Anything that worked under the previous build too
+
+**Rule 5 — Edit tool paths are absolute and route to where you point them.**
+
+The Edit/Write tools take absolute paths. If you're working in a worktree, every `file_path` argument must include `.worktrees/<branch>/`. A path missing that prefix writes to the main repo's working tree — which gradle (run from main) will then build, but if anyone else is running gradle from the worktree, they won't see the edit. Always start file paths with `/Users/.../parachord-android/.worktrees/<branch>/...` when the active branch lives in a worktree.
+
 ## Tech Stack (Android)
 
 - **Language:** Kotlin (KMP shared module for cross-platform business logic)

@@ -4,7 +4,11 @@ import com.parachord.shared.platform.Log
 import com.parachord.shared.platform.currentTimeMillis
 import io.ktor.client.statement.HttpResponse
 import kotlin.concurrent.Volatile
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.launch
 import kotlinx.coroutines.sync.Semaphore
 import kotlinx.coroutines.sync.withPermit
 
@@ -53,6 +57,17 @@ import kotlinx.coroutines.sync.withPermit
  *   permit. Helps stagger bursts.
  * @param defaultCooldownSec used when the response has no `Retry-After`.
  * @param maxCooldownMs hard cap (defense against misbehaving servers).
+ * @param loadCooldownEpochMs optional callback invoked once at construction
+ *   to rehydrate the cooldown across process restarts. When the upstream
+ *   service hands us a long `Retry-After` (Spotify's abuse window can be
+ *   3600s), an in-memory-only gate would erase the cooldown on the next
+ *   process restart and probe the server cold — Spotify often responds with
+ *   a *fresh* 3600s, restarting the user's punishment clock. Persisting the
+ *   epoch-ms timestamp lets the gate honor the original window across
+ *   restarts and stop pestering an already-angry upstream. Pass null on
+ *   tests / clients where persistence isn't needed.
+ * @param saveCooldownEpochMs optional callback fired (fire-and-forget) on
+ *   every cooldown write. Paired with [loadCooldownEpochMs].
  */
 class RateLimitGate(
     private val tag: String,
@@ -60,13 +75,22 @@ class RateLimitGate(
     private val interRequestDelayMs: Long = 150L,
     private val defaultCooldownSec: Long = 30L,
     private val maxCooldownMs: Long = 60L * 60L * 1000L,
+    loadCooldownEpochMs: (() -> Long)? = null,
+    private val saveCooldownEpochMs: (suspend (Long) -> Unit)? = null,
 ) {
     private val limiter = Semaphore(maxConcurrent)
 
+    /** Background scope for fire-and-forget cooldown persistence writes.
+     *  Kept tiny — only ever does a single `setLong` per 429 cycle. */
+    private val persistScope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
+
     /** Epoch-ms timestamp at which calls may resume. `@Volatile` so writes from
-     *  one coroutine are seen on others without a memory-model surprise. */
+     *  one coroutine are seen on others without a memory-model surprise.
+     *  Hydrated from disk via [loadCooldownEpochMs] at construction so
+     *  process restarts inherit any active server-side cooldown rather than
+     *  cold-probing into a fresh punishment cycle. */
     @Volatile
-    private var cooldownUntilMs: Long = 0L
+    private var cooldownUntilMs: Long = loadCooldownEpochMs?.invoke() ?: 0L
 
     /**
      * Run [block] under the gate. Throws via [exceptionFactory] without
@@ -111,7 +135,14 @@ class RateLimitGate(
         val retryAfterSec = response.headers["Retry-After"]?.toLongOrNull()
         val backoffMs = ((retryAfterSec ?: defaultCooldownSec) * 1000L).coerceAtMost(maxCooldownMs)
         val wasAlreadyLimited = currentTimeMillis() < cooldownUntilMs
-        cooldownUntilMs = currentTimeMillis() + backoffMs
+        val newCooldown = currentTimeMillis() + backoffMs
+        cooldownUntilMs = newCooldown
+        // Persist (fire-and-forget) so the cooldown survives a process
+        // restart. See class KDoc for why this matters with abuse-window
+        // upstreams that hand out 3600s `Retry-After` values.
+        saveCooldownEpochMs?.let { save ->
+            persistScope.launch { runCatching { save(newCooldown) } }
+        }
         if (!wasAlreadyLimited) {
             Log.w(tag, "$tag rate-limited (HTTP ${response.status.value}). Backing off ${backoffMs / 1000}s; subsequent calls in this window will short-circuit.")
         }

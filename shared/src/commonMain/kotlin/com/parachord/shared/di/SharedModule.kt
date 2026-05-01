@@ -11,9 +11,14 @@ import com.parachord.shared.api.SmartLinksClient
 import com.parachord.shared.api.SpotifyClient
 import com.parachord.shared.api.TicketmasterClient
 import com.parachord.shared.api.createHttpClient
+import com.parachord.shared.store.KvStore
 import kotlinx.serialization.json.Json
 import org.koin.core.module.dsl.singleOf
 import org.koin.dsl.module
+
+/** KvStore key for persisting [SpotifyClient]'s rate-limit gate cooldown
+ *  epoch-ms. */
+private const val SPOTIFY_GATE_COOLDOWN_KEY = "spotify_rate_limit_cooldown_ms"
 
 /**
  * Shared Koin module — provides cross-platform dependencies.
@@ -38,7 +43,19 @@ val sharedModule = module {
     // Registered with OAuthRefreshPlugin in HttpClientFactory — 401s on
     // api.spotify.com get refreshed + retried automatically. Phase 9E.1.8
     // is the OAuth refresh canary cutover.
-    single { SpotifyClient(get(), get()) }
+    //
+    // Cooldown persistence: the rate-limit gate's cooldown is stored to
+    // KvStore so a 3600s `Retry-After` from Spotify's abuse window survives
+    // a process restart. See SpotifyClient KDoc for why this matters.
+    single {
+        val kv: KvStore = get()
+        SpotifyClient(
+            httpClient = get(),
+            tokens = get(),
+            loadCooldownEpochMs = { kv.getLong(SPOTIFY_GATE_COOLDOWN_KEY, 0L) },
+            saveCooldownEpochMs = { value -> kv.setLong(SPOTIFY_GATE_COOLDOWN_KEY, value) },
+        )
+    }
     single { LastFmClient(get()) }
     single { MusicBrainzClient(get()) }
     single { TicketmasterClient(get()) }

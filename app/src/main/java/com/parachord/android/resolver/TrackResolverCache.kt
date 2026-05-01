@@ -35,6 +35,7 @@ import kotlinx.coroutines.sync.withPermit
  */
 class TrackResolverCache constructor(
     private val resolverManager: ResolverManager,
+    private val resolverScoring: ResolverScoring,
     private val libraryRepository: LibraryRepository,
     private val settingsStore: SettingsStore,
     private val mbidEnrichment: MbidEnrichmentService,
@@ -265,19 +266,41 @@ class TrackResolverCache constructor(
         val spotifyUri = valid.firstOrNull { it.resolver == "spotify" }?.spotifyUri
         val appleMusicId = valid.firstOrNull { it.resolver == "applemusic" }?.appleMusicId
         val soundcloudId = valid.firstOrNull { it.resolver == "soundcloud" }?.soundcloudId
-        // Skip the DB write entirely when there's nothing new to fill.
-        if (spotifyId == null && spotifyUri == null && appleMusicId == null && soundcloudId == null) return
-        try {
-            playlistTrackDao.backfillResolverIds(
-                playlistId = playlistId,
-                position = position,
-                spotifyId = spotifyId,
-                spotifyUri = spotifyUri,
-                appleMusicId = appleMusicId,
-                soundcloudId = soundcloudId,
-            )
-        } catch (e: Exception) {
-            Log.w(TAG, "Failed to backfill playlist_track resolver IDs for '${track.title}': ${e.message}")
+        if (spotifyId != null || spotifyUri != null || appleMusicId != null || soundcloudId != null) {
+            try {
+                playlistTrackDao.backfillResolverIds(
+                    playlistId = playlistId,
+                    position = position,
+                    spotifyId = spotifyId,
+                    spotifyUri = spotifyUri,
+                    appleMusicId = appleMusicId,
+                    soundcloudId = soundcloudId,
+                )
+            } catch (e: Exception) {
+                Log.w(TAG, "Failed to backfill playlist_track resolver IDs for '${track.title}': ${e.message}")
+            }
+        }
+
+        // Persist artwork from the highest-priority resolver that surfaced
+        // one — respecting the user's configured resolver order via
+        // [ResolverScoring.selectBest], NOT a hardcoded provider order.
+        // Hosted-XSPF tracks come in with `trackArtworkUrl = null` (XSPF
+        // has no per-track image data), so the resolver pipeline's first
+        // successful result populates the row. `enrichPlaylistArt` Pass 1/2
+        // then has nothing to do for these — the resolver already gave us
+        // what we needed without an extra MB → Last.fm → Spotify metadata
+        // cascade per track.
+        val artworkSources = valid.filter { it.artworkUrl != null }
+        val bestArtworkSource = if (artworkSources.isNotEmpty()) {
+            resolverScoring.selectBest(artworkSources)
+        } else null
+        val artwork = bestArtworkSource?.artworkUrl
+        if (artwork != null) {
+            try {
+                playlistTrackDao.updateTrackArtwork(playlistId, position, artwork)
+            } catch (e: Exception) {
+                Log.w(TAG, "Failed to backfill playlist_track artwork for '${track.title}': ${e.message}")
+            }
         }
     }
 
@@ -323,12 +346,31 @@ class TrackResolverCache constructor(
         val spotifyUri = validSources.firstOrNull { it.resolver == "spotify" }?.spotifyUri
         val appleMusicId = validSources.firstOrNull { it.resolver == "applemusic" }?.appleMusicId
         val soundcloudId = validSources.firstOrNull { it.resolver == "soundcloud" }?.soundcloudId
-        // Only call DB if there's something new to fill in
-        if ((spotifyId != null && track.spotifyId.isNullOrBlank()) ||
+
+        // Pick the artwork URL from the highest-priority resolver source that
+        // surfaced one — same selection logic as the playlist-track backfill.
+        // [ResolverScoring.selectBest] honors the user's configured resolver
+        // priority order rather than hardcoding Spotify/AM. Library tracks
+        // (e.g. local-only files surfaced through Last.fm/MB metadata) get
+        // the same benefit as playlist tracks: the resolver pipeline's first
+        // successful artwork hit lands on `tracks.artworkUrl` so Coil has
+        // something to render without forcing the metadata cascade to fire
+        // every time the row is shown.
+        val artworkSources = validSources.filter { it.artworkUrl != null }
+        val bestArtworkSource = if (artworkSources.isNotEmpty()) {
+            resolverScoring.selectBest(artworkSources)
+        } else null
+        val artworkUrl = bestArtworkSource?.artworkUrl
+
+        // Only call DB if there's something new to fill in. The COALESCE
+        // queries on the DB side are no-ops when the column is already set,
+        // but skipping the call entirely saves a transaction.
+        val needsIdBackfill = (spotifyId != null && track.spotifyId.isNullOrBlank()) ||
             (spotifyUri != null && track.spotifyUri.isNullOrBlank()) ||
             (appleMusicId != null && track.appleMusicId.isNullOrBlank()) ||
             (soundcloudId != null && track.soundcloudId.isNullOrBlank())
-        ) {
+        val needsArtworkBackfill = artworkUrl != null && track.artworkUrl.isNullOrBlank()
+        if (needsIdBackfill || needsArtworkBackfill) {
             try {
                 libraryRepository.backfillTrackResolverIds(
                     trackId = track.id,
@@ -336,6 +378,7 @@ class TrackResolverCache constructor(
                     spotifyUri = spotifyUri,
                     appleMusicId = appleMusicId,
                     soundcloudId = soundcloudId,
+                    artworkUrl = artworkUrl,
                 )
             } catch (e: Exception) {
                 Log.w(TAG, "Failed to backfill resolver IDs for '${track.title}': ${e.message}")
