@@ -68,6 +68,22 @@ class SpotifyRateLimitedException(val retryAfterSeconds: Long? = null) : Excepti
 class SpotifyClient(
     private val httpClient: HttpClient,
     private val tokens: AuthTokenProvider,
+    /**
+     * Read/write the persisted cooldown epoch-ms across process restarts.
+     * Wired via Koin to a `KvStore`-backed pair (key
+     * `spotify_rate_limit_cooldown_ms`). Pass null on tests / non-Android
+     * surfaces where persistence isn't desired.
+     *
+     * Why this exists: Spotify's abuse window can run 1+ hours
+     * (`Retry-After: 3600`). An in-memory-only gate erases that on every
+     * process restart and probes Spotify cold the moment the next resolve
+     * fan-out fires, which Spotify often answers with a *fresh* 3600s
+     * window — restarting the punishment clock. Persisting the cooldown
+     * lets a restarted process honor the original window without poking
+     * an already-angry upstream.
+     */
+    loadCooldownEpochMs: (() -> Long)? = null,
+    saveCooldownEpochMs: (suspend (Long) -> Unit)? = null,
 ) {
 
     companion object {
@@ -93,7 +109,11 @@ class SpotifyClient(
      * needs to be able to skip / pause even during a throttle window. The
      * gate is for high-volume read traffic, not interactive control.
      */
-    private val gate = RateLimitGate(tag = "SpotifyClient")
+    private val gate = RateLimitGate(
+        tag = "SpotifyClient",
+        loadCooldownEpochMs = loadCooldownEpochMs,
+        saveCooldownEpochMs = saveCooldownEpochMs,
+    )
 
     /**
      * Apply the Spotify bearer token from [AuthTokenProvider]. If no

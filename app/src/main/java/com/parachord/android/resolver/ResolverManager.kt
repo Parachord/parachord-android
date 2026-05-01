@@ -68,30 +68,27 @@ class ResolverManager constructor(
     val resolvers: StateFlow<List<ResolverInfo>> = _resolvers.asStateFlow()
 
     /**
-     * Proactively ensure the Spotify access token is fresh.
-     * Debounced to once per 5 minutes to avoid unnecessary API calls.
+     * No-op kept for binary/source compatibility with callers that still
+     * invoke this from `resolve()`. The proactive `GET /v1/me` probe used
+     * to live here, intended to refresh stale tokens at the top of every
+     * resolve fan-out.
      *
-     * Per Phase 9E.1.8 the global `OAuthRefreshPlugin` (registered for
-     * `api.spotify.com`) handles 401-driven refresh + retry transparently.
-     * `getCurrentUser()` here is a cheap probe — when the stored token is
-     * stale, the plugin sees the 401, refreshes via [OAuthManager], and
-     * the call succeeds with the new token. No manual refresh needed.
+     * **Why it's gone:** `OAuthRefreshPlugin` (registered for
+     * `api.spotify.com` in [com.parachord.shared.api.HttpClientFactory])
+     * already handles 401-driven refresh + retry per-request transparently.
+     * The probe was redundant — and worse, *harmful* during Spotify abuse
+     * windows. Spotify's 429 punishment can run 3600s; every cold start
+     * fired this probe ungated, spent the first available rate-budget
+     * slot on a no-value `/me` call, and Spotify often answered with a
+     * fresh `Retry-After: 3600` that re-armed the in-process gate. The
+     * cooldown is now persisted across restarts (see
+     * [com.parachord.shared.api.RateLimitGate.loadCooldownEpochMs]) and
+     * the per-request refresh handles staleness, so this probe has no
+     * remaining purpose.
      */
+    @Suppress("unused")
     suspend fun ensureTokensFresh() {
-        val now = System.currentTimeMillis()
-        if (now - lastTokenCheck < TOKEN_CHECK_INTERVAL_MS) return
-        lastTokenCheck = now
-
-        val token = settingsStore.getSpotifyAccessToken()
-        if (!token.isNullOrBlank()) {
-            try {
-                spotifyClient.getCurrentUser()
-            } catch (e: com.parachord.shared.api.auth.ReauthRequiredException) {
-                Log.w(TAG, "Spotify proactive token check: reauth required (refresh failed)")
-            } catch (_: Exception) {
-                // Network error etc — resolve() will handle individual failures
-            }
-        }
+        // Intentionally empty — see KDoc.
     }
 
     /**
@@ -217,16 +214,38 @@ class ResolverManager constructor(
         }
 
         // Also run the regular resolve pipeline for other sources
-        // (with target title/artist for confidence scoring)
-        val others = resolve(query, targetTitle, targetArtist)
-            .filter { it.resolver !in results.map { r -> r.resolver } }
-        results.addAll(others)
-
-        results
+        // (with target title/artist for confidence scoring). When the cascade
+        // produces a result for the SAME resolver as a hint (e.g. cascade's
+        // AM search resolves a track for which we already have an AM ID
+        // hint), backfill the hint with the cascade's artworkUrl. Hints are
+        // ID-authoritative but don't carry artwork; the cascade's resolver
+        // calls (MusicKit search, Spotify search) DO return artwork, and
+        // discarding it via the resolver-name filter forces the downstream
+        // image-enrichment cascade to RE-ASK metadata providers. Same root
+        // cause as the AM-artwork-propagation work in [resolveAppleMusic] /
+        // [searchSpotifyTrack].
+        val cascadeResults = resolve(query, targetTitle, targetArtist)
+        val cascadeByResolver = cascadeResults.associateBy { it.resolver }
+        val mergedHints = results.map { hint ->
+            if (hint.artworkUrl == null) {
+                val cascadeArt = cascadeByResolver[hint.resolver]?.artworkUrl
+                if (cascadeArt != null) hint.copy(artworkUrl = cascadeArt) else hint
+            } else hint
+        }
+        val others = cascadeResults.filter { it.resolver !in mergedHints.map { r -> r.resolver } }
+        mergedHints + others
     }
 
     private suspend fun resolveSpotify(query: String): ResolvedSource? {
-        if (settingsStore.getSpotifyAccessToken().isNullOrBlank()) return null
+        val token = settingsStore.getSpotifyAccessToken()
+        if (token.isNullOrBlank()) {
+            // Diagnostic: previously this short-circuited silently, making it
+            // impossible to tell from logs whether Spotify was disconnected,
+            // rate-limited, or just not configured. One log per resolve fan-out
+            // is fine — the user only sees this when something is actually wrong.
+            Log.d(TAG, "Spotify resolve: no access token (disconnected or refresh failed) — skipping '$query'")
+            return null
+        }
 
         return try {
             searchSpotifyTrack(query)
@@ -257,6 +276,9 @@ class ResolverManager constructor(
         val track = response.tracks?.items
             ?.firstOrNull { it.isPlayable != false }
             ?: return null
+        // Spotify returns images in descending size order; take the first
+        // for the highest-resolution album art.
+        val albumArt = track.album?.images?.firstOrNull()?.url
         return ResolvedSource(
             url = "spotify:track:${track.id}",
             sourceType = "spotify",
@@ -267,6 +289,7 @@ class ResolverManager constructor(
             matchedTitle = track.name,
             matchedArtist = track.artistName,
             matchedDurationMs = track.durationMs,
+            artworkUrl = albumArt,
         )
     }
 
@@ -291,6 +314,7 @@ class ResolverManager constructor(
                 spotifyUri = "spotify:track:${track.id}",
                 spotifyId = track.id,
                 confidence = 0.95, // High confidence — verified ID match
+                artworkUrl = track.album?.images?.firstOrNull()?.url,
             )
         } catch (e: com.parachord.shared.api.SpotifyRateLimitedException) {
             // Cooldown active — silently skip. SpotifyClient logs the first 429
@@ -322,6 +346,10 @@ class ResolverManager constructor(
                         confidence = 0.9, // Default — overridden by scoreConfidence() in resolve()
                         matchedTitle = best.title,
                         matchedArtist = best.artist,
+                        // Carry MusicKit's artwork URL so ImageEnrichmentService
+                        // persists it onto the track row instead of re-asking
+                        // the metadata cascade for art it could've had for free.
+                        artworkUrl = best.artworkUrl,
                     )
                 }
             } catch (e: Exception) {
@@ -356,6 +384,10 @@ class ResolverManager constructor(
 
                 Log.d(TAG, "Apple Music (iTunes) matched '${best.trackName}' by ${best.artistName}")
 
+                // iTunes returns artworkUrl100 (100x100). Substitute to 600x600
+                // for a higher-quality URL, matching what `bestImageUrl` does
+                // for AM library responses elsewhere in the app.
+                val artwork600 = best.artworkUrl100?.replace("100x100", "600x600")
                 ResolvedSource(
                     url = best.trackViewUrl ?: "applemusic:song:${best.trackId}",
                     sourceType = "applemusic",
@@ -365,6 +397,7 @@ class ResolverManager constructor(
                     matchedTitle = best.trackName,
                     matchedArtist = best.artistName,
                     matchedDurationMs = best.trackTimeMillis,
+                    artworkUrl = artwork600,
                 )
             } catch (e: Exception) {
                 Log.w(TAG, "iTunes search failed for '$query': ${e.message}")
@@ -395,6 +428,11 @@ class ResolverManager constructor(
                 matchedTitle = track.title,
                 matchedArtist = track.artist,
                 matchedDurationMs = track.duration,
+                // Local files store their artworkUrl on the track row (either
+                // a content:// URI from MediaScanner's albumart resolution or
+                // a file:// URI from ID3 embedded art). Surface it so the
+                // resolver carries an authoritative-for-this-track URL.
+                artworkUrl = track.artworkUrl,
             )
         } catch (e: Exception) {
             Log.w(TAG, "Local file resolve failed: ${e.message}")

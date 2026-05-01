@@ -290,6 +290,14 @@ class LibraryRepository(
     /**
      * Backfill resolver IDs on a stored track from resolution results.
      * Only fills in IDs that are currently null/blank — never overwrites.
+     *
+     * Also persists [artworkUrl] when supplied. The underlying
+     * `tracks.updateArtworkById` query is COALESCE-style (only writes when
+     * the row's `artworkUrl` is NULL/empty), so callers can pass artwork
+     * defensively without risking overwriting user-imported album art.
+     * Used by `TrackResolverCache.backfillResolverIds` to capture artwork
+     * surfaced by `ResolvedSource.artworkUrl` during the resolver pipeline,
+     * which is faster + cheaper than re-asking the metadata cascade later.
      */
     suspend fun backfillTrackResolverIds(
         trackId: String,
@@ -297,8 +305,12 @@ class LibraryRepository(
         spotifyUri: String?,
         appleMusicId: String?,
         soundcloudId: String?,
+        artworkUrl: String? = null,
     ) {
         trackDao.backfillResolverIds(trackId, spotifyId, spotifyUri, appleMusicId, soundcloudId)
+        if (artworkUrl != null) {
+            trackDao.updateArtworkById(trackId, artworkUrl)
+        }
     }
 
     /** Convert a PlaylistTrack to a Track for playback. */

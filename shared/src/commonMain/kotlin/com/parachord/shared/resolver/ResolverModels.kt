@@ -32,6 +32,25 @@ data class ResolvedSource(
     val matchedArtist: String? = null,
     /** Duration in ms from the resolver's result (for confidence scoring). */
     val matchedDurationMs: Long? = null,
+    /**
+     * Album/track artwork URL surfaced by the resolver, when available.
+     *
+     * Apple Music (via MusicKit JS or iTunes Search), Spotify, and Last.fm
+     * all return artwork URLs alongside their track-search results. Without
+     * this field, that data was discarded at the resolver boundary, forcing
+     * [com.parachord.shared.metadata.ImageEnrichmentService.enrichPlaylistArt]
+     * to RE-ASK metadata providers for art the resolver had moments earlier
+     * — wasteful and a problem when those providers rate-limit (the
+     * primary symptom is a hosted-XSPF playlist whose tracks resolve via
+     * AM but whose mosaic still says "no art" because the cascade
+     * fell through).
+     *
+     * Persisted onto `playlist_tracks.trackArtworkUrl` /
+     * `tracks.artworkUrl` by [com.parachord.android.resolver.TrackResolverCache.backfillResolverIds]
+     * when set, so the next render of the row displays it without any
+     * additional network traffic.
+     */
+    val artworkUrl: String? = null,
 )
 
 // ── Confidence Scoring ──────────────────────────────────────────────
