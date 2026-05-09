@@ -344,6 +344,11 @@ val androidModule = module {
         setOf(get<LastFmScrobbler>(), get<ListenBrainzScrobbler>(), get<LibreFmScrobbler>())
     }
 
+    // Loves push (issue #125) — orchestrates per-service loveTrack
+    // dispatch + idempotency cache for both single-track (live toggle)
+    // and bulk backfill paths.
+    singleOf(::LovesPushService)
+
     // ── Metadata ─────────────────────────────────────────────────────
 
     // MetadataService is constructed directly from the shared cascading
