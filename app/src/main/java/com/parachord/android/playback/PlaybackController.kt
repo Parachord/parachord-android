@@ -1523,6 +1523,8 @@ class PlaybackController constructor(
                         apiKey = BuildConfig.LASTFM_API_KEY,
                         limit = SPINOFF_SIMILAR_LIMIT,
                     )
+                    // DEBUG #121: log response shape to diagnose empty-pool reports
+                    Log.d(TAG, "Spinoff DEBUG: getArtistTopTracks($seedArtist) → toptracks=${response.toptracks != null}, track.size=${response.toptracks?.track?.size}, key.len=${BuildConfig.LASTFM_API_KEY.length}, firstTrack=${response.toptracks?.track?.firstOrNull()?.name}")
                     response.toptracks?.track.orEmpty().mapNotNull {
                         // For top-tracks the artist is the seed artist (LfmTopTrackArtist
                         // mirrors what we requested) but fall back gracefully.
