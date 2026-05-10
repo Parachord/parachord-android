@@ -68,6 +68,11 @@ class DeepLinkViewModel constructor(
     private val _navEvents = MutableSharedFlow<DeepLinkNavEvent>()
     val navEvents: SharedFlow<DeepLinkNavEvent> = _navEvents.asSharedFlow()
 
+    private val playRadioDispatcher = PlayRadioDispatcher(
+        playbackController = playbackController,
+        teardown = protocolPlayTeardown,
+    ) { msg -> _navEvents.emit(DeepLinkNavEvent.Toast(msg)) }
+
     private val _pendingConfirmation = MutableStateFlow<DeepLinkConfirmation?>(null)
     val pendingConfirmation: StateFlow<DeepLinkConfirmation?> = _pendingConfirmation.asStateFlow()
 
@@ -313,8 +318,8 @@ class DeepLinkViewModel constructor(
                 is DeepLinkAction.PlayAlbum -> dispatchProtocolPlay(action)
                 is DeepLinkAction.PlayPlaylist -> dispatchProtocolPlay(action)
 
-                // ── Phase 3 (#121) — to be wired ──
-                is DeepLinkAction.PlayRadio,
+                // ── Phase 3 (#121) ──
+                is DeepLinkAction.PlayRadio -> playRadioDispatcher.dispatch(action)
                 is DeepLinkAction.ListenAlong -> {
                     Log.d(TAG, "Protocol handler not yet wired (Phase 3): $action")
                     _navEvents.emit(DeepLinkNavEvent.Toast("Coming soon"))

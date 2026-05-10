@@ -1412,56 +1412,117 @@ class PlaybackController constructor(
      * Start spinoff mode: fetch similar tracks for the current track from
      * Last.fm, shuffle them, resolve each one, and begin playing from the pool.
      * Matches the desktop's startSpinoff() logic.
+     *
+     * Thin delegate over [startSpinoffWithSeed] — kept as the in-app entry
+     * point (right-click → Spinoff) so the existing toast / banner copy
+     * (`Spinoff from <title>`) stays exactly as it was.
      */
     fun startSpinoff() {
         val track = stateHolder.state.value.currentTrack ?: return
+        startSpinoffWithSeed(
+            seedArtist = track.artist,
+            seedTitle = track.title,
+            displayName = "Spinoff from ${track.title}",
+        )
+    }
+
+    /**
+     * Generalized spinoff entry point — used by the in-app right-click →
+     * Spinoff action (via [startSpinoff]) and by `parachord://play/radio?artist=…`
+     * (Mode B).
+     *
+     * Seed forms:
+     *  - `(artist, title)` → Last.fm `track.getsimilar` cascade (same path
+     *    as in-app spinoff has always used).
+     *  - `(artist, null)` → Last.fm `artist.getTopTracks` cascade (Mode B
+     *    fallback when the deeplink has no track hint). Top tracks isn't
+     *    quite "similar tracks", but it's the closest thing Last.fm offers
+     *    for an artist-only seed and matches the desktop's Mode B path.
+     *
+     * [displayName], when non-null, sets the [PlaybackContext.name]
+     * directly. When null, falls back to `"Spinoff from $seedTitle"` (or
+     * `"Radio: $seedArtist"` when title is also null) — preserves the
+     * existing in-app banner copy for the wrapper [startSpinoff].
+     */
+    fun startSpinoffWithSeed(
+        seedArtist: String,
+        seedTitle: String?,
+        displayName: String? = null,
+    ) {
         if (stateHolder.state.value.spinoffMode) return // already active
 
         spinoffJob?.cancel()
         stateHolder.update { copy(spinoffLoading = true) }
 
+        // Used for toast / no-results copy. Title takes precedence when present.
+        val seedDisplay = seedTitle ?: seedArtist
+        // Resolved PlaybackContext name (banner). Title-bearing fallback
+        // matches the historical in-app `Spinoff from <title>` template.
+        val resolvedDisplayName = displayName
+            ?: seedTitle?.let { "Spinoff from $it" }
+            ?: "Radio: $seedArtist"
+
         spinoffJob = scope.launch(Dispatchers.IO) {
             try {
-                // 1. Fetch similar tracks from Last.fm
-                val response = lastFmClient.getSimilarTracks(
-                    track = track.title,
-                    artist = track.artist,
-                    apiKey = BuildConfig.LASTFM_API_KEY,
-                    limit = SPINOFF_SIMILAR_LIMIT,
-                )
-                val similarTracks = response.similartracks?.track ?: emptyList()
+                // 1. Fetch similar tracks (or top tracks for artist-only seeds).
+                //    Both endpoints return `(name, artist.name)` pairs that we
+                //    can map uniformly; the only difference is the wire shape.
+                data class PoolSeed(val name: String, val artistName: String)
+                val pool: List<PoolSeed> = if (seedTitle != null) {
+                    val response = lastFmClient.getSimilarTracks(
+                        track = seedTitle,
+                        artist = seedArtist,
+                        apiKey = BuildConfig.LASTFM_API_KEY,
+                        limit = SPINOFF_SIMILAR_LIMIT,
+                    )
+                    response.similartracks?.track.orEmpty().mapNotNull {
+                        val a = it.artist?.name ?: return@mapNotNull null
+                        PoolSeed(it.name, a)
+                    }
+                } else {
+                    val response = lastFmClient.getArtistTopTracks(
+                        artist = seedArtist,
+                        apiKey = BuildConfig.LASTFM_API_KEY,
+                        limit = SPINOFF_SIMILAR_LIMIT,
+                    )
+                    response.toptracks?.track.orEmpty().mapNotNull {
+                        // For top-tracks the artist is the seed artist (LfmTopTrackArtist
+                        // mirrors what we requested) but fall back gracefully.
+                        val a = it.artist?.name ?: seedArtist
+                        PoolSeed(it.name, a)
+                    }
+                }
 
-                if (similarTracks.isEmpty()) {
-                    Log.d(TAG, "Spinoff: no similar tracks found for '${track.title}'")
+                if (pool.isEmpty()) {
+                    Log.d(TAG, "Spinoff: no similar/top tracks found for '$seedDisplay'")
                     withContext(Dispatchers.Main) {
-                        Toast.makeText(context, "No similar tracks found for \"${track.title}\"", Toast.LENGTH_SHORT).show()
+                        Toast.makeText(context, "No similar tracks found for \"$seedDisplay\"", Toast.LENGTH_SHORT).show()
                     }
                     stateHolder.update { copy(spinoffLoading = false, spinoffAvailable = false) }
                     return@launch
                 }
 
-                Log.d(TAG, "Spinoff: found ${similarTracks.size} similar tracks, resolving...")
+                Log.d(TAG, "Spinoff: found ${pool.size} candidate tracks for '$seedDisplay', resolving...")
 
-                // 2. Convert to TrackEntities and resolve each
+                // 2. Convert to TrackEntities and resolve each.
                 // Skip Last.fm images — they're almost always placeholder/blank.
                 // Album art will be enriched via metadata providers on playback.
                 val resolvedTracks = mutableListOf<TrackEntity>()
-                for (similar in similarTracks.shuffled()) {
-                    val artistName = similar.artist?.name ?: continue
-                    val query = "${similar.name} ${artistName}"
+                for (cand in pool.shuffled()) {
+                    val query = "${cand.name} ${cand.artistName}"
                     try {
                         val sources = resolverManager.resolve(
                             query,
-                            targetTitle = similar.name,
-                            targetArtist = artistName,
+                            targetTitle = cand.name,
+                            targetArtist = cand.artistName,
                         )
                         val best = resolverScoring.selectBest(sources) ?: continue
 
                         resolvedTracks.add(
                             TrackEntity(
-                                id = "spinoff_${similar.name}_${artistName}".hashCode().toString(),
-                                title = similar.name,
-                                artist = artistName,
+                                id = "spinoff_${cand.name}_${cand.artistName}".hashCode().toString(),
+                                title = cand.name,
+                                artist = cand.artistName,
                                 sourceUrl = best.url,
                                 resolver = best.resolver,
                                 spotifyUri = best.spotifyUri,
@@ -1471,14 +1532,14 @@ class PlaybackController constructor(
                             )
                         )
                     } catch (e: Exception) {
-                        Log.w(TAG, "Spinoff: failed to resolve '${similar.name}'", e)
+                        Log.w(TAG, "Spinoff: failed to resolve '${cand.name}'", e)
                     }
                 }
 
                 if (resolvedTracks.isEmpty()) {
                     Log.d(TAG, "Spinoff: no tracks could be resolved")
                     withContext(Dispatchers.Main) {
-                        Toast.makeText(context, "No similar tracks found for \"${track.title}\"", Toast.LENGTH_SHORT).show()
+                        Toast.makeText(context, "No similar tracks found for \"$seedDisplay\"", Toast.LENGTH_SHORT).show()
                     }
                     stateHolder.update { copy(spinoffLoading = false, spinoffAvailable = false) }
                     return@launch
@@ -1486,18 +1547,24 @@ class PlaybackController constructor(
 
                 Log.d(TAG, "Spinoff: resolved ${resolvedTracks.size} tracks, ready for playback")
 
-                // 3. Save previous playback context (queue is NOT modified — desktop behavior)
+                // 3. Save previous playback context (queue is NOT modified — desktop behavior).
+                //    Source-track concept only applies for the in-app
+                //    title-bearing seed; Mode B (artist-only) has no
+                //    "current track" to spinoff from.
                 preSpinoffContext = queueManager.playbackContext
-                spinoffSourceTrack = track
+                spinoffSourceTrack = stateHolder.state.value.currentTrack
 
                 // 4. Populate spinoff pool (separate from queue).
                 //    Don't interrupt the current song — let it finish, then
                 //    skipNextInternal() will pull from the pool automatically.
+                //    For Mode B (deeplink) the queue was already cleared by
+                //    the protocol teardown, so the pool will start playing
+                //    immediately on the next advance.
                 spinoffPool.clear()
                 spinoffPool.addAll(resolvedTracks)
 
-                // Set playback context to spinoff (queue contents untouched)
-                queueManager.setContext(PlaybackContext(type = "spinoff", name = "Spinoff from ${track.title}"))
+                // Set playback context to spinoff (queue contents untouched).
+                queueManager.setContext(PlaybackContext(type = "spinoff", name = resolvedDisplayName))
 
                 stateHolder.update {
                     copy(
@@ -1508,7 +1575,24 @@ class PlaybackController constructor(
                 }
 
                 withContext(Dispatchers.Main) {
-                    Toast.makeText(context, "Spinning off of ${track.title} - ${track.artist}", Toast.LENGTH_SHORT).show()
+                    val toast = if (seedTitle != null) {
+                        "Spinning off of $seedTitle - $seedArtist"
+                    } else {
+                        "Building radio from $seedArtist"
+                    }
+                    Toast.makeText(context, toast, Toast.LENGTH_SHORT).show()
+                }
+
+                // Mode B (artist-only, no current track) needs an explicit
+                // kick — there's nothing currently playing to advance INTO
+                // the pool. The in-app title-bearing path lets the current
+                // song finish and skipNextInternal() pulls from the pool.
+                if (seedTitle == null && stateHolder.state.value.currentTrack == null && spinoffPool.isNotEmpty()) {
+                    val first = spinoffPool.removeAt(0)
+                    Log.d(TAG, "Spinoff: kicking off Mode B with '${first.title}' by ${first.artist}")
+                    withContext(Dispatchers.Main) {
+                        playTrack(first)
+                    }
                 }
             } catch (e: Exception) {
                 Log.e(TAG, "Spinoff: failed to start", e)
