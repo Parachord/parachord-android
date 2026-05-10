@@ -294,6 +294,14 @@ class DeepLinkViewModel constructor(
                 }
 
                 is DeepLinkAction.Unknown -> Log.w(TAG, "Unknown deep link: ${action.uri}")
+
+                // ── Phase 1 (#119) foundation types — wired in Phase 2 (#120) / Phase 3 (#121) ──
+                is DeepLinkAction.PlayAlbum,
+                is DeepLinkAction.PlayPlaylist,
+                is DeepLinkAction.PlayRadio,
+                is DeepLinkAction.ListenAlong -> {
+                    Log.d(TAG, "Protocol play handler not yet wired (Phase 2 / 3): $action")
+                }
             }
         }
     }
