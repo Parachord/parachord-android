@@ -61,6 +61,7 @@ class DeepLinkViewModel constructor(
     private val resolverManager: ResolverManager,
     private val playlistImportManager: PlaylistImportManager,
     private val chatService: AiChatService,
+    private val protocolPlayHandler: ProtocolPlayHandler,
 ) : ViewModel() {
 
     private val _navEvents = MutableSharedFlow<DeepLinkNavEvent>()
@@ -296,14 +297,45 @@ class DeepLinkViewModel constructor(
 
                 is DeepLinkAction.Unknown -> Log.w(TAG, "Unknown deep link: ${action.uri}")
 
-                // ── Phase 1 (#119) foundation types — wired in Phase 2 (#120) / Phase 3 (#121) ──
-                is DeepLinkAction.PlayAlbum,
-                is DeepLinkAction.PlayPlaylist,
+                // ── Protocol play surface (#120 Phase 2) ──
+                is DeepLinkAction.PlayAlbum -> dispatchProtocolPlay(action)
+                is DeepLinkAction.PlayPlaylist -> dispatchProtocolPlay(action)
+
+                // ── Phase 3 (#121) — to be wired ──
                 is DeepLinkAction.PlayRadio,
                 is DeepLinkAction.ListenAlong -> {
-                    Log.d(TAG, "Protocol play handler not yet wired (Phase 2 / 3): $action")
+                    Log.d(TAG, "Protocol handler not yet wired (Phase 3): $action")
+                    _navEvents.emit(DeepLinkNavEvent.Toast("Coming soon"))
                 }
             }
+        }
+    }
+
+    // ── Protocol play dispatch (#120) ────────────────────────────────
+
+    /**
+     * Dispatch a `parachord://play/album` action through the
+     * [ProtocolPlayHandler] and surface the result as a toast.
+     *
+     * Overloaded for [DeepLinkAction.PlayPlaylist] below — same shape,
+     * different handler entry point. Kept as separate methods so the
+     * sealed-class match in [executeAction] doesn't have to upcast.
+     */
+    private suspend fun dispatchProtocolPlay(action: DeepLinkAction.PlayAlbum) {
+        when (val r = protocolPlayHandler.handle(action)) {
+            is ProtocolPlayResult.Started -> _navEvents.emit(
+                DeepLinkNavEvent.Toast("Playing ${r.displayName} (${r.trackCount} tracks)")
+            )
+            is ProtocolPlayResult.Failed -> _navEvents.emit(DeepLinkNavEvent.Toast(r.reason))
+        }
+    }
+
+    private suspend fun dispatchProtocolPlay(action: DeepLinkAction.PlayPlaylist) {
+        when (val r = protocolPlayHandler.handle(action)) {
+            is ProtocolPlayResult.Started -> _navEvents.emit(
+                DeepLinkNavEvent.Toast("Playing ${r.displayName} (${r.trackCount} tracks)")
+            )
+            is ProtocolPlayResult.Failed -> _navEvents.emit(DeepLinkNavEvent.Toast(r.reason))
         }
     }
 
