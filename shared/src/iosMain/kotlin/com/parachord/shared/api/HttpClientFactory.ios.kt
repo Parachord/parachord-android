@@ -12,8 +12,9 @@ actual fun createHttpClient(
     appConfig: AppConfig,
     authProvider: AuthTokenProvider,
     tokenRefresher: OAuthTokenRefresher,
+    lbTokenProvider: suspend () -> String?,
 ): HttpClient = HttpClient(Darwin) {
-    installSharedPlugins(json, appConfig, authProvider, tokenRefresher)
+    installSharedPlugins(json, appConfig, authProvider, tokenRefresher, lbTokenProvider)
     engine {
         configureRequest {
             setAllowsCellularAccess(true)

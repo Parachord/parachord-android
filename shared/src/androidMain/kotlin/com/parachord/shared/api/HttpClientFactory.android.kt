@@ -13,8 +13,9 @@ actual fun createHttpClient(
     appConfig: AppConfig,
     authProvider: AuthTokenProvider,
     tokenRefresher: OAuthTokenRefresher,
+    lbTokenProvider: suspend () -> String?,
 ): HttpClient = HttpClient(OkHttp) {
-    installSharedPlugins(json, appConfig, authProvider, tokenRefresher)
+    installSharedPlugins(json, appConfig, authProvider, tokenRefresher, lbTokenProvider)
     engine {
         config {
             connectTimeout(15, TimeUnit.SECONDS)

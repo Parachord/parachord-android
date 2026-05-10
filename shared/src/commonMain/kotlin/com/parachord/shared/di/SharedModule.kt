@@ -11,6 +11,7 @@ import com.parachord.shared.api.SmartLinksClient
 import com.parachord.shared.api.SpotifyClient
 import com.parachord.shared.api.TicketmasterClient
 import com.parachord.shared.api.createHttpClient
+import com.parachord.shared.settings.SettingsStore
 import com.parachord.shared.store.KvStore
 import kotlinx.serialization.json.Json
 import org.koin.core.module.dsl.singleOf
@@ -36,7 +37,23 @@ val sharedModule = module {
     }
 
     // HTTP Client (platform engine via expect/actual)
-    single { createHttpClient(get(), get(), get(), get()) }
+    //
+    // The lbTokenProvider closure captures SettingsStore so every request to
+    // api.listenbrainz.org auto-attaches `Authorization: Token <token>`. Looked
+    // up per-request — runtime token changes (Settings UI) take effect without
+    // a client rebuild. SettingsStore is registered by the platform-side module
+    // (AndroidModule / iOS module); Koin resolves it lazily on first HttpClient
+    // injection so module load order doesn't matter.
+    single {
+        val settings: SettingsStore = get()
+        createHttpClient(
+            get(),
+            get(),
+            get(),
+            get(),
+            lbTokenProvider = { settings.getListenBrainzToken() },
+        )
+    }
 
     // API Clients (Ktor, cross-platform)
     // SpotifyClient: per-API auth via AuthTokenProvider for AuthRealm.Spotify.
