@@ -1454,21 +1454,19 @@ class PlaybackController constructor(
 
     /**
      * Generalized spinoff entry point — used by the in-app right-click →
-     * Spinoff action (via [startSpinoff]) and by `parachord://play/radio?artist=…`
-     * (Mode B).
+     * Spinoff action (via [startSpinoff]) and by `parachord://play/radio?artist=X&title=Y`
+     * (Mode B title-bearing).
      *
-     * Seed forms:
-     *  - `(artist, title)` → Last.fm `track.getsimilar` cascade (same path
-     *    as in-app spinoff has always used).
-     *  - `(artist, null)` → Last.fm `artist.getTopTracks` cascade (Mode B
-     *    fallback when the deeplink has no track hint). Top tracks isn't
-     *    quite "similar tracks", but it's the closest thing Last.fm offers
-     *    for an artist-only seed and matches the desktop's Mode B path.
+     * Seed form: `(artist, title)` → Last.fm `track.getsimilar` cascade
+     * (same path as in-app spinoff has always used). [seedTitle] is
+     * required — artist-only radio (`?artist=X` with no title) does NOT
+     * route through here. It synthesizes a ListenBrainz `lb-radio` URL
+     * upstream in [PlayRadioDispatcher] and falls into the Mode C pool
+     * path via [ProtocolPlayHandler].
      *
      * [displayName], when non-null, sets the [PlaybackContext.name]
-     * directly. When null, falls back to `"Spinoff from $seedTitle"` (or
-     * `"Radio: $seedArtist"` when title is also null) — preserves the
-     * existing in-app banner copy for the wrapper [startSpinoff].
+     * directly. When null, falls back to `"Spinoff from $seedTitle"` —
+     * preserves the existing in-app banner copy for [startSpinoff].
      *
      * [kickStartFirstTrack] controls whether the first pool track plays
      * immediately once the pool is populated. The deeplink (Mode B) path
@@ -1487,50 +1485,34 @@ class PlaybackController constructor(
         displayName: String? = null,
         kickStartFirstTrack: Boolean = false,
     ) {
+        require(!seedTitle.isNullOrBlank()) {
+            "startSpinoffWithSeed requires seedTitle (title-bearing spinoff). " +
+                "Artist-only radio routes through ProtocolPlayHandler with an LB Radio URL."
+        }
         if (stateHolder.state.value.spinoffMode) return // already active
 
         spinoffJob?.cancel()
         stateHolder.update { copy(spinoffLoading = true) }
 
-        // Used for toast / no-results copy. Title takes precedence when present.
-        val seedDisplay = seedTitle ?: seedArtist
+        // Used for toast / no-results copy.
+        val seedDisplay = seedTitle
         // Resolved PlaybackContext name (banner). Title-bearing fallback
         // matches the historical in-app `Spinoff from <title>` template.
-        val resolvedDisplayName = displayName
-            ?: seedTitle?.let { "Spinoff from $it" }
-            ?: "Radio: $seedArtist"
+        val resolvedDisplayName = displayName ?: "Spinoff from $seedTitle"
 
         spinoffJob = scope.launch(Dispatchers.IO) {
             try {
-                // 1. Fetch similar tracks (or top tracks for artist-only seeds).
-                //    Both endpoints return `(name, artist.name)` pairs that we
-                //    can map uniformly; the only difference is the wire shape.
+                // 1. Fetch similar tracks via Last.fm `track.getsimilar`.
                 data class PoolSeed(val name: String, val artistName: String)
-                val pool: List<PoolSeed> = if (seedTitle != null) {
-                    val response = lastFmClient.getSimilarTracks(
-                        track = seedTitle,
-                        artist = seedArtist,
-                        apiKey = BuildConfig.LASTFM_API_KEY,
-                        limit = SPINOFF_SIMILAR_LIMIT,
-                    )
-                    response.similartracks?.track.orEmpty().mapNotNull {
-                        val a = it.artist?.name ?: return@mapNotNull null
-                        PoolSeed(it.name, a)
-                    }
-                } else {
-                    val response = lastFmClient.getArtistTopTracks(
-                        artist = seedArtist,
-                        apiKey = BuildConfig.LASTFM_API_KEY,
-                        limit = SPINOFF_SIMILAR_LIMIT,
-                    )
-                    // DEBUG #121: log response shape to diagnose empty-pool reports
-                    Log.d(TAG, "Spinoff DEBUG: getArtistTopTracks($seedArtist) → toptracks=${response.toptracks != null}, track.size=${response.toptracks?.track?.size}, key.len=${BuildConfig.LASTFM_API_KEY.length}, firstTrack=${response.toptracks?.track?.firstOrNull()?.name}")
-                    response.toptracks?.track.orEmpty().mapNotNull {
-                        // For top-tracks the artist is the seed artist (LfmTopTrackArtist
-                        // mirrors what we requested) but fall back gracefully.
-                        val a = it.artist?.name ?: seedArtist
-                        PoolSeed(it.name, a)
-                    }
+                val response = lastFmClient.getSimilarTracks(
+                    track = seedTitle,
+                    artist = seedArtist,
+                    apiKey = BuildConfig.LASTFM_API_KEY,
+                    limit = SPINOFF_SIMILAR_LIMIT,
+                )
+                val pool: List<PoolSeed> = response.similartracks?.track.orEmpty().mapNotNull {
+                    val a = it.artist?.name ?: return@mapNotNull null
+                    PoolSeed(it.name, a)
                 }
 
                 if (pool.isEmpty()) {
@@ -1588,9 +1570,6 @@ class PlaybackController constructor(
                 Log.d(TAG, "Spinoff: resolved ${resolvedTracks.size} tracks, ready for playback")
 
                 // 3. Save previous playback context (queue is NOT modified — desktop behavior).
-                //    Source-track concept only applies for the in-app
-                //    title-bearing seed; Mode B (artist-only) has no
-                //    "current track" to spinoff from.
                 preSpinoffContext = queueManager.playbackContext
                 spinoffSourceTrack = stateHolder.state.value.currentTrack
 
@@ -1614,12 +1593,11 @@ class PlaybackController constructor(
                 }
 
                 withContext(Dispatchers.Main) {
-                    val toast = if (seedTitle != null) {
-                        "Spinning off of $seedTitle - $seedArtist"
-                    } else {
-                        "Building radio from $seedArtist"
-                    }
-                    Toast.makeText(context, toast, Toast.LENGTH_SHORT).show()
+                    Toast.makeText(
+                        context,
+                        "Spinning off of $seedTitle - $seedArtist",
+                        Toast.LENGTH_SHORT,
+                    ).show()
                 }
 
                 // Kick-start path (Mode B / deeplink): pull the first pool

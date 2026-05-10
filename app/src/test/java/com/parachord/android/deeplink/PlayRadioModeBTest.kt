@@ -10,8 +10,10 @@ import io.mockk.coVerifyOrder
 import io.mockk.just
 import io.mockk.mockk
 import io.mockk.runs
+import io.mockk.slot
 import kotlinx.coroutines.test.runTest
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertNotNull
 import org.junit.Assert.assertTrue
 import org.junit.Test
 
@@ -19,10 +21,13 @@ import org.junit.Test
  * Unit tests for [PlayRadioDispatcher] (Mode B — artist seed). Mode C
  * (pool-based) lives in [PlayRadioModeCTest].
  *
- * Updated for the result-type pattern (Task 4): the dispatcher no longer
- * takes a toast lambda — the VM emits toasts based on the returned
- * [PlayRadioResult]. Tests assert on the result shape + verify call
- * ordering against the playback / teardown mocks.
+ * Mode B has two sub-paths since the LB Radio fix (#121):
+ *  - **Title-bearing** (`?artist=X&title=Y`) → Last.fm `track.getsimilar`
+ *    via [PlaybackController.startSpinoffWithSeed]. Returns
+ *    [PlayRadioResult.StartedModeB].
+ *  - **Artist-only** (`?artist=X`, no title) → ListenBrainz LB Radio
+ *    via the synthesized Mode C pool path. Returns
+ *    [PlayRadioResult.StartedModeC].
  */
 class PlayRadioModeBTest {
 
@@ -31,13 +36,16 @@ class PlayRadioModeBTest {
         td: ProtocolPlayTeardown = mockk<ProtocolPlayTeardown>().also {
             coEvery { it.prepareForNewPlayback() } just runs
         },
-        // Mode B never invokes the handler — pass a relaxed mock so a
-        // stray call would surface as a verification failure, not a NPE.
+        // Title-bearing Mode B never invokes the handler — pass a relaxed
+        // mock so a stray call surfaces as a verification failure, not a
+        // NPE. Artist-only Mode B tests build their own strict mock.
         handler: ProtocolPlayHandler = mockk(relaxed = true),
     ): PlayRadioDispatcher = PlayRadioDispatcher(pc, td, handler)
 
+    // ── Title-bearing path (Last.fm track.getsimilar) ──────────────────
+
     @Test
-    fun modeB_callsTeardownBeforeStartSpinoffWithSeed() = runTest {
+    fun modeB_titleBearing_callsTeardownBeforeStartSpinoffWithSeed() = runTest {
         val pc = mockk<PlaybackController>(relaxed = true)
         val td = mockk<ProtocolPlayTeardown>()
         coEvery { td.prepareForNewPlayback() } just runs
@@ -45,19 +53,19 @@ class PlayRadioModeBTest {
         val dispatcher = build(pc, td)
         val result = dispatcher.dispatch(
             DeepLinkAction.PlayRadio(
-                mode = RadioMode.ArtistSeed("Slowdive", null),
+                mode = RadioMode.ArtistSeed("Slowdive", "Sugar For The Pill"),
             )
         )
 
         assertTrue(result is PlayRadioResult.StartedModeB)
         coVerifyOrder {
             td.prepareForNewPlayback()
-            pc.startSpinoffWithSeed("Slowdive", null, any(), any())
+            pc.startSpinoffWithSeed("Slowdive", "Sugar For The Pill", any(), any())
         }
     }
 
     @Test
-    fun modeB_displayName_prefersExplicitNameOverArtistTitleFallback() = runTest {
+    fun modeB_titleBearing_displayName_prefersExplicitName() = runTest {
         val pc = mockk<PlaybackController>(relaxed = true)
         val dispatcher = build(pc = pc)
 
@@ -75,7 +83,7 @@ class PlayRadioModeBTest {
     }
 
     @Test
-    fun modeB_displayName_artistTitleFallbackWhenNoExplicitName() = runTest {
+    fun modeB_titleBearing_displayName_artistTitleFallbackWhenNoExplicitName() = runTest {
         val pc = mockk<PlaybackController>(relaxed = true)
         val dispatcher = build(pc = pc)
 
@@ -101,25 +109,7 @@ class PlayRadioModeBTest {
     }
 
     @Test
-    fun modeB_displayName_artistOnlyFallback() = runTest {
-        val pc = mockk<PlaybackController>(relaxed = true)
-        val dispatcher = build(pc = pc)
-
-        val result = dispatcher.dispatch(
-            DeepLinkAction.PlayRadio(
-                mode = RadioMode.ArtistSeed("Slowdive", null),
-                name = null,
-            )
-        )
-
-        assertEquals("Radio: Slowdive", (result as PlayRadioResult.StartedModeB).displayName)
-        coVerify(exactly = 1) {
-            pc.startSpinoffWithSeed("Slowdive", null, "Radio: Slowdive", any())
-        }
-    }
-
-    @Test
-    fun modeB_passesKickStartFirstTrackTrue_soPoolStartsPlayingImmediately() = runTest {
+    fun modeB_titleBearing_passesKickStartFirstTrackTrue() = runTest {
         val pc = mockk<PlaybackController>(relaxed = true)
         val td = mockk<ProtocolPlayTeardown>()
         coEvery { td.prepareForNewPlayback() } just runs
@@ -127,7 +117,7 @@ class PlayRadioModeBTest {
         val dispatcher = build(pc, td)
         dispatcher.dispatch(
             DeepLinkAction.PlayRadio(
-                mode = RadioMode.ArtistSeed("Slowdive", null),
+                mode = RadioMode.ArtistSeed("Slowdive", "Sugar For The Pill"),
             )
         )
 
@@ -136,19 +126,19 @@ class PlayRadioModeBTest {
         coVerify(exactly = 1) {
             pc.startSpinoffWithSeed(
                 seedArtist = "Slowdive",
-                seedTitle = null,
-                displayName = "Radio: Slowdive",
+                seedTitle = "Sugar For The Pill",
+                displayName = "Radio: Slowdive – Sugar For The Pill",
                 kickStartFirstTrack = true,
             )
         }
     }
 
     @Test
-    fun modeB_doesNotCallProtocolPlayHandler() = runTest {
-        // Mode B is fully handled by the dispatcher + PlaybackController —
-        // never delegates to the protocol play handler. (The handler's
-        // `handle(PlayRadio)` requires PoolBased and would throw on
-        // ArtistSeed.)
+    fun modeB_titleBearing_doesNotCallProtocolPlayHandler() = runTest {
+        // Title-bearing Mode B is fully handled by the dispatcher +
+        // PlaybackController — never delegates to the protocol play
+        // handler. (The handler's `handle(PlayRadio)` requires PoolBased
+        // and would throw on ArtistSeed.)
         val pc = mockk<PlaybackController>(relaxed = true)
         val td = mockk<ProtocolPlayTeardown>()
         coEvery { td.prepareForNewPlayback() } just runs
@@ -156,8 +146,137 @@ class PlayRadioModeBTest {
 
         val dispatcher = PlayRadioDispatcher(pc, td, handler)
         dispatcher.dispatch(
-            DeepLinkAction.PlayRadio(mode = RadioMode.ArtistSeed("Slowdive", null))
+            DeepLinkAction.PlayRadio(
+                mode = RadioMode.ArtistSeed("Slowdive", "Sugar For The Pill"),
+            )
         )
         // Strict mock — no verification block needed; any invocation throws.
+    }
+
+    // ── Artist-only path (ListenBrainz LB Radio via Mode C pool) ───────
+
+    @Test
+    fun modeB_artistOnly_synthesizesLbRadioUrlAsBothInitialAndRefill() = runTest {
+        val pc = mockk<PlaybackController>(relaxed = true)
+        val td = mockk<ProtocolPlayTeardown>(relaxed = true)
+        coEvery { td.prepareForNewPlayback() } just runs
+        val handler = mockk<ProtocolPlayHandler>()
+        coEvery { handler.handle(any<DeepLinkAction.PlayRadio>()) } returns
+            ProtocolPlayResult.Started("Radio: Slowdive", 10)
+        coEvery { handler.resolveTrackList(any()) } returns emptyList()
+
+        val dispatcher = PlayRadioDispatcher(pc, td, handler)
+        val result = dispatcher.dispatch(
+            DeepLinkAction.PlayRadio(mode = RadioMode.ArtistSeed("Slowdive", null))
+        )
+
+        assertTrue(result is PlayRadioResult.StartedModeC)
+
+        // Capture the synthetic action handed to the handler. Verify both
+        // input.url and refillUrl point at the same LB Radio URL with the
+        // expected prompt + mode.
+        val slot = slot<DeepLinkAction.PlayRadio>()
+        coVerify(exactly = 1) { handler.handle(capture(slot)) }
+        val synthetic = slot.captured
+        assertEquals(RadioMode.PoolBased, synthetic.mode)
+        assertNotNull(synthetic.input?.url)
+        assertEquals(synthetic.input?.url, synthetic.refillUrl)
+        val url = synthetic.input!!.url!!
+        assertTrue(
+            "URL should hit api.listenbrainz.org: $url",
+            url.startsWith("https://api.listenbrainz.org/1/explore/lb-radio?"),
+        )
+        assertTrue(
+            "URL should encode prompt=artist:(Slowdive): $url",
+            url.contains("prompt=artist%3A%28Slowdive%29") ||
+                url.contains("prompt=artist%3A(Slowdive)") ||
+                url.contains("prompt=artist:%28Slowdive%29") ||
+                url.contains("prompt=artist:(Slowdive)"),
+        )
+        assertTrue("URL should set mode=easy: $url", url.contains("mode=easy"))
+    }
+
+    @Test
+    fun modeB_artistOnly_doesNotCallStartSpinoffWithSeed() = runTest {
+        // Artist-only routes through ProtocolPlayHandler.handle() — must
+        // NOT touch the Last.fm spinoff path.
+        val pc = mockk<PlaybackController>(relaxed = true)
+        val td = mockk<ProtocolPlayTeardown>(relaxed = true)
+        coEvery { td.prepareForNewPlayback() } just runs
+        val handler = mockk<ProtocolPlayHandler>()
+        coEvery { handler.handle(any<DeepLinkAction.PlayRadio>()) } returns
+            ProtocolPlayResult.Started("Radio: Slowdive", 10)
+
+        val dispatcher = PlayRadioDispatcher(pc, td, handler)
+        dispatcher.dispatch(
+            DeepLinkAction.PlayRadio(mode = RadioMode.ArtistSeed("Slowdive", null))
+        )
+
+        coVerify(exactly = 0) { pc.startSpinoffWithSeed(any(), any(), any(), any()) }
+    }
+
+    @Test
+    fun modeB_artistOnly_artistWithSpaces_urlEncodedCorrectly() = runTest {
+        val pc = mockk<PlaybackController>(relaxed = true)
+        val td = mockk<ProtocolPlayTeardown>(relaxed = true)
+        coEvery { td.prepareForNewPlayback() } just runs
+        val handler = mockk<ProtocolPlayHandler>()
+        coEvery { handler.handle(any<DeepLinkAction.PlayRadio>()) } returns
+            ProtocolPlayResult.Started("Radio: Tame Impala", 10)
+
+        val dispatcher = PlayRadioDispatcher(pc, td, handler)
+        dispatcher.dispatch(
+            DeepLinkAction.PlayRadio(mode = RadioMode.ArtistSeed("Tame Impala", null))
+        )
+
+        val slot = slot<DeepLinkAction.PlayRadio>()
+        coVerify(exactly = 1) { handler.handle(capture(slot)) }
+        val url = slot.captured.input!!.url!!
+        // URLEncoder turns spaces into '+' for query-string values.
+        assertTrue(
+            "space should be encoded in $url",
+            url.contains("%20Impala") || url.contains("+Impala"),
+        )
+    }
+
+    @Test
+    fun modeB_artistOnly_displayName_prefersExplicitName() = runTest {
+        val pc = mockk<PlaybackController>(relaxed = true)
+        val td = mockk<ProtocolPlayTeardown>(relaxed = true)
+        coEvery { td.prepareForNewPlayback() } just runs
+        val handler = mockk<ProtocolPlayHandler>()
+        coEvery { handler.handle(any<DeepLinkAction.PlayRadio>()) } returns
+            ProtocolPlayResult.Started("My Custom Station", 10)
+
+        val dispatcher = PlayRadioDispatcher(pc, td, handler)
+        dispatcher.dispatch(
+            DeepLinkAction.PlayRadio(
+                mode = RadioMode.ArtistSeed("Slowdive", null),
+                name = "My Custom Station",
+            )
+        )
+
+        val slot = slot<DeepLinkAction.PlayRadio>()
+        coVerify(exactly = 1) { handler.handle(capture(slot)) }
+        assertEquals("My Custom Station", slot.captured.name)
+    }
+
+    @Test
+    fun modeB_artistOnly_displayName_fallbackWhenNoExplicitName() = runTest {
+        val pc = mockk<PlaybackController>(relaxed = true)
+        val td = mockk<ProtocolPlayTeardown>(relaxed = true)
+        coEvery { td.prepareForNewPlayback() } just runs
+        val handler = mockk<ProtocolPlayHandler>()
+        coEvery { handler.handle(any<DeepLinkAction.PlayRadio>()) } returns
+            ProtocolPlayResult.Started("Radio: Slowdive", 10)
+
+        val dispatcher = PlayRadioDispatcher(pc, td, handler)
+        dispatcher.dispatch(
+            DeepLinkAction.PlayRadio(mode = RadioMode.ArtistSeed("Slowdive", null), name = null)
+        )
+
+        val slot = slot<DeepLinkAction.PlayRadio>()
+        coVerify(exactly = 1) { handler.handle(capture(slot)) }
+        assertEquals("Radio: Slowdive", slot.captured.name)
     }
 }
