@@ -30,10 +30,11 @@ sealed class DeepLinkAction {
     ) : DeepLinkAction()
 
     /**
-     * `parachord://play/radio` — start a radio context. [refillUrl] is the
-     * URL the radio engine polls for fresh tracks (Mode A). [input]
-     * supplies the initial pool / seed; [mode] selects Mode B (artist seed)
-     * or Mode C (pool-based) for non-URL modes.
+     * `parachord://play/radio` — start a radio context. [input] supplies the
+     * initial pool / seed; [mode] selects Mode B (artist seed) or Mode C
+     * (pool-based). [refillUrl] is the URL used for subsequent refills only
+     * — the initial pool is sourced from `input.url` or `input.tracks`,
+     * decoupled from refill sourcing.
      */
     data class PlayRadio(
         val mode: RadioMode,

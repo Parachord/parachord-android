@@ -2,7 +2,7 @@ package com.parachord.shared.deeplink
 
 /**
  * SSRF guard for protocol-fetched URLs (Phase 2 `play/playlist?url=`,
- * Phase 3 `play/radio?refillUrl=`, etc.).
+ * Phase 3 `play/radio?url=` / `play/radio?refill=`, etc.).
  *
  * Mirrors desktop's `isPublicHttpUrl` exactly. Rejects:
  *

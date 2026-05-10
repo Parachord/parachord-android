@@ -323,4 +323,40 @@ class DeepLinkHandlerRadioContractTest {
         val a = handler.parse(Uri.parse("parachord://play/radio?refill=https%3A%2F%2Fexample.com%2Fr.jspf"))
         assertTrue(a is DeepLinkAction.Unknown)
     }
+
+    @Test
+    fun parsePlayRadio_modeB_titleHintPlumbsThrough() {
+        val a = handler.parse(Uri.parse("parachord://play/radio?artist=Slowdive&title=Sugar%20For%20The%20Pill"))
+        val pr = a as DeepLinkAction.PlayRadio
+        val seed = pr.mode as RadioMode.ArtistSeed
+        assertEquals("Slowdive", seed.artist)
+        assertEquals("Sugar For The Pill", seed.title)
+    }
+
+    @Test
+    fun parsePlayRadio_blankArtistTreatedAsAbsent() {
+        // ?artist= (empty) + ?url= → still Mode C (the empty artist must NOT
+        // win Mode B's gate).
+        val a = handler.parse(Uri.parse("parachord://play/radio?artist=&url=https%3A%2F%2Fexample.com%2Fp.jspf"))
+        val pr = a as DeepLinkAction.PlayRadio
+        assertTrue(pr.mode is RadioMode.PoolBased)
+    }
+
+    @Test
+    fun parsePlayRadio_malformedTracksFallsBackToArtistSeed() {
+        // Malformed base64 in ?tracks= causes parseProtocolPlayInput to drop
+        // the input entirely. With ?artist= also present, parser falls into
+        // Mode B. This is documented behavior, locked by this test.
+        val a = handler.parse(Uri.parse("parachord://play/radio?artist=Slowdive&tracks=NOT_BASE64"))
+        val pr = a as DeepLinkAction.PlayRadio
+        assertTrue(pr.mode is RadioMode.ArtistSeed)
+    }
+
+    @Test
+    fun parsePlayRadio_shuffleFlagPlumbsThrough() {
+        val a = handler.parse(Uri.parse("parachord://play/radio?artist=Slowdive&shuffle=1"))
+        assertTrue((a as DeepLinkAction.PlayRadio).shuffle)
+        val b = handler.parse(Uri.parse("parachord://play/radio?artist=Slowdive"))
+        assertFalse((b as DeepLinkAction.PlayRadio).shuffle)
+    }
 }

@@ -283,9 +283,8 @@ class DeepLinkHandler constructor() {
      *   yields [DeepLinkAction.Unknown].
      * - none of the above → [DeepLinkAction.Unknown].
      *
-     * `?name=` (precedence: `name` > `title` > resolved name > "Radio") is the
-     * station display name; `PlayRadio.refillUrl` carries either `?refill=` or
-     * `?refillUrl=` for downstream refill fetches.
+     * `?name=` is the station display name; `PlayRadio.refillUrl` carries
+     * either `?refill=` or `?refillUrl=` for downstream refill fetches.
      */
     private fun parsePlayRadio(uri: Uri): DeepLinkAction {
         val input = parseProtocolPlayInput(uri)
