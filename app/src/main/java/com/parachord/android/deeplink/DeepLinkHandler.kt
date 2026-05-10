@@ -275,25 +275,38 @@ class DeepLinkHandler constructor() {
      * Parse `parachord://play/radio?...` into [DeepLinkAction.PlayRadio].
      *
      * Mode selection (mirrors desktop `protocol-schema.md` §Radio):
-     * - `?refillUrl=` present → Mode A (URL-fed). [RadioMode.PoolBased] used as
-     *   placeholder for the sealed-class slot; the radio engine reads
-     *   `refillUrl` directly.
-     * - `?artist=` present (with optional `?title=`) → Mode B
-     *   ([RadioMode.ArtistSeed]).
-     * - `?tracks=` present → Mode C ([RadioMode.PoolBased]).
+     * - `?artist=` alone (no `?url=`/`?tracks=`) → Mode B ([RadioMode.ArtistSeed]).
+     * - `?url=` or `?tracks=` present → Mode C ([RadioMode.PoolBased]). `?url=`
+     *   is the initial pool URL; `?tracks=` is an inline base64 JSON pool.
+     * - `?refill=` (or legacy alias `?refillUrl=`) is the URL used for
+     *   subsequent refills only — NOT a valid initial pool source. Alone, it
+     *   yields [DeepLinkAction.Unknown].
      * - none of the above → [DeepLinkAction.Unknown].
+     *
+     * `?name=` (precedence: `name` > `title` > resolved name > "Radio") is the
+     * station display name; `PlayRadio.refillUrl` carries either `?refill=` or
+     * `?refillUrl=` for downstream refill fetches.
      */
     private fun parsePlayRadio(uri: Uri): DeepLinkAction {
         val input = parseProtocolPlayInput(uri)
-        val refillUrl = uri.clampedParam("refillUrl")
+        // ?refill= is the explicit refill URL for Mode C; ?refillUrl= kept as
+        // a legacy alias for back-compat with anything generated against the
+        // Phase 2 build.
+        val refillUrl = uri.clampedParam("refill") ?: uri.clampedParam("refillUrl")
         val name = uri.clampedParam("name")
         val shuffle = uri.clampedParam("shuffle") == "1"
         val artist = uri.clampedParam("artist")
         val title = uri.clampedParam("title")
+
+        val hasUrl = !input?.url.isNullOrBlank()
+        val hasTracks = input?.tracks?.isNotEmpty() == true
+        val hasArtist = !artist.isNullOrBlank()
+
         val mode: RadioMode = when {
-            refillUrl != null -> RadioMode.PoolBased
-            !artist.isNullOrBlank() -> RadioMode.ArtistSeed(artist, title)
-            input?.tracks?.isNotEmpty() == true -> RadioMode.PoolBased
+            // Mode B: artist seed, no inline pool, no URL pool
+            hasArtist && !hasUrl && !hasTracks -> RadioMode.ArtistSeed(artist!!, title)
+            // Mode C: explicit pool (URL or inline)
+            hasUrl || hasTracks -> RadioMode.PoolBased
             else -> return DeepLinkAction.Unknown(uri.toString())
         }
         return DeepLinkAction.PlayRadio(
