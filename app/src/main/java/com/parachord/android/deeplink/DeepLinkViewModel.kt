@@ -392,7 +392,10 @@ class DeepLinkViewModel constructor(
                 // the radio name. (The acknowledgment above is enough.)
             }
             is PlayRadioResult.StartedModeC -> _navEvents.emit(
-                DeepLinkNavEvent.Toast("Playing ${r.displayName} (${r.trackCount} tracks)")
+                // No track count — radio stations are seeded with a small
+                // initial pool and refill on the fly, so "(5 tracks)" would
+                // misrepresent the station as a fixed-length playlist.
+                DeepLinkNavEvent.Toast("Playing ${r.displayName}")
             )
             is PlayRadioResult.Failed -> _navEvents.emit(
                 DeepLinkNavEvent.Toast("Radio failed: ${r.reason}")
