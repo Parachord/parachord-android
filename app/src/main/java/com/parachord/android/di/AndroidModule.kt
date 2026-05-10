@@ -701,6 +701,29 @@ val androidModule = module {
     singleOf(::DeepLinkHandler)
     singleOf(::ExternalLinkResolver)
 
+    // Protocol play surface (#119–#121): concrete resolver/teardown impls
+    // + handler orchestrator. The teardown's listen-along stopper is wired
+    // separately at MainActivity startup via setListenAlongStopper().
+    single<com.parachord.shared.deeplink.ProtocolInputResolver> {
+        com.parachord.android.deeplink.AndroidProtocolInputResolver(
+            musicBrainzClient = get(),
+            spotifyClient = get(),
+            appleMusicClient = get(),
+            metadataService = get(),
+            httpClient = get(),
+        )
+    }
+    single { com.parachord.android.deeplink.AndroidProtocolPlayTeardown(playbackController = get()) }
+    single<com.parachord.shared.deeplink.ProtocolPlayTeardown> { get<com.parachord.android.deeplink.AndroidProtocolPlayTeardown>() }
+    single {
+        com.parachord.android.deeplink.ProtocolPlayHandler(
+            resolver = get(),
+            teardown = get(),
+            playbackController = get(),
+            trackResolverCache = get(),
+        )
+    }
+
     // ── Sync ─────────────────────────────────────────────────────────
 
     singleOf(::SyncEngine)

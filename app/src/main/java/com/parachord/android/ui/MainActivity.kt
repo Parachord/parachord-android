@@ -264,6 +264,16 @@ private fun ParachordAppContent(mainViewModel: MainViewModel) {
     // Handle deep link navigation events
     val deepLinkViewModel: DeepLinkViewModel = koinViewModel()
 
+    // Wire the listen-along stopper for the protocol-play teardown (#120).
+    // The teardown lives as a Koin singleton (it can't depend on a ViewModel
+    // directly), so we hand it a callback at composition time. Idempotent —
+    // safe to set multiple times across recompositions.
+    val protocolTeardown: com.parachord.android.deeplink.AndroidProtocolPlayTeardown =
+        org.koin.compose.koinInject()
+    LaunchedEffect(mainViewModel) {
+        protocolTeardown.setListenAlongStopper { mainViewModel.stopListenAlong(silent = true) }
+    }
+
     // Process pending deep links from the Activity (intent handling).
     // The Activity stores the URI; the composable-scoped ViewModel processes it.
     val activity = context as? MainActivity
