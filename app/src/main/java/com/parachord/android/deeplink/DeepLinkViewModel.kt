@@ -40,7 +40,31 @@ sealed class DeepLinkNavEvent {
     data object Settings : DeepLinkNavEvent()
     data class Search(val query: String?) : DeepLinkNavEvent()
     data class Chat(val prompt: String?) : DeepLinkNavEvent()
-    data class Toast(val message: String) : DeepLinkNavEvent()
+
+    /**
+     * Acknowledgment toasts for slow operations (radio fetch, listen-along
+     * lookup) opt into [longDuration]=true so they read as ~3.5s rather
+     * than ~2s. Desktop uses a 30s clearing-on-event toast — Android Toast
+     * doesn't support arbitrary durations or programmatic dismiss-on-event,
+     * so we approximate via LENGTH_LONG. Future polish: convert to a
+     * Compose Snackbar with explicit duration + clear-on-track-change.
+     */
+    data class Toast(
+        val message: String,
+        val longDuration: Boolean = false,
+    ) : DeepLinkNavEvent()
+
+    /**
+     * `parachord://listen-along` resolved to a Friend (saved or
+     * transient). MainActivity collects this and calls
+     * `MainViewModel.startListenAlong(friend)`.
+     *
+     * Event-based dispatch is preferred over a direct callback: it
+     * matches every other deeplink-driven nav transition, keeps the
+     * ViewModel free of an Activity-scoped reference, and survives
+     * recompositions cleanly.
+     */
+    data class StartListenAlong(val friend: com.parachord.shared.model.Friend) : DeepLinkNavEvent()
 }
 
 /**
@@ -63,6 +87,8 @@ class DeepLinkViewModel constructor(
     private val chatService: AiChatService,
     private val protocolPlayHandler: ProtocolPlayHandler,
     private val protocolPlayTeardown: com.parachord.shared.deeplink.ProtocolPlayTeardown,
+    private val playRadioDispatcher: PlayRadioDispatcher,
+    private val listenAlongDispatcher: ListenAlongDispatcher,
 ) : ViewModel() {
 
     private val _navEvents = MutableSharedFlow<DeepLinkNavEvent>()
@@ -313,12 +339,9 @@ class DeepLinkViewModel constructor(
                 is DeepLinkAction.PlayAlbum -> dispatchProtocolPlay(action)
                 is DeepLinkAction.PlayPlaylist -> dispatchProtocolPlay(action)
 
-                // ── Phase 3 (#121) — to be wired ──
-                is DeepLinkAction.PlayRadio,
-                is DeepLinkAction.ListenAlong -> {
-                    Log.d(TAG, "Protocol handler not yet wired (Phase 3): $action")
-                    _navEvents.emit(DeepLinkNavEvent.Toast("Coming soon"))
-                }
+                // ── Phase 3 (#121) ──
+                is DeepLinkAction.PlayRadio -> dispatchPlayRadio(action)
+                is DeepLinkAction.ListenAlong -> dispatchListenAlong(action)
             }
         }
     }
@@ -348,6 +371,68 @@ class DeepLinkViewModel constructor(
                 DeepLinkNavEvent.Toast("Playing ${r.displayName} (${r.trackCount} tracks)")
             )
             is ProtocolPlayResult.Failed -> _navEvents.emit(DeepLinkNavEvent.Toast(r.reason))
+        }
+    }
+
+    /**
+     * Dispatch a `parachord://play/radio` action through
+     * [PlayRadioDispatcher] and surface the result as a toast.
+     *
+     * The acknowledgment toast ("Building radio…") fires BEFORE the
+     * dispatcher runs since Mode C URL fetch can take seconds and the
+     * user needs feedback within ~500ms. Mode B doesn't need a follow-up
+     * toast (the banner shows the radio name); Mode C reports the track
+     * count once the pool is built.
+     */
+    private suspend fun dispatchPlayRadio(action: DeepLinkAction.PlayRadio) {
+        _navEvents.emit(DeepLinkNavEvent.Toast("Building radio…", longDuration = true))
+        when (val r = playRadioDispatcher.dispatch(action)) {
+            is PlayRadioResult.StartedModeB -> {
+                // Mode B doesn't need a follow-up toast — the banner shows
+                // the radio name. (The acknowledgment above is enough.)
+            }
+            is PlayRadioResult.StartedModeC -> _navEvents.emit(
+                // No track count — radio stations are seeded with a small
+                // initial pool and refill on the fly, so "(5 tracks)" would
+                // misrepresent the station as a fixed-length playlist.
+                DeepLinkNavEvent.Toast("Playing ${r.displayName}")
+            )
+            is PlayRadioResult.Failed -> _navEvents.emit(
+                DeepLinkNavEvent.Toast("Radio failed: ${r.reason}")
+            )
+        }
+    }
+
+    /**
+     * Dispatch a `parachord://listen-along` action through
+     * [ListenAlongDispatcher]. Acknowledgment toast fires immediately
+     * (per issue #121's "UX polish" addendum — feedback within ~500ms
+     * of the deeplink) so the user sees something even if the local
+     * lookup misses and we have to round-trip the now-playing API.
+     */
+    private suspend fun dispatchListenAlong(action: DeepLinkAction.ListenAlong) {
+        _navEvents.emit(DeepLinkNavEvent.Toast("Catching up to ${action.user}…", longDuration = true))
+        when (val r = listenAlongDispatcher.dispatch(action)) {
+            is ListenAlongResult.Started -> {
+                // MainActivity collects this and calls
+                // mainViewModel.startListenAlong(friend), which
+                // internally runs stopListenAlong(silent=true) before
+                // starting the new loop — the swap is atomic.
+                _navEvents.emit(DeepLinkNavEvent.StartListenAlong(r.friend))
+            }
+            is ListenAlongResult.NotPlaying -> {
+                val serviceLabel = when (r.service) {
+                    "lastfm" -> "Last.fm"
+                    "listenbrainz" -> "ListenBrainz"
+                    else -> r.service
+                }
+                _navEvents.emit(
+                    DeepLinkNavEvent.Toast("${r.username} is not currently listening on $serviceLabel")
+                )
+            }
+            is ListenAlongResult.Failed -> _navEvents.emit(
+                DeepLinkNavEvent.Toast("Listen along failed: ${r.reason}")
+            )
         }
     }
 

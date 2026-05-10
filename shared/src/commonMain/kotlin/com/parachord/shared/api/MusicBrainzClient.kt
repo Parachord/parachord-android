@@ -111,6 +111,33 @@ class MusicBrainzClient(private val httpClient: HttpClient) {
     ): MbReleaseDetail =
         guardedGet("$BASE_URL/release/$releaseId") { parameter("inc", inc) }
 
+    /**
+     * Browse releases that belong to a given release-group, including
+     * media + recordings + artist-credits so the caller can map tracks
+     * directly without a follow-up release lookup.
+     *
+     * Sorted by release date (oldest first per MB default). Caller picks
+     * the first release as a canonical pick — usually adequate since most
+     * release-groups have one or a few editions of the same tracklist.
+     *
+     * Endpoint: GET /ws/2/release?release-group={rgMbid}&inc=...&limit=...
+     *
+     * Used by the protocol deeplink resolver to handle the common case
+     * where an external tool (e.g. Achordion) emits a release-group MBID
+     * as the canonical "album" identifier — `/ws/2/release/{rgMbid}` 404s
+     * for those, so we fall through to this browse endpoint.
+     */
+    suspend fun browseReleasesByReleaseGroup(
+        releaseGroupMbid: String,
+        inc: String = "recordings+artist-credits",
+        limit: Int = 1,
+    ): MbReleaseBrowseResponse =
+        guardedGet("$BASE_URL/release") {
+            parameter("release-group", releaseGroupMbid)
+            parameter("inc", inc)
+            parameter("limit", limit)
+        }
+
     suspend fun browseReleaseGroups(
         artistId: String,
         limit: Int = 100,
@@ -218,6 +245,21 @@ data class MbReleaseDetail(
     val artistName: String get() = artistCredit.joinToString(", ") { it.name }
     val year: Int? get() = date?.take(4)?.toIntOrNull()
 }
+
+/**
+ * Response for `GET /ws/2/release?release-group={rgMbid}&inc=...`.
+ *
+ * The browsed release entries carry the same shape as [MbReleaseDetail]
+ * (id + title + artist-credit + media[]+tracks[]) when the request
+ * includes `inc=recordings+artist-credits`, so we reuse that type for
+ * the items rather than introducing a parallel response model.
+ */
+@Serializable
+data class MbReleaseBrowseResponse(
+    @SerialName("release-offset") val releaseOffset: Int = 0,
+    @SerialName("release-count") val releaseCount: Int = 0,
+    val releases: List<MbReleaseDetail> = emptyList(),
+)
 
 @Serializable
 data class MbMedia(

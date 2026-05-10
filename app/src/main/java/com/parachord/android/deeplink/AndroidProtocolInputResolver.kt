@@ -2,6 +2,7 @@ package com.parachord.android.deeplink
 
 import com.parachord.android.playlist.parseXspfForProtocol
 import com.parachord.shared.api.AppleMusicClient
+import com.parachord.shared.api.MbReleaseDetail
 import com.parachord.shared.api.MusicBrainzClient
 import com.parachord.shared.api.SpotifyClient
 import com.parachord.shared.deeplink.ProtocolInputResolver
@@ -53,27 +54,53 @@ class AndroidProtocolInputResolver constructor(
     private val maxTracklistBytes: Int = 100 * 1024
 
     override suspend fun resolveByMbid(mbid: String): ResolvedProtocolPlay? {
-        return try {
-            val release = musicBrainzClient.getRelease(mbid, inc = "recordings+artist-credits")
-            val tracks = release.media.flatMap { medium ->
-                medium.tracks.map { track ->
-                    ProtocolTrack(
-                        artist = track.artistName ?: release.artistName.orEmpty(),
-                        title = track.title,
-                        album = release.title,
-                        mbid = track.id,
-                    )
-                }
-            }
-            if (tracks.isEmpty()) return null
-            ResolvedProtocolPlay(
-                displayName = release.title.orEmpty().ifEmpty { "Album" },
-                tracks = tracks,
-            )
+        // Try /release/{mbid} first (cheap, common path). If it 404s — typical
+        // for release-group MBIDs that Achordion + most music tools emit —
+        // fall back to /release?release-group={mbid} to find a canonical
+        // release within the release-group.
+        //
+        // expectSuccess=false on the shared HttpClient means a 404's error
+        // JSON `{"error":"Not Found"}` doesn't trip a status throw, but the
+        // body deserializer fires a SerializationException when the payload
+        // doesn't match MbReleaseDetail. The catch below handles both that
+        // and any genuinely malformed response. We additionally fall through
+        // when getRelease returns a usable object that has no media[] — that
+        // case is rare in practice but the release-group browse may carry a
+        // sibling edition with full tracks.
+        val releaseFromDirect: MbReleaseDetail? = try {
+            musicBrainzClient.getRelease(mbid, inc = "recordings+artist-credits")
+                .takeIf { it.media.isNotEmpty() }
         } catch (e: Exception) {
-            Log.w(TAG, "MBID resolve failed for $mbid: ${e.message}")
+            Log.d(TAG, "MBID $mbid not a release (${e.message?.take(80)}); trying release-group")
             null
         }
+        val releaseFromGroup: MbReleaseDetail? = if (releaseFromDirect != null) null else try {
+            musicBrainzClient.browseReleasesByReleaseGroup(
+                releaseGroupMbid = mbid,
+                inc = "recordings+artist-credits",
+                limit = 1,
+            ).releases.firstOrNull()
+        } catch (e: Exception) {
+            Log.w(TAG, "MBID $mbid release-group browse failed: ${e.message}")
+            null
+        }
+        val release: MbReleaseDetail = releaseFromDirect ?: releaseFromGroup ?: return null
+
+        val tracks = release.media.flatMap { medium ->
+            medium.tracks.map { track ->
+                ProtocolTrack(
+                    artist = track.artistName.ifEmpty { release.artistName },
+                    title = track.title,
+                    album = release.title,
+                    mbid = track.id,
+                )
+            }
+        }
+        if (tracks.isEmpty()) return null
+        return ResolvedProtocolPlay(
+            displayName = release.title.ifEmpty { "Album" },
+            tracks = tracks,
+        )
     }
 
     override suspend fun resolveBySpotify(spotifyIdOrUri: String): ResolvedProtocolPlay? {

@@ -58,16 +58,19 @@ data class ProtocolTrack(
 /**
  * Radio mode for `parachord://play/radio`.
  *
- * Mirrors desktop's three-mode model:
- * - Mode A (URL-fed) — handled via `PlayRadio.refillUrl` + initial
- *   `tracks` payload; no enum variant needed because the radio engine
- *   just polls the URL on each refill.
+ * Two variants after the Phase 3 parser reshape (commit `81e32dc`):
  * - [ArtistSeed] — Mode B. Server / client builds the queue from one
  *   seed artist (and optional song hint); refills are computed from
  *   the same seed.
- * - [PoolBased] — Mode C. Initial pool of tracks supplied inline
- *   (or via [ProtocolPlayInput.tracks]); subsequent refills draw from
- *   that pool. No external seed.
+ * - [PoolBased] — Mode C. Initial pool of tracks supplied via
+ *   [ProtocolPlayInput.url] (a hosted XSPF/JSPF/M3U/JSON tracklist) or
+ *   [ProtocolPlayInput.tracks] (inline base64 JSON). No external seed.
+ *
+ * Note: there is no separate "Mode A" variant — the optional
+ * [PlayRadio.refillUrl] is what subsequent refills draw from, and is
+ * decoupled from initial pool sourcing. A radio with `?url=` for the
+ * initial pool plus `?refill=` for subsequent refills is just Mode C
+ * with a refill URL set.
  */
 sealed class RadioMode {
     /** Mode B — single seed artist (and optional song title hint). */

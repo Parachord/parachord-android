@@ -1,7 +1,14 @@
 package com.parachord.android.deeplink
 
+import android.app.Application
+import android.net.Uri
+import com.parachord.shared.deeplink.DeepLinkAction
+import com.parachord.shared.deeplink.RadioMode
 import org.junit.Assert.*
 import org.junit.Test
+import org.junit.runner.RunWith
+import org.robolectric.RobolectricTestRunner
+import org.robolectric.annotation.Config
 
 /**
  * Tests for DeepLinkHandler's URI parsing logic.
@@ -10,6 +17,9 @@ import org.junit.Test
  * we test the parsing logic by replicating the pure string-based routing.
  * The actual DeepLinkHandler delegates to Uri methods; these tests verify
  * the routing decision logic using the same string patterns.
+ *
+ * Tests that need real Uri parsing run under Robolectric (see
+ * [DeepLinkHandlerRadioContractTest] below).
  */
 class DeepLinkHandlerTest {
 
@@ -259,5 +269,94 @@ class DeepLinkHandlerTest {
         // No path segment — falls into the legacy [Play] action.
         assertTrue(url.startsWith("parachord://play?"))
         assertFalse(url.contains("parachord://play/"))
+    }
+}
+
+/**
+ * Real-Uri tests for the `parachord://play/radio` parser contract (#121 [1/N]).
+ *
+ * Runs under Robolectric so [Uri.parse] is real; the rest of the suite is
+ * string-pattern only and stays fast.
+ */
+@RunWith(RobolectricTestRunner::class)
+@Config(application = Application::class)
+class DeepLinkHandlerRadioContractTest {
+
+    private val handler = DeepLinkHandler()
+
+    @Test
+    fun parsePlayRadio_nameTakesPrecedenceOverTitle() {
+        val a = handler.parse(Uri.parse("parachord://play/radio?url=https%3A%2F%2Fexample.com%2Fp.jspf&name=My%20Station&title=ignored"))
+        assertTrue(a is DeepLinkAction.PlayRadio)
+        val pr = a as DeepLinkAction.PlayRadio
+        assertEquals("My Station", pr.name)
+    }
+
+    @Test
+    fun parsePlayRadio_modeBOnlyWhenNoUrlOrTracks() {
+        val a = handler.parse(Uri.parse("parachord://play/radio?artist=Slowdive"))
+        val pr = a as DeepLinkAction.PlayRadio
+        assertTrue(pr.mode is RadioMode.ArtistSeed)
+    }
+
+    @Test
+    fun parsePlayRadio_modeCWhenTracksAndArtistBothPresent() {
+        // Artist + tracks → Mode C (pool wins per issue spec).
+        // base64 of [{"title":"T","artist":"A"}] = W3sidGl0bGUiOiJUIiwiYXJ0aXN0IjoiQSJ9XQ==
+        val a = handler.parse(Uri.parse("parachord://play/radio?artist=Foo&tracks=W3sidGl0bGUiOiJUIiwiYXJ0aXN0IjoiQSJ9XQ%3D%3D"))
+        val pr = a as DeepLinkAction.PlayRadio
+        assertTrue(pr.mode is RadioMode.PoolBased)
+    }
+
+    @Test
+    fun parsePlayRadio_refillAliasMapsToSameField() {
+        // ?refill= should populate refillUrl. ?refillUrl= legacy alias should also work.
+        val a1 = handler.parse(Uri.parse("parachord://play/radio?url=https%3A%2F%2Fexample.com%2Fp.jspf&refill=https%3A%2F%2Fexample.com%2Fr.jspf"))
+        val a2 = handler.parse(Uri.parse("parachord://play/radio?url=https%3A%2F%2Fexample.com%2Fp.jspf&refillUrl=https%3A%2F%2Fexample.com%2Fr.jspf"))
+        assertEquals("https://example.com/r.jspf", (a1 as DeepLinkAction.PlayRadio).refillUrl)
+        assertEquals("https://example.com/r.jspf", (a2 as DeepLinkAction.PlayRadio).refillUrl)
+    }
+
+    @Test
+    fun parsePlayRadio_refillAlonePresentButNoUrlOrTracks_isUnknown() {
+        // refill is for subsequent fetches only — not a valid initial pool source.
+        val a = handler.parse(Uri.parse("parachord://play/radio?refill=https%3A%2F%2Fexample.com%2Fr.jspf"))
+        assertTrue(a is DeepLinkAction.Unknown)
+    }
+
+    @Test
+    fun parsePlayRadio_modeB_titleHintPlumbsThrough() {
+        val a = handler.parse(Uri.parse("parachord://play/radio?artist=Slowdive&title=Sugar%20For%20The%20Pill"))
+        val pr = a as DeepLinkAction.PlayRadio
+        val seed = pr.mode as RadioMode.ArtistSeed
+        assertEquals("Slowdive", seed.artist)
+        assertEquals("Sugar For The Pill", seed.title)
+    }
+
+    @Test
+    fun parsePlayRadio_blankArtistTreatedAsAbsent() {
+        // ?artist= (empty) + ?url= → still Mode C (the empty artist must NOT
+        // win Mode B's gate).
+        val a = handler.parse(Uri.parse("parachord://play/radio?artist=&url=https%3A%2F%2Fexample.com%2Fp.jspf"))
+        val pr = a as DeepLinkAction.PlayRadio
+        assertTrue(pr.mode is RadioMode.PoolBased)
+    }
+
+    @Test
+    fun parsePlayRadio_malformedTracksFallsBackToArtistSeed() {
+        // Malformed base64 in ?tracks= causes parseProtocolPlayInput to drop
+        // the input entirely. With ?artist= also present, parser falls into
+        // Mode B. This is documented behavior, locked by this test.
+        val a = handler.parse(Uri.parse("parachord://play/radio?artist=Slowdive&tracks=NOT_BASE64"))
+        val pr = a as DeepLinkAction.PlayRadio
+        assertTrue(pr.mode is RadioMode.ArtistSeed)
+    }
+
+    @Test
+    fun parsePlayRadio_shuffleFlagPlumbsThrough() {
+        val a = handler.parse(Uri.parse("parachord://play/radio?artist=Slowdive&shuffle=1"))
+        assertTrue((a as DeepLinkAction.PlayRadio).shuffle)
+        val b = handler.parse(Uri.parse("parachord://play/radio?artist=Slowdive"))
+        assertFalse((b as DeepLinkAction.PlayRadio).shuffle)
     }
 }

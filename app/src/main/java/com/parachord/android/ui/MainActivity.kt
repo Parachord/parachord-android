@@ -78,6 +78,7 @@ import com.parachord.android.ui.components.ImportPlaylistDialog
 import com.parachord.android.ui.components.SpotifyDevicePickerDialog
 import com.parachord.android.ui.components.DrawerContent
 import com.parachord.android.ui.components.MiniPlayer
+import com.parachord.android.ui.components.MiniPlayerLoading
 import com.parachord.android.ui.navigation.BottomNavItem
 import com.parachord.android.ui.navigation.ParachordNavHost
 import com.parachord.android.ui.navigation.Routes
@@ -327,8 +328,18 @@ private fun ParachordAppContent(mainViewModel: MainViewModel) {
                     navController.navigate(Routes.SEARCH) { launchSingleTop = true }
                 is DeepLinkNavEvent.Chat ->
                     navController.navigate(Routes.CHAT) { launchSingleTop = true }
-                is DeepLinkNavEvent.Toast ->
-                    Toast.makeText(context, event.message, Toast.LENGTH_SHORT).show()
+                is DeepLinkNavEvent.Toast -> {
+                    val duration = if (event.longDuration) Toast.LENGTH_LONG else Toast.LENGTH_SHORT
+                    Toast.makeText(context, event.message, duration).show()
+                }
+                is DeepLinkNavEvent.StartListenAlong -> {
+                    // The dispatcher already ran the listen-along
+                    // handover teardown (exit-spinoff + clear-queue,
+                    // skipping listen-along stop). startListenAlong
+                    // calls stopListenAlong(silent=true) at its top so
+                    // the swap from any active friend is atomic.
+                    mainViewModel.startListenAlong(event.friend)
+                }
             }
         }
     }
@@ -515,6 +526,12 @@ private fun ParachordAppContent(mainViewModel: MainViewModel) {
                                         }
                                     },
                                 )
+                            } else if (playbackState.isPlaybarLoading || playbackState.spinoffLoading) {
+                                // Deeplink radio (Mode C) or seed-spinoff
+                                // (Mode B) is mid-fetch with no first
+                                // track yet — show a placeholder bar so
+                                // the user knows something's happening.
+                                MiniPlayerLoading()
                             }
                             // Subtle top border
                             Box(
