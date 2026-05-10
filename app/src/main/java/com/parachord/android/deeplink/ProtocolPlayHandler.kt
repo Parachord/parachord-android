@@ -74,6 +74,22 @@ class ProtocolPlayHandler constructor(
         allowTracks = true, allowArtistTitleAlbum = false,
     )
 
+    /**
+     * Resolve a hosted-tracklist URL into a list of [ProtocolTrack].
+     *
+     * Used by [PlayRadioDispatcher] to wire the Mode C refill fetcher
+     * — same resolver path as the initial pool fetch, so SSRF guard,
+     * JSPF/XSPF/M3U parser cascade, and LB-token auto-attach all apply
+     * for free. Exceptions propagate to the caller (the refiller
+     * catches them and counts as empty).
+     *
+     * Returns an empty list when the URL doesn't resolve to anything
+     * (caller treats this same as an error — counts as empty for the
+     * stop-condition counter).
+     */
+    suspend fun resolveTrackList(url: String): List<ProtocolTrack> =
+        resolver.resolveByUrl(url)?.tracks ?: emptyList()
+
     suspend fun handle(action: DeepLinkAction.PlayAlbum): ProtocolPlayResult =
         runHandle("album", action.input, albumOpts)
 

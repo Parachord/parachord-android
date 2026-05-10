@@ -67,6 +67,8 @@ class PlaybackController constructor(
     companion object {
         private const val TAG = "PlaybackController"
         private const val SPINOFF_SIMILAR_LIMIT = 20
+        /** Pool size below which Mode C triggers a refill (matches desktop's < 3). */
+        private const val POOL_REFILL_THRESHOLD = 3
     }
 
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Main)
@@ -150,19 +152,18 @@ class PlaybackController constructor(
     private var spinoffJob: Job? = null
 
     // ── Pool-based spinoff (Mode C) refill state ────────────────────────
-    // Captured by [startPoolBasedSpinoff]; read by Task 5's refill loop
-    // (`parachord://play/radio?refill=…`). Only meaningful while the
-    // current spinoff is pool-based (id == "pool-based"). For
-    // seed-based spinoffs these stay null/0.
+    // The actual refill loop (rate-limit, empty counter, dedup, ID
+    // stamping) lives in [PoolRefiller] for testability. This holder
+    // forwards `refillUrl` and `fetcher` into it on
+    // [startPoolBasedSpinoff], triggers it from [skipNextInternal] when
+    // the pool drops below [POOL_REFILL_THRESHOLD], and resets it on
+    // [exitSpinoff].
     //
     // Reset on every [startPoolBasedSpinoff] entry AND on [exitSpinoff]
     // to prevent cross-mode state leak — without the exit reset, a Mode B
-    // spinoff that follows a Mode C exit would see a leftover non-null
-    // poolRefillUrl. Task 5's refill loop only reads these fields; it
-    // doesn't need to write reset logic.
-    private var poolRefillUrl: String? = null
-    private var poolRefillEmptyCount: Int = 0
-    private var poolLastRefillTs: Long = 0L
+    // spinoff that follows a Mode C exit would see leftover refiller
+    // state.
+    private val poolRefiller = PoolRefiller()
 
     fun connect() {
         if (controllerFuture != null) return
@@ -313,6 +314,16 @@ class PlaybackController constructor(
             if (spinoffPool.isNotEmpty()) {
                 val next = spinoffPool.removeAt(0)
                 Log.d(TAG, "Spinoff: playing next '${next.title}' by ${next.artist} (${spinoffPool.size} remaining)")
+
+                // Mode C refill trigger — fire when the pool drops below
+                // POOL_REFILL_THRESHOLD AND we have a refill URL configured.
+                // This is a no-op for Mode B (seed-based) spinoffs since
+                // their refillUrl is null. The PoolRefiller handles
+                // rate-limit + stop-condition gating internally.
+                if (spinoffPool.size < POOL_REFILL_THRESHOLD && poolRefiller.refillUrl != null) {
+                    triggerPoolRefill()
+                }
+
                 advanceJob = scope.launch {
                     try {
                         playTrackInternal(next)
@@ -1640,6 +1651,59 @@ class PlaybackController constructor(
     }
 
     /**
+     * Mode C refill trigger — fire-and-forget fetch + dedup + append.
+     *
+     * Called from [skipNextInternal] when the spinoff pool drops below
+     * [POOL_REFILL_THRESHOLD] and a refill URL is configured. The
+     * actual rate-limit / stop-condition / dedup logic lives in
+     * [PoolRefiller.tryRefill] — this method is just the
+     * coroutine-launch shim.
+     *
+     * Pool-level [PlaybackContext] is inherited (refilled tracks just
+     * join the existing spinoff context — no per-track tagging needed
+     * on Android since context is queue-level, not per-track).
+     */
+    private fun triggerPoolRefill() {
+        scope.launch(Dispatchers.IO) {
+            try {
+                val snapshot = spinoffPool.toList()
+                val fresh = poolRefiller.tryRefill(snapshot) ?: return@launch
+                spinoffPool.addAll(fresh)
+                Log.d(TAG, "Pool refill: appended ${fresh.size} tracks (pool now ${spinoffPool.size})")
+                // Pre-warm resolver cache so they're ready when consumed.
+                try {
+                    trackResolverCache.resolveInBackground(fresh, backfillDb = false, priority = false)
+                } catch (e: Exception) {
+                    if (e is kotlinx.coroutines.CancellationException) throw e
+                    Log.w(TAG, "Pool refill pre-warm failed: ${e.message}")
+                }
+            } catch (e: kotlinx.coroutines.CancellationException) {
+                throw e
+            } catch (e: Exception) {
+                Log.w(TAG, "Pool refill launch failed: ${e.message}")
+            }
+        }
+    }
+
+    /**
+     * Set (or clear) the fetcher used by the Mode C refill loop to
+     * re-fetch tracks from a `?refill=…` URL when `spinoffPool.size < 3`.
+     *
+     * The fetcher is a closure over the protocol resolver (wired by
+     * [com.parachord.android.deeplink.PlayRadioDispatcher] at construction
+     * time), so the same SSRF guard, JSPF/XSPF parser, and
+     * LB-token-auto-attach logic that the initial pool fetch goes through
+     * also applies to refills — for free.
+     *
+     * Stored as a process-lifetime reference. Not cleared on
+     * [exitSpinoff] (only the per-pool refillUrl + counters are), so a
+     * subsequent pool-based spinoff doesn't need to re-wire it.
+     */
+    fun setPoolFetcher(fetcher: (suspend (String) -> List<com.parachord.shared.deeplink.ProtocolTrack>)?) {
+        poolRefiller.fetcher = fetcher
+    }
+
+    /**
      * Pool-based spinoff (Mode C of `parachord://play/radio`).
      *
      * No Last.fm seed step — the caller supplies an already-resolved pool,
@@ -1676,12 +1740,14 @@ class PlaybackController constructor(
 
         spinoffPool.addAll(initialPool)
 
-        // Capture refill state for Task 5's refill loop. Reset siblings
-        // (every entry resets — harmless if exitSpinoff hasn't yet wired
-        // its own reset, since they're re-initialized here on every call).
-        poolRefillUrl = refillUrl
-        poolRefillEmptyCount = 0
-        poolLastRefillTs = 0L
+        // Wire refill URL + reset per-pool counters. The fetcher is
+        // process-lifetime (set once by PlayRadioDispatcher at app start
+        // / first dispatch) so we don't touch it here — preserves it
+        // across exit + re-enter cycles. Counters reset to prevent the
+        // previous pool's empty-count or last-fetch timestamp leaking
+        // into this one.
+        poolRefiller.refillUrl = refillUrl
+        poolRefiller.resetCounters()
 
         val spinoffContext = PlaybackContext(
             type = "spinoff",
@@ -1719,9 +1785,11 @@ class PlaybackController constructor(
         spinoffJob?.cancel()
         spinoffPool.clear()
         spinoffSourceTrack = null
-        poolRefillUrl = null
-        poolRefillEmptyCount = 0
-        poolLastRefillTs = 0L
+        // Full reset — clear refillUrl + counters. fetcher stays wired
+        // (it's process-lifetime), so the next pool-based spinoff
+        // doesn't need to re-set it.
+        poolRefiller.refillUrl = null
+        poolRefiller.resetCounters()
 
         // Restore previous playback context (queue was never modified)
         queueManager.setContext(preSpinoffContext)

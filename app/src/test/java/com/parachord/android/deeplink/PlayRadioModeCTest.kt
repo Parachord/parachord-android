@@ -13,6 +13,7 @@ import com.parachord.shared.deeplink.ResolvedProtocolPlay
 import io.mockk.coEvery
 import io.mockk.coVerify
 import io.mockk.coVerifyOrder
+import io.mockk.every
 import io.mockk.just
 import io.mockk.mockk
 import io.mockk.runs
@@ -294,6 +295,62 @@ class PlayRadioModeCTest {
 
         assertTrue(result is PlayRadioResult.StartedModeC)
         coVerify(exactly = 1) { pc.startPoolBasedSpinoff(any(), "Radio", any()) }
+    }
+
+    @Test
+    fun modeC_dispatcher_wiresPoolFetcherBeforeHandlerRuns() = runTest {
+        // The dispatcher must call setPoolFetcher BEFORE handle(), so that
+        // when ProtocolPlayHandler invokes startPoolBasedSpinoff() the
+        // controller has a fetcher in place for the first refill tick.
+        val resolver = mockk<ProtocolInputResolver> {
+            coEvery { resolveByUrl(any()) } returns ResolvedProtocolPlay("X", sampleTracks)
+        }
+        val pc = mockk<PlaybackController>(relaxed = true)
+        val td = mockk<ProtocolPlayTeardown>()
+        coEvery { td.prepareForNewPlayback() } just runs
+        val handler = buildHandler(resolver = resolver, teardown = td, playbackController = pc)
+        val dispatcher = buildDispatcher(pc, td, handler)
+
+        every { pc.setPoolFetcher(any()) } just runs
+
+        dispatcher.dispatch(
+            DeepLinkAction.PlayRadio(
+                mode = RadioMode.PoolBased,
+                input = ProtocolPlayInput(url = "https://example.com/p.jspf"),
+                refillUrl = "https://example.com/p.jspf?refill=1",
+            )
+        )
+
+        coVerifyOrder {
+            pc.setPoolFetcher(any())
+            pc.startPoolBasedSpinoff(any(), any(), any())
+        }
+    }
+
+    @Test
+    fun modeC_handler_resolveTrackList_delegatesToResolver() = runTest {
+        // Tests the new ProtocolPlayHandler.resolveTrackList(url) method
+        // — the closure body wired into PlaybackController.setPoolFetcher.
+        // Should walk through ProtocolInputResolver.resolveByUrl and
+        // unwrap ResolvedProtocolPlay.tracks.
+        val resolver = mockk<ProtocolInputResolver> {
+            coEvery { resolveByUrl("https://refill.example.com/x") } returns
+                ResolvedProtocolPlay("Refill", sampleTracks)
+        }
+        val handler = buildHandler(resolver = resolver)
+        val tracks = handler.resolveTrackList("https://refill.example.com/x")
+        assertEquals(2, tracks.size)
+        assertEquals("A1", tracks[0].artist)
+    }
+
+    @Test
+    fun modeC_handler_resolveTrackList_returnsEmptyOnNullResolve() = runTest {
+        val resolver = mockk<ProtocolInputResolver> {
+            coEvery { resolveByUrl(any()) } returns null
+        }
+        val handler = buildHandler(resolver = resolver)
+        val tracks = handler.resolveTrackList("https://nope.example.com/x")
+        assertTrue(tracks.isEmpty())
     }
 
     @Test

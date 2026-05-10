@@ -66,6 +66,17 @@ class PlayRadioDispatcher(
                 // Mode C delegates resolve + teardown + entity build to
                 // ProtocolPlayHandler. Translate its result into our
                 // result type so the VM only has one sealed match site.
+                //
+                // Wire the refill fetcher BEFORE the handler runs so
+                // startPoolBasedSpinoff() — invoked synchronously inside
+                // handle() — sees a configured fetcher when it sets the
+                // refillUrl. The fetcher is a closure over the handler's
+                // resolveTrackList(url), so refills go through the same
+                // SSRF guard / JSPF parser / LB-token auto-attach as the
+                // initial pool fetch.
+                playbackController.setPoolFetcher { url ->
+                    protocolPlayHandler.resolveTrackList(url)
+                }
                 when (val r = protocolPlayHandler.handle(action)) {
                     is ProtocolPlayResult.Started ->
                         PlayRadioResult.StartedModeC(r.displayName, r.trackCount)
