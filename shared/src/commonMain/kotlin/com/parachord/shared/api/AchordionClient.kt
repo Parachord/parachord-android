@@ -2,6 +2,14 @@ package com.parachord.shared.api
 
 import com.parachord.shared.platform.Log
 import io.ktor.client.HttpClient
+import io.ktor.client.request.accept
+import io.ktor.client.request.get
+import io.ktor.client.request.header
+import io.ktor.client.request.parameter
+import io.ktor.client.statement.bodyAsText
+import io.ktor.http.ContentType
+import io.ktor.http.HttpHeaders
+import io.ktor.http.HttpStatusCode
 import kotlin.concurrent.Volatile
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.serialization.SerialName
@@ -53,7 +61,37 @@ class AchordionClient(
         mbid: String,
         includeNames: Boolean = false,
     ): EntityLink? {
-        TODO("Task 2")
+        if (bearerToken.isBlank()) return null
+        if (authFailed) return null
+        return try {
+            val response = httpClient.get(ENTITY_LINK_ENDPOINT) {
+                parameter("type", type.wireValue)
+                parameter("mbid", mbid)
+                if (includeNames) parameter("include", "names")
+                header(HttpHeaders.Authorization, "Bearer $bearerToken")
+                accept(ContentType.Application.Json)
+            }
+            when (response.status) {
+                HttpStatusCode.Unauthorized -> {
+                    authFailed = true
+                    Log.w(TAG, "entity-link returned 401 — suppressing further calls this session")
+                    null
+                }
+                HttpStatusCode.OK -> {
+                    val body = response.bodyAsText()
+                    json.decodeFromString<EntityLink>(body)
+                }
+                else -> {
+                    Log.w(TAG, "entity-link returned HTTP ${response.status.value} for $type mbid=$mbid")
+                    null
+                }
+            }
+        } catch (e: kotlinx.coroutines.CancellationException) {
+            throw e
+        } catch (e: Throwable) {
+            Log.w(TAG, "entity-link failed for $type mbid=$mbid: ${e.message}")
+            null
+        }
     }
 
     suspend fun submitTrackLinks(payload: SubmitTrackLinksRequest): SubmitResult {
