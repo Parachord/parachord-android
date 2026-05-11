@@ -6,11 +6,17 @@ import com.parachord.android.data.db.dao.PlaylistTrackDao
 import com.parachord.android.data.db.entity.PlaylistEntity
 import com.parachord.android.data.db.entity.PlaylistTrackEntity
 import com.parachord.android.data.db.entity.TrackEntity
+import com.parachord.shared.api.AchordionClient
+import com.parachord.shared.api.EntityType
 import com.parachord.shared.api.SmartLinkCreateRequest
 import com.parachord.shared.api.SmartLinkTrack
 import com.parachord.shared.api.SmartLinksClient
+import com.parachord.shared.api.SubmitTrackLinksRequest
+import com.parachord.shared.api.TrackLink
 import com.parachord.shared.platform.Log
 import kotlinx.coroutines.TimeoutCancellationException
+import kotlinx.coroutines.async
+import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.withTimeout
 
 /**
@@ -31,6 +37,7 @@ import kotlinx.coroutines.withTimeout
  */
 class ShareManager constructor(
     private val smartLinksClient: SmartLinksClient,
+    private val achordionClient: AchordionClient,
     private val playlistDao: PlaylistDao,
     private val playlistTrackDao: PlaylistTrackDao,
 ) {
@@ -47,27 +54,72 @@ class ShareManager constructor(
         val isSmartLink: Boolean,
     )
 
-    suspend fun shareTrack(track: TrackEntity): ShareResult {
+    suspend fun shareTrack(track: TrackEntity): ShareResult = coroutineScope {
         val subject = "${track.artist} – ${track.title}"
-        val urls = buildMap<String, String> {
-            track.spotifyId?.let { put("spotify", "https://open.spotify.com/track/$it") }
-            track.appleMusicId?.let { put("applemusic", "https://music.apple.com/song/$it") }
-            track.soundcloudId?.let { put("soundcloud", "https://soundcloud.com/$it") }
-        }
-        val smart = if (urls.isNotEmpty()) {
-            tryCreateSmartLink(
-                SmartLinkCreateRequest(
-                    title = track.title,
-                    artist = track.artist,
-                    albumArt = track.artworkUrl,
-                    type = "track",
-                    urls = urls,
-                )
-            )
-        } else null
-        val url = smart ?: deepLinkWrapper("play", "artist=${enc(track.artist)}&title=${enc(track.title)}")
-        return ShareResult(url, subject, smart != null)
+        val mbid = track.recordingMbid
+
+        // Fire entity-link + submit in parallel. Both AWAITED so the recipient's
+        // first click sees a fully-warmed Achordion page. Matches desktop's
+        // publishSmartLink behavior (parachord-desktop/app.js:13380+).
+        val entityLinkJob = async { tryFetchEntityLink(EntityType.Track, mbid) }
+        val submitJob = async { trySubmitForTrack(track, mbid) }
+        val entityUrl = entityLinkJob.await()
+        submitJob.await()
+
+        val url = entityUrl ?: trackLookupUrl(track.artist, track.title)
+        ShareResult(url, subject, isSmartLink = entityUrl != null)
     }
+
+    private suspend fun tryFetchEntityLink(type: EntityType, mbid: String?): String? {
+        if (mbid.isNullOrBlank()) return null
+        return try {
+            withTimeout(SMART_LINK_TIMEOUT_MS) {
+                achordionClient.fetchEntityLink(type, mbid)?.url
+            }
+        } catch (e: TimeoutCancellationException) {
+            Log.w(TAG, "fetchEntityLink timed out for $type mbid=$mbid")
+            null
+        } catch (e: Exception) {
+            Log.w(TAG, "fetchEntityLink failed for $type mbid=$mbid: ${e.message}")
+            null
+        }
+    }
+
+    private suspend fun trySubmitForTrack(track: TrackEntity, mbid: String?) {
+        if (mbid.isNullOrBlank()) return
+        val links = buildList {
+            track.spotifyId?.takeIf { it.isNotBlank() }?.let {
+                add(TrackLink(url = "https://open.spotify.com/track/$it", host = "spotify.com", label = "Spotify"))
+            }
+            track.appleMusicId?.takeIf { it.isNotBlank() }?.let {
+                add(TrackLink(url = "https://music.apple.com/song/$it", host = "music.apple.com", label = "Apple Music"))
+            }
+            track.soundcloudId?.takeIf { it.isNotBlank() }?.let {
+                add(TrackLink(url = "https://soundcloud.com/$it", host = "soundcloud.com", label = "SoundCloud"))
+            }
+        }
+        if (links.isEmpty()) return
+        try {
+            withTimeout(SMART_LINK_TIMEOUT_MS) {
+                achordionClient.submitTrackLinks(
+                    SubmitTrackLinksRequest(
+                        mbid = mbid,
+                        links = links,
+                        trackName = track.title,
+                        artistName = track.artist,
+                        albumName = track.album,
+                    )
+                )
+            }
+        } catch (e: TimeoutCancellationException) {
+            Log.w(TAG, "submitTrackLinks timed out for mbid=$mbid")
+        } catch (e: Exception) {
+            Log.w(TAG, "submitTrackLinks failed for mbid=$mbid: ${e.message}")
+        }
+    }
+
+    private fun trackLookupUrl(artist: String, title: String): String =
+        "https://achordion.xyz/recording/lookup?artist=${enc(artist)}&title=${enc(title)}"
 
     suspend fun shareAlbum(
         title: String,
