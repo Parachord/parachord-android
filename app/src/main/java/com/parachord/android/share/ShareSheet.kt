@@ -66,9 +66,12 @@ fun rememberShareAlbum(): (
     val scope = rememberCoroutineScope()
     val shareManager: ShareManager = koinInject()
     return remember(context) {
-        { title, artist, artworkUrl, tracks, spotifyAlbumId ->
+        { title, artist, artworkUrl, _, _ ->
             scope.launch {
-                val result = shareManager.shareAlbum(title, artist, artworkUrl, tracks, spotifyAlbumId)
+                // releaseGroupMbid is not yet plumbed through callers — future follow-up
+                // to surface it from MetadataService results so Achordion serves the
+                // entity page directly instead of the lookup fallback.
+                val result = shareManager.shareAlbum(title, artist, artworkUrl, releaseGroupMbid = null)
                 openShareSheet(context, result.url, result.subject)
             }
             Unit

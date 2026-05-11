@@ -132,6 +132,54 @@ class ShareManagerTest {
     }
 
     @Test
+    fun shareAlbum_withMbid_callsEntityLinkOnly_noSubmit() = runTest {
+        val achordion = mockk<AchordionClient>()
+        coEvery { achordion.fetchEntityLink(EntityType.ReleaseGroup, "rg-mbid-1", any()) } returns
+            EntityLink(url = "https://achordion.xyz/release-group/death-cab-tower")
+
+        val mgr = buildManager(achordion = achordion)
+        val result = mgr.shareAlbum(
+            title = "I Built You a Tower",
+            artist = "Death Cab for Cutie",
+            artworkUrl = null,
+            releaseGroupMbid = "rg-mbid-1",
+        )
+
+        assertEquals("https://achordion.xyz/release-group/death-cab-tower", result.url)
+        assertTrue(result.isSmartLink)
+        coVerify(exactly = 1) { achordion.fetchEntityLink(EntityType.ReleaseGroup, "rg-mbid-1", any()) }
+        coVerify(exactly = 0) { achordion.submitTrackLinks(any()) }
+    }
+
+    @Test
+    fun shareAlbum_noMbid_returnsLookupFallback() = runTest {
+        val achordion = mockk<AchordionClient>(relaxed = true)
+        val mgr = buildManager(achordion = achordion)
+        val result = mgr.shareAlbum(
+            title = "I Built You a Tower",
+            artist = "Death Cab for Cutie",
+            artworkUrl = null,
+            releaseGroupMbid = null,
+        )
+        assertEquals(
+            "https://achordion.xyz/release-group/lookup?artist=Death%20Cab%20for%20Cutie&title=I%20Built%20You%20a%20Tower",
+            result.url,
+        )
+        assertFalse(result.isSmartLink)
+        coVerify(exactly = 0) { achordion.fetchEntityLink(any(), any(), any()) }
+    }
+
+    @Test
+    fun shareAlbum_entityLinkFails_returnsLookupFallback() = runTest {
+        val achordion = mockk<AchordionClient>()
+        coEvery { achordion.fetchEntityLink(any(), any(), any()) } returns null
+        val mgr = buildManager(achordion = achordion)
+        val result = mgr.shareAlbum("Tower", "Death Cab", null, "rg-mbid-1")
+        assertTrue(result.url.contains("/release-group/lookup?"))
+        assertFalse(result.isSmartLink)
+    }
+
+    @Test
     fun shareTrack_noSourceIds_doesNotCallSubmit() = runTest {
         val achordion = mockk<AchordionClient>()
         coEvery { achordion.fetchEntityLink(any(), any(), any()) } returns null

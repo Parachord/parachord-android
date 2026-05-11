@@ -124,35 +124,17 @@ class ShareManager constructor(
     suspend fun shareAlbum(
         title: String,
         artist: String,
-        artworkUrl: String?,
-        tracks: List<PlaylistTrackEntity>,
-        spotifyAlbumId: String? = null,
+        @Suppress("UNUSED_PARAMETER") artworkUrl: String?, // kept for caller compat; unused after Achordion migration
+        releaseGroupMbid: String?,
     ): ShareResult {
         val subject = "$artist – $title"
-        val albumUrls = buildMap<String, String> {
-            spotifyAlbumId?.let { put("spotify", "https://open.spotify.com/album/$it") }
-        }
-        val smartTracks = tracks.map { it.toSmartLinkTrack() }
-        val smart = if (smartTracks.isNotEmpty() || albumUrls.isNotEmpty()) {
-            tryCreateSmartLink(
-                SmartLinkCreateRequest(
-                    title = title,
-                    artist = artist,
-                    albumArt = artworkUrl,
-                    type = "album",
-                    urls = albumUrls.takeIf { it.isNotEmpty() },
-                    tracks = smartTracks.ifEmpty { null },
-                )
-            )
-        } else null
-        val url = smart ?: deepLinkWrapper(
-            host = "album",
-            // Path segments: album/{artist}/{title}; both URL-encoded.
-            pathOrQuery = "/${enc(artist)}/${enc(title)}",
-            isPath = true,
-        )
-        return ShareResult(url, subject, smart != null)
+        val entityUrl = tryFetchEntityLink(EntityType.ReleaseGroup, releaseGroupMbid)
+        val url = entityUrl ?: releaseGroupLookupUrl(artist, title)
+        return ShareResult(url, subject, isSmartLink = entityUrl != null)
     }
+
+    private fun releaseGroupLookupUrl(artist: String, title: String): String =
+        "https://achordion.xyz/release-group/lookup?artist=${enc(artist)}&title=${enc(title)}"
 
     /**
      * Convenience for callsites that have a [playlistId] but no in-memory
