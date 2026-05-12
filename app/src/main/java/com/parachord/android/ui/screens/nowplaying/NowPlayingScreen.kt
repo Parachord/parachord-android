@@ -45,7 +45,9 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.hapticfeedback.HapticFeedbackType
 import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.ui.platform.LocalHapticFeedback
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.text.font.FontWeight
@@ -61,7 +63,6 @@ import com.parachord.android.playback.effectiveTrack
 import com.parachord.android.ui.components.hapticClickable
 import com.parachord.android.ui.components.rememberHapticClick
 import com.parachord.android.resolver.trackKey
-import com.parachord.android.ui.components.AlbumArtCardFill
 import com.parachord.android.ui.components.ResolverSourceDropdown
 import com.parachord.android.ui.components.TrackContextInfo
 import com.parachord.android.ui.components.TrackContextMenuHost
@@ -290,21 +291,29 @@ fun NowPlayingScreen(
                 // (metadata, seek bar, controls, bottom row) are accounted for.
                 // This prevents the play/pause button from being pushed off screen
                 // when the title wraps to 2 lines.
-                AlbumArtCardFill(
+                val currentTrackIsLoved by viewModel.currentTrackIsLoved.collectAsStateWithLifecycle()
+                val singleTapHaptic = LocalHapticFeedback.current
+
+                AlbumArtWithGestures(
                     artworkUrl = displayArtworkUrl,
+                    isLoved = currentTrackIsLoved,
+                    onSingleTap = track?.album?.takeIf { track.artist.isNotBlank() }?.let { album ->
+                        {
+                            singleTapHaptic.performHapticFeedback(HapticFeedbackType.TextHandleMove)
+                            onNavigateToAlbum(album, track.artist)
+                        }
+                    },
+                    onDoubleTapLove = {
+                        track?.let { viewModel.addToCollection(it) }
+                    },
+                    onSwipeNext = { viewModel.skipNext() },
+                    onSwipePrevious = { viewModel.skipPrevious() },
+                    placeholderName = track?.artist ?: track?.title,
                     modifier = Modifier
                         .weight(1f)
-                        .padding(horizontal = 8.dp)
-                        .then(
-                            track?.album?.takeIf { track.artist.isNotBlank() }?.let { album ->
-                                Modifier.hapticClickable {
-                                    onNavigateToAlbum(album, track.artist)
-                                }
-                            } ?: Modifier
-                        ),
+                        .padding(horizontal = 8.dp),
                     cornerRadius = 12.dp,
                     elevation = 8.dp,
-                    placeholderName = track?.artist ?: track?.title,
                 )
 
                 Spacer(modifier = Modifier.height(16.dp))

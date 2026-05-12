@@ -12,14 +12,18 @@ import com.parachord.android.playback.PlaybackState
 import com.parachord.android.playback.PlaybackStateHolder
 import com.parachord.android.resolver.TrackResolverCache
 import android.util.Log
+import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.distinctUntilChanged
+import kotlinx.coroutines.flow.flatMapLatest
+import kotlinx.coroutines.flow.flowOf
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
+@OptIn(ExperimentalCoroutinesApi::class)
 class NowPlayingViewModel constructor(
     private val playbackStateHolder: PlaybackStateHolder,
     private val playbackController: PlaybackController,
@@ -46,6 +50,20 @@ class NowPlayingViewModel constructor(
     /** All resolved sources for the current track, for the source switcher dropdown. */
     val trackSources: StateFlow<Map<String, List<com.parachord.android.resolver.ResolvedSource>>> =
         trackResolverCache.trackSources
+
+    /**
+     * Whether the currently-playing track is in the user's collection.
+     * Drives the heart-pop animation gate in [AlbumArtWithGestures] (no
+     * animation fires when this is true — Instagram-strict).
+     */
+    val currentTrackIsLoved: StateFlow<Boolean> = playbackState
+        .map { it.currentTrack }
+        .distinctUntilChanged { a, b -> a?.title == b?.title && a?.artist == b?.artist }
+        .flatMapLatest { track ->
+            if (track == null) flowOf(false)
+            else libraryRepository.isTrackInCollection(track.title, track.artist)
+        }
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), false)
 
     /** Whether the currently playing artist is on tour. */
     private val _isOnTour = MutableStateFlow(false)
