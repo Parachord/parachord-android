@@ -620,6 +620,18 @@ val androidModule = module {
         )
     }
     singleOf(::WeeklyPlaylistsRepository)
+    // AnnouncementsRepository (#127) — consumes Achordion's `/api/announcements`
+    // feed. appVersion is sourced from BuildConfig.VERSION_NAME so client-side
+    // semver filtering matches the actual installed build. KvStore-backed:
+    // last-fetched timestamp + dismissed-ids CSV. Fetched on cold start
+    // (ParachordApplication) + onResume gated to 6h (MainActivity).
+    single {
+        com.parachord.shared.repository.AnnouncementsRepository(
+            achordionClient = get(),
+            kvStore = get(),
+            appVersion = com.parachord.android.BuildConfig.VERSION_NAME,
+        )
+    }
     // ConcertsRepository takes file I/O as suspend lambdas + per-API
     // BuildConfig key fallbacks (the shared class is platform-agnostic).
     // Cache lives at `<filesDir>/concerts_cache.json`; failures are swallowed.

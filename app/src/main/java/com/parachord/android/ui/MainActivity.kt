@@ -95,6 +95,7 @@ class MainActivity : ComponentActivity() {
     private val oAuthManager: OAuthManager by inject()
     private val musicKitBridge: MusicKitWebBridge by inject()
     private val settingsStore: SettingsStore by inject()
+    private val announcementsRepository: com.parachord.shared.repository.AnnouncementsRepository by inject()
 
     /** Pending deep link URI stored for the composable to process. */
     internal val pendingDeepLink = MutableStateFlow<Uri?>(null)
@@ -153,6 +154,15 @@ class MainActivity : ComponentActivity() {
                     musicKitBridge.configure()
                 }
             }
+        }
+        // Announcements feed (#127). Gated to 6h since last successful fetch
+        // so we don't slam the endpoint on every foreground return — the
+        // server caches at s-maxage=60 but our own gate is the polite floor.
+        // Fire-and-forget: failures inside refreshIfStale() are swallowed.
+        CoroutineScope(Dispatchers.IO).launch {
+            try {
+                announcementsRepository.refreshIfStale()
+            } catch (_: Exception) { /* swallow */ }
         }
     }
 
