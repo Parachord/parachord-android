@@ -19,6 +19,7 @@ class ParachordApplication : Application() {
     private val hostedPlaylistScheduler: HostedPlaylistScheduler by inject()
     private val imageEnrichmentService: ImageEnrichmentService by inject()
     private val crossResolverEnrichmentScheduler: CrossResolverEnrichmentScheduler by inject()
+    private val announcementsRepository: com.parachord.shared.repository.AnnouncementsRepository by inject()
 
     private val appScope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
 
@@ -60,6 +61,19 @@ class ParachordApplication : Application() {
                 imageEnrichmentService.regenerateAllPlaylistMosaics()
             } catch (_: Exception) {
                 // Background pass; don't take down the app on a failure.
+            }
+        }
+
+        // Announcements feed (#127). Fire-and-forget cold-start refresh —
+        // populates the home-screen banner StateFlow before HomeScreen
+        // collects it. Failures inside listAnnouncements() return an empty
+        // list and the banner just hides. The MainActivity.onResume path
+        // (gated to 6h) handles subsequent foreground returns.
+        appScope.launch {
+            try {
+                announcementsRepository.refreshNow()
+            } catch (_: Exception) {
+                // Swallow; banner stays hidden until next foreground refresh.
             }
         }
     }

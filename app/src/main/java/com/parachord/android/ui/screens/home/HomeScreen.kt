@@ -65,6 +65,8 @@ import androidx.compose.material3.TopAppBar
 import androidx.compose.material3.rememberModalBottomSheetState
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.rememberCoroutineScope
+import kotlinx.coroutines.launch
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -97,6 +99,9 @@ import com.parachord.android.data.db.entity.AlbumEntity
 import com.parachord.android.data.db.entity.FriendEntity
 import com.parachord.android.data.db.entity.PlaylistEntity
 import com.parachord.android.ui.components.AlbumArtCard
+import com.parachord.android.ui.components.AnnouncementBanner
+import android.content.Intent
+import android.net.Uri
 import android.widget.Toast
 import androidx.compose.ui.platform.LocalContext
 import com.parachord.android.share.rememberSharePlaylistById
@@ -292,10 +297,54 @@ fun HomeScreen(
                 }
             }
         } else {
+            // ── Achordion announcements banner (#127) ────────────────────
+            val announcementsRepository: com.parachord.shared.repository.AnnouncementsRepository =
+                org.koin.compose.koinInject()
+            val announcements by announcementsRepository.visibleAnnouncements
+                .collectAsStateWithLifecycle()
+            val bannerScope = rememberCoroutineScope()
+            val firstAnnouncement = announcements.firstOrNull()
+            if (firstAnnouncement != null) {
+                LaunchedEffect(firstAnnouncement.id) {
+                    announcementsRepository.trackView(firstAnnouncement.id)
+                }
+            }
+
             LazyColumn(
                 modifier = Modifier.fillMaxSize(),
                 contentPadding = PaddingValues(bottom = 24.dp),
             ) {
+                if (firstAnnouncement != null) {
+                    item(key = "announcement-${firstAnnouncement.id}") {
+                        AnnouncementBanner(
+                            announcement = firstAnnouncement,
+                            onDismiss = {
+                                bannerScope.launch {
+                                    announcementsRepository.dismiss(firstAnnouncement.id)
+                                }
+                            },
+                            onCtaClick = { url ->
+                                announcementsRepository.trackCtaClick(firstAnnouncement.id)
+                                try {
+                                    context.startActivity(
+                                        Intent(Intent.ACTION_VIEW, Uri.parse(url))
+                                    )
+                                } catch (_: Exception) {
+                                    Toast.makeText(
+                                        context,
+                                        "Couldn't open the link",
+                                        Toast.LENGTH_SHORT,
+                                    ).show()
+                                }
+                            },
+                            modifier = Modifier.padding(
+                                horizontal = 16.dp,
+                                vertical = 8.dp,
+                            ),
+                        )
+                    }
+                }
+
                 // ── Continue Listening ──────────────────────────────────
                 if (playbackState.currentTrack != null) {
                     item {
