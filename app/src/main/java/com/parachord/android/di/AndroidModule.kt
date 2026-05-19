@@ -255,6 +255,14 @@ val androidModule = module {
         } catch (_: Exception) {
             // Column already present (idempotent on repeat launches).
         }
+        // Slow-trickle cross-resolver enrichment (#150): tracks the last time
+        // we tried to backfill streaming-service IDs for a localfiles-only
+        // track. Same idempotent ALTER pattern as above.
+        try {
+            driver.execute(null, "ALTER TABLE tracks ADD COLUMN crossResolverEnrichedAt INTEGER", 0)
+        } catch (_: Exception) {
+            // Column already present (idempotent on repeat launches).
+        }
         com.parachord.shared.db.ParachordDb(driver)
     }
 
