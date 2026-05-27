@@ -4,6 +4,7 @@ import com.parachord.shared.api.ListenBrainzClient
 import com.parachord.shared.metadata.MbidEnrichmentService
 import com.parachord.shared.model.Playlist
 import com.parachord.shared.model.PlaylistTrack
+import com.parachord.shared.platform.Log
 import com.parachord.shared.platform.currentTimeMillis
 import com.parachord.shared.settings.SettingsStore
 import kotlin.concurrent.Volatile
@@ -30,6 +31,7 @@ class ListenBrainzSyncProvider(
 ) : SyncProvider {
     companion object {
         const val PROVIDER_ID = "listenbrainz"
+        private const val TAG = "ListenBrainzSyncProvider"
     }
 
     override val id: String = PROVIDER_ID
@@ -73,8 +75,14 @@ class ListenBrainzSyncProvider(
         val lbPlaylists = try {
             client.getUserOwnedPlaylists(username)
         } catch (e: ListenBrainzUnauthorizedException) {
-            // Trip the session-scoped kill-switch. Non-401 errors propagate
-            // so SyncEngine can decide whether to surface them to the user.
+            // Defensive — getUserOwnedPlaylists is unauth today (LB public playlists
+            // are world-readable), so this catch is mostly for symmetry with the
+            // AM provider and future-proofing in case LB starts requiring auth on
+            // this endpoint. Real 401s today land in the generic-Exception path
+            // below and propagate to SyncEngine. The kill-switch primarily exists
+            // to trip from the *mutation* endpoints (createPlaylist, replacePlaylist
+            // tracks, etc.) which DO send Token and DO translate 401.
+            Log.w(TAG, "LB fetchPlaylists 401 — tripping kill-switch", e)
             authFailedForSession = true
             return emptyList()
         }

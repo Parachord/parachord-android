@@ -68,7 +68,12 @@ class ListenBrainzSyncProviderTest {
     }
 
     @Test
-    fun `fetchPlaylists swallows 401 and trips kill-switch`() = runTest {
+    fun `fetchPlaylists trips kill-switch on ListenBrainzUnauthorizedException (defensive — unauth endpoint today)`() = runTest {
+        // The pull endpoint is unauth today, so the typed exception flows only from
+        // a mocked client. Real 401 paths exit through the generic-Exception arm
+        // (separate test). This pins the kill-switch invariant for the day LB
+        // ever requires auth on this endpoint OR if a mutation lands on the kill-switch
+        // path during a pull cycle.
         val client: ListenBrainzClient = mockk {
             coEvery { getUserOwnedPlaylists("test-user") } throws ListenBrainzUnauthorizedException()
         }
@@ -82,6 +87,46 @@ class ListenBrainzSyncProviderTest {
         // active means we don't ping the API again until session restart.
         assertTrue(provider.fetchPlaylists().isEmpty())
         coVerify(exactly = 1) { client.getUserOwnedPlaylists("test-user") }
+    }
+
+    @Test
+    fun `fetchPlaylists propagates a real 401 from the unauth endpoint as generic Exception (does not trip kill-switch)`() = runTest {
+        val client: ListenBrainzClient = mockk {
+            coEvery { getUserOwnedPlaylists("test-user") } throws Exception("getUserOwnedPlaylists(test-user) failed: HTTP 401 Unauthorized")
+        }
+        val settings: SettingsStore = mockk {
+            coEvery { getListenBrainzToken() } returns "tok"
+            coEvery { getListenBrainzUsername() } returns "test-user"
+        }
+        val provider = ListenBrainzSyncProvider(client, settings, mockk())
+        // First call: generic Exception propagates
+        try {
+            provider.fetchPlaylists()
+            error("expected Exception to propagate")
+        } catch (e: Exception) {
+            assertTrue(e.message?.contains("HTTP 401") == true)
+        }
+        // Second call: kill-switch NOT tripped, client called again
+        try {
+            provider.fetchPlaylists()
+            error("expected Exception to propagate")
+        } catch (e: Exception) {
+            assertTrue(e.message?.contains("HTTP 401") == true)
+        }
+        coVerify(exactly = 2) { client.getUserOwnedPlaylists("test-user") }
+    }
+
+    @Test
+    fun `fetchPlaylists returns empty list when user has no playlists`() = runTest {
+        val client: ListenBrainzClient = mockk {
+            coEvery { getUserOwnedPlaylists("test-user") } returns emptyList()
+        }
+        val settings: SettingsStore = mockk {
+            coEvery { getListenBrainzToken() } returns "tok"
+            coEvery { getListenBrainzUsername() } returns "test-user"
+        }
+        val provider = ListenBrainzSyncProvider(client, settings, mockk())
+        assertTrue(provider.fetchPlaylists().isEmpty())
     }
 
     @Test
