@@ -1,6 +1,7 @@
 package com.parachord.android.sync
 
 import com.parachord.shared.api.LbPlaylist
+import com.parachord.shared.api.LbPlaylistTrack
 import com.parachord.shared.api.ListenBrainzClient
 import com.parachord.shared.settings.SettingsStore
 import com.parachord.shared.sync.ListenBrainzSyncProvider
@@ -191,5 +192,74 @@ class ListenBrainzSyncProviderTest {
         assertEquals("Playlist 2", result[1].entity.name)
         assertNull(result[1].entity.description)
         assertNull(result[1].snapshotId)
+    }
+
+    // ── fetchPlaylistTracks (Task 11) ──────────────────────────────────
+
+    @Test
+    fun `fetchPlaylistTracks delegates to client and maps to PlaylistTrack`() = runTest {
+        val richTracks = listOf(
+            LbPlaylistTrack(
+                id = "mbid-1",
+                title = "Track1",
+                artist = "Artist1",
+                album = "Album1",
+                mbid = "mbid-1",
+            ),
+            LbPlaylistTrack(
+                id = "mbid-2",
+                title = "Track2",
+                artist = "Artist2",
+                album = null,
+                mbid = "mbid-2",
+            ),
+        )
+        val client: ListenBrainzClient = mockk {
+            coEvery { getPlaylistTracksRich("playlist-mbid") } returns richTracks
+        }
+        val provider = ListenBrainzSyncProvider(client, mockk(relaxed = true), mockk())
+        val result = provider.fetchPlaylistTracks("playlist-mbid")
+        assertEquals(2, result.size)
+        assertEquals("Track1", result[0].trackTitle)
+        assertEquals("Artist1", result[0].trackArtist)
+        assertEquals("Album1", result[0].trackAlbum)
+        assertEquals("mbid-1", result[0].trackRecordingMbid)
+        assertEquals(0, result[0].position)
+        assertEquals(1, result[1].position)
+        assertNull(result[1].trackAlbum)
+        // playlistId follows the `<provider>-<externalId>` convention used by
+        // SpotifySyncProvider + AppleMusicSyncProvider. SyncEngine remaps this
+        // to the local id when persisting.
+        assertEquals("listenbrainz-playlist-mbid", result[0].playlistId)
+        assertEquals("listenbrainz-playlist-mbid", result[1].playlistId)
+    }
+
+    @Test
+    fun `fetchPlaylistTracks returns empty list when playlist has no tracks`() = runTest {
+        val client: ListenBrainzClient = mockk {
+            coEvery { getPlaylistTracksRich("mbid") } returns emptyList()
+        }
+        val provider = ListenBrainzSyncProvider(client, mockk(relaxed = true), mockk())
+        assertTrue(provider.fetchPlaylistTracks("mbid").isEmpty())
+    }
+
+    // ── getPlaylistSnapshotId (Task 11) ────────────────────────────────
+
+    @Test
+    fun `getPlaylistSnapshotId returns last_modified_at from client`() = runTest {
+        val client: ListenBrainzClient = mockk {
+            coEvery { getPlaylistLastModified("mbid") } returns "2026-05-27T10:00:00Z"
+        }
+        val provider = ListenBrainzSyncProvider(client, mockk(relaxed = true), mockk())
+        assertEquals("2026-05-27T10:00:00Z", provider.getPlaylistSnapshotId("mbid"))
+    }
+
+    @Test
+    fun `getPlaylistSnapshotId returns null when client returns null`() = runTest {
+        val client: ListenBrainzClient = mockk {
+            coEvery { getPlaylistLastModified("mbid") } returns null
+        }
+        val provider = ListenBrainzSyncProvider(client, mockk(relaxed = true), mockk())
+        assertNull(provider.getPlaylistSnapshotId("mbid"))
     }
 }

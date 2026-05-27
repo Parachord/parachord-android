@@ -124,11 +124,30 @@ class ListenBrainzSyncProvider(
 
     override suspend fun fetchPlaylistTracks(
         externalPlaylistId: String,
-    ): List<PlaylistTrack> = TODO("Task 11")
+    ): List<PlaylistTrack> {
+        // playlistId follows the `<provider>-<externalId>` convention used by
+        // SpotifySyncProvider + AppleMusicSyncProvider. SyncEngine remaps this
+        // to the local id when persisting; this value is a stable, locally
+        // recognisable placeholder.
+        val localPlaylistId = "listenbrainz-$externalPlaylistId"
+        val richTracks = client.getPlaylistTracksRich(externalPlaylistId)
+        return richTracks.mapIndexed { index, t ->
+            PlaylistTrack(
+                playlistId = localPlaylistId,
+                position = index,
+                trackTitle = t.title,
+                trackArtist = t.artist,
+                trackAlbum = t.album,
+                trackDuration = t.durationMs,
+                trackArtworkUrl = t.albumArt,
+                trackRecordingMbid = t.mbid,
+            )
+        }
+    }
 
     override suspend fun getPlaylistSnapshotId(
         externalPlaylistId: String,
-    ): String? = TODO("Task 11")
+    ): String? = client.getPlaylistLastModified(externalPlaylistId)
 
     override suspend fun createPlaylist(
         name: String,
