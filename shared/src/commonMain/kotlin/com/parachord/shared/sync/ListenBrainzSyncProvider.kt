@@ -245,13 +245,53 @@ class ListenBrainzSyncProvider(
 
     override suspend fun deletePlaylist(
         externalPlaylistId: String,
-    ): DeleteResult = TODO("Task 13")
+    ): DeleteResult {
+        val token = settingsStore.getListenBrainzToken()
+        if (token.isNullOrBlank()) {
+            return DeleteResult.Failed(IllegalStateException("ListenBrainz token not configured"))
+        }
+        return try {
+            client.deletePlaylist(externalPlaylistId, token)
+            DeleteResult.Success
+        } catch (e: ListenBrainzUnauthorizedException) {
+            // Per the SyncProvider contract, deletePlaylist must NEVER throw on
+            // documented-unsupported responses. For LB the 401 is an auth issue
+            // (not "API doesn't support delete"), but the user can't recover
+            // without re-auth — surface to UI as Unsupported(401) so they get
+            // the "remove manually in {provider}" toast (matches AM pattern).
+            Log.w(TAG, "LB deletePlaylist 401 — tripping kill-switch", e)
+            authFailedForSession = true
+            DeleteResult.Unsupported(401)
+        } catch (e: Throwable) {
+            // Re-throw cancellation per KMP convention — coroutine cancellation
+            // must propagate, never be swallowed.
+            if (e is kotlinx.coroutines.CancellationException) throw e
+            Log.e(TAG, "LB deletePlaylist failed", e)
+            DeleteResult.Failed(e)
+        }
+    }
 
     override suspend fun searchForTrackId(
         title: String,
         artist: String,
         album: String?,
-    ): String? = TODO("Task 13")
+    ): String? {
+        // Delegate to the existing MBID mapper. Returns the canonical
+        // recording MBID for the title+artist pair, or null if no high-
+        // confidence match was found (the LB mapper applies its own internal
+        // confidence floor — we don't need to apply MIN_CONFIDENCE_THRESHOLD
+        // here).
+        //
+        // Note arg order: mapperLookup is (artist, recording) — NOT (title, artist).
+        val result = try {
+            mbidEnrichmentService.mapperLookup(artist, title)
+        } catch (e: Throwable) {
+            if (e is kotlinx.coroutines.CancellationException) throw e
+            Log.w(TAG, "LB searchForTrackId mapper lookup failed for '$title' / '$artist'", e)
+            return null
+        }
+        return result?.recordingMbid
+    }
 
     // Library surface (saveTracks, saveAlbums, fetchArtists, etc.) intentionally
     // inherits the no-op defaults from SyncProvider.

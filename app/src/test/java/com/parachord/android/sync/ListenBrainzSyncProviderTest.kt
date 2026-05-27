@@ -3,7 +3,10 @@ package com.parachord.android.sync
 import com.parachord.shared.api.LbPlaylist
 import com.parachord.shared.api.LbPlaylistTrack
 import com.parachord.shared.api.ListenBrainzClient
+import com.parachord.shared.api.MbidMapperResult
+import com.parachord.shared.metadata.MbidEnrichmentService
 import com.parachord.shared.settings.SettingsStore
+import com.parachord.shared.sync.DeleteResult
 import com.parachord.shared.sync.ListenBrainzSyncProvider
 import com.parachord.shared.sync.ListenBrainzUnauthorizedException
 import io.mockk.coEvery
@@ -454,5 +457,124 @@ class ListenBrainzSyncProviderTest {
             provider.updatePlaylistDetails("mbid", "Name", null)
             fail("expected ListenBrainzUnauthorizedException")
         } catch (e: ListenBrainzUnauthorizedException) { /* ok */ }
+    }
+
+    // ── deletePlaylist (Task 13) ───────────────────────────────────────
+
+    @Test
+    fun `deletePlaylist returns Success on happy path`() = runTest {
+        val client: ListenBrainzClient = mockk(relaxed = true)
+        val settings: SettingsStore = mockk { coEvery { getListenBrainzToken() } returns "tok" }
+        val provider = ListenBrainzSyncProvider(client, settings, mockk())
+        val result = provider.deletePlaylist("mbid")
+        assertEquals(DeleteResult.Success, result)
+        coVerify(exactly = 1) { client.deletePlaylist("mbid", "tok") }
+    }
+
+    @Test
+    fun `deletePlaylist 401 returns Unsupported (not thrown)`() = runTest {
+        // Per the SyncProvider contract, deletePlaylist must NEVER throw on
+        // documented-unsupported responses. Caller surfaces "remove manually"
+        // UX from Unsupported(401).
+        val client: ListenBrainzClient = mockk {
+            coEvery { deletePlaylist(any(), any()) } throws ListenBrainzUnauthorizedException()
+        }
+        val settings: SettingsStore = mockk { coEvery { getListenBrainzToken() } returns "tok" }
+        val provider = ListenBrainzSyncProvider(client, settings, mockk())
+        val result = provider.deletePlaylist("mbid")
+        assertTrue("expected Unsupported, got $result", result is DeleteResult.Unsupported)
+        assertEquals(401, (result as DeleteResult.Unsupported).status)
+    }
+
+    @Test
+    fun `deletePlaylist returns Failed on other errors`() = runTest {
+        val client: ListenBrainzClient = mockk {
+            coEvery { deletePlaylist(any(), any()) } throws Exception("HTTP 500")
+        }
+        val settings: SettingsStore = mockk { coEvery { getListenBrainzToken() } returns "tok" }
+        val provider = ListenBrainzSyncProvider(client, settings, mockk())
+        val result = provider.deletePlaylist("mbid")
+        assertTrue("expected Failed, got $result", result is DeleteResult.Failed)
+        assertEquals("HTTP 500", (result as DeleteResult.Failed).error.message)
+    }
+
+    @Test
+    fun `deletePlaylist returns Failed when token unset`() = runTest {
+        // Token-unset is a hard config error, but the contract still says
+        // never throw — return Failed instead.
+        val settings: SettingsStore = mockk { coEvery { getListenBrainzToken() } returns null }
+        val provider = ListenBrainzSyncProvider(mockk(), settings, mockk())
+        val result = provider.deletePlaylist("mbid")
+        assertTrue("expected Failed, got $result", result is DeleteResult.Failed)
+        assertTrue((result as DeleteResult.Failed).error is IllegalStateException)
+    }
+
+    @Test
+    fun `deletePlaylist returns Failed when token blank`() = runTest {
+        val settings: SettingsStore = mockk { coEvery { getListenBrainzToken() } returns "" }
+        val provider = ListenBrainzSyncProvider(mockk(), settings, mockk())
+        val result = provider.deletePlaylist("mbid")
+        assertTrue("expected Failed, got $result", result is DeleteResult.Failed)
+    }
+
+    // ── searchForTrackId (Task 13) ─────────────────────────────────────
+
+    @Test
+    fun `searchForTrackId returns recordingMbid from mapper on hit`() = runTest {
+        // mapperLookup signature is (artist, recording) — NOT (title, artist).
+        // The provider must pass them in the right order.
+        val enrichment: MbidEnrichmentService = mockk {
+            coEvery { mapperLookup("Artist", "Title") } returns MbidMapperResult(
+                artistMbid = "artist-mbid",
+                artistCreditName = "Artist",
+                recordingName = "Title",
+                recordingMbid = "mbid-result",
+                releaseName = null,
+                releaseMbid = null,
+                confidence = 0.95,
+            )
+        }
+        val provider = ListenBrainzSyncProvider(mockk(), mockk(relaxed = true), enrichment)
+        assertEquals("mbid-result", provider.searchForTrackId("Title", "Artist"))
+    }
+
+    @Test
+    fun `searchForTrackId returns null on mapper miss`() = runTest {
+        val enrichment: MbidEnrichmentService = mockk {
+            coEvery { mapperLookup(any(), any()) } returns null
+        }
+        val provider = ListenBrainzSyncProvider(mockk(), mockk(relaxed = true), enrichment)
+        assertNull(provider.searchForTrackId("Title", "Artist"))
+    }
+
+    @Test
+    fun `searchForTrackId returns null when mapper throws`() = runTest {
+        // Defensive — mapperLookup already swallows exceptions internally
+        // and returns null, but if it ever stops doing so, the provider
+        // must not propagate the failure (sync engine would abort the
+        // whole hydrate-loop on a single bad lookup).
+        val enrichment: MbidEnrichmentService = mockk {
+            coEvery { mapperLookup(any(), any()) } throws Exception("Network error")
+        }
+        val provider = ListenBrainzSyncProvider(mockk(), mockk(relaxed = true), enrichment)
+        assertNull(provider.searchForTrackId("Title", "Artist"))
+    }
+
+    @Test
+    fun `searchForTrackId returns null when recordingMbid is null`() = runTest {
+        // Mapper sometimes returns a result with artist MBID resolved but
+        // no recording MBID — treat as miss.
+        val enrichment: MbidEnrichmentService = mockk {
+            coEvery { mapperLookup(any(), any()) } returns MbidMapperResult(
+                artistMbid = "artist-mbid",
+                artistCreditName = "Artist",
+                recordingName = null,
+                recordingMbid = null,
+                releaseName = null,
+                releaseMbid = null,
+            )
+        }
+        val provider = ListenBrainzSyncProvider(mockk(), mockk(relaxed = true), enrichment)
+        assertNull(provider.searchForTrackId("Title", "Artist"))
     }
 }

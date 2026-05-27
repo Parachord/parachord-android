@@ -234,7 +234,18 @@ class MbidEnrichmentService(
         }
     }
 
-    private suspend fun mapperLookup(artist: String, recording: String): MbidMapperResult? {
+    /**
+     * Lookup an MBID for the given (artist, recording) pair via the LB mapper.
+     *
+     * Returns null when the mapper has no high-confidence match (its own
+     * internal confidence floor) OR when the lookup throws. Exceptions are
+     * swallowed and logged — callers (including [ListenBrainzSyncProvider.searchForTrackId])
+     * treat null as "no match, skip the track".
+     *
+     * Note arg order: `(artist, recording)` — matches the underlying
+     * `ListenBrainzClient.mbidMapperLookup` signature, NOT `(title, artist)`.
+     */
+    suspend fun mapperLookup(artist: String, recording: String): MbidMapperResult? {
         return try {
             listenBrainzClient.mbidMapperLookup(artist, recording)
         } catch (e: Exception) {
