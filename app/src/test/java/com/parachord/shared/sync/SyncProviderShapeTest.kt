@@ -1,6 +1,9 @@
 package com.parachord.shared.sync
 
+import io.mockk.mockk
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
+import org.junit.Assert.assertTrue
 import org.junit.Test
 
 /**
@@ -56,5 +59,21 @@ class SyncProviderShapeTest {
         assertEquals("abc", withSnapshot.externalId)
         assertEquals("snap-1", withSnapshot.snapshotId)
         assertEquals(null, withoutSnapshot.snapshotId)
+    }
+
+    @Test
+    fun `LB features struct matches design`() {
+        val provider = ListenBrainzSyncProvider(
+            client = mockk(),
+            settingsStore = mockk(),
+            mbidEnrichmentService = mockk(),
+        )
+        assertEquals(ListenBrainzSyncProvider.PROVIDER_ID, provider.id)
+        assertEquals("ListenBrainz", provider.displayName)
+        assertEquals(SnapshotKind.DateString, provider.features.snapshots)
+        assertFalse(provider.features.supportsFollow)
+        assertTrue(provider.features.supportsPlaylistDelete)
+        assertTrue(provider.features.supportsPlaylistRename)
+        assertTrue(provider.features.supportsTrackReplace)
     }
 }
