@@ -52,6 +52,10 @@ class PushCandidateTest {
         return when (providerId) {
             "spotify" -> p.spotifyId == null && baseEligible
             "applemusic" -> baseEligible || p.id.startsWith("spotify-")
+            "listenbrainz" ->
+                baseEligible
+                    || p.id.startsWith("spotify-")
+                    || p.id.startsWith("applemusic-")
             else -> baseEligible
         }
     }
@@ -98,6 +102,32 @@ class PushCandidateTest {
         // applemusic- and aren't local-* or hosted, so the filter
         // returns false for them under AM push too.
         assertFalse(isPushCandidate(playlist("applemusic-abc"), "applemusic"))
+    }
+
+    @Test fun `ListenBrainz pushes local-prefix playlists`() {
+        assertTrue(isPushCandidate(playlist("local-abc"), "listenbrainz"))
+    }
+
+    @Test fun `ListenBrainz pushes hosted XSPF playlists`() {
+        assertTrue(isPushCandidate(playlist("hosted-xyz", sourceUrl = "https://e.xspf"), "listenbrainz"))
+    }
+
+    @Test fun `ListenBrainz pushes Spotify-imported playlists`() {
+        // LB mirrors any source-of-truth playlist; spotify-imported is one
+        // such source. Runtime syncedFrom guard skips when pulling from
+        // Spotify but allows the cross-mirror to LB.
+        assertTrue(isPushCandidate(playlist("spotify-abc", spotifyId = "abc"), "listenbrainz"))
+    }
+
+    @Test fun `ListenBrainz pushes AM-imported playlists`() {
+        // AM is also a source-of-truth provider; LB mirrors from it.
+        assertTrue(isPushCandidate(playlist("applemusic-abc"), "listenbrainz"))
+    }
+
+    @Test fun `ListenBrainz does NOT push unrecognized-prefix playlists`() {
+        // A third provider's import (e.g. a hypothetical tidal-*) doesn't
+        // count as a source-of-truth until added explicitly here.
+        assertFalse(isPushCandidate(playlist("tidal-abc"), "listenbrainz"))
     }
 
     @Test fun `unknown provider falls back to baseline (local + hosted)`() {

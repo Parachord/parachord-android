@@ -274,6 +274,73 @@ class HealImportedSyncedFromTest {
     }
 
     @Test
+    fun `heal restores listenbrainz source when playlist ID prefix is listenbrainz`() = runBlocking {
+        val db = TestDatabaseFactory.create()
+        // listenbrainz-<mbid> playlist row, but sync_playlist_source is wrongly
+        // pointing at spotify (corrupt state — e.g. from a bug in a prior client).
+        db.insertPlaylist(id = "listenbrainz-abc123")
+        val sourceDao = SyncPlaylistSourceDao(db)
+        val linkDao = SyncPlaylistLinkDao(db)
+        val playlistDao = PlaylistDao(db)
+
+        sourceDao.upsert(
+            localPlaylistId = "listenbrainz-abc123",
+            providerId = "spotify",
+            externalId = "SP-WRONG",
+            snapshotId = "sp-snap",
+            ownerId = null,
+            syncedAt = 100L,
+        )
+
+        com.parachord.shared.sync.SyncEngine.healImportedSyncedFromMismatch(
+            playlistDao, sourceDao, linkDao,
+        )
+
+        // Source row corrected to listenbrainz with externalId derived from prefix.
+        val src = sourceDao.selectForLocal("listenbrainz-abc123")
+        assertNotNull(src)
+        assertEquals("listenbrainz", src!!.providerId)
+        assertEquals("abc123", src.externalId)
+        assertNull(src.snapshotId) // null so next LB sync repopulates
+
+        // Demoted spotify mapping preserved as a link.
+        val link = linkDao.selectForLink("listenbrainz-abc123", "spotify")
+        assertNotNull(link)
+        assertEquals("SP-WRONG", link!!.externalId)
+        assertEquals("sp-snap", link.snapshotId)
+    }
+
+    @Test
+    fun `healthy listenbrainz playlist is no-op`() = runBlocking {
+        val db = TestDatabaseFactory.create()
+        db.insertPlaylist(id = "listenbrainz-abc123")
+        val sourceDao = SyncPlaylistSourceDao(db)
+        val linkDao = SyncPlaylistLinkDao(db)
+        val playlistDao = PlaylistDao(db)
+
+        sourceDao.upsert(
+            localPlaylistId = "listenbrainz-abc123",
+            providerId = "listenbrainz",
+            externalId = "abc123",
+            snapshotId = "lb-snap",
+            ownerId = null,
+            syncedAt = 100L,
+        )
+
+        com.parachord.shared.sync.SyncEngine.healImportedSyncedFromMismatch(
+            playlistDao, sourceDao, linkDao,
+        )
+
+        val src = sourceDao.selectForLocal("listenbrainz-abc123")
+        assertNotNull(src)
+        assertEquals("listenbrainz", src!!.providerId)
+        assertEquals("abc123", src.externalId)
+        assertEquals("lb-snap", src.snapshotId) // snapshot preserved
+        assertEquals(100L, src.syncedAt)
+        assertTrue(linkDao.selectForLocal("listenbrainz-abc123").isEmpty())
+    }
+
+    @Test
     fun `clears locallyModified flag on healed playlist`() = runBlocking {
         val db = TestDatabaseFactory.create()
         db.insertPlaylist(id = "spotify-X", spotifyId = "X", locallyModified = 1L)
