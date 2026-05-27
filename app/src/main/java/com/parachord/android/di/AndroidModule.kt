@@ -263,6 +263,15 @@ val androidModule = module {
         } catch (_: Exception) {
             // Column already present (idempotent on repeat launches).
         }
+        // ListenBrainz playlist sync (#156): trackRecordingMbid carries the
+        // recording MBID per-row so LB push/pull can identify tracks by MBID
+        // (LB's only stable ID). New installs get the column from
+        // PlaylistTrack.sq's CREATE TABLE; existing installs need this ALTER.
+        try {
+            driver.execute(null, "ALTER TABLE playlist_tracks ADD COLUMN trackRecordingMbid TEXT", 0)
+        } catch (_: Exception) {
+            // Column already present (idempotent on repeat launches).
+        }
         com.parachord.shared.db.ParachordDb(driver)
     }
 
