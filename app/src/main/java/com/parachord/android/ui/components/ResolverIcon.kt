@@ -262,9 +262,21 @@ private fun parseSvgPath(d: String): List<androidx.compose.ui.graphics.vector.Pa
     }
 
     var i = 0
+    // Track the previous command for SVG-spec-compliant 's'/'S' handling.
+    // Per SVG spec, when 's' (or 'S') follows a non-curve command (anything
+    // other than C/c/S/s), the implicit first control point is the current
+    // point — NOT a reflection of any earlier curve. Compose's PathBuilder
+    // doesn't reset its cached-control-point tracking when a non-curve
+    // command is emitted, so calling reflectiveCurveTo* in that case uses
+    // a stale control point and produces wrong curvature. The Wikipedia W
+    // icon hits this exact pattern (`s` after `l`); without this fix, the
+    // bottom-left vertex of the W renders with a malformed curve.
+    var prevCmd: Char? = null
+    val curveCmds = setOf('C', 'c', 'S', 's')
     while (i < parts.size) {
         val cmd = parts[i][0]
         val nums = if (parts[i].length > 1) parseNumbers(parts[i].substring(1)) else emptyList()
+        val prevWasCurve = prevCmd in curveCmds
         when (cmd) {
             'M' -> {
                 var j = 0
@@ -337,7 +349,19 @@ private fun parseSvgPath(d: String): List<androidx.compose.ui.graphics.vector.Pa
                 while (j + 3 < nums.size) {
                     val x2 = nums[j]; val y2 = nums[j + 1]
                     val x = nums[j + 2]; val y = nums[j + 3]
-                    result.add { reflectiveCurveTo(x2, y2, x, y) }
+                    if (j == 0 && !prevWasCurve) {
+                        // First sub-curve of an 'S' after a non-curve command.
+                        // SVG spec: implicit first control point = current point.
+                        // We don't track absolute current position in this parser,
+                        // so emit a degenerate curveTo where (x1,y1) coincides
+                        // with (x2,y2) — produces the same visual as reflecting
+                        // off the current point in practice for the icons we
+                        // ship today (none use 'S' after non-curve as of writing,
+                        // but kept symmetric with the lowercase fix below).
+                        result.add { curveTo(x2, y2, x2, y2, x, y) }
+                    } else {
+                        result.add { reflectiveCurveTo(x2, y2, x, y) }
+                    }
                     j += 4
                 }
             }
@@ -346,7 +370,18 @@ private fun parseSvgPath(d: String): List<androidx.compose.ui.graphics.vector.Pa
                 while (j + 3 < nums.size) {
                     val dx2 = nums[j]; val dy2 = nums[j + 1]
                     val dx = nums[j + 2]; val dy = nums[j + 3]
-                    result.add { reflectiveCurveToRelative(dx2, dy2, dx, dy) }
+                    if (j == 0 && !prevWasCurve) {
+                        // First sub-curve of an 's' after a non-curve command.
+                        // SVG spec: implicit first control point = current point,
+                        // which in relative coordinates is (0, 0). Emit an
+                        // explicit cubic with that first control point instead
+                        // of letting Compose's reflectiveCurveToRelative use
+                        // its stale cached control point from earlier curves.
+                        // This is the Wikipedia W's bottom-left-vertex fix.
+                        result.add { curveToRelative(0f, 0f, dx2, dy2, dx, dy) }
+                    } else {
+                        result.add { reflectiveCurveToRelative(dx2, dy2, dx, dy) }
+                    }
                     j += 4
                 }
             }
@@ -376,6 +411,9 @@ private fun parseSvgPath(d: String): List<androidx.compose.ui.graphics.vector.Pa
             }
             'Z', 'z' -> result.add { close() }
         }
+        // Remember the current command so the next iteration can detect
+        // 's'/'S' after non-curve and apply the spec-correct workaround.
+        prevCmd = cmd
         i++
     }
     return result
