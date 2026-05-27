@@ -152,18 +152,96 @@ class ListenBrainzSyncProvider(
     override suspend fun createPlaylist(
         name: String,
         description: String?,
-    ): RemoteCreated = TODO("Task 12")
+    ): RemoteCreated {
+        // Mutations require auth — unlike pulls. Throw so SyncEngine knows
+        // the push can't proceed; this is a hard config error (not "no playlists").
+        val token = settingsStore.getListenBrainzToken()
+        if (token.isNullOrBlank()) {
+            throw IllegalStateException("ListenBrainz token not configured")
+        }
+        val mbid = try {
+            client.createPlaylist(name = name, description = description, isPublic = true, token = token)
+        } catch (e: ListenBrainzUnauthorizedException) {
+            Log.w(TAG, "LB createPlaylist 401 — tripping kill-switch", e)
+            authFailedForSession = true
+            throw e // propagate so SyncEngine knows the push failed
+        }
+        // Snapshot is fetched separately via getPlaylistSnapshotId — the create
+        // endpoint returns only the MBID, not a last_modified timestamp.
+        return RemoteCreated(externalId = mbid, snapshotId = null)
+    }
 
     override suspend fun replacePlaylistTracks(
         externalPlaylistId: String,
         externalTrackIds: List<String>,
-    ): String? = TODO("Task 12")
+    ): String? {
+        val token = settingsStore.getListenBrainzToken()
+        if (token.isNullOrBlank()) {
+            throw IllegalStateException("ListenBrainz token not configured")
+        }
+
+        try {
+            // Get current track count to know how many to delete.
+            val currentTracks = client.getPlaylistTracksRich(externalPlaylistId)
+            val currentCount = currentTracks.size
+
+            // Step 1: delete all existing items (if any).
+            // NOTE: this is NOT atomic — between step 1 and step 2 the playlist
+            // appears empty to other LB clients. Acceptable per the design
+            // (mirrors how AM POST-appends after PUT degradation).
+            if (currentCount > 0) {
+                client.deletePlaylistItems(
+                    playlistMbid = externalPlaylistId,
+                    index = 0,
+                    count = currentCount,
+                    token = token,
+                )
+            }
+
+            // Step 2: add desired items (if any).
+            if (externalTrackIds.isNotEmpty()) {
+                client.addPlaylistItems(
+                    playlistMbid = externalPlaylistId,
+                    recordingMbids = externalTrackIds,
+                    token = token,
+                )
+            }
+
+            // Step 3: re-fetch and return the new snapshot.
+            return client.getPlaylistLastModified(externalPlaylistId)
+        } catch (e: ListenBrainzUnauthorizedException) {
+            Log.w(TAG, "LB replacePlaylistTracks 401 — tripping kill-switch", e)
+            authFailedForSession = true
+            throw e
+        }
+    }
 
     override suspend fun updatePlaylistDetails(
         externalPlaylistId: String,
         name: String?,
         description: String?,
-    ): Unit = TODO("Task 12")
+    ) {
+        // No-op when both are null — nothing to update.
+        if (name == null && description == null) return
+
+        val token = settingsStore.getListenBrainzToken()
+        if (token.isNullOrBlank()) {
+            throw IllegalStateException("ListenBrainz token not configured")
+        }
+
+        try {
+            client.editPlaylist(
+                playlistMbid = externalPlaylistId,
+                name = name,
+                description = description,
+                token = token,
+            )
+        } catch (e: ListenBrainzUnauthorizedException) {
+            Log.w(TAG, "LB updatePlaylistDetails 401 — tripping kill-switch", e)
+            authFailedForSession = true
+            throw e
+        }
+    }
 
     override suspend fun deletePlaylist(
         externalPlaylistId: String,

@@ -8,12 +8,14 @@ import com.parachord.shared.sync.ListenBrainzSyncProvider
 import com.parachord.shared.sync.ListenBrainzUnauthorizedException
 import io.mockk.coEvery
 import io.mockk.coVerify
+import io.mockk.coVerifyOrder
 import io.mockk.mockk
 import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.test.runTest
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
+import org.junit.Assert.fail
 import org.junit.Test
 
 /**
@@ -261,5 +263,196 @@ class ListenBrainzSyncProviderTest {
         }
         val provider = ListenBrainzSyncProvider(client, mockk(relaxed = true), mockk())
         assertNull(provider.getPlaylistSnapshotId("mbid"))
+    }
+
+    // ── createPlaylist (Task 12) ───────────────────────────────────────
+
+    @Test
+    fun `createPlaylist returns RemoteCreated with server-assigned MBID`() = runTest {
+        val client: ListenBrainzClient = mockk {
+            coEvery { createPlaylist(any(), any(), any(), any()) } returns "new-mbid-uuid"
+        }
+        val settings: SettingsStore = mockk { coEvery { getListenBrainzToken() } returns "tok" }
+        val provider = ListenBrainzSyncProvider(client, settings, mockk())
+        val result = provider.createPlaylist("Test", "Desc")
+        assertEquals("new-mbid-uuid", result.externalId)
+        // Snapshot is fetched separately via getPlaylistSnapshotId — the create
+        // endpoint returns only the MBID, not a last_modified timestamp.
+        assertNull(result.snapshotId)
+        coVerify { client.createPlaylist("Test", "Desc", true, "tok") }
+    }
+
+    @Test
+    fun `createPlaylist propagates 401 as ListenBrainzUnauthorizedException`() = runTest {
+        // Kill-switch invariant: a 401 from a mutation endpoint should trip
+        // authFailedForSession AND propagate to the caller so SyncEngine knows
+        // the push failed. We can't directly read the @Volatile field from
+        // outside the class — pin the typed-exception propagation instead
+        // (matches the fetchPlaylists defensive 401 test pattern above).
+        val client: ListenBrainzClient = mockk {
+            coEvery { createPlaylist(any(), any(), any(), any()) } throws ListenBrainzUnauthorizedException()
+        }
+        val settings: SettingsStore = mockk { coEvery { getListenBrainzToken() } returns "tok" }
+        val provider = ListenBrainzSyncProvider(client, settings, mockk())
+        try {
+            provider.createPlaylist("Test", "Desc")
+            fail("expected ListenBrainzUnauthorizedException")
+        } catch (e: ListenBrainzUnauthorizedException) { /* ok */ }
+    }
+
+    @Test
+    fun `createPlaylist throws IllegalStateException when token unset`() = runTest {
+        val settings: SettingsStore = mockk { coEvery { getListenBrainzToken() } returns null }
+        val provider = ListenBrainzSyncProvider(mockk(), settings, mockk())
+        try {
+            provider.createPlaylist("Test", null)
+            fail("expected IllegalStateException")
+        } catch (e: IllegalStateException) { /* ok */ }
+    }
+
+    @Test
+    fun `createPlaylist throws IllegalStateException when token blank`() = runTest {
+        val settings: SettingsStore = mockk { coEvery { getListenBrainzToken() } returns "" }
+        val provider = ListenBrainzSyncProvider(mockk(), settings, mockk())
+        try {
+            provider.createPlaylist("Test", null)
+            fail("expected IllegalStateException")
+        } catch (e: IllegalStateException) { /* ok */ }
+    }
+
+    // ── replacePlaylistTracks (Task 12) ────────────────────────────────
+
+    @Test
+    fun `replacePlaylistTracks does delete-all + add-all + returns new snapshot`() = runTest {
+        val client: ListenBrainzClient = mockk(relaxed = true) {
+            coEvery { getPlaylistTracksRich("mbid") } returns listOf(mockk(), mockk(), mockk()) // 3 items
+            coEvery { getPlaylistLastModified("mbid") } returns "2026-05-27T12:00:00Z"
+        }
+        val settings: SettingsStore = mockk { coEvery { getListenBrainzToken() } returns "tok" }
+        val provider = ListenBrainzSyncProvider(client, settings, mockk())
+        val newSnap = provider.replacePlaylistTracks("mbid", listOf("a", "b", "c", "d"))
+        coVerifyOrder {
+            client.getPlaylistTracksRich("mbid")
+            client.deletePlaylistItems("mbid", 0, 3, "tok")
+            client.addPlaylistItems("mbid", listOf("a", "b", "c", "d"), "tok")
+            client.getPlaylistLastModified("mbid")
+        }
+        assertEquals("2026-05-27T12:00:00Z", newSnap)
+    }
+
+    @Test
+    fun `replacePlaylistTracks skips deleteItems when current is empty`() = runTest {
+        val client: ListenBrainzClient = mockk(relaxed = true) {
+            coEvery { getPlaylistTracksRich("mbid") } returns emptyList()
+        }
+        val settings: SettingsStore = mockk { coEvery { getListenBrainzToken() } returns "tok" }
+        val provider = ListenBrainzSyncProvider(client, settings, mockk())
+        provider.replacePlaylistTracks("mbid", listOf("a", "b"))
+        coVerify(exactly = 0) { client.deletePlaylistItems(any(), any(), any(), any()) }
+        coVerify(exactly = 1) { client.addPlaylistItems("mbid", listOf("a", "b"), "tok") }
+    }
+
+    @Test
+    fun `replacePlaylistTracks skips addItems when desired is empty`() = runTest {
+        val client: ListenBrainzClient = mockk(relaxed = true) {
+            coEvery { getPlaylistTracksRich("mbid") } returns listOf(mockk(), mockk())
+        }
+        val settings: SettingsStore = mockk { coEvery { getListenBrainzToken() } returns "tok" }
+        val provider = ListenBrainzSyncProvider(client, settings, mockk())
+        provider.replacePlaylistTracks("mbid", emptyList())
+        coVerify(exactly = 1) { client.deletePlaylistItems("mbid", 0, 2, "tok") }
+        coVerify(exactly = 0) { client.addPlaylistItems(any(), any(), any()) }
+    }
+
+    @Test
+    fun `replacePlaylistTracks throws IllegalStateException when token unset`() = runTest {
+        val settings: SettingsStore = mockk { coEvery { getListenBrainzToken() } returns null }
+        val provider = ListenBrainzSyncProvider(mockk(), settings, mockk())
+        try {
+            provider.replacePlaylistTracks("mbid", listOf("a"))
+            fail("expected IllegalStateException")
+        } catch (e: IllegalStateException) { /* ok */ }
+    }
+
+    @Test
+    fun `replacePlaylistTracks propagates 401 from deletePlaylistItems`() = runTest {
+        val client: ListenBrainzClient = mockk {
+            coEvery { getPlaylistTracksRich("mbid") } returns listOf(mockk(), mockk())
+            coEvery { deletePlaylistItems(any(), any(), any(), any()) } throws ListenBrainzUnauthorizedException()
+        }
+        val settings: SettingsStore = mockk { coEvery { getListenBrainzToken() } returns "tok" }
+        val provider = ListenBrainzSyncProvider(client, settings, mockk())
+        try {
+            provider.replacePlaylistTracks("mbid", listOf("a"))
+            fail("expected ListenBrainzUnauthorizedException")
+        } catch (e: ListenBrainzUnauthorizedException) { /* ok */ }
+    }
+
+    @Test
+    fun `replacePlaylistTracks propagates 401 from addPlaylistItems`() = runTest {
+        val client: ListenBrainzClient = mockk(relaxed = true) {
+            coEvery { getPlaylistTracksRich("mbid") } returns emptyList()
+            coEvery { addPlaylistItems(any(), any(), any()) } throws ListenBrainzUnauthorizedException()
+        }
+        val settings: SettingsStore = mockk { coEvery { getListenBrainzToken() } returns "tok" }
+        val provider = ListenBrainzSyncProvider(client, settings, mockk())
+        try {
+            provider.replacePlaylistTracks("mbid", listOf("a"))
+            fail("expected ListenBrainzUnauthorizedException")
+        } catch (e: ListenBrainzUnauthorizedException) { /* ok */ }
+    }
+
+    // ── updatePlaylistDetails (Task 12) ────────────────────────────────
+
+    @Test
+    fun `updatePlaylistDetails delegates to client editPlaylist`() = runTest {
+        val client: ListenBrainzClient = mockk(relaxed = true)
+        val settings: SettingsStore = mockk { coEvery { getListenBrainzToken() } returns "tok" }
+        val provider = ListenBrainzSyncProvider(client, settings, mockk())
+        provider.updatePlaylistDetails("mbid", "New Name", "New Desc")
+        coVerify(exactly = 1) { client.editPlaylist("mbid", "New Name", "New Desc", "tok") }
+    }
+
+    @Test
+    fun `updatePlaylistDetails forwards a name-only update`() = runTest {
+        val client: ListenBrainzClient = mockk(relaxed = true)
+        val settings: SettingsStore = mockk { coEvery { getListenBrainzToken() } returns "tok" }
+        val provider = ListenBrainzSyncProvider(client, settings, mockk())
+        provider.updatePlaylistDetails("mbid", "New Name", null)
+        coVerify(exactly = 1) { client.editPlaylist("mbid", "New Name", null, "tok") }
+    }
+
+    @Test
+    fun `updatePlaylistDetails no-ops when both name and description are null`() = runTest {
+        val client: ListenBrainzClient = mockk(relaxed = true)
+        val settings: SettingsStore = mockk(relaxed = true)
+        val provider = ListenBrainzSyncProvider(client, settings, mockk())
+        provider.updatePlaylistDetails("mbid", null, null)
+        coVerify(exactly = 0) { client.editPlaylist(any(), any(), any(), any()) }
+        // Don't even read the token — pure short-circuit.
+        coVerify(exactly = 0) { settings.getListenBrainzToken() }
+    }
+
+    @Test
+    fun `updatePlaylistDetails throws IllegalStateException when token unset`() = runTest {
+        val settings: SettingsStore = mockk { coEvery { getListenBrainzToken() } returns null }
+        val provider = ListenBrainzSyncProvider(mockk(), settings, mockk())
+        try {
+            provider.updatePlaylistDetails("mbid", "Name", null)
+            fail("expected IllegalStateException")
+        } catch (e: IllegalStateException) { /* ok */ }
+    }
+
+    @Test
+    fun `updatePlaylistDetails propagates 401 as ListenBrainzUnauthorizedException`() = runTest {
+        val client: ListenBrainzClient = mockk {
+            coEvery { editPlaylist(any(), any(), any(), any()) } throws ListenBrainzUnauthorizedException()
+        }
+        val settings: SettingsStore = mockk { coEvery { getListenBrainzToken() } returns "tok" }
+        val provider = ListenBrainzSyncProvider(client, settings, mockk())
+        try {
+            provider.updatePlaylistDetails("mbid", "Name", null)
+            fail("expected ListenBrainzUnauthorizedException")
+        } catch (e: ListenBrainzUnauthorizedException) { /* ok */ }
     }
 }
