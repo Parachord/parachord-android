@@ -34,6 +34,7 @@ class PlaylistTrackDao(private val db: ParachordDb) {
         trackSoundcloudId = trackSoundcloudId,
         trackSpotifyId = trackSpotifyId,
         trackAppleMusicId = trackAppleMusicId,
+        trackRecordingMbid = trackRecordingMbid,
         addedAt = addedAt,
     )
 
@@ -72,6 +73,7 @@ class PlaylistTrackDao(private val db: ParachordDb) {
                     trackSoundcloudId = track.trackSoundcloudId,
                     trackSpotifyId = track.trackSpotifyId,
                     trackAppleMusicId = track.trackAppleMusicId,
+                    trackRecordingMbid = track.trackRecordingMbid,
                     addedAt = track.addedAt,
                 )
             }
@@ -114,15 +116,17 @@ class PlaylistTrackDao(private val db: ParachordDb) {
         spotifyUri: String?,
         appleMusicId: String?,
         soundcloudId: String?,
+        recordingMbid: String?,
     ): Unit = withContext(Dispatchers.Default) {
-        // SQLDelight generates positional `value`, `value_`, `value__`, `value___`
-        // for the four COALESCE params; keep the order matching the SQL
-        // (Spotify ID, Spotify URI, Apple Music ID, SoundCloud ID).
+        // SQLDelight generates positional `value`, `value_`, `value__`, `value___`, `value____`
+        // for the five COALESCE params; keep the order matching the SQL
+        // (Spotify ID, Spotify URI, Apple Music ID, SoundCloud ID, Recording MBID).
         queries.backfillResolverIds(
             value = spotifyId,
             value_ = spotifyUri,
             value__ = appleMusicId,
             value___ = soundcloudId,
+            value____ = recordingMbid,
             playlistId = playlistId,
             position = position.toLong(),
         )
@@ -147,6 +151,7 @@ class PlaylistTrackDao(private val db: ParachordDb) {
                     trackSoundcloudId = track.trackSoundcloudId,
                     trackSpotifyId = track.trackSpotifyId,
                     trackAppleMusicId = track.trackAppleMusicId,
+                    trackRecordingMbid = track.trackRecordingMbid,
                     addedAt = track.addedAt,
                 )
             }

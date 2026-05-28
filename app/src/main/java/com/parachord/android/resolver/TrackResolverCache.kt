@@ -275,6 +275,7 @@ class TrackResolverCache constructor(
                     spotifyUri = spotifyUri,
                     appleMusicId = appleMusicId,
                     soundcloudId = soundcloudId,
+                    recordingMbid = null,
                 )
             } catch (e: Exception) {
                 Log.w(TAG, "Failed to backfill playlist_track resolver IDs for '${track.title}': ${e.message}")

@@ -1,6 +1,7 @@
 package com.parachord.shared.api
 
 import com.parachord.shared.platform.Log
+import com.parachord.shared.sync.ListenBrainzUnauthorizedException
 import io.ktor.client.HttpClient
 import io.ktor.client.request.get
 import io.ktor.client.request.header
@@ -17,6 +18,10 @@ import kotlinx.coroutines.delay
 import kotlinx.serialization.SerialName
 import kotlinx.serialization.Serializable
 import kotlinx.serialization.json.Json
+import kotlinx.serialization.json.buildJsonArray
+import kotlinx.serialization.json.buildJsonObject
+import kotlinx.serialization.json.jsonObject
+import kotlinx.serialization.json.jsonPrimitive
 import kotlinx.serialization.json.put
 
 /**
@@ -162,6 +167,318 @@ class ListenBrainzClient(private val httpClient: HttpClient) {
         } catch (e: Throwable) {
             Log.w(TAG, "submitRecordingFeedback failed for $recordingMbid: ${e.message}")
             throw e
+        }
+    }
+
+    /**
+     * POST /1/playlist/create — create a new JSPF playlist owned by the
+     * token's user. Returns the assigned playlist MBID.
+     *
+     * Body shape per LB JSPF playlist spec
+     * (https://listenbrainz.readthedocs.io/en/latest/users/api/playlist.html):
+     *
+     *   {"playlist": {
+     *      "title": "...",
+     *      "annotation": "...?",
+     *      "extension": {
+     *        "https://musicbrainz.org/doc/jspf#playlist": { "public": true }
+     *      }
+     *   }}
+     *
+     * Response: `{"playlist_mbid": "<uuid>", "status": "ok"}`.
+     *
+     * Wrapped in [executeWithRetry] for 429/503 backoff, mirroring
+     * [submitRecordingFeedback]. Throws [ListenBrainzUnauthorizedException]
+     * on HTTP 401 so [ListenBrainzSyncProvider] can trip its session-scoped
+     * auth-failed kill-switch (matches AM reauth contract).
+     */
+    suspend fun createPlaylist(
+        name: String,
+        description: String? = null,
+        isPublic: Boolean = true,
+        token: String,
+    ): String {
+        val body = buildJsonObject {
+            put(
+                "playlist",
+                buildJsonObject {
+                    put("title", name)
+                    if (description != null) put("annotation", description)
+                    put(
+                        "extension",
+                        buildJsonObject {
+                            put(
+                                "https://musicbrainz.org/doc/jspf#playlist",
+                                buildJsonObject { put("public", isPublic) },
+                            )
+                        },
+                    )
+                },
+            )
+        }
+        val response = executeWithRetry {
+            httpClient.post("$BASE_URL/1/playlist/create") {
+                header("Authorization", "Token $token")
+                contentType(io.ktor.http.ContentType.Application.Json)
+                setBody(body)
+            }
+        }
+        if (response.status == HttpStatusCode.Unauthorized) {
+            throw ListenBrainzUnauthorizedException(
+                "ListenBrainz returned 401 on createPlaylist — token rejected",
+            )
+        }
+        if (!response.status.isSuccess()) {
+            val text = response.bodyAsText().take(200)
+            throw Exception("createPlaylist failed: HTTP ${response.status.value} $text")
+        }
+        val parsed = json.decodeFromString<CreatePlaylistWire>(response.bodyAsText())
+        return parsed.playlistMbid
+            ?: throw Exception("createPlaylist response missing playlist_mbid")
+    }
+
+    /**
+     * POST /1/playlist/edit/{playlistMbid} — rename + description.
+     *
+     * Best-effort. LB rejects edits to non-owned playlists with 403/404
+     * (caller should treat those as no-op rather than crashing the sync
+     * cycle). Body shape is the same as [createPlaylist] but only includes
+     * fields that are non-null — LB ignores absent fields and leaves them
+     * unchanged.
+     *
+     * Throws [ListenBrainzUnauthorizedException] on HTTP 401.
+     */
+    suspend fun editPlaylist(
+        playlistMbid: String,
+        name: String?,
+        description: String?,
+        token: String,
+    ) {
+        val body = buildJsonObject {
+            put(
+                "playlist",
+                buildJsonObject {
+                    if (name != null) put("title", name)
+                    if (description != null) put("annotation", description)
+                },
+            )
+        }
+        val response = executeWithRetry {
+            httpClient.post("$BASE_URL/1/playlist/edit/$playlistMbid") {
+                header("Authorization", "Token $token")
+                contentType(io.ktor.http.ContentType.Application.Json)
+                setBody(body)
+            }
+        }
+        if (response.status == HttpStatusCode.Unauthorized) {
+            throw ListenBrainzUnauthorizedException(
+                "ListenBrainz returned 401 on editPlaylist — token rejected",
+            )
+        }
+        if (!response.status.isSuccess()) {
+            val text = response.bodyAsText().take(200)
+            throw Exception("editPlaylist($playlistMbid) failed: HTTP ${response.status.value} $text")
+        }
+    }
+
+    /**
+     * POST /1/playlist/{playlistMbid}/delete — soft-deletes from the
+     * user's profile. LB's REST surface uses POST for delete, not the
+     * HTTP DELETE verb. No body required.
+     *
+     * Throws [ListenBrainzUnauthorizedException] on HTTP 401.
+     */
+    suspend fun deletePlaylist(playlistMbid: String, token: String) {
+        val response = executeWithRetry {
+            httpClient.post("$BASE_URL/1/playlist/$playlistMbid/delete") {
+                header("Authorization", "Token $token")
+            }
+        }
+        if (response.status == HttpStatusCode.Unauthorized) {
+            throw ListenBrainzUnauthorizedException(
+                "ListenBrainz returned 401 on deletePlaylist — token rejected",
+            )
+        }
+        if (!response.status.isSuccess()) {
+            val text = response.bodyAsText().take(200)
+            throw Exception("deletePlaylist($playlistMbid) failed: HTTP ${response.status.value} $text")
+        }
+    }
+
+    /**
+     * POST /1/playlist/{playlistMbid}/item/add — append recording MBIDs.
+     *
+     * Per LB JSPF spec, recordings are identified by full MusicBrainz URI
+     * (`https://musicbrainz.org/recording/<mbid>`). Body shape:
+     *
+     *   {"playlist": {"track": [{"identifier": "https://..."}, ...]}}
+     *
+     * No-op (no HTTP request) when [recordingMbids] is empty.
+     *
+     * Wrapped in [executeWithRetry]. Throws [ListenBrainzUnauthorizedException]
+     * on HTTP 401.
+     */
+    suspend fun addPlaylistItems(
+        playlistMbid: String,
+        recordingMbids: List<String>,
+        token: String,
+    ) {
+        if (recordingMbids.isEmpty()) return
+        val body = buildJsonObject {
+            put(
+                "playlist",
+                buildJsonObject {
+                    put(
+                        "track",
+                        buildJsonArray {
+                            for (mbid in recordingMbids) {
+                                add(
+                                    buildJsonObject {
+                                        put("identifier", "https://musicbrainz.org/recording/$mbid")
+                                    },
+                                )
+                            }
+                        },
+                    )
+                },
+            )
+        }
+        val response = executeWithRetry {
+            httpClient.post("$BASE_URL/1/playlist/$playlistMbid/item/add") {
+                header("Authorization", "Token $token")
+                contentType(io.ktor.http.ContentType.Application.Json)
+                setBody(body)
+            }
+        }
+        if (response.status == HttpStatusCode.Unauthorized) {
+            throw ListenBrainzUnauthorizedException(
+                "ListenBrainz returned 401 on addPlaylistItems — token rejected",
+            )
+        }
+        if (!response.status.isSuccess()) {
+            val text = response.bodyAsText().take(200)
+            throw Exception("addPlaylistItems($playlistMbid) failed: HTTP ${response.status.value} $text")
+        }
+    }
+
+    /**
+     * POST /1/playlist/{playlistMbid}/item/delete — remove items by position range.
+     *
+     * `index` is the 0-based starting position; `count` is the number of items
+     * to remove. To full-replace, call this with (0, currentTrackCount) then
+     * [addPlaylistItems] with the new list.
+     *
+     * No-op (no HTTP request) when [count] is `<= 0`.
+     *
+     * Wrapped in [executeWithRetry]. Throws [ListenBrainzUnauthorizedException]
+     * on HTTP 401.
+     */
+    suspend fun deletePlaylistItems(
+        playlistMbid: String,
+        index: Int,
+        count: Int,
+        token: String,
+    ) {
+        if (count <= 0) return
+        val body = buildJsonObject {
+            put("index", index)
+            put("count", count)
+        }
+        val response = executeWithRetry {
+            httpClient.post("$BASE_URL/1/playlist/$playlistMbid/item/delete") {
+                header("Authorization", "Token $token")
+                contentType(io.ktor.http.ContentType.Application.Json)
+                setBody(body)
+            }
+        }
+        if (response.status == HttpStatusCode.Unauthorized) {
+            throw ListenBrainzUnauthorizedException(
+                "ListenBrainz returned 401 on deletePlaylistItems — token rejected",
+            )
+        }
+        if (!response.status.isSuccess()) {
+            val text = response.bodyAsText().take(200)
+            throw Exception("deletePlaylistItems($playlistMbid) failed: HTTP ${response.status.value} $text")
+        }
+    }
+
+    /**
+     * GET /1/playlist/{playlistMbid} — extract only the `last_modified_at`
+     * timestamp from the JSPF extension.
+     *
+     * Used by `ListenBrainzSyncProvider.getPlaylistSnapshotId` to detect
+     * remote changes since the local snapshot. Returns `null` when:
+     *  - The playlist returns 404 (deleted / never existed)
+     *  - The `last_modified_at` field is absent
+     *
+     * Reads `playlist.extension["https://musicbrainz.org/doc/jspf#playlist"]
+     * .last_modified_at` (JSPF extension structure LB uses).
+     *
+     * No auth required — public LB playlists are publicly readable, and the
+     * caller may be checking other users' shared playlists. Non-2xx errors
+     * other than 404 propagate as [Exception].
+     */
+    suspend fun getPlaylistLastModified(playlistMbid: String): String? {
+        val response = httpClient.get("$BASE_URL/1/playlist/$playlistMbid")
+        if (response.status == HttpStatusCode.NotFound) return null
+        if (!response.status.isSuccess()) {
+            val text = response.bodyAsText().take(200)
+            throw Exception("getPlaylistLastModified($playlistMbid) failed: HTTP ${response.status.value} $text")
+        }
+        return try {
+            val root = Json.parseToJsonElement(response.bodyAsText()).jsonObject
+            val playlist = root["playlist"]?.jsonObject ?: return null
+            val ext = playlist["extension"]?.jsonObject ?: return null
+            val jspf = ext["https://musicbrainz.org/doc/jspf#playlist"]?.jsonObject ?: return null
+            jspf["last_modified_at"]?.jsonPrimitive?.content?.ifBlank { null }
+        } catch (e: CancellationException) {
+            throw e
+        } catch (e: Throwable) {
+            Log.w(TAG, "Failed to parse last_modified_at for $playlistMbid", e)
+            null
+        }
+    }
+
+    /**
+     * GET /1/user/{userName}/playlists — owned playlists, not the system
+     * `createdfor` playlists already exposed via [getCreatedForPlaylists].
+     *
+     * Returns the user's playlists as a list of [LbPlaylist] entries. Each
+     * entry carries playlist MBID (extracted from the `identifier` URL's
+     * trailing segment) + title + annotation (description) +
+     * last_modified_at (from the JSPF extension).
+     *
+     * Unauth — public playlists are world-readable. The `Token` header is
+     * NOT sent. 404 → empty list (treat as "user has no playlists or does
+     * not exist"); other non-2xx → throws [Exception]. Parse failures
+     * propagate as well — the caller ([ListenBrainzSyncProvider.fetchPlaylists])
+     * needs to distinguish "user has no playlists" (empty list) from "LB is
+     * broken right now" (exception) so a malformed response doesn't wipe the
+     * local mirror.
+     *
+     * Wrapped in [executeWithRetry] for 429/503 backoff, matching the other
+     * read paths in this client.
+     */
+    suspend fun getUserOwnedPlaylists(userName: String): List<LbPlaylist> {
+        val response = executeWithRetry {
+            httpClient.get("$BASE_URL/1/user/$userName/playlists")
+        }
+        if (response.status == HttpStatusCode.NotFound) return emptyList()
+        if (!response.status.isSuccess()) {
+            val text = response.bodyAsText().take(200)
+            throw Exception("getUserOwnedPlaylists($userName) failed: HTTP ${response.status.value} $text")
+        }
+        val parsed = json.decodeFromString<CreatedForListWire>(response.bodyAsText())
+        return parsed.playlists.mapNotNull { wrapper ->
+            val pl = wrapper.playlist ?: return@mapNotNull null
+            val mbid = pl.identifier?.substringAfterLast("/")?.ifBlank { null }
+                ?: return@mapNotNull null
+            LbPlaylist(
+                mbid = mbid,
+                title = pl.title.orEmpty(),
+                annotation = pl.annotation.orEmpty(),
+                lastModifiedAt = pl.lastModifiedAt?.ifBlank { null },
+            )
         }
     }
 
@@ -499,6 +816,12 @@ class ListenBrainzClient(private val httpClient: HttpClient) {
 // ── Wire-format models (private, @Serializable) ──────────────────────────────
 
 @Serializable
+private data class CreatePlaylistWire(
+    @SerialName("playlist_mbid") val playlistMbid: String? = null,
+    val status: String? = null,
+)
+
+@Serializable
 private data class ValidateTokenWire(
     val valid: Boolean? = null,
     @SerialName("user_name") val userName: String? = null,
@@ -581,6 +904,21 @@ private data class PlaylistMetaWire(
     val title: String? = null,
     val date: String? = null,
     val annotation: String? = null,
+    val extension: PlaylistMetaExtensionWire? = null,
+) {
+    val lastModifiedAt: String?
+        get() = extension?.jspfPlaylist?.lastModifiedAt
+}
+
+@Serializable
+private data class PlaylistMetaExtensionWire(
+    @SerialName("https://musicbrainz.org/doc/jspf#playlist")
+    val jspfPlaylist: JspfPlaylistMetaWire? = null,
+)
+
+@Serializable
+private data class JspfPlaylistMetaWire(
+    @SerialName("last_modified_at") val lastModifiedAt: String? = null,
 )
 
 @Serializable

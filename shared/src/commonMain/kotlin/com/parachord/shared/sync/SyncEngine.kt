@@ -140,7 +140,8 @@ class SyncEngine constructor(
          *
          * Idempotent. Runs every launch. No-op on healthy data (no log unless N > 0).
          *
-         * For each playlist row whose `id` starts with `spotify-` or `applemusic-`:
+         * For each playlist row whose `id` starts with `spotify-`, `applemusic-`,
+         * or `listenbrainz-`:
          *   1. Derive `impliedProvider` from the prefix and `externalIdFromPrefix`
          *      from the substring after it.
          *   2. Read the current `sync_playlist_source` row.
@@ -171,6 +172,7 @@ class SyncEngine constructor(
             val supportedProviders = listOf(
                 SpotifySyncProvider.PROVIDER_ID,
                 AppleMusicSyncProvider.PROVIDER_ID,
+                ListenBrainzSyncProvider.PROVIDER_ID,
             )
             var healed = 0
             for (playlist in playlistDao.getAllSync()) {
@@ -1905,6 +1907,13 @@ class SyncEngine constructor(
                 playlist.spotifyId == null && baseEligible
             AppleMusicSyncProvider.PROVIDER_ID ->
                 baseEligible || playlist.id.startsWith("spotify-")
+            ListenBrainzSyncProvider.PROVIDER_ID ->
+                // LB mirrors any source-of-truth playlist: local-*, hosted XSPF,
+                // spotify-*, applemusic-*. The runtime `syncedFrom` guard skips
+                // listenbrainz-imported playlists when targeting LB.
+                baseEligible
+                    || playlist.id.startsWith("spotify-")
+                    || playlist.id.startsWith("applemusic-")
             else -> baseEligible
         }
     }
@@ -1921,6 +1930,7 @@ class SyncEngine constructor(
     ): List<String> = when (providerId) {
         SpotifySyncProvider.PROVIDER_ID -> tracks.mapNotNull { it.trackSpotifyUri }
         AppleMusicSyncProvider.PROVIDER_ID -> tracks.mapNotNull { it.trackAppleMusicId }
+        ListenBrainzSyncProvider.PROVIDER_ID -> tracks.mapNotNull { it.trackRecordingMbid }
         else -> emptyList()
     }
 
@@ -1932,6 +1942,7 @@ class SyncEngine constructor(
     private fun missingProviderId(track: PlaylistTrack, providerId: String): Boolean = when (providerId) {
         SpotifySyncProvider.PROVIDER_ID -> track.trackSpotifyUri.isNullOrBlank()
         AppleMusicSyncProvider.PROVIDER_ID -> track.trackAppleMusicId.isNullOrBlank()
+        ListenBrainzSyncProvider.PROVIDER_ID -> track.trackRecordingMbid.isNullOrBlank()
         else -> true
     }
 
@@ -1955,6 +1966,7 @@ class SyncEngine constructor(
             )
         }
         AppleMusicSyncProvider.PROVIDER_ID -> track.copy(trackAppleMusicId = resolvedId)
+        ListenBrainzSyncProvider.PROVIDER_ID -> track.copy(trackRecordingMbid = resolvedId)
         else -> track
     }
 

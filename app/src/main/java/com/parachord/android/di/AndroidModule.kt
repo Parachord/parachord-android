@@ -52,6 +52,7 @@ import com.parachord.android.resolver.TrackResolverCache
 import com.parachord.android.sync.AppleMusicSyncProvider
 import com.parachord.android.sync.SpotifySyncProvider
 import com.parachord.android.sync.SyncEngine
+import com.parachord.shared.sync.ListenBrainzSyncProvider
 import com.parachord.android.sync.SyncScheduler
 import com.parachord.android.ui.MainViewModel
 import com.parachord.android.ui.screens.album.AlbumViewModel
@@ -260,6 +261,15 @@ val androidModule = module {
         // track. Same idempotent ALTER pattern as above.
         try {
             driver.execute(null, "ALTER TABLE tracks ADD COLUMN crossResolverEnrichedAt INTEGER", 0)
+        } catch (_: Exception) {
+            // Column already present (idempotent on repeat launches).
+        }
+        // ListenBrainz playlist sync (#156): trackRecordingMbid carries the
+        // recording MBID per-row so LB push/pull can identify tracks by MBID
+        // (LB's only stable ID). New installs get the column from
+        // PlaylistTrack.sq's CREATE TABLE; existing installs need this ALTER.
+        try {
+            driver.execute(null, "ALTER TABLE playlist_tracks ADD COLUMN trackRecordingMbid TEXT", 0)
         } catch (_: Exception) {
             // Column already present (idempotent on repeat launches).
         }
@@ -798,6 +808,7 @@ val androidModule = module {
     // changes required here.
     singleOf(::SpotifySyncProvider) bind com.parachord.shared.sync.SyncProvider::class
     singleOf(::AppleMusicSyncProvider) bind com.parachord.shared.sync.SyncProvider::class
+    singleOf(::ListenBrainzSyncProvider) bind com.parachord.shared.sync.SyncProvider::class
     single<List<com.parachord.shared.sync.SyncProvider>> { getAll() }
     singleOf(::SyncScheduler)
     singleOf(::HostedPlaylistPoller)
