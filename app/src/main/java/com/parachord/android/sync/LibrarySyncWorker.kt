@@ -5,6 +5,7 @@ import com.parachord.shared.platform.Log
 import androidx.work.CoroutineWorker
 import androidx.work.WorkerParameters
 import com.parachord.android.auth.OAuthManager
+import com.parachord.android.auth.SpotifyReauthRequiredException
 import com.parachord.android.data.store.SettingsStore
 import kotlinx.coroutines.flow.first
 import org.koin.core.component.KoinComponent
@@ -39,7 +40,15 @@ class LibrarySyncWorker(
         }
 
         return try {
-            oAuthManager.refreshSpotifyToken()
+            try {
+                oAuthManager.refreshSpotifyToken()
+            } catch (_: SpotifyReauthRequiredException) {
+                // Refresh token revoked. Retrying won't help until the
+                // user reconnects via the in-app banner. Skip Spotify
+                // sync for this run — let the rest of syncEngine.syncAll
+                // proceed (it'll no-op Spotify on missing access token).
+                Log.w(TAG, "Spotify reauth required — skipping refresh, no retry")
+            }
 
             val result = syncEngine.syncAll()
             if (result.success) {
@@ -49,6 +58,9 @@ class LibrarySyncWorker(
                 Log.w(TAG, "Sync reported failure: ${result.error}")
                 if (runAttemptCount < 3) Result.retry() else Result.failure()
             }
+        } catch (e: SpotifyReauthRequiredException) {
+            Log.w(TAG, "Spotify reauth required — sync aborted, no retry", e)
+            Result.success()
         } catch (e: Exception) {
             Log.e(TAG, "Sync worker failed", e)
             if (runAttemptCount < 3) Result.retry() else Result.failure()

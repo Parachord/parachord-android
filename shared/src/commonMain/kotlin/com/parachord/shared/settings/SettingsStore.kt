@@ -82,6 +82,7 @@ class SettingsStore(
         const val CONCERT_RADIUS = "concert_radius_miles"
         const val LAST_PLUGIN_SYNC = "last_plugin_sync_timestamp"
         const val DISABLED_PLUGINS = "disabled_plugins"
+        const val SPOTIFY_ACCESS_TOKEN_EXPIRES_AT = "spotify_access_token_expires_at"
 
         /** Per-service opt-in toggle for the loved-tracks push. Mirrors
          *  desktop's `scrobbler_love_push_enabled` shape from the design
@@ -222,6 +223,25 @@ class SettingsStore(
     suspend fun clearSpotifyTokens() {
         secureStore.remove("spotify_access_token")
         secureStore.remove("spotify_refresh_token")
+        ensureMigrated(); kv.remove(SPOTIFY_ACCESS_TOKEN_EXPIRES_AT)
+    }
+
+    /**
+     * Epoch-millis when the current Spotify access token expires. Computed
+     * as `now + expires_in * 1000` after every successful token response
+     * (initial auth + refresh). Read by the foreground hook to proactively
+     * refresh within a 5-minute window — moves the user-visible discovery
+     * moment for a dead refresh token from "tap play, wait 23s in silence"
+     * to "open app, banner immediately shows".
+     *
+     * Returns 0 if never set (treat as "expired / refresh now").
+     */
+    suspend fun getSpotifyAccessTokenExpiresAt(): Long {
+        ensureMigrated(); return kv.getLong(SPOTIFY_ACCESS_TOKEN_EXPIRES_AT, default = 0L)
+    }
+
+    suspend fun setSpotifyAccessTokenExpiresAt(expiresAt: Long) {
+        ensureMigrated(); kv.setLong(SPOTIFY_ACCESS_TOKEN_EXPIRES_AT, expiresAt)
     }
 
     // ── Last.fm session + username ───────────────────────────────────

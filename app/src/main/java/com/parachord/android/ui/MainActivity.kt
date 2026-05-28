@@ -164,6 +164,34 @@ class MainActivity : ComponentActivity() {
                 announcementsRepository.refreshIfStale()
             } catch (_: Exception) { /* swallow */ }
         }
+        // Proactive Spotify token refresh when within the 5-minute expiry
+        // window. Without this, the first signal that a refresh token is
+        // dead is when the user taps play and waits in silence for ~23s.
+        // Doing it on foreground shifts the discovery to "open app → banner
+        // immediately appears". Fire-and-forget; the kill-switch flag in
+        // OAuthManager handles all error cases.
+        proactiveSpotifyTokenRefreshIfNeeded()
+    }
+
+    private fun proactiveSpotifyTokenRefreshIfNeeded() {
+        // No point hammering if the session already knows the refresh
+        // token is dead — the banner is already showing.
+        if (oAuthManager.spotifyReauthRequired.value) return
+        CoroutineScope(Dispatchers.IO).launch {
+            try {
+                if (settingsStore.getSpotifyRefreshToken().isNullOrBlank()) return@launch
+                val expiresAt = settingsStore.getSpotifyAccessTokenExpiresAt()
+                // expiresAt == 0L means we don't know — treat as "refresh
+                // now" since the user's earlier session may have predated
+                // the expiry-tracking persistence.
+                val withinWindow = expiresAt == 0L ||
+                    expiresAt - System.currentTimeMillis() < 5 * 60 * 1000L
+                if (!withinWindow) return@launch
+                oAuthManager.refreshSpotifyToken()
+            } catch (_: com.parachord.android.auth.SpotifyReauthRequiredException) {
+                // Kill-switch already tripped the StateFlow → banner shows.
+            } catch (_: Exception) { /* swallow */ }
+        }
     }
 
     override fun onPause() {

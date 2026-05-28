@@ -100,6 +100,7 @@ import com.parachord.android.data.db.entity.FriendEntity
 import com.parachord.android.data.db.entity.PlaylistEntity
 import com.parachord.android.ui.components.AlbumArtCard
 import com.parachord.android.ui.components.AnnouncementBanner
+import com.parachord.android.ui.components.SpotifyReauthBanner
 import android.content.Intent
 import android.net.Uri
 import android.widget.Toast
@@ -310,10 +311,31 @@ fun HomeScreen(
                 }
             }
 
+            // ── Spotify reauth banner ────────────────────────────────────
+            val oAuthManager: com.parachord.android.auth.OAuthManager =
+                org.koin.compose.koinInject()
+            val spotifyReauthRequired by oAuthManager.spotifyReauthRequired
+                .collectAsStateWithLifecycle()
+
             LazyColumn(
                 modifier = Modifier.fillMaxSize(),
                 contentPadding = PaddingValues(bottom = 24.dp),
             ) {
+                if (spotifyReauthRequired) {
+                    item(key = "spotify-reauth-banner") {
+                        SpotifyReauthBanner(
+                            onReconnect = {
+                                oAuthManager.launchSpotifyAuth(
+                                    com.parachord.android.BuildConfig.SPOTIFY_CLIENT_ID,
+                                )
+                            },
+                            modifier = Modifier.padding(
+                                horizontal = 16.dp,
+                                vertical = 8.dp,
+                            ),
+                        )
+                    }
+                }
                 if (firstAnnouncement != null) {
                     item(key = "announcement-${firstAnnouncement.id}") {
                         AnnouncementBanner(
