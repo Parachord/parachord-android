@@ -648,41 +648,47 @@ class SpotifyPlaybackHandler constructor(
      * - Auto-selects when 1 real device + synthetic entry (don't show picker)
      * - Filters restricted devices from the picker
      */
-    private suspend fun pickDevice(devices: List<SpDevice>): SpDevice? {
+    internal suspend fun pickDevice(devices: List<SpDevice>): SpDevice? {
         val controllable = devices.filter { !it.isRestricted }
         val available = controllable.ifEmpty { devices }
 
         // Inject synthetic "This device" if no local smartphone found
         val localModel = Build.MODEL.lowercase()
         val localManufacturer = Build.MANUFACTURER.lowercase()
-        val hasLocalDevice = available.any { device ->
-            if (device.type != "Smartphone") return@any false
-            val name = device.name.lowercase()
-            name.contains(localModel) || name.contains(localManufacturer)
-        } || available.count { it.type == "Smartphone" } == 1
+        val matchesLocalSmartphone: (SpDevice) -> Boolean = { device ->
+            if (device.type != "Smartphone") {
+                false
+            } else {
+                val name = device.name.lowercase()
+                name.contains(localModel) || name.contains(localManufacturer)
+            }
+        }
+        val hasLocalDevice = available.any(matchesLocalSmartphone) ||
+            available.count { it.type == "Smartphone" } == 1
         val withLocal = if (hasLocalDevice) available else available + localDeviceEntry()
 
         Log.d(TAG, "pickDevice: ${withLocal.map { "'${it.name}'(type=${it.type}, active=${it.isActive})" }}")
 
-        val preferredId = settingsStore.getPreferredSpotifyDeviceId()
+        val storedPreferredId = settingsStore.getPreferredSpotifyDeviceId()
 
         // 1. Preferred = local placeholder → honour it
-        if (preferredId == LOCAL_DEVICE_ID) {
+        if (storedPreferredId == LOCAL_DEVICE_ID) {
             Log.d(TAG, "Preferred device is local — returning local placeholder")
             return withLocal.firstOrNull { isLocalPlaceholder(it) } ?: localDeviceEntry()
         }
 
         // 2. Preferred device found → use it (even if inactive — transfer will activate)
         //    Only clear preference when the device is completely absent from the list.
-        if (preferredId != null) {
-            val preferred = withLocal.firstOrNull { it.id == preferredId }
+        if (storedPreferredId != null) {
+            val preferred = withLocal.firstOrNull { it.id == storedPreferredId }
             if (preferred != null) {
                 Log.d(TAG, "Using preferred device: '${preferred.name}' (active=${preferred.isActive})")
                 return preferred
             }
-            // Device gone — clear preference so picker shows
-            Log.d(TAG, "Preferred device $preferredId no longer available, clearing")
+            Log.d(TAG, "Preferred device $storedPreferredId no longer available, clearing")
             settingsStore.clearPreferredSpotifyDeviceId()
+            // Fall through to step 3-5: stale-cleared is equivalent to "no preference"
+            // for the downstream local-preference rule.
         }
 
         // 3. Single real device (+ optional synthetic entry) → auto-select
@@ -696,13 +702,26 @@ class SpotifyPlaybackHandler constructor(
             return withLocal[0]
         }
 
-        // 4. Already-active device → use it
+        // 4. No effective preference + local option exists → prefer local over
+        //    already-active remote. Matches user intent: "I tapped play on my phone →
+        //    audio comes out of my phone." Without this, an idle Bedroom TV still flagged
+        //    active=true in Spotify's devices list silently steals playback from a
+        //    freshly-reauth'd user. (preferredId is provably null here — either unset from
+        //    the start or just cleared as stale above.)
+        val localCandidate = withLocal.firstOrNull { isLocalPlaceholder(it) }
+            ?: withLocal.firstOrNull(matchesLocalSmartphone)
+        if (localCandidate != null) {
+            Log.d(TAG, "No preference set — defaulting to local device '${localCandidate.name}' over already-active remote")
+            return localCandidate
+        }
+
+        // 5. Already-active device → use it (ultimate fallback when no local option)
         withLocal.firstOrNull { it.isActive }?.let { active ->
             Log.d(TAG, "Using already-active device '${active.name}'")
             return active
         }
 
-        // 5. Multiple devices — show picker
+        // 6. Multiple devices — show picker
         Log.d(TAG, "Multiple devices, showing picker dialog")
         _devicePickerRequest.value?.deferred?.complete(null) // Cancel stale picker
         val deferred = CompletableDeferred<SpDevice?>()
