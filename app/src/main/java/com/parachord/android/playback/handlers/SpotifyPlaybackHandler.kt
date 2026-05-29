@@ -290,6 +290,7 @@ class SpotifyPlaybackHandler constructor(
 
                 if (resp.status.isSuccess() || resp.status.value == 204) {
                     Log.d(TAG, "Playback accepted on '${targetDevice.name}' (attempt $attempt, ${System.currentTimeMillis() - playStart}ms)")
+                    stickyDefaultLocalIfUnset(targetDevice)
 
                     // Quick verification on cold devices only
                     if (!deviceVerified) {
@@ -640,6 +641,41 @@ class SpotifyPlaybackHandler constructor(
         device.id == LOCAL_DEVICE_ID
 
     /**
+     * True when [device] is a real Spotify-registered Smartphone matching the
+     * current handset (Build.MODEL or Build.MANUFACTURER). After
+     * resolveLocalDevice() runs, the "used" device is no longer the synthetic
+     * placeholder — it's the real Connect entry. The sticky-default helper
+     * needs to recognize both forms.
+     */
+    internal fun isLocalRealDevice(device: SpDevice): Boolean {
+        if (device.type != "Smartphone") return false
+        val name = device.name.lowercase()
+        return name.contains(Build.MODEL.lowercase()) ||
+            name.contains(Build.MANUFACTURER.lowercase())
+    }
+
+    /**
+     * Defense-in-depth: persist LOCAL_DEVICE_ID as the preferred Spotify device
+     * after a successful local play, but ONLY if no preference is set right now.
+     *
+     * Re-reads the preference at write time to avoid clobbering a parallel
+     * picker action that may have landed during the play attempt. Never
+     * overwrites an explicit existing preference.
+     *
+     * Called after the "Playback accepted" success log in attemptPlay. Pairs
+     * with the pickDevice prefer-local-over-active-remote rule: that fix routes
+     * audio correctly NOW, this makes the next session immune to phantom
+     * active remotes (e.g., a Bedroom TV the API still flags as active) by
+     * giving the routing decision an explicit preference to honor.
+     */
+    internal suspend fun stickyDefaultLocalIfUnset(usedDevice: SpDevice) {
+        if (!isLocalPlaceholder(usedDevice) && !isLocalRealDevice(usedDevice)) return
+        if (settingsStore.getPreferredSpotifyDeviceId() != null) return
+        settingsStore.setPreferredSpotifyDeviceId(LOCAL_DEVICE_ID)
+        Log.d(TAG, "Sticky default: persisted LOCAL_DEVICE_ID as preference after successful local play")
+    }
+
+    /**
      * Pick the best device to play on.
      *
      * Improvements over old picker:
@@ -653,17 +689,7 @@ class SpotifyPlaybackHandler constructor(
         val available = controllable.ifEmpty { devices }
 
         // Inject synthetic "This device" if no local smartphone found
-        val localModel = Build.MODEL.lowercase()
-        val localManufacturer = Build.MANUFACTURER.lowercase()
-        val matchesLocalSmartphone: (SpDevice) -> Boolean = { device ->
-            if (device.type != "Smartphone") {
-                false
-            } else {
-                val name = device.name.lowercase()
-                name.contains(localModel) || name.contains(localManufacturer)
-            }
-        }
-        val hasLocalDevice = available.any(matchesLocalSmartphone) ||
+        val hasLocalDevice = available.any { isLocalRealDevice(it) } ||
             available.count { it.type == "Smartphone" } == 1
         val withLocal = if (hasLocalDevice) available else available + localDeviceEntry()
 
@@ -709,7 +735,7 @@ class SpotifyPlaybackHandler constructor(
         //    freshly-reauth'd user. (preferredId is provably null here — either unset from
         //    the start or just cleared as stale above.)
         val localCandidate = withLocal.firstOrNull { isLocalPlaceholder(it) }
-            ?: withLocal.firstOrNull(matchesLocalSmartphone)
+            ?: withLocal.firstOrNull { isLocalRealDevice(it) }
         if (localCandidate != null) {
             Log.d(TAG, "No preference set — defaulting to local device '${localCandidate.name}' over already-active remote")
             return localCandidate
