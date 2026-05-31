@@ -165,6 +165,71 @@ class ForwardingPlayerSnapshotTest {
         verify(exactly = 2) { listener.onMediaItemTransition(any(), Player.MEDIA_ITEM_TRANSITION_REASON_AUTO) }
     }
 
+    /**
+     * Android Auto's now-playing card reads the session MediaMetadata, which
+     * Media3 derives from Player.getMediaMetadata() — NOT getCurrentMediaItem().
+     * Without overriding getMediaMetadata, the wrapper delegated to the ExoPlayer
+     * (the silence/placeholder item), so the card showed the cold-start
+     * placeholder (the playlist name) until the next track or app foreground
+     * refreshed the delegate. getMediaMetadata must reflect the snapshot's
+     * current track.
+     */
+    @Test fun `getMediaMetadata reflects current track from updateQueueSnapshot`() {
+        val delegate = mockk<androidx.media3.exoplayer.ExoPlayer>(relaxed = true)
+        every { delegate.currentTimeline } returns Timeline.EMPTY
+        val controller = mockk<PlaybackController>(relaxed = true)
+        val stateHolder = PlaybackStateHolder()
+        val wrapper = PlaybackService.ExternalPlaybackForwardingPlayer(delegate, controller, stateHolder)
+
+        wrapper.updateQueueSnapshot(track("Talkback"), emptyList())
+
+        assertEquals("Talkback", wrapper.mediaMetadata.title)
+    }
+
+    /**
+     * A current-track change must fire onMediaMetadataChanged so Media3 re-reads
+     * getMediaMetadata() and pushes the new metadata to Auto. Firing only
+     * onMediaItemTransition is insufficient — the session's PlayerInfo metadata
+     * field updates on EVENT_MEDIA_METADATA_CHANGED.
+     */
+    @Test fun `current track change fires onMediaMetadataChanged`() {
+        val delegate = mockk<androidx.media3.exoplayer.ExoPlayer>(relaxed = true)
+        every { delegate.currentTimeline } returns Timeline.EMPTY
+        val controller = mockk<PlaybackController>(relaxed = true)
+        val stateHolder = PlaybackStateHolder()
+        val wrapper = PlaybackService.ExternalPlaybackForwardingPlayer(delegate, controller, stateHolder)
+
+        val listener = mockk<Player.Listener>(relaxed = true)
+        wrapper.addListener(listener)
+
+        wrapper.updateQueueSnapshot(track("first"), emptyList())
+        wrapper.updateQueueSnapshot(track("second"), emptyList())
+
+        verify(exactly = 2) { listener.onMediaMetadataChanged(any()) }
+    }
+
+    /**
+     * publishMetadataRefresh re-fires onMediaMetadataChanged without a track
+     * change, so Auto re-reads getDuration() when external polling reports the
+     * real duration ~1s after a track starts.
+     */
+    @Test fun `publishMetadataRefresh fires onMediaMetadataChanged for current track`() {
+        val delegate = mockk<androidx.media3.exoplayer.ExoPlayer>(relaxed = true)
+        every { delegate.currentTimeline } returns Timeline.EMPTY
+        val controller = mockk<PlaybackController>(relaxed = true)
+        val stateHolder = PlaybackStateHolder()
+        val wrapper = PlaybackService.ExternalPlaybackForwardingPlayer(delegate, controller, stateHolder)
+
+        wrapper.updateQueueSnapshot(track("Talkback"), emptyList())
+
+        val listener = mockk<Player.Listener>(relaxed = true)
+        wrapper.addListener(listener)
+
+        wrapper.publishMetadataRefresh()
+
+        verify { listener.onMediaMetadataChanged(match { it.title == "Talkback" }) }
+    }
+
     @Test fun `empty snapshot reports zero count and null current item`() {
         val delegate = mockk<androidx.media3.exoplayer.ExoPlayer>(relaxed = true)
         every { delegate.currentTimeline } returns Timeline.EMPTY

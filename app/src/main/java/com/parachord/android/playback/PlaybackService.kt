@@ -96,6 +96,14 @@ class PlaybackService : MediaLibraryService() {
     private var forwardingPlayer: ExternalPlaybackForwardingPlayer? = null
     private var isExternalForeground = false
 
+    /**
+     * Last external-playback duration we pushed a metadata refresh for. External
+     * handlers report duration via polling ~1s after a track starts; when it
+     * changes we re-fire onMediaMetadataChanged so Auto re-reads getDuration()
+     * (see [ExternalPlaybackForwardingPlayer.publishMetadataRefresh]).
+     */
+    private var lastPublishedDurationMs = 0L
+
     private val serviceScope = CoroutineScope(SupervisorJob() + Dispatchers.Main)
     private var stateObserverJob: Job? = null
     private var queueSnapshotJob: Job? = null
@@ -861,6 +869,16 @@ class PlaybackService : MediaLibraryService() {
                     buildNotification(title, artist, state.isPlaying, currentArtworkBitmap),
                 )
 
+                // When the external handler's polling first reports a real
+                // duration (it starts at 0/UNSET), no Player event fires on its
+                // own — so Auto keeps showing 0:00 until the app is foregrounded
+                // or the next track transitions. Re-fire a metadata refresh so
+                // Auto re-reads getDuration() the moment the duration changes.
+                if (state.duration != lastPublishedDurationMs) {
+                    lastPublishedDurationMs = state.duration
+                    forwardingPlayer?.publishMetadataRefresh()
+                }
+
                 // Sync ExoPlayer's position with the real external playback
                 // position. ExoPlayer plays a 10-minute silence file, so we
                 // seek it to match the actual track position. This makes the
@@ -1421,6 +1439,22 @@ class PlaybackService : MediaLibraryService() {
 
         override fun getCurrentMediaItem(): MediaItem? = queueSnapshot.items.firstOrNull()
 
+        /**
+         * Android Auto's now-playing card derives its title/subtitle/artwork
+         * from the session MediaMetadata, which Media3 reads from
+         * [getMediaMetadata] — NOT [getCurrentMediaItem]. We must override it to
+         * return the snapshot's current-track metadata; otherwise it delegates
+         * to the wrapped ExoPlayer, which during external playback holds the
+         * silence loop / cold-start placeholder (the playlist name). That left
+         * the head unit showing the placeholder until the next track or an app
+         * foreground refreshed the delegate. Falls back to the delegate's
+         * metadata only when the snapshot has no current track (e.g. the brief
+         * pre-resolve window where the valid placeholder is the right thing to
+         * show).
+         */
+        override fun getMediaMetadata(): MediaMetadata =
+            queueSnapshot.items.firstOrNull()?.mediaMetadata ?: super.getMediaMetadata()
+
         override fun getMediaItemAt(index: Int): MediaItem = queueSnapshot.items[index]
 
         override fun hasNextMediaItem(): Boolean = queueSnapshot.items.size > 1
@@ -1591,15 +1625,42 @@ class PlaybackService : MediaLibraryService() {
                 // transition).
                 if (newCurrentId != previousMediaId) {
                     val newItem = items.firstOrNull()
+                    val newMetadata = newItem?.mediaMetadata ?: MediaMetadata.EMPTY
                     for (listener in externalListeners) {
                         listener.onMediaItemTransition(
                             newItem,
                             Player.MEDIA_ITEM_TRANSITION_REASON_AUTO,
                         )
+                        // Media3's session updates its now-playing MediaMetadata
+                        // field on EVENT_MEDIA_METADATA_CHANGED specifically —
+                        // onMediaItemTransition alone won't refresh the card.
+                        // Without this, Auto keeps the stale delegate metadata
+                        // (the cold-start placeholder) on the first track.
+                        listener.onMediaMetadataChanged(newMetadata)
                     }
                 }
             } finally {
                 dispatching = false
+            }
+        }
+
+        /**
+         * Force Android Auto to re-read [getMediaMetadata] + [getDuration] for
+         * the current track WITHOUT a track change. External handlers (Spotify
+         * Web API, MusicKit) report the real track duration via polling ~1s
+         * AFTER playback starts — by then the track-transition event has already
+         * fired with duration still 0/UNSET, and nothing re-fires when the
+         * duration lands. Media3 rebuilds the platform MediaMetadataCompat
+         * (which carries METADATA_KEY_DURATION, sourced from getDuration()) on
+         * EVENT_MEDIA_METADATA_CHANGED, so re-emitting that event makes Auto
+         * pick up the now-known duration. Without this, the head unit shows 0:00
+         * until the app is foregrounded or the next track transitions.
+         */
+        fun publishMetadataRefresh() {
+            if (dispatching) return
+            val metadata = getMediaMetadata()
+            for (listener in externalListeners) {
+                listener.onMediaMetadataChanged(metadata)
             }
         }
 
