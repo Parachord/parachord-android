@@ -316,6 +316,22 @@ Tracks that genuinely don't exist in a provider's catalog still get silently ski
 
 **Key files:** `shared/.../sync/SyncProvider.kt` (interface + features), `shared/.../sync/SyncedModels.kt` (cross-platform models), `shared/.../sqldelight/.../SyncPlaylistLink.sq`, `SyncPlaylistSource.sq`, `Playlist.sq`, `data/db/dao/SyncPlaylistLinkDao.kt`, `SyncPlaylistSourceDao.kt`, `data/api/AppleMusicLibraryApi.kt`, `data/api/AppleMusicAuthInterceptor.kt`, `sync/SyncEngine.kt` (per-provider push/pull iteration), `sync/SpotifySyncProvider.kt`, `sync/AppleMusicSyncProvider.kt`, `sync/AppleMusicReauthRequiredException.kt`, `data/store/SettingsStore.kt` (`getEnabledSyncProviders` / `setEnabledSyncProviders`), `data/repository/LibraryRepository.kt` (`deletePlaylistWithSync`, `hasSyncIntent`).
 
+### ListenBrainz Playlist Sync — Interop Contract (hard-won)
+
+`ListenBrainzSyncProvider` reconciles against existing LB playlists; it must NEVER re-create them. Violating any rule below recreates the user's entire LB library as new playlists every sync cycle — a May 2026 incident put **~6,400 duplicate public playlists** on a real account. These mirror the Achordion interop contract (their `AGENTS.md`) and desktop's `sync-providers/listenbrainz.js`.
+
+1. **Fetch the COMPLETE remote list — paginate.** `ListenBrainzClient.getUserOwnedPlaylists` MUST page through `count` + `offset` until all `playlist_count` entries are pulled. LB's `GET /1/user/{user}/playlists` defaults to **`count=25`**. The root cause of the incident: without pagination the SyncEngine three-layer dedup only saw the 25 newest playlists, so every older playlist failed Layer 1 (its MBID looked deleted-remotely → link cleared) AND Layer 3 (name not in the page) → recreated. Each new dup became one of the newest 25, evicting the rest → runaway. The non-negotiable invariant: **the dedup must be handed the full owned-playlist list.**
+
+2. **Default PRIVATE — send an explicit `public` flag.** `createPlaylist` uses `isPublic = false`, matching desktop. **LB treats a MISSING `public` flag as public**, so it must always be sent explicitly. Pushing a user's whole library as public playlists is a privacy leak; the original `isPublic = true` is what made the 6,400 dups publicly visible.
+
+3. **Reconcile via the MBID link, edit in place.** First push creates the LB playlist and persists `sync_playlist_link[localId]["listenbrainz"] = mbid`. Every later sync drives off that link (Layer 1) → `replacePlaylistTracks` (delete-all + add-all on the **same** MBID). A 404'd MBID (user deleted on LB) is handled by create-once + re-map — never recreate-every-run.
+
+4. **Never touch `dateCreated`.** It's immutable on LB and a reset creation date is the canary for accidental re-creation. Don't set it on create or edit.
+
+5. **Idempotency is the acceptance test.** Sync × 2 with no local changes ⇒ **zero** new LB playlists. (A full SyncEngine sync×2 integration harness doesn't exist yet — the property is currently enforced structurally by the pagination fix + three-layer dedup. Adding the integration test is a tracked follow-up.)
+
+**Key files:** `shared/.../api/ListenBrainzClient.kt` (`getUserOwnedPlaylists` pagination), `shared/.../sync/ListenBrainzSyncProvider.kt` (`createPlaylist` `isPublic=false`, `replacePlaylistTracks`), `sync/SyncEngine.kt` (`pushPlaylistsForProvider` three-layer dedup).
+
 ### Hosted XSPF Playlists
 
 Importing a playlist from an XSPF URL (as opposed to an uploaded `.xspf` file or a Spotify/Apple Music URL) sets `sourceUrl` on the row and records a SHA-256 of the body in `sourceContentHash`. A background poller re-fetches that URL, diffs the hash, and when the content has changed replaces the playlist's tracks and flips `locallyModified = true`. The XSPF is canonical; the next Spotify sync pushes the new state up, overwriting any Spotify-side edits (mirrors desktop's `pollHostedPlaylists`, app.js L32167+).
