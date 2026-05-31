@@ -101,6 +101,22 @@ class PlaybackService : MediaLibraryService() {
     private var queueSnapshotJob: Job? = null
 
     /**
+     * Browse-tile metadata cache (mediaId → title/subtitle), populated whenever
+     * we serve a playable tile to Android Auto. When Auto later dispatches a
+     * play command via onSetMediaItems it hands back only the bare mediaId — not
+     * the tile's metadata — so [silencePlaceholderFor] looks the real
+     * title/subtitle up here to build a VALID synchronous placeholder. Without
+     * it, the placeholder has empty metadata and Auto's GH.MediaPlaybackMonitor
+     * rejects the session ("Invalid metadata, no title and subtitle"), reverting
+     * the head unit to browse before PlaybackController's async real metadata
+     * lands — a race we lose specifically when the phone is locked and the
+     * foreground-service promotion is contended. ConcurrentHashMap because
+     * tile builders run on Media3 binder threads.
+     */
+    private val browseTileMetadata =
+        java.util.concurrent.ConcurrentHashMap<String, Pair<String, String?>>()
+
+    /**
      * Pause playback when an audio output device disconnects (Bluetooth,
      * wired headset). Standard music player behavior — prevents audio from
      * blasting through the phone speaker unexpectedly.
@@ -431,10 +447,25 @@ class PlaybackService : MediaLibraryService() {
             val silenceUri = Uri.parse(
                 "android.resource://${packageName}/${com.parachord.android.R.raw.silence}"
             )
+            // Auto hands back a bare mediaId here — source.mediaMetadata is empty.
+            // Resolve a VALID title+subtitle synchronously (source → cached tile →
+            // generic fallback) so Auto's GH.MediaPlaybackMonitor never sees an
+            // empty-metadata window. See [browseTileMetadata].
+            val cached = browseTileMetadata[source.mediaId]
+            val (title, subtitle) = resolvePlaceholderTitleSubtitle(
+                sourceTitle = source.mediaMetadata.title,
+                sourceSubtitle = source.mediaMetadata.subtitle,
+                cachedTitle = cached?.first,
+                cachedSubtitle = cached?.second,
+            )
+            val metadata = source.mediaMetadata.buildUpon()
+                .setTitle(title)
+                .setSubtitle(subtitle)
+                .build()
             return MediaItem.Builder()
                 .setMediaId(source.mediaId)
                 .setUri(silenceUri)
-                .setMediaMetadata(source.mediaMetadata)
+                .setMediaMetadata(metadata)
                 .build()
         }
 
@@ -654,8 +685,10 @@ class PlaybackService : MediaLibraryService() {
                 .setMediaType(MediaMetadata.MEDIA_TYPE_MUSIC)
                 .apply { r.artworkUrl?.let { setArtworkUri(Uri.parse(it)) } }
                 .build()
+            val mediaId = "$SEARCH_TRACK_PREFIX$index"
+            browseTileMetadata[mediaId] = r.title to r.artist
             return MediaItem.Builder()
-                .setMediaId("$SEARCH_TRACK_PREFIX$index")
+                .setMediaId(mediaId)
                 .setMediaMetadata(md)
                 .build()
         }
@@ -711,6 +744,7 @@ class PlaybackService : MediaLibraryService() {
                 .setIsPlayable(true)
                 .setMediaType(MediaMetadata.MEDIA_TYPE_MUSIC)
                 .build()
+            browseTileMetadata[id] = title to subtitle
             return MediaItem.Builder().setMediaId(id).setMediaMetadata(md).build()
         }
 
@@ -724,8 +758,10 @@ class PlaybackService : MediaLibraryService() {
                 .setMediaType(MediaMetadata.MEDIA_TYPE_PLAYLIST)
                 .apply { p.artworkUrl?.let { setArtworkUri(Uri.parse(it)) } }
                 .build()
+            val mediaId = "$PLAYLIST_ITEM_PREFIX${p.id}"
+            browseTileMetadata[mediaId] = p.name to (p.ownerName ?: "Parachord")
             return MediaItem.Builder()
-                .setMediaId("$PLAYLIST_ITEM_PREFIX${p.id}")
+                .setMediaId(mediaId)
                 .setMediaMetadata(md)
                 .build()
         }
@@ -1576,4 +1612,33 @@ class PlaybackService : MediaLibraryService() {
             )
         }
     }
+}
+
+/**
+ * Resolve a guaranteed-non-blank title/subtitle pair for the synchronous
+ * play-dispatch placeholder, in priority order:
+ *   1. Whatever Android Auto sent on the source MediaItem (usually empty — Auto
+ *      hands back a bare mediaId).
+ *   2. The cached browse-tile metadata for that mediaId (the real playlist /
+ *      track name we served moments ago).
+ *   3. A generic non-blank fallback.
+ *
+ * Both fields MUST be non-blank: Auto's GH.MediaPlaybackMonitor rejects a
+ * session whose current item lacks either, reverting the head unit to browse.
+ * Blank/whitespace strings are treated as missing. Pure function — unit-tested
+ * in PlaybackServicePlaceholderTest.
+ */
+internal fun resolvePlaceholderTitleSubtitle(
+    sourceTitle: CharSequence?,
+    sourceSubtitle: CharSequence?,
+    cachedTitle: String?,
+    cachedSubtitle: String?,
+): Pair<String, String> {
+    val title = sourceTitle?.toString()?.takeIf { it.isNotBlank() }
+        ?: cachedTitle?.takeIf { it.isNotBlank() }
+        ?: "Loading…"
+    val subtitle = sourceSubtitle?.toString()?.takeIf { it.isNotBlank() }
+        ?: cachedSubtitle?.takeIf { it.isNotBlank() }
+        ?: "Parachord"
+    return title to subtitle
 }
