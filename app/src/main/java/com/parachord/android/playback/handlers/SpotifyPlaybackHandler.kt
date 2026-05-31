@@ -728,8 +728,24 @@ class SpotifyPlaybackHandler constructor(
         //    active=true in Spotify's devices list silently steals playback from a
         //    freshly-reauth'd user. (preferredId is provably null here — either unset from
         //    the start or just cleared as stale above.)
+        //
+        //    Local identification, in priority order:
+        //      a. Synthetic "This device" placeholder (injected above when no real local found)
+        //      b. A smartphone whose name contains Build.MODEL / Build.MANUFACTURER
+        //      c. The SOLE smartphone in the list — catches users who renamed their
+        //         Spotify Connect device (e.g. "J9a" instead of "Google Pixel 9a"), which
+        //         fails the name match in (b). This mirrors the sole-smartphone signal
+        //         already used above to suppress synthetic injection: if exactly one
+        //         smartphone is registered, it's overwhelmingly the user's local handset,
+        //         not a phantom. Keeping (c) here makes the routing decision consistent
+        //         with the injection decision — otherwise a renamed phone gets neither a
+        //         synthetic nor a name match, and routing wrongly falls through to step 5.
+        val soleSmartphone = withLocal.filter { it.type == "Smartphone" }
+            .takeIf { it.size == 1 }
+            ?.firstOrNull()
         val localCandidate = withLocal.firstOrNull { isLocalPlaceholder(it) }
             ?: withLocal.firstOrNull { isLocalRealDevice(it) }
+            ?: soleSmartphone
         if (localCandidate != null) {
             Log.d(TAG, "No preference set — defaulting to local device '${localCandidate.name}' over already-active remote")
             return localCandidate

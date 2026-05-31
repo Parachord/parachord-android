@@ -82,6 +82,49 @@ class SpotifyPlaybackHandlerPickDeviceTest {
     }
 
     /**
+     * Renamed-phone case (observed in the wild: device named "J9a"). The user
+     * renamed their Spotify Connect device so it no longer contains Build.MODEL
+     * ("Pixel 9a") or Build.MANUFACTURER ("Google"). It's still the sole
+     * smartphone in the list, so it must be treated as the local device and
+     * win over an already-active phantom remote (a Bedroom TV the API still
+     * flags active=true). Without the sole-smartphone fallback, routing falls
+     * through to the already-active rule and silently casts to the TV.
+     */
+    @Test
+    fun `no preference prefers sole renamed smartphone over already-active remote`() = runTest {
+        coEvery { settingsStore.getPreferredSpotifyDeviceId() } returns null
+
+        val phone = SpDevice(id = "j9a-id", name = "J9a", isActive = false, type = "Smartphone")
+        val tv = SpDevice(id = "tv-id", name = "Bedroom TV", isActive = true, type = "TV")
+
+        val picked = handler.pickDevice(listOf(phone, tv))
+
+        assertEquals("j9a-id", picked?.id)
+    }
+
+    /**
+     * Multi-smartphone guard: when more than one smartphone is present and none
+     * matches Build.MODEL, the sole-smartphone heuristic must NOT fire (we can't
+     * assume which is local). Because no local smartphone is identified, the
+     * synthetic "This device" placeholder is injected and routing prefers it
+     * (step 4) — waking local Spotify to resolve the real device. The key
+     * invariant: a phantom active TV must NOT steal playback.
+     */
+    @Test
+    fun `multiple smartphones inject synthetic and do not route to phantom remote`() = runTest {
+        coEvery { settingsStore.getPreferredSpotifyDeviceId() } returns null
+
+        val phoneA = SpDevice(id = "a-id", name = "J9a", isActive = false, type = "Smartphone")
+        val phoneB = SpDevice(id = "b-id", name = "Other Phone", isActive = false, type = "Smartphone")
+        val tv = SpDevice(id = "tv-id", name = "Bedroom TV", isActive = true, type = "TV")
+
+        val picked = handler.pickDevice(listOf(phoneA, phoneB, tv))
+
+        // No single identifiable local → synthetic placeholder, NOT the active TV.
+        assertEquals(SpotifyPlaybackHandler.LOCAL_DEVICE_ID, picked?.id)
+    }
+
+    /**
      * Explicit preference for the local placeholder still honored.
      */
     @Test
