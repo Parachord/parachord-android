@@ -167,8 +167,15 @@ class PlaybackService : MediaLibraryService() {
         // through ExoPlayer's media-item loading path. Playlist items use
         // the "playlist:" prefix.
         private const val BROWSE_PLAYLISTS_ID = "browse:playlists"
+        private const val BROWSE_LOVED_ID = "browse:loved"
         private const val ACTION_COLLECTION_RADIO_ID = "action:collection-radio"
         private const val PLAYLIST_ITEM_PREFIX = "playlist:"
+
+        /** MediaId prefix for an individual loved song in the "Loved Songs"
+         *  Auto folder. Suffix is the track's stable id (`loved-track:<id>`) —
+         *  id-keyed, not index-keyed, so it survives the collection changing
+         *  between render and tap. */
+        private const val LOVED_TRACK_PREFIX = "loved-track:"
 
         /**
          * MediaId prefix for tracks returned by Auto search. The integer
@@ -343,11 +350,13 @@ class PlaybackService : MediaLibraryService() {
                 LIBRARY_ROOT_ID -> {
                     val children = ImmutableList.of(
                         browsableFolder(BROWSE_PLAYLISTS_ID, "Playlists"),
+                        browsableFolder(BROWSE_LOVED_ID, "Loved Songs"),
                         playableAction(ACTION_COLLECTION_RADIO_ID, "Collection Radio", subtitle = "Shuffle all loved tracks"),
                     )
                     Futures.immediateFuture(LibraryResult.ofItemList(children, params))
                 }
                 BROWSE_PLAYLISTS_ID -> loadPlaylistChildrenAsync(params)
+                BROWSE_LOVED_ID -> loadLovedChildrenAsync(params)
                 else -> Futures.immediateFuture(LibraryResult.ofItemList(ImmutableList.of(), params))
             }
         }
@@ -361,8 +370,20 @@ class PlaybackService : MediaLibraryService() {
                 Futures.immediateFuture(LibraryResult.ofItem(rootItem(), null))
             mediaId == BROWSE_PLAYLISTS_ID ->
                 Futures.immediateFuture(LibraryResult.ofItem(browsableFolder(BROWSE_PLAYLISTS_ID, "Playlists"), null))
+            mediaId == BROWSE_LOVED_ID ->
+                Futures.immediateFuture(LibraryResult.ofItem(browsableFolder(BROWSE_LOVED_ID, "Loved Songs"), null))
             mediaId == ACTION_COLLECTION_RADIO_ID ->
                 Futures.immediateFuture(LibraryResult.ofItem(playableAction(ACTION_COLLECTION_RADIO_ID, "Collection Radio", "Shuffle all loved tracks"), null))
+            mediaId.startsWith(LOVED_TRACK_PREFIX) -> {
+                val future = SettableFuture.create<LibraryResult<MediaItem>>()
+                serviceScope.launch {
+                    val id = mediaId.removePrefix(LOVED_TRACK_PREFIX)
+                    val t = try { trackDao.getById(id) } catch (e: Exception) { null }
+                    if (t == null) future.set(LibraryResult.ofError(LibraryResult.RESULT_ERROR_BAD_VALUE))
+                    else future.set(LibraryResult.ofItem(lovedTrackToMediaItem(t), null))
+                }
+                future
+            }
             mediaId.startsWith(PLAYLIST_ITEM_PREFIX) -> {
                 val future = SettableFuture.create<LibraryResult<MediaItem>>()
                 serviceScope.launch {
@@ -497,6 +518,25 @@ class PlaybackService : MediaLibraryService() {
             return future
         }
 
+        /** Async loader for the "Loved Songs" folder — the most-recently-loved
+         *  tracks (capped, see [lovedSongsForAutoBrowse]). */
+        private fun loadLovedChildrenAsync(
+            params: LibraryParams?,
+        ): ListenableFuture<LibraryResult<ImmutableList<MediaItem>>> {
+            val future = SettableFuture.create<LibraryResult<ImmutableList<MediaItem>>>()
+            serviceScope.launch {
+                try {
+                    val loved = lovedSongsForAutoBrowse(trackDao.getAll().first())
+                    val items = ImmutableList.copyOf(loved.map { lovedTrackToMediaItem(it) })
+                    future.set(LibraryResult.ofItemList(items, params))
+                } catch (e: Exception) {
+                    Log.e(TAG, "Browse: failed to load loved songs", e)
+                    future.set(LibraryResult.ofItemList(ImmutableList.of(), params))
+                }
+            }
+            return future
+        }
+
         /** Tap-target dispatch for browse-tree entries (called off the binder thread). */
         private suspend fun dispatchBrowseTreeAction(mediaId: String) {
             try {
@@ -509,6 +549,19 @@ class PlaybackService : MediaLibraryService() {
                         }
                         Log.d(TAG, "Collection Radio: starting shuffled queue of ${collection.size} tracks")
                         playbackController.playQueue(collection, startIndex = 0, shuffle = true)
+                    }
+                    mediaId.startsWith(LOVED_TRACK_PREFIX) -> {
+                        val trackId = mediaId.removePrefix(LOVED_TRACK_PREFIX)
+                        // Re-fetch the same capped/ordered list shown in the
+                        // folder and play from the tapped song onward.
+                        val loved = lovedSongsForAutoBrowse(trackDao.getAll().first())
+                        val idx = loved.indexOfFirst { it.id == trackId }
+                        if (idx < 0) {
+                            Log.w(TAG, "Loved Songs: track $trackId not in current collection")
+                            return
+                        }
+                        Log.d(TAG, "Loved Songs: tap at index $idx of ${loved.size}")
+                        playbackController.playQueue(loved, startIndex = idx)
                     }
                     mediaId.startsWith(PLAYLIST_ITEM_PREFIX) -> {
                         val playlistId = mediaId.removePrefix(PLAYLIST_ITEM_PREFIX)
@@ -546,6 +599,7 @@ class PlaybackService : MediaLibraryService() {
         private fun isBrowseTreeMediaId(mediaId: String): Boolean =
             mediaId == ACTION_COLLECTION_RADIO_ID ||
                 mediaId.startsWith(PLAYLIST_ITEM_PREFIX) ||
+                mediaId.startsWith(LOVED_TRACK_PREFIX) ||
                 mediaId.startsWith(SEARCH_TRACK_PREFIX)
 
         // ── Auto search ─────────────────────────────────────────────────
@@ -768,6 +822,28 @@ class PlaybackService : MediaLibraryService() {
                 .build()
             val mediaId = "$PLAYLIST_ITEM_PREFIX${p.id}"
             browseTileMetadata[mediaId] = p.name to (p.ownerName ?: "Parachord")
+            return MediaItem.Builder()
+                .setMediaId(mediaId)
+                .setMediaMetadata(md)
+                .build()
+        }
+
+        /** Build a playable tile for a loved song in the "Loved Songs" folder.
+         *  Records [browseTileMetadata] so the now-playing card shows the real
+         *  title/artist on dispatch (Auto sends back a bare mediaId). */
+        private fun lovedTrackToMediaItem(t: TrackEntity): MediaItem {
+            val md = MediaMetadata.Builder()
+                .setTitle(t.title)
+                .setSubtitle(t.artist)
+                .setArtist(t.artist)
+                .apply { t.album?.let { setAlbumTitle(it) } }
+                .setIsBrowsable(false)
+                .setIsPlayable(true)
+                .setMediaType(MediaMetadata.MEDIA_TYPE_MUSIC)
+                .apply { t.artworkUrl?.let { setArtworkUri(Uri.parse(it)) } }
+                .build()
+            val mediaId = "$LOVED_TRACK_PREFIX${t.id}"
+            browseTileMetadata[mediaId] = t.title to t.artist
             return MediaItem.Builder()
                 .setMediaId(mediaId)
                 .setMediaMetadata(md)
@@ -1689,6 +1765,20 @@ class PlaybackService : MediaLibraryService() {
  * Blank/whitespace strings are treated as missing. Pure function — unit-tested
  * in PlaybackServicePlaceholderTest.
  */
+/** Max loved songs shown in the Android Auto "Loved Songs" browse folder. */
+internal const val LOVED_BROWSE_CAP = 100
+
+/**
+ * The loved-tracks slice shown in the Android Auto "Loved Songs" folder. The
+ * input is already ordered most-recently-loved first (`TrackDao.getAll()` is
+ * `ORDER BY addedAt DESC`), so this only caps the list — Auto browse lists must
+ * stay bounded for head-unit responsiveness. Pure + unit-tested.
+ */
+internal fun lovedSongsForAutoBrowse(
+    tracks: List<com.parachord.shared.model.Track>,
+    cap: Int = LOVED_BROWSE_CAP,
+): List<com.parachord.shared.model.Track> = tracks.take(cap)
+
 internal fun resolvePlaceholderTitleSubtitle(
     sourceTitle: CharSequence?,
     sourceSubtitle: CharSequence?,
