@@ -1860,7 +1860,29 @@ class SyncEngine constructor(
                 val tracks = hydrateMissingTrackIds(playlist.id, rawTracks, provider)
                 val externalTrackIds = extractExternalTrackIds(tracks, providerId)
                 if (externalTrackIds.isNotEmpty()) {
-                    provider.replacePlaylistTracks(externalId, externalTrackIds)
+                    // Skip-unchanged short-circuit (desktop's
+                    // canShortCircuitPlaylistUpdate, sync-providers/listenbrainz.js
+                    // "Step 3.5"). `replacePlaylistTracks` is a delete-all +
+                    // add-all on LB, so re-pushing an identical tracklist every
+                    // cycle bumps the remote's last_modified and burns API calls
+                    // for no benefit (the Achordion maintainer flagged ~128
+                    // playlists "modified" in a day from exactly this). When the
+                    // remote already matches the intended list we skip it.
+                    //
+                    // Currently wired for ListenBrainz only: Spotify already
+                    // short-circuits structurally via its `spotifyId == null`
+                    // candidate exclusion, and Apple Music's append-only PUT
+                    // degradation makes a remote-compare unreliable. A
+                    // locallyModified playlist always re-pushes (the flag clears
+                    // immediately below), so a local edit is never short-circuited.
+                    val canShortCircuit = providerId == ListenBrainzSyncProvider.PROVIDER_ID &&
+                        !playlist.locallyModified &&
+                        remoteTracklistMatches(provider, externalId, externalTrackIds)
+                    if (canShortCircuit) {
+                        Log.d(TAG, "Skip-unchanged: '${playlist.name}' on $providerId — remote already matches (${externalTrackIds.size} tracks)")
+                    } else {
+                        provider.replacePlaylistTracks(externalId, externalTrackIds)
+                    }
                 }
 
                 // Spotify-specific scalars stay write-through for backward
@@ -1932,6 +1954,42 @@ class SyncEngine constructor(
         AppleMusicSyncProvider.PROVIDER_ID -> tracks.mapNotNull { it.trackAppleMusicId }
         ListenBrainzSyncProvider.PROVIDER_ID -> tracks.mapNotNull { it.trackRecordingMbid }
         else -> emptyList()
+    }
+
+    /**
+     * Skip-unchanged check: true when [provider]'s CURRENT remote tracklist
+     * for [externalPlaylistId] already equals [intendedExternalIds] exactly —
+     * same IDs, same order. Ports the desktop's push short-circuit
+     * (sync-providers/listenbrainz.js "Step 3.5", parachord#796): an
+     * order-aware compare against the live remote, so the caller can skip a
+     * `replacePlaylistTracks` (delete-all + add-all) that would otherwise be a
+     * no-op costing one remote `last_modified` bump per cycle.
+     *
+     * Order-aware: ListenBrainz honors playlist order, so a reorder must fall
+     * through to a real replace. Case-insensitive: recording MBIDs are hex and
+     * the remote vs. local store may differ in case.
+     *
+     * Provider-generic (uses [SyncProvider.fetchPlaylistTracks] +
+     * [extractExternalTrackIds]) but only the LB push wires it today — see the
+     * call site. On any fetch failure it returns false: we never skip a push
+     * because we couldn't confirm the remote state.
+     */
+    private suspend fun remoteTracklistMatches(
+        provider: com.parachord.shared.sync.SyncProvider,
+        externalPlaylistId: String,
+        intendedExternalIds: List<String>,
+    ): Boolean = try {
+        val remoteTracks = provider.fetchPlaylistTracks(externalPlaylistId)
+        val remoteIds = extractExternalTrackIds(remoteTracks, provider.id)
+        remoteIds.size == intendedExternalIds.size &&
+            remoteIds.indices.all { i ->
+                remoteIds[i].equals(intendedExternalIds[i], ignoreCase = true)
+            }
+    } catch (e: kotlinx.coroutines.CancellationException) {
+        throw e
+    } catch (e: Exception) {
+        Log.d(TAG, "Short-circuit check failed for $externalPlaylistId on ${provider.id}; will push", e)
+        false
     }
 
     /**
