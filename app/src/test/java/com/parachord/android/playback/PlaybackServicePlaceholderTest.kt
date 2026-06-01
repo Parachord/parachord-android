@@ -105,4 +105,31 @@ class PlaybackServicePlaceholderTest {
         val tracks = (1..30).map { track("t$it") }
         assertEquals(30, lovedSongsForAutoBrowse(tracks, cap = 100).size)
     }
+
+    // ── mosaicFileNameFromStored (Auto FileProvider bridge) ──────────────
+
+    @Test
+    fun `mosaicFileNameFromStored extracts name from single-slash file URI`() {
+        // The form java.io.File.toURI() actually produces today.
+        val stored = "file:/data/user/0/com.parachord.android/files/playlist_mosaics/listenbrainz-abc.jpg"
+        assertEquals("listenbrainz-abc.jpg", mosaicFileNameFromStored(stored))
+    }
+
+    @Test
+    fun `mosaicFileNameFromStored strips cache-bust query`() {
+        val stored = "file:///data/.../files/playlist_mosaics/hosted-xspf-7cd1.jpg?v=e2de321e"
+        assertEquals("hosted-xspf-7cd1.jpg", mosaicFileNameFromStored(stored))
+    }
+
+    @Test
+    fun `mosaicFileNameFromStored returns null for http art (not bridged)`() {
+        assertEquals(null, mosaicFileNameFromStored("https://mosaic.scdn.co/300/abc"))
+    }
+
+    @Test
+    fun `mosaicFileNameFromStored returns null for content art and null input`() {
+        assertEquals(null, mosaicFileNameFromStored("content://media/external/audio/albumart/5"))
+        assertEquals(null, mosaicFileNameFromStored(null))
+        assertEquals(null, mosaicFileNameFromStored(""))
+    }
 }

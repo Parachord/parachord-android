@@ -355,8 +355,8 @@ class PlaybackService : MediaLibraryService() {
                     )
                     Futures.immediateFuture(LibraryResult.ofItemList(children, params))
                 }
-                BROWSE_PLAYLISTS_ID -> loadPlaylistChildrenAsync(params)
-                BROWSE_LOVED_ID -> loadLovedChildrenAsync(params)
+                BROWSE_PLAYLISTS_ID -> loadPlaylistChildrenAsync(params, browser.packageName)
+                BROWSE_LOVED_ID -> loadLovedChildrenAsync(params, browser.packageName)
                 else -> Futures.immediateFuture(LibraryResult.ofItemList(ImmutableList.of(), params))
             }
         }
@@ -503,13 +503,15 @@ class PlaybackService : MediaLibraryService() {
         /** Async loader for the "Playlists" folder's children. */
         private fun loadPlaylistChildrenAsync(
             params: LibraryParams?,
+            browserPackage: String,
         ): ListenableFuture<LibraryResult<ImmutableList<MediaItem>>> {
             val future = SettableFuture.create<LibraryResult<ImmutableList<MediaItem>>>()
             serviceScope.launch {
                 try {
                     val playlists = playlistDao.getAllSync().sortedByDescending { it.updatedAt }
-                    val items = ImmutableList.copyOf(playlists.map { playlistToMediaItem(it) })
-                    future.set(LibraryResult.ofItemList(items, params))
+                    val tiles = playlists.map { playlistToMediaItem(it) }
+                    grantArtworkUriPermissions(tiles, browserPackage)
+                    future.set(LibraryResult.ofItemList(ImmutableList.copyOf(tiles), params))
                 } catch (e: Exception) {
                     Log.e(TAG, "Browse: failed to load playlist children", e)
                     future.set(LibraryResult.ofItemList(ImmutableList.of(), params))
@@ -522,19 +524,48 @@ class PlaybackService : MediaLibraryService() {
          *  tracks (capped, see [lovedSongsForAutoBrowse]). */
         private fun loadLovedChildrenAsync(
             params: LibraryParams?,
+            browserPackage: String,
         ): ListenableFuture<LibraryResult<ImmutableList<MediaItem>>> {
             val future = SettableFuture.create<LibraryResult<ImmutableList<MediaItem>>>()
             serviceScope.launch {
                 try {
                     val loved = lovedSongsForAutoBrowse(trackDao.getAll().first())
-                    val items = ImmutableList.copyOf(loved.map { lovedTrackToMediaItem(it) })
-                    future.set(LibraryResult.ofItemList(items, params))
+                    val tiles = loved.map { lovedTrackToMediaItem(it) }
+                    grantArtworkUriPermissions(tiles, browserPackage)
+                    future.set(LibraryResult.ofItemList(ImmutableList.copyOf(tiles), params))
                 } catch (e: Exception) {
                     Log.e(TAG, "Browse: failed to load loved songs", e)
                     future.set(LibraryResult.ofItemList(ImmutableList.of(), params))
                 }
             }
             return future
+        }
+
+        /**
+         * Grant the browsing controller (e.g. Android Auto's gearhead, a
+         * SEPARATE process) read access to each tile's `content://` mosaic
+         * artwork. Media3 does NOT auto-grant URI permissions for browse-tree
+         * library items, so without this gearhead hits "Permission Denial:
+         * opening provider FileProvider" and the tile renders blank. http(s)
+         * artwork needs no grant — skip non-content URIs. Idempotent; safe to
+         * re-grant on every browse.
+         */
+        private fun grantArtworkUriPermissions(items: List<MediaItem>, browserPackage: String) {
+            var granted = 0
+            items.forEach { item ->
+                val uri = item.mediaMetadata.artworkUri ?: return@forEach
+                if (uri.scheme != "content") return@forEach
+                try {
+                    grantUriPermission(
+                        browserPackage, uri,
+                        android.content.Intent.FLAG_GRANT_READ_URI_PERMISSION,
+                    )
+                    granted++
+                } catch (e: Exception) {
+                    Log.w(TAG, "grantUriPermission($browserPackage, $uri) failed", e)
+                }
+            }
+            Log.d(TAG, "Browse art: granted $granted content:// URI(s) to $browserPackage (of ${items.size} tiles)")
         }
 
         /** Tap-target dispatch for browse-tree entries (called off the binder thread). */
@@ -810,6 +841,39 @@ class PlaybackService : MediaLibraryService() {
             return MediaItem.Builder().setMediaId(id).setMediaMetadata(md).build()
         }
 
+        /**
+         * Resolve a playlist's stored artworkUrl into a URI Android Auto can
+         * actually render. http(s)/content:// pass through. A local mosaic
+         * (`file:/…/playlist_mosaics/…`) lives in our private filesDir, which
+         * the Auto process can't read — bridge it to a `content://` FileProvider
+         * URI (Media3 grants the controller read permission). Returns null when
+         * a local mosaic file is missing/unreadable (better no art than a broken
+         * URI). The app's own in-app rendering keeps using the stored file URI —
+         * this conversion is Auto-surface only.
+         */
+        private fun autoArtworkUri(stored: String?): Uri? {
+            if (stored.isNullOrBlank()) return null
+            val mosaicName = mosaicFileNameFromStored(stored)
+                ?: return Uri.parse(stored) // http(s)/content:// — Auto-usable as-is
+            return try {
+                val file = java.io.File(java.io.File(filesDir, "playlist_mosaics"), mosaicName)
+                if (!file.exists()) null
+                else androidx.core.content.FileProvider.getUriForFile(
+                    this@PlaybackService, "$packageName.fileprovider", file,
+                ).buildUpon()
+                    // Cache-bust by mtime: makes the URI change when the mosaic
+                    // is regenerated, and — critically — distinct from any URI
+                    // Android Auto previously cached as a failed load. FileProvider
+                    // ignores the query and serves by path; gearhead keys its
+                    // artwork cache on the full URI, so a new ?v forces a reload.
+                    .appendQueryParameter("v", file.lastModified().toString())
+                    .build()
+            } catch (e: Exception) {
+                Log.w(TAG, "autoArtworkUri: FileProvider bridge failed for $stored", e)
+                null
+            }
+        }
+
         private fun playlistToMediaItem(p: com.parachord.shared.model.Playlist): MediaItem {
             val md = MediaMetadata.Builder()
                 .setTitle(p.name)
@@ -818,7 +882,7 @@ class PlaybackService : MediaLibraryService() {
                 .setIsBrowsable(false)
                 .setIsPlayable(true)
                 .setMediaType(MediaMetadata.MEDIA_TYPE_PLAYLIST)
-                .apply { p.artworkUrl?.let { setArtworkUri(Uri.parse(it)) } }
+                .apply { autoArtworkUri(p.artworkUrl)?.let { setArtworkUri(it) } }
                 .build()
             val mediaId = "$PLAYLIST_ITEM_PREFIX${p.id}"
             browseTileMetadata[mediaId] = p.name to (p.ownerName ?: "Parachord")
@@ -1767,6 +1831,22 @@ class PlaybackService : MediaLibraryService() {
  */
 /** Max loved songs shown in the Android Auto "Loved Songs" browse folder. */
 internal const val LOVED_BROWSE_CAP = 100
+
+/**
+ * If [stored] is a local playlist-mosaic artwork URL — a file URI into our
+ * private `filesDir/playlist_mosaics/` (handles both `file:/…` and `file:///…`
+ * forms) — return the bare mosaic file name with any cache-bust query stripped.
+ * Otherwise null: http(s) and content:// artwork are usable by Android Auto
+ * as-is and don't need bridging through a FileProvider. Pure + unit-tested;
+ * the FileProvider lookup itself lives in PlaybackService.autoArtworkUri.
+ */
+internal fun mosaicFileNameFromStored(stored: String?): String? {
+    if (stored.isNullOrBlank()) return null
+    val marker = "playlist_mosaics/"
+    val idx = stored.indexOf(marker)
+    if (idx < 0) return null
+    return stored.substring(idx + marker.length).substringBefore('?').ifBlank { null }
+}
 
 /**
  * The loved-tracks slice shown in the Android Auto "Loved Songs" folder. The

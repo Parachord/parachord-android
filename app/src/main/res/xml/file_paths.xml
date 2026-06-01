@@ -1,0 +1,9 @@
+<?xml version="1.0" encoding="utf-8"?>
+<paths>
+    <!-- Playlist mosaic art written by ImageEnrichmentService /
+         composeMosaicAndroid into filesDir/playlist_mosaics/. Exposed so
+         Android Auto can render playlist cover art via content:// URIs. -->
+    <files-path
+        name="playlist_mosaics"
+        path="playlist_mosaics/" />
+</paths>

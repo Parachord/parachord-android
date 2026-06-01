@@ -219,6 +219,20 @@
                 android:resource="@xml/mini_player_widget_info" />
         </receiver>
 
+        <!-- Exposes playlist mosaic art (private filesDir) to other processes
+             — notably Android Auto (gearhead), which can't read our private
+             file:// URIs. Media3's MediaSession auto-grants connected
+             controllers read permission for content:// artwork URIs. -->
+        <provider
+            android:name="androidx.core.content.FileProvider"
+            android:authorities="${applicationId}.fileprovider"
+            android:exported="false"
+            android:grantUriPermissions="true">
+            <meta-data
+                android:name="android.support.FILE_PROVIDER_PATHS"
+                android:resource="@xml/file_paths" />
+        </provider>
+
     </application>
 
 </manifest>
