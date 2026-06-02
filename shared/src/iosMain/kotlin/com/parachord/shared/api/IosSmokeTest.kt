@@ -1,0 +1,84 @@
+package com.parachord.shared.api
+
+import io.ktor.client.HttpClient
+import io.ktor.client.engine.darwin.Darwin
+import io.ktor.client.plugins.contentnegotiation.ContentNegotiation
+import io.ktor.client.plugins.defaultRequest
+import io.ktor.client.request.header
+import io.ktor.serialization.kotlinx.json.json
+import kotlinx.serialization.Serializable
+import kotlinx.serialization.json.Json
+
+/**
+ * Phase 2.5 smoke test for the iOS app.
+ *
+ * Exists to prove three things that have to work before any production
+ * shared-module HTTP call can be wired up from Swift:
+ *   1. Ktor's Darwin engine actually fires HTTP requests
+ *   2. kotlinx.serialization parses real JSON responses on iOS
+ *   3. Kotlin `suspend fun` ↔ Swift `async throws` interop works
+ *      end-to-end (the value, not the completion-handler dance)
+ *
+ * Uses MusicBrainz because it's the only first-party API surface in
+ * the shared module that needs no auth at all — no API key, no OAuth,
+ * no LB token. The 1-req/sec rate limit is fine for a button-tap demo.
+ *
+ * Intentionally NOT the production HttpClient setup. That one wires
+ * `OAuthRefreshPlugin`, `User-Agent` injection, the LB token provider,
+ * etc. via `createHttpClient(...)` in [HttpClientFactory.ios.kt], all
+ * of which require `AppConfig` + `AuthTokenProvider` + `OAuthTokenRefresher`
+ * dependencies that haven't been wired through Swift yet. The minimal
+ * client below has just enough plugins (ContentNegotiation + the
+ * required `User-Agent` header MB returns 403 without) to talk to the
+ * MB API.
+ */
+class IosSmokeTest {
+
+    private val httpClient = HttpClient(Darwin) {
+        install(ContentNegotiation) {
+            json(Json {
+                ignoreUnknownKeys = true
+                isLenient = true
+            })
+        }
+        // MusicBrainz returns 403 to the default Ktor User-Agent. The
+        // production HttpClient sets a Parachord-branded UA via the
+        // shared `User-Agent` interceptor; for the smoke test we set
+        // it inline so the request actually gets a response.
+        defaultRequest {
+            header("User-Agent", "Parachord-iOS-SmokeTest/0.1 (https://parachord.com)")
+        }
+    }
+
+    private val musicBrainz = MusicBrainzClient(httpClient)
+
+    /**
+     * Search MusicBrainz for artists and return a flattened, Swift-
+     * friendly DTO. Plain `data class` so Kotlin/Native exposes it
+     * cleanly to Swift without `List<MbArtist>` ObjC bridging weirdness.
+     */
+    suspend fun searchArtists(query: String, limit: Int): List<SmokeTestArtist> {
+        val response = musicBrainz.searchArtists(query, limit)
+        return response.artists.map { artist ->
+            SmokeTestArtist(
+                id = artist.id,
+                name = artist.name,
+                disambiguation = artist.disambiguation,
+                topTag = artist.tags.maxByOrNull { it.count }?.name,
+            )
+        }
+    }
+}
+
+/**
+ * Flat Swift-friendly projection of [MbArtist]. The full upstream
+ * type has more fields (tags as a list, sort name, etc.) but the
+ * smoke test only needs what the demo view renders.
+ */
+@Serializable
+data class SmokeTestArtist(
+    val id: String,
+    val name: String,
+    val disambiguation: String?,
+    val topTag: String?,
+)
