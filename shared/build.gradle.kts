@@ -13,8 +13,21 @@ kotlin {
             }
         }
     }
-    iosArm64()
-    iosSimulatorArm64()
+    // iOS targets — produce a static Shared.framework that the iOS Xcode
+    // project links and `import`s. Static is preferred over dynamic for
+    // KMP frameworks: smaller app launch overhead, no embedded-dylib
+    // gymnastics, and Swift call-sites resolve through the same symbol
+    // table as the rest of the binary. The framework name is the type
+    // prefix Swift sees (`import Shared`).
+    listOf(
+        iosArm64(),
+        iosSimulatorArm64(),
+    ).forEach { target ->
+        target.binaries.framework {
+            baseName = "Shared"
+            isStatic = true
+        }
+    }
 
     // Share iOS source sets
     applyDefaultHierarchyTemplate()
