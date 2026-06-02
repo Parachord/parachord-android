@@ -48,9 +48,9 @@ struct ContentView: View {
 
                 row(label: "MIN_CONFIDENCE_THRESHOLD", value: threshold)
                 Divider()
-                row(label: "Imagine / Lennon → Imagine / Lennon", value: correctMatch.doubleValue)
-                row(label: "Imagine / Lennon → Imagine / A Perfect Circle", value: wrongArtist.doubleValue)
-                row(label: "Imagine / Lennon → Teen Spirit / Nirvana", value: noMatch.doubleValue)
+                row(label: "Imagine / Lennon → Imagine / Lennon", value: correctMatch)
+                row(label: "Imagine / Lennon → Imagine / A Perfect Circle", value: wrongArtist)
+                row(label: "Imagine / Lennon → Teen Spirit / Nirvana", value: noMatch)
             }
             .padding()
             .background(Color(.systemGray6))
@@ -93,7 +93,7 @@ struct ContentView: View {
             Spacer()
             Text(String(format: "%.2f", value))
                 .font(.callout.monospacedDigit())
-                .foregroundStyle(value >= threshold.doubleValue ? .green : .red)
+                .foregroundStyle(value >= threshold ? .green : .red)
         }
     }
 }

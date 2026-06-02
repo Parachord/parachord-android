@@ -124,6 +124,7 @@
 /* Begin PBXShellScriptBuildPhase section */
 		AA0000000000000000000033 /* Run gradle :shared:embedAndSignAppleFrameworkForXcode */ = {
 			isa = PBXShellScriptBuildPhase;
+			alwaysOutOfDate = 1;
 			buildActionMask = 2147483647;
 			files = (
 			);
@@ -301,6 +302,7 @@
 					"$(inherited)",
 					"-framework",
 					Shared,
+					"-lsqlite3",
 				);
 				PRODUCT_BUNDLE_IDENTIFIER = com.parachord.ios;
 				PRODUCT_NAME = "$(TARGET_NAME)";
@@ -339,6 +341,7 @@
 					"$(inherited)",
 					"-framework",
 					Shared,
+					"-lsqlite3",
 				);
 				PRODUCT_BUNDLE_IDENTIFIER = com.parachord.ios;
 				PRODUCT_NAME = "$(TARGET_NAME)";
