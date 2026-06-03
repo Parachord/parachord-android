@@ -119,6 +119,25 @@ class IosContainer private constructor() {
         return jams + exploration
     }
 
+    /**
+     * Load the tracks of a single weekly playlist (by MBID), flattened
+     * to Swift-friendly DTOs. These are metadata-only LB tracks (no
+     * resolver / streaming IDs yet) — browse-only until the iOS resolver
+     * pipeline is wired. Powers the Playlist Detail screen (phase 5.4).
+     */
+    suspend fun loadWeeklyPlaylistTracks(playlistId: String): List<IosPlaylistTrack> {
+        return weeklyPlaylistsRepository.loadPlaylistTracks(playlistId).map {
+            IosPlaylistTrack(
+                id = it.id,
+                title = it.title,
+                artist = it.artist,
+                album = it.album,
+                albumArt = it.albumArt,
+                durationMs = it.durationMs,
+            )
+        }
+    }
+
     private fun WeeklyPlaylistEntry.toIos(kind: String) = IosWeeklyEntry(
         id = id,
         title = title,
@@ -191,6 +210,20 @@ data class IosSearchRelease(
     val title: String,
     val artist: String,
     val year: String?,
+)
+
+/**
+ * Flat Swift-friendly playlist track. Metadata-only (no resolver /
+ * streaming IDs) — these come from ListenBrainz playlists and need the
+ * resolver pipeline before they're playable.
+ */
+data class IosPlaylistTrack(
+    val id: String,
+    val title: String,
+    val artist: String,
+    val album: String?,
+    val albumArt: String?,
+    val durationMs: Long?,
 )
 
 /**

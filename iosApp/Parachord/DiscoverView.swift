@@ -82,16 +82,23 @@ struct DiscoverView: View {
     }
 
     private func weeklyRow(_ entry: IosWeeklyEntry) -> some View {
-        VStack(alignment: .leading, spacing: 3) {
-            Text(entry.weekLabel)
-                .font(.body.weight(.medium))
-            if !entry.summary.isEmpty {
-                Text(entry.summary)
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-                    .lineLimit(2)
+        NavigationLink {
+            PlaylistDetailView(
+                playlistId: entry.id,
+                title: "\(entry.weekLabel) · \(entry.kind)"
+            )
+        } label: {
+            VStack(alignment: .leading, spacing: 3) {
+                Text(entry.weekLabel)
+                    .font(.body.weight(.medium))
+                if !entry.summary.isEmpty {
+                    Text(entry.summary)
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                        .lineLimit(2)
+                }
             }
+            .padding(.vertical, 2)
         }
-        .padding(.vertical, 2)
     }
 }
