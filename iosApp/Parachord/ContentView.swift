@@ -1100,7 +1100,11 @@ enum JsPolyfills {
 /// and Kotlin `suspend fun` bridges to Swift `async throws` end-to-
 /// end. Calls MusicBrainz because it's the only first-party API
 /// surface in the shared module that needs no auth.
-struct ContentView: View {
+/// Phase 1–4 smoke-test harness. Kept as a "Dev" tab in the real app
+/// shell so the platform-actual proofs (resolver scoring, JSC, mosaic,
+/// AVPlayer, queue, MusicKit, Spotify Connect, OAuth) stay one tap away
+/// while real screens get built out in phase 5.
+struct DevSmokeTestView: View {
     private let smokeTest = IosSmokeTest()
     private let threshold = ResolverScoring.companion.MIN_CONFIDENCE_THRESHOLD
 
@@ -1968,5 +1972,5 @@ struct ContentView: View {
 }
 
 #Preview {
-    ContentView()
+    DevSmokeTestView()
 }

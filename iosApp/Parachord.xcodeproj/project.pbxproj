@@ -10,6 +10,8 @@
 		AA0000000000000000000020 /* ParachordApp.swift in Sources */ = {isa = PBXBuildFile; fileRef = AA0000000000000000000010 /* ParachordApp.swift */; };
 		AA0000000000000000000021 /* ContentView.swift in Sources */ = {isa = PBXBuildFile; fileRef = AA0000000000000000000011 /* ContentView.swift */; };
 		AA0000000000000000000022 /* Assets.xcassets in Resources */ = {isa = PBXBuildFile; fileRef = AA0000000000000000000012 /* Assets.xcassets */; };
+		AA0000000000000000000023 /* SettingsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = AA0000000000000000000013 /* SettingsView.swift */; };
+		AA0000000000000000000024 /* RootView.swift in Sources */ = {isa = PBXBuildFile; fileRef = AA0000000000000000000014 /* RootView.swift */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXFileReference section */
@@ -17,6 +19,8 @@
 		AA0000000000000000000010 /* ParachordApp.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ParachordApp.swift; sourceTree = "<group>"; };
 		AA0000000000000000000011 /* ContentView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ContentView.swift; sourceTree = "<group>"; };
 		AA0000000000000000000012 /* Assets.xcassets */ = {isa = PBXFileReference; lastKnownFileType = folder.assetcatalog; path = Assets.xcassets; sourceTree = "<group>"; };
+		AA0000000000000000000013 /* SettingsView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SettingsView.swift; sourceTree = "<group>"; };
+		AA0000000000000000000014 /* RootView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RootView.swift; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXFrameworksBuildPhase section */
@@ -51,6 +55,8 @@
 			children = (
 				AA0000000000000000000010 /* ParachordApp.swift */,
 				AA0000000000000000000011 /* ContentView.swift */,
+				AA0000000000000000000013 /* SettingsView.swift */,
+				AA0000000000000000000014 /* RootView.swift */,
 				AA0000000000000000000012 /* Assets.xcassets */,
 			);
 			path = Parachord;
@@ -150,6 +156,8 @@
 			files = (
 				AA0000000000000000000020 /* ParachordApp.swift in Sources */,
 				AA0000000000000000000021 /* ContentView.swift in Sources */,
+				AA0000000000000000000023 /* SettingsView.swift in Sources */,
+				AA0000000000000000000024 /* RootView.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
