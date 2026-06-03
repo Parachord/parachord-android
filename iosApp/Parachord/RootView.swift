@@ -8,8 +8,17 @@ import SwiftUI
 /// As real screens land (Library, Now Playing, Search, Playlists…) they
 /// become tabs here and the Dev tab eventually retires.
 struct ContentView: View {
+    /// Single app-wide playback engine, shared by the Now Playing tab
+    /// and the persistent mini player.
+    @State private var playback = AppPlayback()
+
     var body: some View {
         TabView {
+            NowPlayingView(playback: playback)
+                .tabItem {
+                    Label("Playing", systemImage: "play.circle")
+                }
+
             SearchView()
                 .tabItem {
                     Label("Search", systemImage: "magnifyingglass")
@@ -24,6 +33,11 @@ struct ContentView: View {
                 .tabItem {
                     Label("Dev", systemImage: "hammer")
                 }
+        }
+        // Mini player floats above the tab bar on every tab whenever
+        // something is queued.
+        .safeAreaInset(edge: .bottom) {
+            MiniPlayer(playback: playback)
         }
     }
 }
