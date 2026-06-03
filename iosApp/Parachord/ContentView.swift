@@ -8,6 +8,91 @@ import MusicKit
 import AuthenticationServices
 import CryptoKit
 
+// MARK: - Spotify Connect (phase 4.8)
+//
+// iOS Spotify playback uses the Web API (Spotify Connect over HTTP),
+// NOT the Spotify iOS SDK — exactly the architecture decision Android
+// made. The HTTP surface (getDevices / transferPlayback / startPlayback
+// / pause / seek / volume / getPlaybackState) ALREADY LIVES in the
+// shared `SpotifyClient` and is reused unchanged. The only genuinely
+// iOS-specific piece is the device-wake strategy, because Android's
+// media-button broadcast to `com.spotify.music` has no iOS equivalent.
+//
+// ## Wake strategy
+//
+// Android wakes Spotify two ways (invisible media-button broadcast,
+// then a launch-intent fallback). iOS app sandboxing blocks targeted
+// media-key broadcasts entirely, so iOS has ONE path: the `spotify://`
+// universal/scheme deep link via `UIApplication.open`. It briefly
+// foregrounds Spotify (less invisible than Android's broadcast) but is
+// the same fallback Android already uses when the broadcast fails on a
+// killed Spotify. `canWakeSpotify` (canOpenURL) reports whether the
+// Spotify app is installed at all.
+//
+// ## Verification status
+//
+// `canWakeSpotify` is verifiable: in the simulator Spotify isn't
+// installed so it reports false; on a device with Spotify it reports
+// true and `wakeSpotify()` foregrounds it. The actual play flow
+// (ensureDevice → pickDevice → startPlayback via the shared
+// SpotifyClient) needs an OAuth access token (phase 4.9) AND a Spotify
+// Premium account, neither suppliable headlessly. The orchestration
+// logic is platform-agnostic and largely already in the shared layer;
+// this class is the thin iOS shim that adds wake + ties it together.
+
+@MainActor
+@Observable
+final class IosSpotifyConnect {
+
+    /// The Spotify app's URL scheme. `canOpenURL` requires it be listed
+    /// in `LSApplicationQueriesSchemes` (Info.plist) to return true on a
+    /// device where Spotify is installed.
+    private static let spotifyScheme = "spotify://"
+
+    var spotifyInstalled: Bool = false
+    var lastAction: String?
+
+    func refreshInstalled() {
+        guard let url = URL(string: Self.spotifyScheme) else {
+            spotifyInstalled = false
+            return
+        }
+        spotifyInstalled = UIApplication.shared.canOpenURL(url)
+    }
+
+    /// Wake Spotify by foregrounding it via the `spotify://` deep link.
+    /// The iOS equivalent of Android's media-button broadcast → launch
+    /// intent fallback. After this, the shared SpotifyClient's
+    /// getDevices() should report Spotify's local device as available
+    /// for a Connect transfer.
+    func wakeSpotify() {
+        guard let url = URL(string: Self.spotifyScheme) else { return }
+        UIApplication.shared.open(url, options: [:]) { [weak self] success in
+            Task { @MainActor in
+                self?.lastAction = success
+                    ? "Opened spotify:// (Spotify foregrounded)"
+                    : "Couldn't open spotify:// (app not installed)"
+            }
+        }
+    }
+
+    // The play flow itself — ensureDevice / pickDevice / startPlayback —
+    // calls the SHARED `SpotifyClient` (already in Shared.framework):
+    //
+    //   let devices = try await spotifyClient.getDevices()
+    //   let device = pickDevice(devices.devices)   // prefer local smartphone
+    //   try await spotifyClient.startPlayback(
+    //       body: SpPlaybackRequest(uris: [track.spotifyUri]),
+    //       deviceId: device?.id
+    //   )
+    //
+    // It isn't reproduced here because (a) it needs a real token + a
+    // Premium account to run, and (b) the device-selection rules are
+    // platform-agnostic and belong in the shared layer alongside the
+    // HTTP client when iOS Koin wiring lands. Build.MODEL-style local
+    // matching becomes `UIDevice.current.name` / `.model`.
+}
+
 // MARK: - OAuth (phase 4.9)
 //
 // PKCE + state OAuth via `ASWebAuthenticationSession`, the iOS analogue
@@ -1060,6 +1145,7 @@ struct ContentView: View {
     @State private var oauthManager = IosOAuthManager()
     @State private var pkceSample: (verifier: String, challenge: String, state: String)?
     @State private var oauthError: String?
+    @State private var spotifyConnect = IosSpotifyConnect()
 
     var body: some View {
         ScrollView {
@@ -1069,6 +1155,7 @@ struct ContentView: View {
                 queueCard
                 avPlayerCard
                 musicKitCard
+                spotifyConnectCard
                 oauthCard
                 jsRuntimeCard
                 mosaicSmokeTestCard
@@ -1566,6 +1653,49 @@ struct ContentView: View {
         .padding()
         .background(Color(.systemGray6))
         .clipShape(RoundedRectangle(cornerRadius: 12))
+    }
+
+    // MARK: - Phase 4.8 (Spotify Connect)
+
+    private var spotifyConnectCard: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            Text("Spotify Connect (Phase 4.8)")
+                .font(.headline)
+            Text(
+                "Web API (Connect over HTTP), not the Spotify iOS SDK — " +
+                "same decision as Android. The HTTP surface (getDevices / " +
+                "transfer / startPlayback / pause / seek) is reused from " +
+                "the shared SpotifyClient unchanged; only the device-wake " +
+                "deep link is iOS-specific. Play needs an OAuth token + " +
+                "Premium account."
+            )
+            .font(.caption)
+            .foregroundStyle(.secondary)
+
+            HStack {
+                Text("Spotify app installed:")
+                    .font(.callout)
+                Text(spotifyConnect.spotifyInstalled ? "yes" : "no")
+                    .font(.callout.monospaced())
+                    .foregroundStyle(spotifyConnect.spotifyInstalled ? .green : .orange)
+                Spacer()
+                Button("Wake") { spotifyConnect.wakeSpotify() }
+                    .buttonStyle(.bordered)
+                    .disabled(!spotifyConnect.spotifyInstalled)
+            }
+
+            if let action = spotifyConnect.lastAction {
+                Text(action)
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
+        }
+        .padding()
+        .background(Color(.systemGray6))
+        .clipShape(RoundedRectangle(cornerRadius: 12))
+        .task {
+            spotifyConnect.refreshInstalled()
+        }
     }
 
     // MARK: - Phase 4.9 (OAuth / ASWebAuthenticationSession)

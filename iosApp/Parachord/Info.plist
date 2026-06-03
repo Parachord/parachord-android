@@ -34,6 +34,16 @@
 	<key>NSAppleMusicUsageDescription</key>
 	<string>Parachord uses Apple Music to play tracks resolved to the Apple Music catalog.</string>
 	<!--
+	  Schemes Parachord queries via `UIApplication.canOpenURL`. iOS
+	  returns false for any unlisted scheme regardless of whether the
+	  target app is installed, so the Spotify Connect wake-detection
+	  (phase 4.8) needs `spotify` declared here.
+	-->
+	<key>LSApplicationQueriesSchemes</key>
+	<array>
+		<string>spotify</string>
+	</array>
+	<!--
 	  UIBackgroundModes: `audio` keeps AVPlayer / MusicKit / Spotify
 	  Connect playback alive when the app is backgrounded or the screen
 	  is locked. Without it, iOS suspends the process on background and
