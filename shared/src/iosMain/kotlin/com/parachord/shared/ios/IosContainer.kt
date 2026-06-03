@@ -1,5 +1,6 @@
 package com.parachord.shared.ios
 
+import com.parachord.shared.api.ListenBrainzClient
 import com.parachord.shared.api.MusicBrainzClient
 import com.parachord.shared.api.auth.AuthCredential
 import com.parachord.shared.api.auth.AuthRealm
@@ -7,6 +8,8 @@ import com.parachord.shared.api.auth.AuthTokenProvider
 import com.parachord.shared.api.auth.OAuthTokenRefresher
 import com.parachord.shared.api.createHttpClient
 import com.parachord.shared.config.AppConfig
+import com.parachord.shared.repository.WeeklyPlaylistEntry
+import com.parachord.shared.repository.WeeklyPlaylistsRepository
 import com.parachord.shared.settings.SettingsStore
 import com.parachord.shared.store.IosSecureTokenStore
 import com.parachord.shared.store.KvStoreFactory
@@ -88,6 +91,54 @@ class IosContainer private constructor() {
 
     val musicBrainzClient: MusicBrainzClient by lazy { MusicBrainzClient(httpClient) }
 
+    val listenBrainzClient: ListenBrainzClient by lazy { ListenBrainzClient(httpClient) }
+
+    /**
+     * Weekly Jams / Weekly Exploration from ListenBrainz. Needs only the
+     * LB client + the SettingsStore (for the username the user set in
+     * Settings). No auth — the createdfor playlists endpoint is public.
+     */
+    val weeklyPlaylistsRepository: WeeklyPlaylistsRepository by lazy {
+        WeeklyPlaylistsRepository(
+            listenBrainzClient = listenBrainzClient,
+            settingsStore = settingsStore,
+        )
+    }
+
+    /**
+     * Load the Weekly Jams + Weekly Exploration entries, flattened into
+     * a single Swift-friendly list tagged by kind. Returns empty if no
+     * LB username is set. Powers the iOS Discover screen (phase 5.3).
+     */
+    suspend fun loadWeeklyPlaylists(forceRefresh: Boolean): List<IosWeeklyEntry> {
+        val result = weeklyPlaylistsRepository.loadWeeklyPlaylists(forceRefresh)
+            ?: return emptyList()
+        val jams = (result.jams ?: emptyList()).map { it.toIos(kind = "Weekly Jams") }
+        val exploration = (result.exploration ?: emptyList())
+            .map { it.toIos(kind = "Weekly Exploration") }
+        return jams + exploration
+    }
+
+    private fun WeeklyPlaylistEntry.toIos(kind: String) = IosWeeklyEntry(
+        id = id,
+        title = title,
+        weekLabel = weekLabel,
+        // LB annotations carry HTML (<p>…</p>, <a>…</a>). Strip tags +
+        // decode the few entities that show up so the row reads clean.
+        summary = description.stripHtml(),
+        kind = kind,
+    )
+
+    private fun String.stripHtml(): String =
+        replace(Regex("<[^>]+>"), "")
+            .replace("&amp;", "&")
+            .replace("&lt;", "<")
+            .replace("&gt;", ">")
+            .replace("&quot;", "\"")
+            .replace("&#39;", "'")
+            .replace(Regex("\\s+"), " ")
+            .trim()
+
     /**
      * Search MusicBrainz for artists + releases, returning flat
      * Swift-friendly DTOs (the upstream MB response types have nested
@@ -140,6 +191,23 @@ data class IosSearchRelease(
     val title: String,
     val artist: String,
     val year: String?,
+)
+
+/**
+ * Flat Swift-friendly weekly-playlist entry, tagged by kind.
+ *
+ * NOTE: the blurb field is `summary`, NOT `description` — a Kotlin
+ * property named `description` collides with ObjC's `NSObject.description`
+ * on the Swift side, so `entry.description` would return the data-class
+ * toString instead of the field value. Avoid `description` on any
+ * Swift-facing Kotlin model.
+ */
+data class IosWeeklyEntry(
+    val id: String,
+    val title: String,
+    val weekLabel: String,
+    val summary: String,
+    val kind: String,   // "Weekly Jams" | "Weekly Exploration"
 )
 
 /**

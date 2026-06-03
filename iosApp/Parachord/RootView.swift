@@ -11,28 +11,41 @@ struct ContentView: View {
     /// Single app-wide playback engine, shared by the Now Playing tab
     /// and the persistent mini player.
     @State private var playback = AppPlayback()
+    /// Open on Discover — a music app landing on real content beats an
+    /// empty Now Playing.
+    @State private var selectedTab = 1
 
     var body: some View {
-        TabView {
+        TabView(selection: $selectedTab) {
             NowPlayingView(playback: playback)
                 .tabItem {
                     Label("Playing", systemImage: "play.circle")
                 }
+                .tag(0)
+
+            DiscoverView()
+                .tabItem {
+                    Label("Discover", systemImage: "sparkles")
+                }
+                .tag(1)
 
             SearchView()
                 .tabItem {
                     Label("Search", systemImage: "magnifyingglass")
                 }
+                .tag(2)
 
             SettingsView()
                 .tabItem {
                     Label("Settings", systemImage: "gearshape")
                 }
+                .tag(3)
 
             DevSmokeTestView()
                 .tabItem {
                     Label("Dev", systemImage: "hammer")
                 }
+                .tag(4)
         }
         // Mini player floats above the tab bar on every tab whenever
         // something is queued.
