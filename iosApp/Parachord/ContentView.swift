@@ -45,6 +45,10 @@ struct ContentView: View {
     @State private var loading = false
     @State private var error: String?
 
+    @State private var mosaicURL: URL?
+    @State private var mosaicLoading = false
+    @State private var mosaicError: String?
+
     var body: some View {
         ScrollView {
             VStack(alignment: .leading, spacing: 24) {
@@ -53,6 +57,8 @@ struct ContentView: View {
                 expectedSection
                 Divider().padding(.vertical, 4)
                 ktorSmokeTestCard
+                Divider().padding(.vertical, 4)
+                mosaicSmokeTestCard
             }
             .padding()
         }
@@ -186,6 +192,107 @@ struct ContentView: View {
             self.error = "Error: \(error.localizedDescription)"
         }
         loading = false
+    }
+
+    // MARK: - Phase 4 (CoreGraphics mosaic)
+
+    private var mosaicSmokeTestCard: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            Text("Playlist mosaic (CoreGraphics, async)")
+                .font(.headline)
+
+            Text(
+                "Downloads 4 images via Ktor, composites them 2×2 at 600×600 " +
+                "via UIGraphicsImageRenderer, writes JPEG to Application Support. " +
+                "Returns the file:// URL that ImageEnrichmentService would store."
+            )
+            .font(.caption)
+            .foregroundStyle(.secondary)
+
+            HStack(spacing: 8) {
+                Button {
+                    Task { await runMosaic() }
+                } label: {
+                    if mosaicLoading {
+                        ProgressView()
+                    } else {
+                        Text("Compose Mosaic")
+                    }
+                }
+                .buttonStyle(.borderedProminent)
+                .disabled(mosaicLoading)
+
+                if let mosaicURL {
+                    Text(mosaicURL.lastPathComponent)
+                        .font(.caption.monospaced())
+                        .foregroundStyle(.secondary)
+                        .lineLimit(1)
+                        .truncationMode(.middle)
+                }
+            }
+
+            if let mosaicError {
+                Text(mosaicError)
+                    .font(.caption)
+                    .foregroundStyle(.red)
+            }
+
+            if let mosaicURL,
+               let uiImage = UIImage(contentsOfFile: mosaicURL.path) {
+                Image(uiImage: uiImage)
+                    .resizable()
+                    .aspectRatio(contentMode: .fit)
+                    .frame(maxWidth: 300)
+                    .clipShape(RoundedRectangle(cornerRadius: 8))
+            }
+        }
+        .padding()
+        .background(Color(.systemGray6))
+        .clipShape(RoundedRectangle(cornerRadius: 12))
+        // Auto-run on first appear so the screenshot harness can
+        // observe the full pipeline (download + composite + write +
+        // render) without a synthetic tap. Subsequent runs come from
+        // the button.
+        .task {
+            if mosaicURL == nil && mosaicError == nil && !mosaicLoading {
+                await runMosaic()
+            }
+        }
+    }
+
+    private func runMosaic() async {
+        mosaicLoading = true
+        mosaicError = nil
+        // picsum.photos has stable, deterministic 300×300 endpoints that
+        // serve real photo content — perfect for proving the composite
+        // pipeline without depending on MB/CAA's release-group MBIDs being
+        // exactly right.
+        let urls = [
+            "https://picsum.photos/id/1/300/300",
+            "https://picsum.photos/id/100/300/300",
+            "https://picsum.photos/id/200/300/300",
+            "https://picsum.photos/id/300/300/300",
+        ]
+        // Unique ID per tap so the SwiftUI image cache doesn't show a
+        // stale result when re-running.
+        let id = "smoke-\(Int(Date().timeIntervalSince1970))"
+        do {
+            if let pathString = try await smokeTest.composeMosaic(
+                playlistId: id,
+                urls: urls
+            ) {
+                // Kotlin returns a "file://<absolute path>" string; parse it.
+                mosaicURL = URL(string: pathString)
+                if mosaicURL == nil {
+                    mosaicError = "Couldn't parse returned path: \(pathString)"
+                }
+            } else {
+                mosaicError = "Mosaic returned null — likely a download or encode failure."
+            }
+        } catch {
+            mosaicError = "Error: \(error.localizedDescription)"
+        }
+        mosaicLoading = false
     }
 
     // MARK: - Helpers

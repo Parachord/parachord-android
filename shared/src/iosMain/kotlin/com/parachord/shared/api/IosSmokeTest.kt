@@ -1,5 +1,6 @@
 package com.parachord.shared.api
 
+import com.parachord.shared.metadata.IosMosaicComposer
 import io.ktor.client.HttpClient
 import io.ktor.client.engine.darwin.Darwin
 import io.ktor.client.plugins.contentnegotiation.ContentNegotiation
@@ -51,6 +52,7 @@ class IosSmokeTest {
     }
 
     private val musicBrainz = MusicBrainzClient(httpClient)
+    private val mosaicComposer = IosMosaicComposer(httpClient)
 
     /**
      * Search MusicBrainz for artists and return a flattened, Swift-
@@ -68,6 +70,17 @@ class IosSmokeTest {
             )
         }
     }
+
+    /**
+     * Phase 4 smoke test for the iOS-side mosaic composite. Downloads
+     * four images via Ktor, composites them into a 2×2 600×600 JPEG
+     * via UIGraphicsImageRenderer, writes to Application Support,
+     * returns the resulting `file://` URL. Drives the same code path
+     * that `ImageEnrichmentService.enrichPlaylistArt` would call via
+     * its `composeMosaic` lambda once an iOS Koin module wires it up.
+     */
+    suspend fun composeMosaic(playlistId: String, urls: List<String>): String? =
+        mosaicComposer.compose(playlistId, urls)
 }
 
 /**
