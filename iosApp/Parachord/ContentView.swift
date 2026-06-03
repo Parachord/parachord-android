@@ -3,6 +3,7 @@ import Shared
 import JavaScriptCore
 import AVFoundation
 import Combine
+import MediaPlayer
 
 // MARK: - AVPlayer engine (phase 4.4)
 //
@@ -33,6 +34,7 @@ final class IosAVPlayer {
     private var timeObserver: Any?
     private var statusObservation: NSKeyValueObservation?
     private var endObservation: NSObjectProtocol?
+    private var remoteCommandsRegistered = false
 
     var status: Status = .idle
     var isPlaying = false
@@ -41,12 +43,24 @@ final class IosAVPlayer {
     var errorMessage: String?
     var loadedURL: URL?
 
+    // Now-playing metadata, surfaced both to the lock screen via
+    // MPNowPlayingInfoCenter and back to the UI as a read-back proof.
+    var nowPlayingTitle: String = ""
+    var nowPlayingArtist: String = ""
+    /// The last keys we pushed to MPNowPlayingInfoCenter — displayed in
+    /// the smoke-test card so the lock-screen wiring is observable in
+    /// the simulator (where photographing the actual lock screen is
+    /// awkward).
+    var lastNowPlayingKeys: [String] = []
+
     init() {
         configureAudioSession()
+        setupRemoteCommands()
     }
 
     deinit {
         teardown()
+        tearDownRemoteCommands()
     }
 
     /// Activate `.playback` category so audio plays through the
@@ -67,13 +81,19 @@ final class IosAVPlayer {
         }
     }
 
-    func load(url urlString: String) {
+    func load(
+        url urlString: String,
+        title: String = "",
+        artist: String = ""
+    ) {
         guard let url = URL(string: urlString) else {
             status = .failed
             errorMessage = "Invalid URL"
             return
         }
         teardown()
+        nowPlayingTitle = title
+        nowPlayingArtist = artist
         let item = AVPlayerItem(url: url)
         let newPlayer = AVPlayer(playerItem: item)
         // KVO on `status` — when item becomes `.readyToPlay`, durationis known
@@ -86,6 +106,9 @@ final class IosAVPlayer {
                     self.status = .ready
                     self.duration = item.duration.seconds.isFinite
                         ? item.duration.seconds : 0
+                    // Duration is now known — refresh the lock-screen
+                    // payload so the scrubber shows the right length.
+                    self.updateNowPlayingInfo()
                 case .failed:
                     self.status = .failed
                     self.errorMessage = item.error?.localizedDescription
@@ -129,12 +152,14 @@ final class IosAVPlayer {
         player?.play()
         isPlaying = true
         status = .playing
+        updateNowPlayingInfo()
     }
 
     func pause() {
         player?.pause()
         isPlaying = false
         status = .paused
+        updateNowPlayingInfo()
     }
 
     func togglePlayPause() {
@@ -143,11 +168,103 @@ final class IosAVPlayer {
 
     func seek(to seconds: Double) {
         let target = CMTime(seconds: seconds, preferredTimescale: 600)
-        player?.seek(to: target)
+        player?.seek(to: target) { [weak self] _ in
+            // Reflect the new position into the lock-screen scrubber.
+            self?.updateNowPlayingInfo()
+        }
     }
 
     func stop() {
         teardown()
+        MPNowPlayingInfoCenter.default().nowPlayingInfo = nil
+        lastNowPlayingKeys = []
+    }
+
+    // MARK: - Lock screen / Control Center (phase 4.5)
+
+    /// Push the current track + transport state into
+    /// `MPNowPlayingInfoCenter`. This is what populates the lock
+    /// screen, Control Center, the now-playing widget, CarPlay, and
+    /// the AirPods/Watch transport surfaces. Called on load, play,
+    /// pause, and seek so the elapsed-time scrubber stays in sync.
+    private func updateNowPlayingInfo() {
+        var info: [String: Any] = [:]
+        info[MPMediaItemPropertyTitle] = nowPlayingTitle.isEmpty
+            ? "Unknown Title" : nowPlayingTitle
+        info[MPMediaItemPropertyArtist] = nowPlayingArtist.isEmpty
+            ? "Unknown Artist" : nowPlayingArtist
+        if duration > 0 {
+            info[MPMediaItemPropertyPlaybackDuration] = duration
+        }
+        info[MPNowPlayingInfoPropertyElapsedPlaybackTime] = currentTime
+        // Rate drives whether the lock-screen UI shows a play or pause
+        // glyph and whether the scrubber animates: 1.0 = playing,
+        // 0.0 = paused.
+        info[MPNowPlayingInfoPropertyPlaybackRate] = isPlaying ? 1.0 : 0.0
+        MPNowPlayingInfoCenter.default().nowPlayingInfo = info
+        lastNowPlayingKeys = info.keys.sorted().map { shortKey($0) }
+    }
+
+    /// Register lock-screen / remote transport command handlers
+    /// (play, pause, toggle, skip-back/forward seek, scrub). Each maps
+    /// to the same controls the in-app buttons drive. Idempotent.
+    private func setupRemoteCommands() {
+        guard !remoteCommandsRegistered else { return }
+        let center = MPRemoteCommandCenter.shared()
+
+        center.playCommand.addTarget { [weak self] _ in
+            self?.play()
+            return .success
+        }
+        center.pauseCommand.addTarget { [weak self] _ in
+            self?.pause()
+            return .success
+        }
+        center.togglePlayPauseCommand.addTarget { [weak self] _ in
+            self?.togglePlayPause()
+            return .success
+        }
+        center.changePlaybackPositionCommand.addTarget { [weak self] event in
+            guard let self,
+                  let e = event as? MPChangePlaybackPositionCommandEvent
+            else { return .commandFailed }
+            self.seek(to: e.positionTime)
+            return .success
+        }
+        // Skip ±15s — stand-ins until queue management (phase 4.6)
+        // provides real next/previous track commands.
+        center.skipForwardCommand.preferredIntervals = [15]
+        center.skipForwardCommand.addTarget { [weak self] _ in
+            guard let self else { return .commandFailed }
+            self.seek(to: min(self.currentTime + 15, self.duration))
+            return .success
+        }
+        center.skipBackwardCommand.preferredIntervals = [15]
+        center.skipBackwardCommand.addTarget { [weak self] _ in
+            guard let self else { return .commandFailed }
+            self.seek(to: max(self.currentTime - 15, 0))
+            return .success
+        }
+        remoteCommandsRegistered = true
+    }
+
+    private func tearDownRemoteCommands() {
+        let center = MPRemoteCommandCenter.shared()
+        center.playCommand.removeTarget(nil)
+        center.pauseCommand.removeTarget(nil)
+        center.togglePlayPauseCommand.removeTarget(nil)
+        center.changePlaybackPositionCommand.removeTarget(nil)
+        center.skipForwardCommand.removeTarget(nil)
+        center.skipBackwardCommand.removeTarget(nil)
+        remoteCommandsRegistered = false
+    }
+
+    /// Trim the verbose `MPMediaItem*` / `MPNowPlayingInfo*` constant
+    /// names down to a readable tail for the UI read-back panel.
+    private func shortKey(_ key: String) -> String {
+        key
+            .replacingOccurrences(of: "MPMediaItemProperty", with: "")
+            .replacingOccurrences(of: "MPNowPlayingInfoProperty", with: "")
     }
 
     private func teardown() {
@@ -717,7 +834,11 @@ struct ContentView: View {
             HStack(spacing: 8) {
                 Button(loadButtonLabel) {
                     if avPlayer.status == .idle || avPlayer.status == .failed {
-                        avPlayer.load(url: Self.testAudioURL)
+                        avPlayer.load(
+                            url: Self.testAudioURL,
+                            title: "SoundHelix Song 1",
+                            artist: "T. Schürger"
+                        )
                     } else {
                         avPlayer.stop()
                     }
@@ -763,6 +884,21 @@ struct ContentView: View {
                     .font(.caption)
                     .foregroundStyle(.red)
             }
+
+            if !avPlayer.lastNowPlayingKeys.isEmpty {
+                Divider()
+                Text("MPNowPlayingInfoCenter (phase 4.5)")
+                    .font(.caption.weight(.semibold))
+                    .foregroundStyle(.secondary)
+                Text("\(avPlayer.nowPlayingTitle) — \(avPlayer.nowPlayingArtist)")
+                    .font(.caption)
+                Text("keys: \(avPlayer.lastNowPlayingKeys.joined(separator: ", "))")
+                    .font(.caption2.monospaced())
+                    .foregroundStyle(.secondary)
+                Text("+ MPRemoteCommandCenter: play / pause / toggle / seek / skip±15s")
+                    .font(.caption2)
+                    .foregroundStyle(.secondary)
+            }
         }
         .padding()
         .background(Color(.systemGray6))
@@ -773,7 +909,11 @@ struct ContentView: View {
         // without needing to script a synthetic button tap.
         .task {
             if avPlayer.status == .idle {
-                avPlayer.load(url: Self.testAudioURL)
+                avPlayer.load(
+                    url: Self.testAudioURL,
+                    title: "SoundHelix Song 1",
+                    artist: "T. Schürger"
+                )
                 // Poll for ready (item.status hits .readyToPlay
                 // asynchronously after the first frame parses). Bail
                 // on failure, time out at 8s on slow networks.
