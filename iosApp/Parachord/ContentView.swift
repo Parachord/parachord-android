@@ -49,16 +49,17 @@ struct ContentView: View {
     @State private var mosaicLoading = false
     @State private var mosaicError: String?
 
+    @State private var jsResults: [(label: String, value: String)] = []
+    @State private var jsError: String?
+
     var body: some View {
         ScrollView {
-            VStack(alignment: .leading, spacing: 24) {
+            VStack(alignment: .leading, spacing: 20) {
                 header
                 resolverScoringCard
-                expectedSection
-                Divider().padding(.vertical, 4)
-                ktorSmokeTestCard
-                Divider().padding(.vertical, 4)
+                jsRuntimeCard
                 mosaicSmokeTestCard
+                ktorSmokeTestCard
             }
             .padding()
         }
@@ -257,6 +258,78 @@ struct ContentView: View {
             if mosaicURL == nil && mosaicError == nil && !mosaicLoading {
                 await runMosaic()
             }
+        }
+    }
+
+    // MARK: - Phase 4.1 (JavaScriptCore)
+
+    private var jsRuntimeCard: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            Text("JavaScriptCore runtime (Phase 4.1)")
+                .font(.headline)
+
+            Text(
+                "Stands up a JSContext via shared `IosJsRuntime`, then runs " +
+                "synchronous + async JS through `evaluate(script)`. Polyfills " +
+                "for fetch/console/storage land in a follow-up — the binding " +
+                "gap for JS↔Kotlin callbacks is documented in IosJsRuntime.kt."
+            )
+            .font(.caption)
+            .foregroundStyle(.secondary)
+
+            ForEach(jsResults, id: \.label) { result in
+                HStack(alignment: .top) {
+                    Text(result.label)
+                        .font(.callout.monospaced())
+                    Spacer()
+                    Text(result.value)
+                        .font(.callout.monospacedDigit())
+                        .foregroundStyle(.green)
+                }
+            }
+
+            if let jsError {
+                Text(jsError)
+                    .font(.caption)
+                    .foregroundStyle(.red)
+            }
+        }
+        .padding()
+        .background(Color(.systemGray6))
+        .clipShape(RoundedRectangle(cornerRadius: 12))
+        .task {
+            if jsResults.isEmpty && jsError == nil {
+                await runJsEvaluations()
+            }
+        }
+    }
+
+    private func runJsEvaluations() async {
+        // Drive three cases that mirror what `resolver-loader.js`
+        // depends on the JS runtime to provide:
+        //   1. Synchronous arithmetic — runtime alive
+        //   2. JSON.stringify — built-in globals work (parser
+        //      configuration is correct)
+        //   3. Synchronous IIFE returning a string — the pattern .axe
+        //      plugins use when they're not awaiting native callbacks.
+        //      An ACTUAL `(async () => ...)()` would return a Promise
+        //      object both here and on Android (`[object Promise]`);
+        //      real async work uses the resolver-loader's callback
+        //      queue once `fetch` is polyfilled in phase 4.2.
+        let cases: [(label: String, script: String)] = [
+            ("2 + 40", "2 + 40"),
+            ("JSON.stringify({a:1,b:[2,3]})", "JSON.stringify({a:1,b:[2,3]})"),
+            ("IIFE returning string", "(function() { var x = 21; return JSON.stringify({status: 'ok', value: x * 2}); })()"),
+        ]
+        do {
+            var collected: [(label: String, value: String)] = []
+            for (label, script) in cases {
+                let result = try await smokeTest.evaluateJs(script: script)
+                collected.append((label: label, value: result ?? "<null>"))
+            }
+            jsResults = collected
+        } catch {
+            jsError = "Error: \(error.localizedDescription)"
         }
     }
 

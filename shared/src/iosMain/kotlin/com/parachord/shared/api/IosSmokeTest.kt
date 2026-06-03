@@ -1,6 +1,7 @@
 package com.parachord.shared.api
 
 import com.parachord.shared.metadata.IosMosaicComposer
+import com.parachord.shared.plugin.IosJsRuntime
 import io.ktor.client.HttpClient
 import io.ktor.client.engine.darwin.Darwin
 import io.ktor.client.plugins.contentnegotiation.ContentNegotiation
@@ -53,6 +54,7 @@ class IosSmokeTest {
 
     private val musicBrainz = MusicBrainzClient(httpClient)
     private val mosaicComposer = IosMosaicComposer(httpClient)
+    private val jsRuntime = IosJsRuntime()
 
     /**
      * Search MusicBrainz for artists and return a flattened, Swift-
@@ -81,6 +83,19 @@ class IosSmokeTest {
      */
     suspend fun composeMosaic(playlistId: String, urls: List<String>): String? =
         mosaicComposer.compose(playlistId, urls)
+
+    /**
+     * Phase 4.1 smoke test for the iOS-side JavaScriptCore runtime.
+     * Initializes the `IosJsRuntime` (cheap — just allocs a `JSContext`)
+     * and evaluates a JS expression, returning the stringified result.
+     * Used by `ContentView`'s JSC card to prove the runtime can host
+     * the same `(async () => {...})()` evaluation pattern the Android
+     * `JsBridge.evaluate(...)` accepts.
+     */
+    suspend fun evaluateJs(script: String): String? {
+        if (!jsRuntime.ready.value) jsRuntime.initialize()
+        return jsRuntime.evaluate(script)
+    }
 }
 
 /**
