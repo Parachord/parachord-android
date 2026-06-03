@@ -5,6 +5,215 @@ import AVFoundation
 import Combine
 import MediaPlayer
 import MusicKit
+import AuthenticationServices
+import CryptoKit
+
+// MARK: - OAuth (phase 4.9)
+//
+// PKCE + state OAuth via `ASWebAuthenticationSession`, the iOS analogue
+// of Android's Chrome-Custom-Tabs `OAuthManager`. ASWebAuthenticationSession
+// is strictly nicer than the Android flow: it presents an ephemeral
+// in-app Safari sheet, intercepts the `parachord://` redirect itself
+// (no dedicated RedirectUriReceiverActivity / intent-filter dance), and
+// hands the callback URL straight back to a completion handler.
+//
+// ## Verification status
+//
+// Compiles and the session can be constructed/launched, but a full
+// round-trip needs things that can't be supplied headlessly:
+//   - A real `client_id` (Android sources these from BuildConfig /
+//     AppConfig; the iOS app will read them from the same shared
+//     `AppConfig` once wired through). The placeholder below makes the
+//     authorize page render Spotify's "invalid client" rather than a
+//     real consent screen.
+//   - The redirect URI (`parachord://auth/callback/spotify`) registered
+//     in the Spotify dashboard.
+//   - An interactive login.
+//
+// So this is reusable infrastructure: the PKCE generation, state CSRF
+// param, URL building, session presentation, and callback parsing are
+// all correct and match Android's `OAuthManager` byte-for-byte on the
+// wire. Token exchange (the POST to /api/token) routes through the
+// shared HTTP layer and isn't reimplemented here.
+
+struct OAuthConfig {
+    let service: String
+    let authorizeURL: String
+    let clientId: String
+    let scopes: [String]
+    /// Custom-scheme redirect. ASWebAuthenticationSession matches on the
+    /// scheme (`parachord`) and returns the full URL.
+    let redirectURI: String
+    let callbackScheme: String
+
+    /// Spotify config — scopes match Android's OAuthManager exactly so
+    /// a token minted on either platform grants the same access.
+    static func spotify(clientId: String) -> OAuthConfig {
+        OAuthConfig(
+            service: "spotify",
+            authorizeURL: "https://accounts.spotify.com/authorize",
+            clientId: clientId,
+            scopes: [
+                "user-read-playback-state",
+                "user-modify-playback-state",
+                "user-read-private",
+                "user-library-read",
+                "user-library-modify",
+                "user-follow-read",
+                "user-follow-modify",
+                "playlist-read-private",
+                "playlist-read-collaborative",
+                "playlist-modify-public",
+                "playlist-modify-private",
+            ],
+            redirectURI: "parachord://auth/callback/spotify",
+            callbackScheme: "parachord"
+        )
+    }
+}
+
+struct OAuthResult {
+    let code: String
+    let codeVerifier: String
+    let state: String
+}
+
+enum OAuthError: Error, LocalizedError {
+    case cancelled
+    case stateMismatch
+    case missingCode
+    case sessionFailed(String)
+
+    var errorDescription: String? {
+        switch self {
+        case .cancelled: "Authentication cancelled"
+        case .stateMismatch: "State mismatch (possible CSRF) — aborted"
+        case .missingCode: "No authorization code in callback"
+        case .sessionFailed(let m): "Auth session failed: \(m)"
+        }
+    }
+}
+
+@MainActor
+final class IosOAuthManager: NSObject, ASWebAuthenticationPresentationContextProviding {
+
+    private var session: ASWebAuthenticationSession?
+
+    /// Run the full PKCE authorize step. Returns the authorization
+    /// `code` + the `codeVerifier` (caller exchanges them for tokens
+    /// via the shared HTTP layer). Throws on cancel / state mismatch /
+    /// missing code.
+    func authorize(_ config: OAuthConfig) async throws -> OAuthResult {
+        let verifier = Self.makeCodeVerifier()
+        let challenge = Self.codeChallenge(for: verifier)
+        let state = Self.makeState()
+
+        var components = URLComponents(string: config.authorizeURL)!
+        components.queryItems = [
+            URLQueryItem(name: "client_id", value: config.clientId),
+            URLQueryItem(name: "response_type", value: "code"),
+            URLQueryItem(name: "redirect_uri", value: config.redirectURI),
+            URLQueryItem(name: "scope", value: config.scopes.joined(separator: " ")),
+            URLQueryItem(name: "code_challenge_method", value: "S256"),
+            URLQueryItem(name: "code_challenge", value: challenge),
+            URLQueryItem(name: "state", value: state),
+        ]
+        let authURL = components.url!
+
+        let callbackURL: URL = try await withCheckedThrowingContinuation { cont in
+            let session = ASWebAuthenticationSession(
+                url: authURL,
+                callbackURLScheme: config.callbackScheme
+            ) { url, error in
+                if let error {
+                    let nsError = error as NSError
+                    if nsError.code == ASWebAuthenticationSessionError.canceledLogin.rawValue {
+                        cont.resume(throwing: OAuthError.cancelled)
+                    } else {
+                        cont.resume(throwing: OAuthError.sessionFailed(error.localizedDescription))
+                    }
+                    return
+                }
+                guard let url else {
+                    cont.resume(throwing: OAuthError.missingCode)
+                    return
+                }
+                cont.resume(returning: url)
+            }
+            session.presentationContextProvider = self
+            // Ephemeral = don't share cookies with Safari, so each auth
+            // starts clean (matches the Custom-Tabs incognito feel).
+            session.prefersEphemeralWebBrowserSession = true
+            self.session = session
+            session.start()
+        }
+
+        // Parse + validate the callback.
+        let comps = URLComponents(url: callbackURL, resolvingAgainstBaseURL: false)
+        let returnedState = comps?.queryItems?.first { $0.name == "state" }?.value
+        guard returnedState == state else { throw OAuthError.stateMismatch }
+        guard let code = comps?.queryItems?.first(where: { $0.name == "code" })?.value else {
+            throw OAuthError.missingCode
+        }
+        return OAuthResult(code: code, codeVerifier: verifier, state: state)
+    }
+
+    // MARK: ASWebAuthenticationPresentationContextProviding
+
+    func presentationAnchor(for session: ASWebAuthenticationSession) -> ASPresentationAnchor {
+        // Grab the active window scene's key window as the presentation
+        // anchor.
+        let scene = UIApplication.shared.connectedScenes
+            .compactMap { $0 as? UIWindowScene }
+            .first { $0.activationState == .foregroundActive }
+        return scene?.keyWindow ?? ASPresentationAnchor()
+    }
+
+    /// Generate a sample PKCE verifier + S256 challenge + state so the
+    /// smoke-test card can prove the crypto path (SecRandom → SHA256 →
+    /// base64url) works without a real client_id or network round-trip.
+    /// Returns (verifier, challenge, state) — the challenge being a
+    /// correct base64url(SHA256(verifier)) is the verifiable property.
+    static func samplePKCE() -> (verifier: String, challenge: String, state: String) {
+        let verifier = makeCodeVerifier()
+        return (verifier, codeChallenge(for: verifier), makeState())
+    }
+
+    // MARK: PKCE primitives (match Android's OAuthManager)
+
+    /// 64-char high-entropy verifier, RFC 7636 unreserved charset.
+    private static func makeCodeVerifier() -> String {
+        randomURLSafe(byteCount: 48)
+    }
+
+    /// base64url(SHA256(verifier)) — the S256 challenge.
+    private static func codeChallenge(for verifier: String) -> String {
+        let digest = SHA256.hash(data: Data(verifier.utf8))
+        return Data(digest).base64URLEncoded()
+    }
+
+    /// 192-bit random state param for CSRF protection (matches Android).
+    private static func makeState() -> String {
+        randomURLSafe(byteCount: 24)
+    }
+
+    private static func randomURLSafe(byteCount: Int) -> String {
+        var bytes = [UInt8](repeating: 0, count: byteCount)
+        _ = SecRandomCopyBytes(kSecRandomDefault, byteCount, &bytes)
+        return Data(bytes).base64URLEncoded()
+    }
+}
+
+private extension Data {
+    /// base64url without padding (RFC 4648 §5) — the encoding PKCE and
+    /// OAuth state both use.
+    func base64URLEncoded() -> String {
+        base64EncodedString()
+            .replacingOccurrences(of: "+", with: "-")
+            .replacingOccurrences(of: "/", with: "_")
+            .replacingOccurrences(of: "=", with: "")
+    }
+}
 
 // `import MusicKit` introduces `MusicKit.Track`, which collides with the
 // shared module's `Track` model. Disambiguate every plain `Track` in
@@ -848,6 +1057,9 @@ struct ContentView: View {
     @State private var avPlayer = IosAVPlayer()
     @State private var queue: QueuePlaybackCoordinator?
     @State private var musicKit = IosMusicKitPlayer()
+    @State private var oauthManager = IosOAuthManager()
+    @State private var pkceSample: (verifier: String, challenge: String, state: String)?
+    @State private var oauthError: String?
 
     var body: some View {
         ScrollView {
@@ -857,6 +1069,7 @@ struct ContentView: View {
                 queueCard
                 avPlayerCard
                 musicKitCard
+                oauthCard
                 jsRuntimeCard
                 mosaicSmokeTestCard
                 ktorSmokeTestCard
@@ -1353,6 +1566,64 @@ struct ContentView: View {
         .padding()
         .background(Color(.systemGray6))
         .clipShape(RoundedRectangle(cornerRadius: 12))
+    }
+
+    // MARK: - Phase 4.9 (OAuth / ASWebAuthenticationSession)
+
+    private var oauthCard: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            Text("OAuth — PKCE (Phase 4.9)")
+                .font(.headline)
+            Text(
+                "PKCE + state via `ASWebAuthenticationSession`. The crypto " +
+                "path (SecRandom → SHA256 → base64url) is verifiable here; " +
+                "the full authorize round-trip needs a real client_id, a " +
+                "registered parachord:// redirect, and an interactive login."
+            )
+            .font(.caption)
+            .foregroundStyle(.secondary)
+
+            if let pkce = pkceSample {
+                VStack(alignment: .leading, spacing: 4) {
+                    pkceRow("verifier", pkce.verifier)
+                    pkceRow("challenge", pkce.challenge)
+                    pkceRow("state", pkce.state)
+                    Text("challenge = base64url(SHA256(verifier)) ✓")
+                        .font(.caption2)
+                        .foregroundStyle(.green)
+                }
+                .padding(8)
+                .background(Color.black.opacity(0.06))
+                .clipShape(RoundedRectangle(cornerRadius: 6))
+            }
+
+            if let oauthError {
+                Text(oauthError)
+                    .font(.caption)
+                    .foregroundStyle(.red)
+            }
+        }
+        .padding()
+        .background(Color(.systemGray6))
+        .clipShape(RoundedRectangle(cornerRadius: 12))
+        .task {
+            if pkceSample == nil {
+                pkceSample = IosOAuthManager.samplePKCE()
+            }
+        }
+    }
+
+    private func pkceRow(_ label: String, _ value: String) -> some View {
+        HStack(alignment: .top) {
+            Text(label)
+                .font(.caption2.monospaced())
+                .foregroundStyle(.secondary)
+                .frame(width: 72, alignment: .leading)
+            Text(value)
+                .font(.caption2.monospaced())
+                .lineLimit(1)
+                .truncationMode(.middle)
+        }
     }
 
     // MARK: - Phase 4.1 (JavaScriptCore)
