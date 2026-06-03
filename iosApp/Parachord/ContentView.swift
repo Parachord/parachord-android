@@ -45,6 +45,214 @@ enum JsPolyfills {
             })();
         """)
     }
+
+    /// Attach a `window.fetch` polyfill that routes through
+    /// `__nativeFetchAsync(callbackId, url, method, headersJson, body)`
+    /// to a Swift `URLSession` call, then resolves the JS Promise via
+    /// `window.__fetchCallbacks[callbackId](envelopeStr)`. Mirrors the
+    /// Android `NativeBridge.fetchAsync` callback pattern in
+    /// `bootstrap.html` byte-for-byte so .axe plugins written against
+    /// the Android host work unmodified on iOS.
+    ///
+    /// The Swift block fires synchronously on whatever thread JS's
+    /// `evaluateScript` was called from; the `URLSession.shared.data`
+    /// work happens on the system's URL-loading queue; the callback
+    /// dispatches BACK to main before invoking the JS callback,
+    /// because `JSContext` is thread-bound to its creation thread
+    /// (main in our setup).
+    ///
+    /// Captures `context` strongly — fine for the smoke test, but
+    /// production should hold a weak ref or pin the closure's lifetime
+    /// to the runtime's.
+    static func attachFetch(to context: JSContext) {
+        let nativeFetchAsync: @convention(block) (
+            _ callbackId: String,
+            _ url: String,
+            _ method: String,
+            _ headersJson: String,
+            _ body: String
+        ) -> Void = { callbackId, url, method, headersJson, body in
+            guard let requestURL = URL(string: url) else {
+                fireFetchCallback(
+                    context: context,
+                    callbackId: callbackId,
+                    envelope: errorEnvelope("Invalid URL: \(url)")
+                )
+                return
+            }
+            var request = URLRequest(url: requestURL)
+            request.httpMethod = method
+            // headersJson is the JSON of the JS options.headers object —
+            // a flat map of header-name → string-value. Parse defensively
+            // (.axe plugins occasionally pass empty objects or arrays).
+            if let headersData = headersJson.data(using: .utf8),
+               let parsed = try? JSONSerialization.jsonObject(with: headersData),
+               let headers = parsed as? [String: String] {
+                for (name, value) in headers {
+                    request.setValue(value, forHTTPHeaderField: name)
+                }
+            }
+            if !body.isEmpty {
+                request.httpBody = body.data(using: .utf8)
+            }
+            Task.detached {
+                do {
+                    let (data, response) = try await URLSession.shared.data(for: request)
+                    let httpResponse = response as? HTTPURLResponse
+                    let status = httpResponse?.statusCode ?? 0
+                    let responseBody = String(data: data, encoding: .utf8) ?? ""
+                    let envelope: [String: Any] = [
+                        "ok": (200..<300).contains(status),
+                        "status": status,
+                        "body": responseBody,
+                    ]
+                    await MainActor.run {
+                        fireFetchCallback(
+                            context: context,
+                            callbackId: callbackId,
+                            envelope: envelope
+                        )
+                    }
+                } catch {
+                    await MainActor.run {
+                        fireFetchCallback(
+                            context: context,
+                            callbackId: callbackId,
+                            envelope: errorEnvelope(error.localizedDescription)
+                        )
+                    }
+                }
+            }
+        }
+        context.setObject(
+            nativeFetchAsync,
+            forKeyedSubscript: "__nativeFetchAsync" as NSString
+        )
+        // JS-side polyfill matches `app/src/main/assets/js/bootstrap.html`
+        // for byte-compatibility with .axe plugins ported from Android.
+        // The `window` alias is required because Android's WebView
+        // provides `window` natively; JSC is pure JavaScript and only
+        // has `globalThis`. Aliasing once at the top means every plugin
+        // that does `window.fetch(...)` keeps working unmodified.
+        context.evaluateScript("""
+            (function() {
+                if (typeof window === 'undefined') { globalThis.window = globalThis; }
+                window.__fetchCallbacks = window.__fetchCallbacks || {};
+                var __fetchIdCounter = 0;
+                window.fetch = function(url, options) {
+                    options = options || {};
+                    var method = (options.method || 'GET').toUpperCase();
+                    var headers = JSON.stringify(options.headers || {});
+                    var body = typeof options.body === 'string' ? options.body
+                             : options.body ? JSON.stringify(options.body) : '';
+                    var callbackId = 'fetch_' + (++__fetchIdCounter);
+                    return new Promise(function(resolve, reject) {
+                        window.__fetchCallbacks[callbackId] = function(envelopeStr) {
+                            delete window.__fetchCallbacks[callbackId];
+                            try {
+                                var parsed = JSON.parse(envelopeStr);
+                                var responseBody = parsed.body || '';
+                                if (parsed.error) {
+                                    reject(new Error(parsed.error));
+                                    return;
+                                }
+                                resolve({
+                                    ok: parsed.ok,
+                                    status: parsed.status,
+                                    statusText: parsed.ok ? 'OK' : 'Error',
+                                    text: function() { return Promise.resolve(responseBody); },
+                                    json: function() {
+                                        try { return Promise.resolve(JSON.parse(responseBody)); }
+                                        catch (e) { return Promise.reject(e); }
+                                    }
+                                });
+                            } catch (e) { reject(e); }
+                        };
+                        __nativeFetchAsync(callbackId, url, method, headers, body);
+                    });
+                };
+            })();
+        """)
+    }
+
+    /// Attach a `window.storage.get(key)` / `set(key, value)` polyfill
+    /// backed by `UserDefaults`. Mirrors the Android
+    /// `NativeBridge.storageGet` / `storageSet` allowlist —
+    /// keys MUST start with `parachord.` or `plugin.` or the get
+    /// returns null / the set is dropped. Without that allowlist,
+    /// a compromised .axe plugin could read arbitrary settings.
+    ///
+    /// For a smoke-test demo we go straight to `UserDefaults.standard`.
+    /// The Android production path goes through DataStore (typed,
+    /// async, observable). When the shared `KvStore` /
+    /// `SettingsStore` gets wired through Koin on iOS, this should
+    /// swap to call into shared Kotlin so storage stays unified
+    /// between native code and JS plugins.
+    static func attachStorage(to context: JSContext) {
+        let nativeStorageGet: @convention(block) (String) -> String? = { key in
+            guard isAllowedStorageKey(key) else { return nil }
+            return UserDefaults.standard.string(forKey: key)
+        }
+        let nativeStorageSet: @convention(block) (String, String) -> Void = { key, value in
+            guard isAllowedStorageKey(key) else { return }
+            UserDefaults.standard.set(value, forKey: key)
+        }
+        context.setObject(
+            nativeStorageGet,
+            forKeyedSubscript: "__nativeStorageGet" as NSString
+        )
+        context.setObject(
+            nativeStorageSet,
+            forKeyedSubscript: "__nativeStorageSet" as NSString
+        )
+        context.evaluateScript("""
+            (function() {
+                if (typeof window === 'undefined') { globalThis.window = globalThis; }
+                window.storage = {
+                    get: function(key) { return __nativeStorageGet(key); },
+                    set: function(key, value) { __nativeStorageSet(key, value); }
+                };
+            })();
+        """)
+    }
+
+    // MARK: - Helpers
+
+    private static func isAllowedStorageKey(_ key: String) -> Bool {
+        return key.hasPrefix("parachord.") || key.hasPrefix("plugin.")
+    }
+
+    private static func errorEnvelope(_ message: String) -> [String: Any] {
+        return [
+            "ok": false,
+            "status": 0,
+            "body": "",
+            "error": message,
+        ]
+    }
+
+    /// Call back into JS to resolve a pending fetch. Calls the
+    /// JSValue function directly via `JSValue.call(withArguments:)`
+    /// — no string-escaping into `evaluateScript`, no risk of JS
+    /// injection if the upstream returns funky body content.
+    private static func fireFetchCallback(
+        context: JSContext,
+        callbackId: String,
+        envelope: [String: Any]
+    ) {
+        guard let envelopeData = try? JSONSerialization.data(
+            withJSONObject: envelope,
+            options: []
+        ),
+        let envelopeStr = String(data: envelopeData, encoding: .utf8) else {
+            return
+        }
+        let callbacks = context.objectForKeyedSubscript("__fetchCallbacks")
+        let callback = callbacks?.objectForKeyedSubscript(callbackId)
+        if let callback, !callback.isUndefined {
+            callback.call(withArguments: [envelopeStr])
+        }
+    }
 }
 
 /// Phase 2 + 2.5 "Hello-shared" smoke test.
@@ -386,6 +594,8 @@ struct ContentView: View {
                         jsConsoleOutput.append("[\(level)] \(message)")
                     }
                 }
+                JsPolyfills.attachFetch(to: ctx)
+                JsPolyfills.attachStorage(to: ctx)
                 jsPolyfillsAttached = true
             }
 
@@ -413,6 +623,47 @@ struct ContentView: View {
                         console.warn('warn-level message');
                         console.error('error-level message');
                         return 'logged ' + 3 + ' lines';
+                    })()
+                    """
+                ),
+                (
+                    "storage.set + get round-trip",
+                    """
+                    (function() {
+                        var key = 'parachord.smoke-test.phase4_3';
+                        var value = 'roundtrip-' + Date.now();
+                        storage.set(key, value);
+                        var got = storage.get(key);
+                        return JSON.stringify({set: value, got: got, match: got === value});
+                    })()
+                    """
+                ),
+                (
+                    "storage allowlist (no prefix)",
+                    """
+                    (function() {
+                        storage.set('attacker.steals.spotify.token', 'pwned');
+                        var got = storage.get('attacker.steals.spotify.token');
+                        return JSON.stringify({got: got === null ? 'null' : got});
+                    })()
+                    """
+                ),
+                (
+                    "fetch → console (async)",
+                    """
+                    (function() {
+                        fetch('https://musicbrainz.org/ws/2/artist?query=radiohead&limit=1&fmt=json', {
+                            headers: { 'Accept': 'application/json' }
+                        })
+                        .then(function(r) { return r.json(); })
+                        .then(function(data) {
+                            var first = (data.artists && data.artists[0]) || {};
+                            console.log('fetch ok →', first.name || '<no name>', '(' + (first['sort-name'] || '?') + ')');
+                        })
+                        .catch(function(e) {
+                            console.error('fetch failed:', e.message);
+                        });
+                        return 'fetching… (check console below)';
                     })()
                     """
                 ),
