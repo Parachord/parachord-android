@@ -54,7 +54,15 @@ class IosSmokeTest {
 
     private val musicBrainz = MusicBrainzClient(httpClient)
     private val mosaicComposer = IosMosaicComposer(httpClient)
-    private val jsRuntime = IosJsRuntime()
+
+    /**
+     * Exposed publicly so the Swift side can grab the underlying
+     * [JSContext][platform.JavaScriptCore.JSContext] via
+     * `IosJsRuntime.nativeContext` and attach the
+     * console / fetch / storage polyfills that the Kotlin/Native JSC
+     * binding can't express. See `IosJsRuntime.kt` for the rationale.
+     */
+    val jsRuntime = IosJsRuntime()
 
     /**
      * Search MusicBrainz for artists and return a flattened, Swift-
@@ -95,6 +103,17 @@ class IosSmokeTest {
     suspend fun evaluateJs(script: String): String? {
         if (!jsRuntime.ready.value) jsRuntime.initialize()
         return jsRuntime.evaluate(script)
+    }
+
+    /**
+     * Initialize the JS runtime without evaluating anything. The Swift
+     * smoke-test harness calls this before
+     * [evaluateJs] so it can grab `jsRuntime.nativeContext` and inject
+     * polyfills BEFORE any script that depends on them
+     * (`console.log`, `fetch`, etc.) runs. Idempotent.
+     */
+    suspend fun ensureJsRuntimeReady() {
+        if (!jsRuntime.ready.value) jsRuntime.initialize()
     }
 }
 

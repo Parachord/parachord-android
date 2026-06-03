@@ -54,6 +54,19 @@ class IosJsRuntime : JsRuntime {
 
     private var context: JSContext? = null
 
+    /**
+     * The raw underlying [JSContext], exposed for Swift-side polyfill
+     * injection (phase 4.2). Returns null before [initialize] has run.
+     *
+     * Swift code attaches `console` / `fetch` / `storage` polyfills via
+     * the JSC subscript API (`ctx["__nativeLog"] = { ... }`), which
+     * Kotlin/Native's JSC bindings don't expose. This is the
+     * cleanest split — Kotlin owns the runtime lifecycle (init /
+     * evaluate / teardown), Swift owns the polyfill surface where
+     * the API is fully ergonomic.
+     */
+    val nativeContext: JSContext? get() = context
+
     override suspend fun initialize() {
         if (context != null) return
         val ctx = JSContext()

@@ -1,5 +1,51 @@
 import SwiftUI
 import Shared
+import JavaScriptCore
+
+// MARK: - JSC Polyfills (phase 4.2)
+//
+// Swift companion to `IosJsRuntime`. The Kotlin runtime stands up the
+// JSContext and owns the lifecycle; this struct attaches the
+// console / fetch / storage polyfills via the JSC subscript API that
+// Kotlin/Native's bindings don't expose
+// (`ctx["__nativeLog"] = { level, msg in ... }`).
+//
+// Polyfills route to Swift closures the call site provides, so a smoke-
+// test harness can capture log lines into a SwiftUI @State buffer
+// without the polyfill itself owning any UI concerns.
+
+enum JsPolyfills {
+
+    /// Attach a `console.log` / info / warn / error / debug polyfill
+    /// that routes through `__nativeLog(level, message)` to the
+    /// caller-provided `onLog` closure. Fires synchronously inside the
+    /// next `evaluateScript`; if `onLog` updates SwiftUI state it MUST
+    /// dispatch to the main actor itself.
+    static func attachConsole(
+        to context: JSContext,
+        onLog: @escaping (_ level: String, _ message: String) -> Void
+    ) {
+        let nativeLog: @convention(block) (String, String) -> Void = { level, message in
+            onLog(level, message)
+        }
+        context.setObject(
+            nativeLog,
+            forKeyedSubscript: "__nativeLog" as NSString
+        )
+        context.evaluateScript("""
+            (function() {
+                var levels = ['log', 'info', 'warn', 'error', 'debug'];
+                if (typeof console === 'undefined') { console = {}; }
+                levels.forEach(function(level) {
+                    console[level] = function() {
+                        var args = Array.prototype.slice.call(arguments);
+                        __nativeLog(level, args.map(String).join(' '));
+                    };
+                });
+            })();
+        """)
+    }
+}
 
 /// Phase 2 + 2.5 "Hello-shared" smoke test.
 ///
@@ -51,6 +97,8 @@ struct ContentView: View {
 
     @State private var jsResults: [(label: String, value: String)] = []
     @State private var jsError: String?
+    @State private var jsConsoleOutput: [String] = []
+    @State private var jsPolyfillsAttached = false
 
     var body: some View {
         ScrollView {
@@ -293,6 +341,23 @@ struct ContentView: View {
                     .font(.caption)
                     .foregroundStyle(.red)
             }
+
+            if !jsConsoleOutput.isEmpty {
+                Divider()
+                Text("console.log polyfill (phase 4.2)")
+                    .font(.caption.weight(.semibold))
+                    .foregroundStyle(.secondary)
+                VStack(alignment: .leading, spacing: 2) {
+                    ForEach(Array(jsConsoleOutput.enumerated()), id: \.offset) { _, line in
+                        Text(line)
+                            .font(.caption.monospaced())
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                    }
+                }
+                .padding(8)
+                .background(Color.black.opacity(0.06))
+                .clipShape(RoundedRectangle(cornerRadius: 6))
+            }
         }
         .padding()
         .background(Color(.systemGray6))
@@ -305,23 +370,53 @@ struct ContentView: View {
     }
 
     private func runJsEvaluations() async {
-        // Drive three cases that mirror what `resolver-loader.js`
-        // depends on the JS runtime to provide:
-        //   1. Synchronous arithmetic — runtime alive
-        //   2. JSON.stringify — built-in globals work (parser
-        //      configuration is correct)
-        //   3. Synchronous IIFE returning a string — the pattern .axe
-        //      plugins use when they're not awaiting native callbacks.
-        //      An ACTUAL `(async () => ...)()` would return a Promise
-        //      object both here and on Android (`[object Promise]`);
-        //      real async work uses the resolver-loader's callback
-        //      queue once `fetch` is polyfilled in phase 4.2.
-        let cases: [(label: String, script: String)] = [
-            ("2 + 40", "2 + 40"),
-            ("JSON.stringify({a:1,b:[2,3]})", "JSON.stringify({a:1,b:[2,3]})"),
-            ("IIFE returning string", "(function() { var x = 21; return JSON.stringify({status: 'ok', value: x * 2}); })()"),
-        ]
         do {
+            // Phase 4.2: stand up the runtime so `nativeContext` is
+            // populated, then attach Swift-side polyfills BEFORE
+            // running any script that uses `console.log`.
+            try await smokeTest.ensureJsRuntimeReady()
+            if !jsPolyfillsAttached,
+               let ctx = smokeTest.jsRuntime.nativeContext {
+                JsPolyfills.attachConsole(to: ctx) { level, message in
+                    // JS callback fires synchronously during
+                    // `evaluateScript`, on whatever thread Kotlin's
+                    // coroutine ended up on — bounce to main before
+                    // mutating SwiftUI state.
+                    Task { @MainActor in
+                        jsConsoleOutput.append("[\(level)] \(message)")
+                    }
+                }
+                jsPolyfillsAttached = true
+            }
+
+            // Drive four cases:
+            //   1. Synchronous arithmetic — runtime alive
+            //   2. JSON.stringify — built-in globals work
+            //   3. Synchronous IIFE returning a string — the pattern
+            //      .axe plugins use when they're not awaiting native
+            //      callbacks
+            //   4. console.log via the polyfill — JS calls
+            //      `__nativeLog(level, message)`, which the Swift
+            //      block fires, which appends a line to the
+            //      `jsConsoleOutput` panel below. This is the JS→Swift
+            //      callback path the rest of phase 4 (fetch, storage,
+            //      MBID resolution) all sit on top of.
+            let cases: [(label: String, script: String)] = [
+                ("2 + 40", "2 + 40"),
+                ("JSON.stringify({a:1,b:[2,3]})", "JSON.stringify({a:1,b:[2,3]})"),
+                ("IIFE returning string", "(function() { var x = 21; return JSON.stringify({status: 'ok', value: x * 2}); })()"),
+                (
+                    "console.log → polyfill",
+                    """
+                    (function() {
+                        console.log('hello from JS', 42, {plug: 'in'});
+                        console.warn('warn-level message');
+                        console.error('error-level message');
+                        return 'logged ' + 3 + ' lines';
+                    })()
+                    """
+                ),
+            ]
             var collected: [(label: String, value: String)] = []
             for (label, script) in cases {
                 let result = try await smokeTest.evaluateJs(script: script)
