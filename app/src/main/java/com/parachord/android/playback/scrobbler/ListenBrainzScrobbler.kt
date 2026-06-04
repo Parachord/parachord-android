@@ -38,6 +38,8 @@ class ListenBrainzScrobbler constructor(
     companion object {
         private const val TAG = "ListenBrainzScrobbler"
         private const val API_URL = "https://api.listenbrainz.org/1/submit-listens"
+        // Matches desktop's listenbrainz-scrobbler.js submission_client_version.
+        private const val SUBMISSION_CLIENT_VERSION = "1.0.0"
     }
 
     override val id = "listenbrainz"
@@ -153,22 +155,36 @@ class ListenBrainzScrobbler constructor(
         track: TrackEntity,
         timestamp: Long?,
     ): JSONObject {
+        // Source + MBID enrichment (issue #170). Mirrors desktop's
+        // _deriveSourceEnrichment — origin_url/music_service/spotify_id + MBIDs.
+        val enrichment = deriveLbSourceEnrichment(track)
+
         val additionalInfo = JSONObject().apply {
             put("media_player", "Parachord")
-            // Include MBIDs when available — improves match accuracy on ListenBrainz
-            track.recordingMbid?.let { put("recording_mbid", it) }
-            track.artistMbid?.let {
-                put("artist_mbids", JSONArray().put(it))
+            put("submission_client", "Parachord")
+            put("submission_client_version", SUBMISSION_CLIENT_VERSION)
+            // Track.duration is milliseconds; LB's duration_ms wants ms directly.
+            track.duration?.let { put("duration_ms", it) }
+            // Played-source identity (tied 1:1; omitted for localfiles).
+            enrichment.originUrl?.let { put("origin_url", it) }
+            enrichment.musicService?.let { put("music_service", it) }
+            enrichment.musicServiceName?.let { put("music_service_name", it) }
+            // Cross-platform Spotify anchor, even if another source played.
+            enrichment.spotifyId?.let { put("spotify_id", it) }
+            // MBIDs — improve match accuracy and let LB skip its mapping hop.
+            enrichment.recordingMbid?.let { put("recording_mbid", it) }
+            enrichment.releaseMbid?.let { put("release_mbid", it) }
+            if (enrichment.artistMbids.isNotEmpty()) {
+                put("artist_mbids", JSONArray().apply { enrichment.artistMbids.forEach { put(it) } })
             }
-            track.releaseMbid?.let { put("release_mbid", it) }
         }
 
         val trackMetadata = JSONObject().apply {
             put("artist_name", track.artist)
             put("track_name", track.title)
             track.album?.let { put("release_name", it) }
-            // Top-level MBIDs per ListenBrainz API spec
-            track.recordingMbid?.let { put("recording_mbid", it) }
+            // Top-level recording_mbid per ListenBrainz API spec (validated UUID).
+            enrichment.recordingMbid?.let { put("recording_mbid", it) }
             put("additional_info", additionalInfo)
         }
 
