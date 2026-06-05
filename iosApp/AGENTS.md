@@ -221,6 +221,16 @@ there**, so several gaps only surface on iOS:
   `console.log` is captured by `xcrun simctl log stream`. Filter with a
   predicate like `eventMessage CONTAINS "plugin:"`. `print` output does NOT
   reliably reach os_log.
+- **The `NativeBridge` installer MUST be set at app STARTUP** (`ParachordApp.init`),
+  not just in the Dev tab. `IosJsRuntime.initialize()` only loads
+  `resolver-loader.js` + the plugins when `nativeBridgeInstaller` is present;
+  otherwise it stands up a bare JSContext with no `window.__resolverLoader`.
+  `initialize()` is **idempotent** — if any production resolution
+  (a playlist's `resolveInBackground`, a tap's on-the-fly `resolveSources`)
+  runs before the installer is set, the host initializes plugin-less and stays
+  broken for the whole session (no badges, nothing resolves, taps flash then
+  fail). Symptom of regressing this: resolution works only after visiting the
+  Dev tab. Keep the installer wired in `ParachordApp.init()` + pre-warm there.
 
 ---
 
@@ -248,9 +258,50 @@ there**, so several gaps only surface on iOS:
   teams can't generate a profile from nothing — "Communication with
   Apple failed" until a device is seen). Connect iPad/iPhone, unlock,
   Developer Mode on, then the profile generates.
-- MusicKit (when it goes live) needs the MusicKit capability added in
-  Signing & Capabilities (one click) — that regenerates the profile with
-  the entitlement.
+---
+
+## MusicKit / Apple Music playback (the full saga — verified on-device)
+
+Apple Music *resolution* needs nothing (the `.axe` uses no-auth iTunes
+Search). Apple Music *playback* (`ApplicationMusicPlayer`) is the hard part —
+it took many rounds. The complete, correct procedure:
+
+1. **MusicKit is NOT a code-signing entitlement.** Do NOT hand-write a
+   `Parachord.entitlements` with `com.apple.developer.musickit` — it's not a
+   valid provisionable entitlement and automatic signing rejects it
+   ("Entitlement … not found … should be removed"). It's also NOT in Xcode's
+   "+ Capability" picker. (Both dead ends were tried.)
+2. **MusicKit is an App Service on the App ID**, enabled at the developer
+   portal: developer.apple.com → Identifiers → `com.parachord.ios` → the
+   **App Services** tab (NOT the Capabilities tab — that's the trap that wastes
+   time) → check **MusicKit** → Save.
+3. **The explicit App ID must exist.** Automatic signing uses an `XC Wildcard`
+   (`*`) profile when the app has no entitlements forcing an explicit App ID,
+   so `com.parachord.ios` may not exist as an identifier until you create it
+   (or a device build creates it). The wildcard is harmless once an explicit
+   match exists.
+4. **`NSAppleMusicUsageDescription`** must be in Info.plist (it is).
+5. **Developer token 404 = stale profile + cached error.** After enabling the
+   App Service, `MusicCatalogResourceRequest` / `ApplicationMusicPlayer` still
+   404 (`developerTokenRequestFailed`, "com.parachord.ios … not registered as a
+   valid client identifier") until BOTH:
+   - **Delete the app from the device** — iOS caches the token *failure*
+     ("Updated MusicKit tokens cache with new error"); a rebuild-over-install
+     does NOT clear it. Deleting does.
+   - **Regenerate the provisioning profile** — toggle "Automatically manage
+     signing" OFF/ON, Clean Build Folder, rebuild. (Apple's token service can
+     also lag 15–30 min after enabling the service.)
+   The success signal: the `developerTokenRequestFailed` flood vanishes from
+   the console and `api.music.apple.com` requests return 200.
+6. **Deleting the app also clears the MusicKit AUTHORIZATION grant.** Symptom:
+   tokens work (no 404s) but tapping a track "skips all the way down the
+   playlist" with no audio — because the router's
+   `guard MusicAuthorization.currentStatus == .authorized` fails. Fix is in
+   `PlaybackRouter`: it now calls `MusicAuthorization.request()` on the first
+   Apple Music play (`notDetermined → prompt`), so a fresh install prompts and
+   plays without the Dev tab. Don't regress this to a status-only check.
+7. **Catalog playback needs an active Apple Music subscription** on the
+   device's Apple ID. Tokens + auth working but still no audio ⇒ subscription.
 
 ---
 
