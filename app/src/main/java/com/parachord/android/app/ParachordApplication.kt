@@ -20,6 +20,7 @@ class ParachordApplication : Application() {
     private val imageEnrichmentService: ImageEnrichmentService by inject()
     private val crossResolverEnrichmentScheduler: CrossResolverEnrichmentScheduler by inject()
     private val announcementsRepository: com.parachord.shared.repository.AnnouncementsRepository by inject()
+    private val trackTombstoneService: com.parachord.shared.sync.TrackTombstoneService by inject()
 
     private val appScope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
 
@@ -42,6 +43,19 @@ class ParachordApplication : Application() {
         // never connect a streaming service. 24h periodic, unmetered +
         // battery-not-low. Idempotent via WorkManager KEEP policy.
         crossResolverEnrichmentScheduler.enable()
+
+        // Sweep tombstones older than the 365-day TTL once per launch (#172).
+        // Fire-and-forget; never fail startup on a prune error.
+        appScope.launch {
+            try {
+                val pruned = trackTombstoneService.prune()
+                if (pruned > 0) {
+                    com.parachord.shared.platform.Log.d("ParachordApplication", "Pruned $pruned expired track tombstones")
+                }
+            } catch (_: Exception) {
+                // Background sweep; ignore failures.
+            }
+        }
 
         // On every app launch, regenerate playlist mosaics for any playlist
         // whose artwork isn't already a locally-generated `file://` mosaic.
