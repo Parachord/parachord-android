@@ -91,6 +91,20 @@ final class IosSpotifyConnect {
     // platform-agnostic and belong in the shared layer alongside the
     // HTTP client when iOS Koin wiring lands. Build.MODEL-style local
     // matching becomes `UIDevice.current.name` / `.model`.
+
+    /// Whether Spotify playback can currently run. False until a Spotify
+    /// OAuth token + the shared SpotifyClient are wired into IosContainer —
+    /// the PlaybackRouter gates on this and falls through to the next source.
+    var canPlay: Bool { false }
+
+    /// Start Spotify Connect playback of a track URI. Stub until the shared
+    /// SpotifyClient + token wiring lands (see the flow sketch above); the
+    /// router treats a `false` return as "engine unavailable, try next".
+    @MainActor
+    func play(uri: String) async -> Bool {
+        lastAction = "Spotify playback not wired yet (needs token + SpotifyClient)"
+        return false
+    }
 }
 
 // MARK: - OAuth (phase 4.9)
@@ -359,12 +373,15 @@ final class IosMusicKitPlayer {
     /// (the `appleMusicId` field already on `Track`). Resolves the ID
     /// to a `Song` via a catalog request, then hands it to the shared
     /// application player.
+    /// Returns true when playback actually started — the PlaybackRouter uses
+    /// this to decide whether to fall through to the next ranked source.
     @MainActor
-    func play(appleMusicId: String) async {
+    @discardableResult
+    func play(appleMusicId: String) async -> Bool {
         lastError = nil
         guard MusicAuthorization.currentStatus == .authorized else {
             lastError = "Not authorized for Apple Music"
-            return
+            return false
         }
         do {
             let request = MusicCatalogResourceRequest<Song>(
@@ -374,15 +391,17 @@ final class IosMusicKitPlayer {
             let response = try await request.response()
             guard let song = response.items.first else {
                 lastError = "Catalog song \(appleMusicId) not found"
-                return
+                return false
             }
             let player = ApplicationMusicPlayer.shared
             player.queue = [song]
             try await player.play()
             nowPlayingTitle = song.title
             isPlaying = true
+            return true
         } catch {
             lastError = "Playback failed: \(error.localizedDescription)"
+            return false
         }
     }
 
