@@ -37,6 +37,7 @@
 		AA000000000000000000001B /* IosTrackResolverCache.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = IosTrackResolverCache.swift; sourceTree = "<group>"; };
 		AA000000000000000000001C /* PlaybackRouter.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PlaybackRouter.swift; sourceTree = "<group>"; };
 		AA000000000000000000001D /* ResolverBadgeRow.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ResolverBadgeRow.swift; sourceTree = "<group>"; };
+		AA000000000000000000001E /* Parachord.entitlements */ = {isa = PBXFileReference; lastKnownFileType = text.plist.entitlements; path = Parachord.entitlements; sourceTree = "<group>"; };
 		AA0000000000000000000019 /* resolver-loader.js */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.javascript; path = "Resources/resolver-loader.js"; sourceTree = "<group>"; };
 		AA000000000000000000001A /* plugins */ = {isa = PBXFileReference; lastKnownFileType = folder; path = Resources/plugins; sourceTree = "<group>"; };
 /* End PBXFileReference section */
@@ -82,6 +83,7 @@
 				AA000000000000000000001B /* IosTrackResolverCache.swift */,
 				AA000000000000000000001C /* PlaybackRouter.swift */,
 				AA000000000000000000001D /* ResolverBadgeRow.swift */,
+				AA000000000000000000001E /* Parachord.entitlements */,
 				AA0000000000000000000019 /* resolver-loader.js */,
 				AA000000000000000000001A /* plugins */,
 				AA0000000000000000000012 /* Assets.xcassets */,
@@ -322,6 +324,7 @@
 			buildSettings = {
 				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
 				ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME = AccentColor;
+				CODE_SIGN_ENTITLEMENTS = Parachord/Parachord.entitlements;
 				CODE_SIGN_STYLE = Automatic;
 				CURRENT_PROJECT_VERSION = 1;
 				DEVELOPMENT_TEAM = YR3XETE537;
@@ -356,6 +359,7 @@
 			buildSettings = {
 				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
 				ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME = AccentColor;
+				CODE_SIGN_ENTITLEMENTS = Parachord/Parachord.entitlements;
 				CODE_SIGN_STYLE = Automatic;
 				CURRENT_PROJECT_VERSION = 1;
 				DEVELOPMENT_TEAM = YR3XETE537;
