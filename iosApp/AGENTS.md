@@ -188,6 +188,40 @@ The runtime split: **Kotlin owns lifecycle, Swift owns polyfills.**
 - Storage polyfill enforces the same allowlist as Android
   (`parachord.*` / `plugin.*` key prefixes only).
 
+### Resolving tracks via `.axe` on iOS (the iOS-is-.axe-only consequences)
+
+iOS has **no native resolvers** — every source resolves by running the
+`.axe` plugin's `resolve()` in JSC. Android's native-first strategy means
+its `applemusic`/`spotify`/`soundcloud` `.axe` `resolve()` paths **never run
+there**, so several gaps only surface on iOS:
+
+- **`PluginManager.resolve` returns `[object Promise]` on JSC.** It reads a
+  bare `(async()=>…)()` synchronously. Use the `window.__resolveResults[key]`
+  poll pattern (`IosResolverCoordinator.resolveOne`). For **concurrent
+  fan-out** use a UNIQUE key per call — a single shared global
+  (`__lastPluginResult`) gets clobbered when resolves overlap. Unique keys let
+  the `async{}` fan-out interleave on the one JSC run loop.
+- **`.axe` plugins expect host-provided globals that live nowhere in the
+  `.axe` or `resolver-loader.js`.** `applemusic.axe` calls
+  `window.iTunesRateLimiter.fetch(url)` for its no-auth iTunes Search. The
+  desktop/Android hosts define it; iOS must too (added to `BOOTSTRAP_JS` as a
+  passthrough — JSC has no `setTimeout` for a real throttle gap, so throttle a
+  layer up in `IosTrackResolverCache`). If a `.axe` errors with "undefined is
+  not an object (evaluating 'window.X')", X is a missing host global — add it.
+- **ID-based resolvers return NO top-level `url`.** `applemusic.axe` returns
+  `{appleMusicId, previewUrl, appleMusicUrl}`; `spotify.axe` a URI. Android's
+  `AxeResolveResult` required `url` (it only runs url-based bandcamp/youtube
+  `.axe`). Accept a source with EITHER a playable `url` OR a routable ID, and
+  map the extra fields (`previewUrl`, `appleMusicUrl`, `soundcloudUrl`, …).
+- **`.axe` resolvers need credentials for most sources.** With no tokens:
+  soundcloud "No token, skipping", spotify silent, localfiles "not available".
+  Apple Music **works credential-free** via iTunes Search — the one resolver
+  that returns real matches on a bare simulator. Test with it.
+- **`NativeBridge.log` uses `NSLog`, not `print`** so `.axe` / resolver-loader
+  `console.log` is captured by `xcrun simctl log stream`. Filter with a
+  predicate like `eventMessage CONTAINS "plugin:"`. `print` output does NOT
+  reliably reach os_log.
+
 ---
 
 ## UIKit / CoreGraphics (mosaic, etc.)
