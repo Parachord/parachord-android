@@ -221,6 +221,23 @@ Only if all three miss does `createPlaylistOnSpotify` run. The link is written *
 
 **Key files:** `shared/src/commonMain/sqldelight/com/parachord/shared/db/SyncPlaylistLink.sq`, `data/db/dao/SyncPlaylistLinkDao.kt`, `sync/SyncEngine.kt` (`migrateLinksFromPlaylists`, push loop), `sync/SpotifySyncProvider.kt`
 
+### Track-Level Remove Tombstones
+
+When the user removes a saved track, sync would re-import it on the next pull if the remote still has it — and the remote often still does, because remote-remove can fail or be unsupported (Apple Music has no working track-removal API; it degrades PUT to POST-append, so removals never reach the provider). Without a durable "user removed this on purpose" marker, the next pull re-adds the track and the removal silently undoes itself. Mirrors desktop parachord#865 (`sync-engine/tombstones.js`).
+
+**Three integration points:**
+1. **Write on remove** — `SyncEngine.onTrackRemoved` tombstones every synced provider's `(providerId, externalId)` (derived via `TrackTombstoneService.deriveTombstoneEntries` — spotify / applemusic / listenbrainz from the track's IDs) BEFORE attempting remote removal, regardless of whether remote-remove succeeds. This is the whole point: the tombstone must survive a failed or unsupported remote-remove (Apple Music) so the next pull still drops the track.
+2. **Filter + re-arm on pull** — `SyncEngine.applyTrackDiff` filters the remote list through tombstones at the top (using `SyncedTrack.spotifyId` as the external id), dropping tombstoned tracks from the add-diff AND re-arming each hit's `removedAt = now`. The re-arm keeps the tombstone durable for the full TTL window as long as the remote keeps the track and the user keeps syncing — a tombstone only expires once the remote stops offering the track for a full year.
+3. **Clear on user re-add** — `LibraryRepository.addTrack` / `addTracks` clear tombstones, because an explicit user re-add is user intent to re-enable sync import. **Load-bearing boundary: tombstones are cleared ONLY on the user re-add path, NEVER in the sync-add path** (`applyTrackDiff` → `trackDao.insertAll`). Clearing on sync-add would defeat the tombstone the instant a pull tried to re-import the removed track.
+
+**TTL:** `TrackTombstones.TTL_MS = 365 days`. `ParachordApplication.onCreate` fires a fire-and-forget `prune()` once per launch, sweeping entries older than the TTL.
+
+**Storage:** one JSON blob via `KvTombstoneStore` (mirrors desktop's electron-store key `removed_track_tombstones`), backed on Android by a dedicated SharedPreferences file `parachord_tombstones` through sync load/save lambdas. **Local-per-device, not synced across devices** — semantic parity with desktop (each device keeps its own removal intent), not a shared blob. `TrackTombstoneService` is a Mutex-guarded suspend facade (`addAll`, `clearAll`, `filterRemote`, `prune`) over the pure `TrackTombstones` module.
+
+**iOS parity:** `TrackTombstones` + `TrackTombstoneService` are already KMP-shared. iOS needs only its own `TombstoneStore` backing (NSUserDefaults-equivalent JSON blob) plus an app-start `prune()` call when the shell lands.
+
+**Key files:** `shared/.../sync/TrackTombstones.kt` (pure module), `shared/.../sync/KvTombstoneStore.kt` (JSON-blob store), `shared/.../sync/TrackTombstoneService.kt` (Mutex facade + `deriveTombstoneEntries`), `sync/SyncEngine.kt` (`onTrackRemoved` write, `applyTrackDiff` filter+re-arm), `data/repository/LibraryRepository.kt` (`addTrack`/`addTracks` clear), `app/ParachordApplication.kt` (app-start prune).
+
 ### Multi-Provider Sync — Apple Music + Spotify (Phases 1–6.5 + Collection)
 
 The sync engine handles N providers concurrently. Phases 1 through 6.5 (Apr 2026) ported the desktop's multi-provider model: a playlist can carry one pull source (`syncedFrom`) and any number of push mirrors (`syncedTo[providerId]`). Today two providers are registered (Spotify + Apple Music); a third (e.g. Tidal) needs only a `SyncProvider` implementation + Koin registration. `SyncEngine` never branches on `provider.id`; it dispatches on `provider.features` and per-provider candidate filters.

@@ -44,6 +44,7 @@ class SyncEngine constructor(
      * + cast` indirection goes away when those bodies are generalized.
      */
     private val providers: List<com.parachord.shared.sync.SyncProvider>,
+    private val tombstones: TrackTombstoneService,
 ) {
 
     private val spotifyProvider: SpotifySyncProvider
@@ -458,10 +459,18 @@ class SyncEngine constructor(
     }
 
     private suspend fun applyTrackDiff(
-        remote: List<SyncedTrack>,
+        remoteIn: List<SyncedTrack>,
         localSources: List<SyncSource>,
         providerId: String,
     ): TypeSyncResult {
+        // Drop tracks the user removed on purpose (and re-arm their TTL on every
+        // hit), so a still-present remote track isn't re-imported against the
+        // user's intent (#172). Mirrors desktop "filter remote before diff".
+        val tombResult = tombstones.filterRemote(remoteIn, providerId) { it.spotifyId }
+        val remote = tombResult.filtered ?: remoteIn
+        if (tombResult.dropped > 0) {
+            Log.d(TAG, "applyTrackDiff: tombstones dropped ${tombResult.dropped} remote tracks for $providerId")
+        }
         val remoteByExternalId = remote.associateBy { it.spotifyId }
         val localByExternalId = localSources.associateBy { it.externalId }
 
@@ -2284,6 +2293,12 @@ class SyncEngine constructor(
     suspend fun onTrackRemoved(track: Track) {
         val sources = syncSourceDao.getByItem(track.id, "track")
         val providersById = providers.associateBy { it.id }
+        // Tombstone EVERY synced provider for this track up front, so a failed or
+        // unsupported remote removal can't be undone by the next sync's re-import (#172).
+        val entries = sources.mapNotNull { s ->
+            s.externalId?.let { TombstoneEntry(s.providerId, it) }
+        }
+        if (entries.isNotEmpty()) tombstones.addAll(entries)
         for (source in sources) {
             val externalId = source.externalId ?: continue
             val provider = providersById[source.providerId] ?: continue
