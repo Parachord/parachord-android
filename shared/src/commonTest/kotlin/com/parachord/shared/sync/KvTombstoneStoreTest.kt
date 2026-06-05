@@ -40,4 +40,13 @@ class KvTombstoneStoreTest {
         assertEquals(Tombstone(1000), TrackTombstones.getTombstone(reread, "applemusic", "b"))
         assertNull(TrackTombstones.getTombstone(reread, "spotify", "missing"))
     }
+
+    @Test fun `empty-object entry decodes to null removedAt (desktop corrupt-entry shape)`() {
+        // Mirrors desktop's `{ [provider]: { [ext]: {} } }` corrupt entry: an
+        // entry with no removedAt must round-trip to Tombstone(null) so
+        // pruneExpired treats it as corrupt and sweeps it. Depends on
+        // encodeDefaults=false (null omitted) + the nullable constructor default.
+        val m = MemBlob().apply { blob = """{"spotify":{"abc":{}}}""" }
+        assertEquals(Tombstone(null), TrackTombstones.getTombstone(m.store(), "spotify", "abc"))
+    }
 }
