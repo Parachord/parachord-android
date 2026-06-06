@@ -470,7 +470,6 @@ final class IosMusicKitPlayer {
         let amp = ApplicationMusicPlayer.shared
         let status = amp.state.playbackStatus
         currentTime = amp.playbackTime
-        isPlaying = (status == .playing)
         if status == .playing { observedPlaying = true }
 
         // End detection: primary = playing→stopped (single-song queue ends);
@@ -480,6 +479,15 @@ final class IosMusicKitPlayer {
         if (naturalStop || nearEnd) && !trackEndHandled {
             trackEndHandled = true
             onTrackEnded?()
+        }
+
+        // Publish isPlaying — but HOLD it "playing" through the inter-track
+        // handoff (trackEndHandled): MusicKit reports the finished track as
+        // .stopped for the ~½s the next track takes to resolve + start, which
+        // would blink the play/pause glyph. play() resets trackEndHandled and
+        // sets isPlaying for the new track.
+        if !trackEndHandled {
+            isPlaying = (status == .playing)
         }
     }
 }
