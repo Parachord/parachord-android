@@ -17,15 +17,23 @@ import Shared
 @Observable
 final class SettingsViewModel {
 
+    private let container = IosContainer.companion.shared
     private let store = IosContainer.companion.shared.settingsStore
     private let watcher = FlowWatcher(scope: IosContainer.companion.shared.appScope)
     private var subscriptions: [Cancellable] = []
+
+    // Retained for the duration of the OAuth session — ASWebAuthenticationSession
+    // inside IosOAuthManager must stay alive until the callback fires, so it
+    // can't be a Task-local that deallocates mid-flow.
+    private var oauthManager: IosOAuthManager?
 
     // Mirrored settings state.
     var themeMode: String = "system"
     var scrobblingEnabled: Bool = false
     var lastFmUsername: String = ""
     var listenBrainzUsername: String = ""
+    var spotifyConnected: Bool = false
+    var spotifyError: String? = nil
 
     func start() {
         guard subscriptions.isEmpty else { return }
@@ -49,6 +57,11 @@ final class SettingsViewModel {
         subscriptions.append(
             watcher.watch(flow: store.getListenBrainzUsernameFlow()) { [weak self] value in
                 self?.listenBrainzUsername = (value as? String) ?? ""
+            }
+        )
+        subscriptions.append(
+            watcher.watch(flow: container.getSpotifyConnectedFlow()) { [weak self] value in
+                self?.spotifyConnected = (value as? Bool) ?? ((value as? KotlinBoolean)?.boolValue ?? false)
             }
         )
     }
@@ -76,6 +89,35 @@ final class SettingsViewModel {
 
     func setListenBrainzUsername(_ username: String) {
         Task { try? await store.setListenBrainzUsername(username: username) }
+    }
+
+    // Spotify OAuth — drives the PKCE authorize flow then exchanges the code
+    // for tokens via the shared container. The connected flow republishes
+    // the result into `spotifyConnected`.
+
+    func connectSpotify() {
+        Task { @MainActor in
+            do {
+                let manager = IosOAuthManager()
+                oauthManager = manager  // retain for the auth session
+                let cfg = OAuthConfig.spotify(clientId: container.appConfig.spotifyClientId)
+                let result = try await manager.authorize(cfg)
+                try await container.connectSpotify(
+                    code: result.code,
+                    codeVerifier: result.codeVerifier
+                )
+                spotifyError = nil
+            } catch let e as OAuthError {
+                spotifyError = e.localizedDescription
+            } catch {
+                spotifyError = error.localizedDescription
+            }
+            oauthManager = nil
+        }
+    }
+
+    func disconnectSpotify() {
+        Task { try? await container.disconnectSpotify() }
     }
 }
 
@@ -112,6 +154,28 @@ struct SettingsView: View {
                     TextField("Username", text: listenBrainzBinding)
                         .textInputAutocapitalization(.never)
                         .autocorrectionDisabled()
+                }
+
+                Section("Spotify") {
+                    if model.spotifyConnected {
+                        HStack(spacing: 8) {
+                            Image(systemName: "checkmark.circle.fill")
+                                .foregroundStyle(.green)
+                            Text("Spotify · Connected")
+                        }
+                        Button("Disconnect", role: .destructive) {
+                            model.disconnectSpotify()
+                        }
+                    } else {
+                        Button("Connect Spotify") {
+                            model.connectSpotify()
+                        }
+                        if let error = model.spotifyError {
+                            Text(error)
+                                .font(.caption)
+                                .foregroundStyle(.red)
+                        }
+                    }
                 }
 
                 Section {
