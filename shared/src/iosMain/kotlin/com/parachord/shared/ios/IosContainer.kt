@@ -2,10 +2,6 @@ package com.parachord.shared.ios
 
 import com.parachord.shared.api.ListenBrainzClient
 import com.parachord.shared.api.MusicBrainzClient
-import com.parachord.shared.api.auth.AuthCredential
-import com.parachord.shared.api.auth.AuthRealm
-import com.parachord.shared.api.auth.AuthTokenProvider
-import com.parachord.shared.api.auth.OAuthTokenRefresher
 import com.parachord.shared.api.createHttpClient
 import com.parachord.shared.config.AppConfig
 import com.parachord.shared.plugin.IosJsRuntime
@@ -15,16 +11,22 @@ import com.parachord.shared.resolver.ResolvedSource
 import com.parachord.shared.resolver.ResolverScoring
 import com.parachord.shared.repository.WeeklyPlaylistEntry
 import com.parachord.shared.repository.WeeklyPlaylistsRepository
+import com.parachord.shared.api.SpotifyClient
 import com.parachord.shared.settings.SettingsStore
 import com.parachord.shared.store.IosSecureTokenStore
 import com.parachord.shared.store.KvStoreFactory
 import io.ktor.client.HttpClient
+import io.ktor.client.engine.darwin.Darwin
+import io.ktor.client.plugins.contentnegotiation.ContentNegotiation
+import io.ktor.serialization.kotlinx.json.json
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.launch
 import kotlinx.serialization.json.Json
+import platform.Foundation.NSBundle
 
 /**
  * Hand-rolled dependency container for the iOS app shell (phase 5.0).
@@ -59,25 +61,53 @@ class IosContainer private constructor() {
     }
 
     val appConfig: AppConfig by lazy {
-        // No-auth defaults for now. API keys (Last.fm, Ticketmaster,
-        // etc.) and the Spotify client ID get populated from a config
-        // mechanism (Info.plist / a generated config) when those
-        // services come online. The User-Agent is the one field that
-        // matters today: MusicBrainz 403s the default Ktor UA.
+        // The Spotify client ID comes from Info.plist (SpotifyClientID).
+        // Other API keys (Last.fm, Ticketmaster, etc.) get populated from
+        // the same config mechanism when those services come online. The
+        // User-Agent matters today regardless: MusicBrainz 403s the
+        // default Ktor UA.
         AppConfig(
             userAgent = "Parachord/0.1 (iOS; https://parachord.com)",
             isDebug = true,
+            spotifyClientId = NSBundle.mainBundle
+                .objectForInfoDictionaryKey("SpotifyClientID") as? String ?: "",
         )
+    }
+
+    /**
+     * Plain Ktor `HttpClient` for the Spotify token endpoint ONLY — Darwin
+     * engine + JSON/form support, with NO auth/refresh plugins. The token
+     * exchange ([spotifyAuth]) and the refresher ([spotifyTokenRefresher])
+     * both run through this so they can't recurse the shared client's
+     * 401-refresh plugin (which would itself call back into the refresher).
+     * See CLAUDE.md "avoid an infinite refresh loop".
+     */
+    val authHttpClient: HttpClient by lazy {
+        HttpClient(Darwin) {
+            install(ContentNegotiation) {
+                json(Json { ignoreUnknownKeys = true; isLenient = true })
+            }
+        }
+    }
+
+    /** Spotify 401-refresh (plain client — no plugin recursion). */
+    val spotifyTokenRefresher: SpotifyTokenRefresher by lazy {
+        SpotifyTokenRefresher(settingsStore, authHttpClient) { appConfig.spotifyClientId }
+    }
+
+    /** Request-time Spotify bearer lookup (proactive-refresh aware). */
+    val spotifyAuthProvider: SpotifyAuthTokenProvider by lazy {
+        SpotifyAuthTokenProvider(settingsStore, spotifyTokenRefresher)
     }
 
     /**
      * Production shared Ktor `HttpClient` — the same one
      * `SharedModule` builds, with the User-Agent injection and shared
-     * plugins. Auth providers are no-op stubs for now (below); they
-     * just return null for every realm, which is correct for the
-     * unauthenticated endpoints the first network screens use
-     * (MusicBrainz search, the RSS/critics feeds, etc.). Real token
-     * lookup wires in when OAuth lands.
+     * plugins. Auth is wired to [spotifyAuthProvider] /
+     * [spotifyTokenRefresher]: Spotify requests get a bearer (refreshed on
+     * 401 via the plain [authHttpClient]); every other realm returns null,
+     * which is correct for the unauthenticated endpoints (MusicBrainz
+     * search, the RSS/critics feeds, etc.).
      */
     val httpClient: HttpClient by lazy {
         createHttpClient(
@@ -88,13 +118,41 @@ class IosContainer private constructor() {
                 coerceInputValues = true
             },
             appConfig,
-            NoAuthTokenProvider,
-            NoOpTokenRefresher,
+            spotifyAuthProvider,
+            spotifyTokenRefresher,
             lbTokenProvider = { settingsStore.getListenBrainzToken() },
         )
     }
 
     val musicBrainzClient: MusicBrainzClient by lazy { MusicBrainzClient(httpClient) }
+
+    /** Shared Spotify Web API client, authed via [spotifyAuthProvider]. */
+    val spotifyClient: SpotifyClient by lazy { SpotifyClient(httpClient, spotifyAuthProvider) }
+
+    /** Spotify authorization-code → token exchange (plain client). */
+    val spotifyAuth: IosSpotifyAuth by lazy {
+        IosSpotifyAuth(authHttpClient, settingsStore) { appConfig.spotifyClientId }
+    }
+
+    // ── Swift-callable Spotify auth surface ────────────────────────────
+
+    /**
+     * Complete the Spotify OAuth flow: exchange the authorization code (from
+     * `IosOAuthManager.authorize`) for tokens and persist them. Throws on
+     * non-2xx / missing client ID.
+     */
+    suspend fun connectSpotify(code: String, codeVerifier: String) {
+        spotifyAuth.exchangeCode(code, codeVerifier, "parachord://auth/callback/spotify")
+    }
+
+    /** Clear stored Spotify tokens (disconnect). */
+    suspend fun disconnectSpotify() {
+        settingsStore.clearSpotifyTokens()
+    }
+
+    /** Emits true when a Spotify access token is present, false otherwise. */
+    fun getSpotifyConnectedFlow(): Flow<Boolean> =
+        settingsStore.getSpotifyAccessTokenFlow().map { it != null }
 
     val listenBrainzClient: ListenBrainzClient by lazy { ListenBrainzClient(httpClient) }
 
@@ -350,22 +408,6 @@ data class IosWeeklyEntry(
     val summary: String,
     val kind: String,   // "Weekly Jams" | "Weekly Exploration"
 )
-
-/**
- * Stub [AuthTokenProvider] for the pre-OAuth iOS shell — every realm
- * is unauthenticated. Returns null so authenticated requests simply
- * fail with 401 (none are made yet); the unauthenticated endpoints
- * the first screens hit don't consult it.
- */
-private object NoAuthTokenProvider : AuthTokenProvider {
-    override suspend fun tokenFor(realm: AuthRealm): AuthCredential? = null
-    override suspend fun invalidate(realm: AuthRealm) {}
-}
-
-/** Stub [OAuthTokenRefresher] — no refresh path until OAuth wires in. */
-private object NoOpTokenRefresher : OAuthTokenRefresher {
-    override suspend fun refresh(realm: AuthRealm): AuthCredential.BearerToken? = null
-}
 
 /**
  * Bridges a Kotlin [Flow] to a Swift callback. Swift can't `collect` a
