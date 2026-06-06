@@ -3,6 +3,7 @@ package com.parachord.shared.api
 import com.parachord.shared.api.auth.AuthCredential
 import com.parachord.shared.api.auth.AuthRealm
 import com.parachord.shared.api.auth.AuthTokenProvider
+import com.parachord.shared.resolver.ResolvedSource
 import io.ktor.client.HttpClient
 import io.ktor.client.call.body
 import io.ktor.client.request.HttpRequestBuilder
@@ -200,6 +201,34 @@ class SpotifyClient(
             gate.handleResponse(response) { SpotifyRateLimitedException(it) }
             if (!response.status.isSuccess()) SpSearchResponse() else response.body()
         }
+
+    /**
+     * Resolve a free-text query to a single playable Spotify track as a
+     * [ResolvedSource]. Lifted verbatim from Android's
+     * `ResolverManager.searchSpotifyTrack` so both platforms share one impl.
+     *
+     * Filters to tracks that are actually playable in the user's market
+     * (`market=from_token` sets `is_playable`). Returns the first such track,
+     * or null if none. `confidence` defaults to 0.9 — overridden by
+     * `scoreConfidence()` in the resolver pipeline.
+     */
+    suspend fun searchTrack(query: String): ResolvedSource? {
+        val response = search(query = query, type = "track", limit = 5)
+        val track = response.tracks?.items?.firstOrNull { it.isPlayable != false } ?: return null
+        val albumArt = track.album?.images?.firstOrNull()?.url
+        return ResolvedSource(
+            url = "spotify:track:${track.id}",
+            sourceType = "spotify",
+            resolver = "spotify",
+            spotifyUri = "spotify:track:${track.id}",
+            spotifyId = track.id,
+            confidence = 0.9,
+            matchedTitle = track.name,
+            matchedArtist = track.artistName,
+            matchedDurationMs = track.durationMs,
+            artworkUrl = albumArt,
+        )
+    }
 
     suspend fun getTrack(trackId: String, market: String = "from_token"): SpTrack =
         gatedGet("$BASE/v1/tracks/$trackId") { applyAuth(this); parameter("market", market) }
