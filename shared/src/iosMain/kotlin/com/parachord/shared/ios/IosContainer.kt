@@ -48,15 +48,24 @@ class IosContainer private constructor() {
     companion object {
         /** Single app-wide instance — Swift reads `IosContainer.companion.shared`. */
         val shared: IosContainer by lazy { IosContainer() }
+
+        /** KvStore key for the persisted Spotify rate-limit cooldown (matches
+         *  Android's `spotify_rate_limit_cooldown_ms`). */
+        private const val SPOTIFY_COOLDOWN_KEY = "spotify_rate_limit_cooldown_ms"
     }
 
     /** App-wide coroutine scope for fire-and-forget settings writes. */
     val appScope = CoroutineScope(SupervisorJob() + Dispatchers.Main)
 
+    /** Shared KvStore (NSUserDefaults) — used by SettingsStore AND the
+     *  Spotify rate-limit cooldown persistence (so the cooldown survives a
+     *  restart instead of re-probing an already-rate-limited Spotify). */
+    val kvStore by lazy { KvStoreFactory.create() }
+
     val settingsStore: SettingsStore by lazy {
         SettingsStore(
             secureStore = IosSecureTokenStore(),
-            kv = KvStoreFactory.create(),
+            kv = kvStore,
         )
     }
 
@@ -126,8 +135,19 @@ class IosContainer private constructor() {
 
     val musicBrainzClient: MusicBrainzClient by lazy { MusicBrainzClient(httpClient) }
 
-    /** Shared Spotify Web API client, authed via [spotifyAuthProvider]. */
-    val spotifyClient: SpotifyClient by lazy { SpotifyClient(httpClient, spotifyAuthProvider) }
+    /** Shared Spotify Web API client, authed via [spotifyAuthProvider]. The
+     *  rate-limit cooldown is persisted to [kvStore] (matching Android) so a
+     *  429 abuse window (Spotify's `Retry-After` can be 1h+) is honored across
+     *  restarts — without this, every relaunch re-probes Spotify and gets a
+     *  FRESH window, restarting the punishment clock (CLAUDE.md SpotifyClient). */
+    val spotifyClient: SpotifyClient by lazy {
+        SpotifyClient(
+            httpClient,
+            spotifyAuthProvider,
+            loadCooldownEpochMs = { kvStore.getLong(SPOTIFY_COOLDOWN_KEY, 0L) },
+            saveCooldownEpochMs = { kvStore.setLong(SPOTIFY_COOLDOWN_KEY, it) },
+        )
+    }
 
     /** Spotify authorization-code → token exchange (plain client). */
     val spotifyAuth: IosSpotifyAuth by lazy {
