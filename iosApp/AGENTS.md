@@ -309,11 +309,22 @@ it took many rounds. The complete, correct procedure:
 
 - Full Koin DI graph — `IosContainer` is hand-rolled on purpose until
   the auth module is needed.
-- Auth token providers are no-op stubs — every realm returns null.
-  Correct for the unauthenticated endpoints the current screens use.
-  Real OAuth (Spotify/Last.fm via `ASWebAuthenticationSession`) wires the
-  real providers in.
+- Auth token providers: **Spotify is wired** (`SpotifyAuthTokenProvider` +
+  `SpotifyTokenRefresher`, OAuth via `ASWebAuthenticationSession`). Every other
+  realm still returns null — correct for the unauthenticated endpoints in use.
+  Last.fm / others wire their providers in when those features land.
 - The SQLDelight DB + DAOs aren't in the container yet — Library /
-  collection screens need them + an iOS media scanner.
+  collection screens need them + an iOS media scanner. **When that lands,
+  wire resolver-ID backfill onto the persistent track rows** — mirror
+  Android's `TrackResolverCache.backfillResolverIds` (`resolveInBackground(...,
+  backfillDb = true)`): after resolving a *library* track, write the discovered
+  `spotifyId` / `appleMusicId` / `soundcloudId` / MBIDs back onto its row so it
+  never re-resolves. **Ephemeral tracks (weekly playlists) intentionally do NOT
+  persist** — Android calls them with `backfillDb = false` and re-resolves each
+  session; the persisted Spotify rate-limit cooldown (`IosContainer`'s
+  `spotifyClient` `loadCooldownEpochMs`/`saveCooldownEpochMs` → KvStore
+  `spotify_rate_limit_cooldown_ms`) is the safety net for that, NOT a standalone
+  resolver cache. Don't build a separate persistent resolver cache for ephemeral
+  tracks — it diverges from Android and is throwaway once row-backfill exists.
 - The "Dev" tab (phase 1–4 platform-actual smoke tests) stays until the
   real screens cover everything; it has its own playback player.
