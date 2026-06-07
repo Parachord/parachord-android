@@ -135,6 +135,19 @@ final class IosSpotifyConnect {
         let client = IosContainer.companion.shared.spotifyClient
         let settings = IosContainer.companion.shared.settingsStore
 
+        // 0. Honor the shared rate-limit cooldown BEFORE any Connect call.
+        // The device/playback endpoints are ungated (they must work during
+        // normal playback), so without this guard the play flow would flood
+        // getDevices/startPlayback at a rate-limited account — keeping
+        // Spotify's rolling abuse window hot and re-arming the cooldown so it
+        // never clears. Android rule: never make ungated Spotify calls during
+        // an abuse window. Return false → PlaybackRouter falls through.
+        let cooldownMs = client.rateLimitRemainingMs()
+        if cooldownMs > 0 {
+            lastAction = "Spotify rate-limited — try again in ~\(Int(cooldownMs) / 1000)s"
+            return false
+        }
+
         // 1. Warm path — cached local device still present.
         if deviceVerified, let warmId = lastResolvedLocalId {
             let devs = (try? await client.getDevices())?.devices ?? []
@@ -181,20 +194,29 @@ final class IosSpotifyConnect {
     /// Android `resolveLocalDevice`). iOS wake = foreground `spotify://`.
     @MainActor
     private func resolveLocalDevice(_ client: SpotifyClient) async -> SpDevice? {
+        // Android device-wake constants (SpotifyPlaybackHandler): 300ms poll
+        // interval, ~500ms initial settle. The `spotify://` wake is iOS's
+        // launch-intent equivalent (foregrounds Spotify from cold), so use
+        // the launch-path deadline (~12s) Android documents, NOT a flat 18s
+        // of unconditional polling.
+        let pollIntervalNs: UInt64 = 300_000_000
+        let maxPolls = 40 // ~12s at 300ms
+
         wakeSpotify()
         try? await Task.sleep(nanoseconds: 1_500_000_000) // let Spotify start
         // Stop Spotify auto-resuming its own last track on wake.
         _ = try? await client.pausePlayback()
 
-        // Cold-launching Spotify can take ~15-20s to register as a Connect
-        // device (process start + auth + server registration).
-        for _ in 0..<60 { // ~18s at 300ms
+        for _ in 0..<maxPolls {
+            // Bail early if a 429 lands mid-wait — keep parity with the
+            // cooldown guard in play() and stop hammering during a window.
+            if client.rateLimitRemainingMs() > 0 { return nil }
             let usable = ((try? await client.getDevices())?.devices ?? []).filter { !$0.isRestricted }
             if let local = usable.first(where: { isLocalRealDevice($0) })
                 ?? usable.first(where: { isTabletOrPhone($0) }) {
                 return local
             }
-            try? await Task.sleep(nanoseconds: 300_000_000)
+            try? await Task.sleep(nanoseconds: pollIntervalNs)
         }
         return nil
     }

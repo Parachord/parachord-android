@@ -155,4 +155,18 @@ class RateLimitGate(
             throw exceptionFactory(((cooldownUntilMs - now + 999L) / 1000L).coerceAtLeast(1L))
         }
     }
+
+    /**
+     * Milliseconds remaining on the active cooldown, or 0 when clear.
+     *
+     * Read-only — does NOT acquire a permit or make a call. Lets UNGATED
+     * call paths (e.g. Spotify Connect device/playback endpoints, which
+     * don't run through [withPermit]) honor the same cooldown the gated
+     * search path enforces. Without this, those paths keep hitting an
+     * already-penalized account during an abuse window, and Spotify's
+     * rolling window keeps handing back a fresh `Retry-After` that re-arms
+     * the cooldown — so it never clears. See the ResolverManager
+     * `ensureTokensFresh` KDoc for the original Android post-mortem.
+     */
+    fun remainingCooldownMs(): Long = (cooldownUntilMs - currentTimeMillis()).coerceAtLeast(0L)
 }

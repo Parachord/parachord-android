@@ -126,6 +126,20 @@ class SpotifyClient(
     )
 
     /**
+     * Milliseconds remaining on the Spotify rate-limit cooldown (0 = clear).
+     *
+     * The Spotify Connect device/playback endpoints (`getDevices`,
+     * `startPlayback`, `pausePlayback`, …) are intentionally NOT gated —
+     * they must work during normal playback regardless of catalog-search
+     * pacing. But during a 429 abuse window, polling them keeps the
+     * account's rolling window hot and re-arms the cooldown forever. The
+     * playback flow should call this FIRST and bail when it's > 0, so we
+     * stop poking an already-penalized account. Mirrors the Android rule:
+     * never make ungated Spotify calls during an abuse window.
+     */
+    fun rateLimitRemainingMs(): Long = gate.remainingCooldownMs()
+
+    /**
      * Apply the Spotify bearer token from [AuthTokenProvider]. If no
      * token is currently stored, the call falls through with no
      * Authorization header set — the server will return 401, and
