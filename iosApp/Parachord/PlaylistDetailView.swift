@@ -38,10 +38,22 @@ final class PlaylistDetailViewModel {
         isLoading = false
         loaded = true
 
-        // Resolver Pipeline Rule: every tracklist screen pre-resolves its
-        // tracks in the background → resolver badges + instant tap-to-play.
+        // NOTE: tracks are NOT bulk-resolved here. Resolution is driven
+        // per-visible-row from the List (`.onAppear`), mirroring the
+        // desktop's ResolutionScheduler, which resolves ONLY imminently-
+        // visible tracks (viewport + overscan) rather than the whole list.
+        // Bulk-resolving a 50-track playlist on open fired ~50 Spotify
+        // searches (+ ~50 iTunes) in one burst, which tripped Spotify's
+        // abuse window (HTTP 429, Retry-After ~3600s) on the shared client
+        // ID. See `resolveVisible(_:)`.
+    }
+
+    /// Resolve a single track on demand (called when its row scrolls into
+    /// view). The shared cache dedups by key + tracks in-flight, so this is
+    /// safe to call repeatedly as rows recycle.
+    func resolveVisible(_ track: IosPlaylistTrack) {
         IosTrackResolverCache.shared.resolveInBackground(
-            tracks.map { ResolveRequest(artist: $0.artist, title: $0.title, album: $0.album) }
+            [ResolveRequest(artist: track.artist, title: track.title, album: track.album)]
         )
     }
 
@@ -90,6 +102,10 @@ struct PlaylistDetailView: View {
                             row(index: index, track: track)
                         }
                         .buttonStyle(.plain)
+                        // Visibility-scoped resolution (desktop parity): each
+                        // row resolves itself only when it scrolls into view,
+                        // instead of bursting the whole list on open.
+                        .onAppear { model.resolveVisible(track) }
                     }
                 }
             }
