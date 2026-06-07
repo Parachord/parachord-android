@@ -305,6 +305,40 @@ it took many rounds. The complete, correct procedure:
 
 ---
 
+## Spotify Connect playback (`IosSpotifyConnect` in `ContentView.swift`)
+
+**The canonical spec is `/CLAUDE.md` → "Spotify Connect — Device Wake &
+Playback" + Common Mistakes #19–#31. Treat it as the spec, not as
+background reading.** That section is hard-won from real Android incidents;
+the iOS flow MUST conform. (It didn't at first — a loose by-eye port shipped
+an 18s ungated `getDevices` poll that flooded a rate-limited account and kept
+Spotify's rolling abuse window hot for hours. Don't repeat that.)
+
+Conformance checklist (audited 2026-06-07):
+
+- **Honor the rate-limit cooldown before ANY Connect call.** Device/playback
+  endpoints (`getDevices`, `startPlayback`, `pausePlayback`, …) are ungated by
+  design. `play()` calls `spotifyClient.rateLimitRemainingMs()` first and bails
+  when > 0; `resolveLocalDevice`'s poll loop re-checks and bails mid-wait.
+  **Never poll Spotify during an abuse window** — it re-arms the cooldown and it
+  never clears (CLAUDE.md `ResolverManager.ensureTokensFresh` post-mortem).
+- **Device poll bounds:** 300ms interval, ~12s deadline (the launch-path
+  value — `spotify://` is iOS's launch-intent equivalent), ~1.5s wake settle.
+  Not a flat unconditional 18s.
+- **Self-select THIS device** (`isLocalRealDevice`: name + Smartphone/Tablet
+  type), never an active *remote* phantom. Always wake on the local path.
+- **Single-pass**, single 502 retry after 1s; **cold-device verification**
+  (2 polls × 500ms via `getPlaybackStateOrNull`); persist the **synthetic**
+  `localDeviceId`, never the real id.
+- **Deferred (low-risk on iOS today, no device picker yet):** granular
+  404/hard-fail preference cleanup, and warm-path handling of a non-local
+  preferred device. Do them when the picker lands.
+- **Still ungated (latent, same as Android):** Spotify writes/sync
+  (`saveTracks`, `createPlaylist`, `replacePlaylistTracks`, follow). They should
+  also consult `rateLimitRemainingMs()` — tracked in parachord-mobile #176.
+
+---
+
 ## What's intentionally deferred (don't "fix")
 
 - Full Koin DI graph — `IosContainer` is hand-rolled on purpose until
