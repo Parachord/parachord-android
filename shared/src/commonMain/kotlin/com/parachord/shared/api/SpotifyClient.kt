@@ -298,6 +298,20 @@ class SpotifyClient(
     suspend fun getPlaybackState(): HttpResponse =
         httpClient.get("$BASE/v1/me/player") { applyAuth(this) }
 
+    /**
+     * Typed convenience over [getPlaybackState] for Swift consumption and the
+     * cold-device verification step (Swift can't call the reified
+     * `HttpResponse.body<SpPlaybackState>()`). Returns the decoded state, or
+     * null on 204 (no active device), any non-2xx, or a decode/transport
+     * failure. Never throws.
+     */
+    suspend fun getPlaybackStateOrNull(): SpPlaybackState? = try {
+        val resp = getPlaybackState()
+        if (resp.status.value == 204 || !resp.status.isSuccess()) null else resp.body()
+    } catch (e: Exception) {
+        null
+    }
+
     // ── Library (Sync Read) ──────────────────────────────────────────
 
     suspend fun getLikedTracks(limit: Int = 50, offset: Int = 0, market: String = "from_token"): SpSavedTracksResponse =

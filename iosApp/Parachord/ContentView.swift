@@ -172,9 +172,17 @@ final class IosSpotifyConnect {
             return false
         }
 
-        // 4. Play.
+        // 4. Play. (We're on the COLD path here — the warm path returns
+        // early on success — so deviceVerified is currently false.)
         let ok = await startPlayback(client, uri: uri, deviceId: dev.id)
         if ok {
+            // Quick verification on cold devices only (2 polls × 500ms),
+            // mirroring Android's verifyPlaybackStarted. Optimistic: if it
+            // can't confirm, proceed anyway (the device accepted the call).
+            if !deviceVerified {
+                let verified = await verifyPlaybackStarted(client)
+                if !verified { lastAction = "Spotify playback started (unverified)" }
+            }
             deviceVerified = true
             lastResolvedLocalId = dev.id
             // Sticky default (parity with Android): persist the SYNTHETIC
@@ -249,6 +257,21 @@ final class IosSpotifyConnect {
             if status >= 0 { lastAction = "Spotify play failed (status \(status))" }
             return false
         }
+    }
+
+    /// Quick confirmation that playback actually started on a freshly-resolved
+    /// (cold) device — 2 polls × 500ms via the typed playback-state endpoint,
+    /// mirroring Android's `verifyPlaybackStarted`. Optimistic: returns false
+    /// if it can't confirm within 1s, and the caller proceeds anyway.
+    @MainActor
+    private func verifyPlaybackStarted(_ client: SpotifyClient) async -> Bool {
+        for _ in 0..<2 {
+            try? await Task.sleep(nanoseconds: 500_000_000)
+            if let state = try? await client.getPlaybackStateOrNull(), state.isPlaying {
+                return true
+            }
+        }
+        return false
     }
 
     /// True when [device] is THIS device's own Spotify entry — matched by name
