@@ -315,6 +315,29 @@ final class IosSpotifyConnect {
         }
     }
 
+    /// Authoritative Web-API playback snapshot for the slow scrubber +
+    /// auto-advance poll (position/duration in SECONDS). Returns nil on 204
+    /// (no active device) / error. Callers must skip this during a rate-limit
+    /// cooldown — check `rateLimitRemainingMs()` first (NOT a 500ms poll; this
+    /// is the ungated endpoint that re-arms the limit if hammered).
+    @MainActor
+    func fetchPlaybackState() async -> SpotifyPlaybackSnapshot? {
+        guard let s = (try? await IosContainer.companion.shared.spotifyClient.getPlaybackStateOrNull()) ?? nil else {
+            return nil
+        }
+        return SpotifyPlaybackSnapshot(
+            positionSec: (s.progressMs?.doubleValue ?? 0) / 1000.0,
+            durationSec: (s.item?.durationMs?.doubleValue ?? 0) / 1000.0,
+            isPlaying: s.isPlaying
+        )
+    }
+
+    /// Seek the Connect session to `toSec` (Web API PUT /me/player/seek).
+    @MainActor
+    func seek(toSec: Double) async {
+        _ = try? await IosContainer.companion.shared.spotifyClient.seekPlayback(positionMs: Int64(max(0, toSec) * 1000))
+    }
+
     /// User-initiated device re-pick (the Connect "speaker" affordance).
     /// Fetches live devices, shows the picker (live devices + "This device"),
     /// persists the choice, and clears the warm-path cache so the NEXT play
@@ -449,6 +472,14 @@ final class IosSpotifyConnect {
 struct SpotifyPickerRequest: Identifiable {
     let id = UUID()
     let devices: [SpDevice]
+}
+
+/// Authoritative Connect playback snapshot (seconds) for the scrubber +
+/// auto-advance poll.
+struct SpotifyPlaybackSnapshot {
+    let positionSec: Double
+    let durationSec: Double
+    let isPlaying: Bool
 }
 
 /// "Choose Spotify Device" sheet — mirrors Android's `SpotifyDevicePickerDialog`
@@ -858,6 +889,14 @@ final class IosMusicKitPlayer {
         }
     }
 
+    /// Seek the Apple Music player to `seconds` (scrubber). The polling loop
+    /// republishes `currentTime`, but set it optimistically for instant UI.
+    @MainActor
+    func seek(to seconds: Double) {
+        ApplicationMusicPlayer.shared.playbackTime = seconds
+        currentTime = seconds
+    }
+
     // ── State polling (auto-advance + scrubber) ────────────────────────
     //
     // Mirrors Android's startAppleMusicStatePolling: a 500ms main-actor loop
@@ -1259,6 +1298,15 @@ final class QueuePlaybackCoordinator {
     /// getter below read Spotify state without crossing into the @MainActor
     /// `IosSpotifyConnect` from a nonisolated getter.
     private var spotifyPlaying = false
+    /// Connect position/duration (seconds) for the scrubber, fed by the slow
+    /// poll + local interpolation in `startSpotifyPolling`.
+    private var spotifyPositionSec: Double = 0
+    private var spotifyDurationSec: Double = 0
+    /// Seconds since the current Connect track started (grace + interpolation).
+    private var spotifyElapsedSec = 0
+    /// Once-per-track guard so auto-advance fires a single `skipNext`.
+    private var spotifyEndHandled = false
+    @ObservationIgnored private var spotifyPollTask: Task<Void, Never>?
 
     // ── Unified now-playing state (engine-agnostic) ────────────────────
     // AVPlayer and MusicKit both expose real position/duration (MusicKit via
@@ -1274,14 +1322,28 @@ final class QueuePlaybackCoordinator {
         switch activeEngine {
         case .avPlayer: return player.currentTime
         case .musicKit: return musicKit.currentTime
-        case .spotify: return 0
+        case .spotify: return spotifyPositionSec
         }
     }
     var duration: Double {
         switch activeEngine {
         case .avPlayer: return player.duration
         case .musicKit: return musicKit.duration
-        case .spotify: return 0
+        case .spotify: return spotifyDurationSec
+        }
+    }
+
+    /// Engine-agnostic seek (scrubber). Routes to the active engine — AVPlayer
+    /// inline, MusicKit / Spotify on the main actor (the latter via the Web API).
+    func seek(to seconds: Double) {
+        switch activeEngine {
+        case .avPlayer:
+            player.seek(to: seconds)
+        case .musicKit:
+            Task { @MainActor in musicKit.seek(to: seconds) }
+        case .spotify:
+            spotifyPositionSec = seconds // optimistic; resync corrects drift
+            Task { @MainActor in await spotify.seek(toSec: seconds) }
         }
     }
 
@@ -1435,12 +1497,68 @@ final class QueuePlaybackCoordinator {
             case .played(let kind):
                 activeEngine = kind
                 if kind == .avPlayer { startAVPlaybackWhenReady() }
-                if kind == .spotify { spotifyPlaying = spotify.isPlaying }
+                if kind == .spotify {
+                    spotifyPlaying = spotify.isPlaying
+                    spotifyPositionSec = 0
+                    spotifyDurationSec = 0
+                    spotifyElapsedSec = 0
+                    spotifyEndHandled = false
+                    startSpotifyPolling()
+                }
             case .noPlayableSource:
                 // Resolved but no engine could play it (e.g. Apple-Music-only
                 // match with no subscription) — advance to the next track.
                 skipNext()
             }
+        }
+    }
+
+    /// Slow Spotify Connect state loop for the scrubber + auto-advance.
+    ///
+    /// A 1s local tick interpolates the position (free, no API), with an
+    /// AUTHORITATIVE Web-API resync only every ~8s and only while playing —
+    /// deliberately NOT a 500ms poll (that ungated endpoint re-arms the rate
+    /// limit). Skips the resync entirely during a cooldown. Self-cancels when
+    /// the active engine is no longer Spotify.
+    private func startSpotifyPolling() {
+        guard spotifyPollTask == nil else { return } // idempotent across tracks
+        spotifyPollTask = Task { @MainActor [weak self] in
+            while !Task.isCancelled {
+                try? await Task.sleep(nanoseconds: 1_000_000_000)
+                guard let self else { return }
+                guard self.activeEngine == .spotify else {
+                    self.spotifyPollTask = nil
+                    return
+                }
+                self.spotifyElapsedSec += 1
+                if self.spotifyPlaying { self.spotifyPositionSec += 1 } // interpolate
+
+                let resyncDue = self.spotifyElapsedSec == 2 || self.spotifyElapsedSec % 8 == 0
+                let cooldown = IosContainer.companion.shared.spotifyClient.rateLimitRemainingMs()
+                if resyncDue, self.spotifyPlaying, cooldown == 0 {
+                    if let snap = await self.spotify.fetchPlaybackState() {
+                        if snap.durationSec > 0 { self.spotifyDurationSec = snap.durationSec }
+                        self.spotifyPositionSec = snap.positionSec
+                        self.spotifyPlaying = snap.isPlaying
+                    }
+                }
+                self.checkSpotifyEnd()
+            }
+        }
+    }
+
+    /// Auto-advance detection for Connect, mirroring Android `isOurTrackDone`:
+    /// advance EARLY (within 2s of the end, while still playing) to preempt
+    /// Spotify's own autoplay; also fire when stopped at/near the end. A 5s
+    /// grace after start avoids false positives from transient post-`play`
+    /// state. Fires `skipNext` once per track.
+    private func checkSpotifyEnd() {
+        guard !spotifyEndHandled, spotifyDurationSec > 0, spotifyElapsedSec >= 5 else { return }
+        let nearEnd = spotifyPositionSec >= spotifyDurationSec - 2 && spotifyPlaying
+        let finished = !spotifyPlaying && spotifyPositionSec >= spotifyDurationSec - 1
+        if nearEnd || finished {
+            spotifyEndHandled = true
+            skipNext()
         }
     }
 

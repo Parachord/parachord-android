@@ -152,7 +152,7 @@ struct NowPlayingView: View {
             Slider(
                 value: Binding(
                     get: { coordinator.currentTime },
-                    set: { player.seek(to: $0) }
+                    set: { coordinator.seek(to: $0) }
                 ),
                 in: 0...max(coordinator.duration, 0.01)
             )
