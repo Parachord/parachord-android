@@ -299,19 +299,47 @@ final class IosSpotifyConnect {
         }
     }
 
+    /// User-initiated device re-pick (the Connect "speaker" affordance).
+    /// Fetches live devices, shows the picker (live devices + "This device"),
+    /// persists the choice, and clears the warm-path cache so the NEXT play
+    /// targets it. Lets the user escape a remembered device (e.g. switch from
+    /// "This device", which must foreground Spotify, to a Mac that plays
+    /// silently). Does not start playback itself.
+    @MainActor
+    func chooseDevice() async {
+        let client = IosContainer.companion.shared.spotifyClient
+        let settings = IosContainer.companion.shared.settingsStore
+        if client.rateLimitRemainingMs() > 0 {
+            lastAction = "Spotify rate-limited — try again shortly"
+            return
+        }
+        let usable = ((try? await client.getDevices())?.devices ?? []).filter { !$0.isRestricted }
+        guard let chosen = await presentPicker(usable + [localDeviceEntry()]) else { return }
+        try? await settings.setPreferredSpotifyDeviceId(deviceId: chooseStableId(chosen))
+        deviceVerified = false
+        lastResolvedLocalId = nil
+        lastAction = isLocalPlaceholder(chosen) ? "Spotify target: This device" : "Spotify target: \(chosen.name)"
+    }
+
     /// Wake this device's Spotify and poll until its own Connect device
     /// registers. Always wakes — remote devices appear in the API without the
     /// LOCAL Spotify running, so finding *a* device isn't enough (mirrors
     /// Android `resolveLocalDevice`). iOS wake = foreground `spotify://`.
     @MainActor
     private func resolveLocalDevice(_ client: SpotifyClient) async -> SpDevice? {
-        // Android device-wake constants (SpotifyPlaybackHandler): 300ms poll
-        // interval, ~500ms initial settle. The `spotify://` wake is iOS's
-        // launch-intent equivalent (foregrounds Spotify from cold), so use
-        // the launch-path deadline (~12s) Android documents, NOT a flat 18s
-        // of unconditional polling.
         let pollIntervalNs: UInt64 = 300_000_000
-        let maxPolls = 40 // ~12s at 300ms
+        // Spotify cold-launches in ~15-20s before it registers as a Connect
+        // device, so poll up to ~20s (vs Android's 8s warm / 18s launch path).
+        let maxPolls = 66 // ~20s at 300ms
+
+        // CRITICAL: `wakeSpotify()` foregrounds Spotify, which BACKGROUNDS
+        // Parachord — and iOS suspends a backgrounded app within a few seconds,
+        // freezing this poll loop so the device never registers (the reported
+        // symptom: "opened Spotify, didn't play; came back, tried again, it
+        // played"). A background-task assertion buys ~30s of continued
+        // execution so the wake+poll completes while Spotify is in front.
+        let bgTask = UIApplication.shared.beginBackgroundTask(withName: "spotify-device-wake")
+        defer { if bgTask != .invalid { UIApplication.shared.endBackgroundTask(bgTask) } }
 
         wakeSpotify()
         try? await Task.sleep(nanoseconds: 1_500_000_000) // let Spotify start

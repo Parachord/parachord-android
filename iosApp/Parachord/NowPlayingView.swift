@@ -86,6 +86,18 @@ struct NowPlayingView: View {
                 }
             }
             .navigationTitle("Now Playing")
+            .toolbar {
+                // Spotify Connect device picker — re-pick the output device
+                // (e.g. switch from "This device" to a Mac that plays silently).
+                ToolbarItem(placement: .topBarTrailing) {
+                    Button {
+                        Task { await playback.spotify.chooseDevice() }
+                    } label: {
+                        Image(systemName: "hifispeaker.2.fill")
+                    }
+                    .tint(.accentColor)
+                }
+            }
         }
     }
 
