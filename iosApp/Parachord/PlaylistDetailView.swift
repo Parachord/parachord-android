@@ -49,11 +49,14 @@ final class PlaylistDetailViewModel {
     }
 
     /// Resolve a single track on demand (called when its row scrolls into
-    /// view). The shared cache dedups by key + tracks in-flight, so this is
-    /// safe to call repeatedly as rows recycle.
-    func resolveVisible(_ track: IosPlaylistTrack) {
-        IosTrackResolverCache.shared.resolveInBackground(
-            [ResolveRequest(artist: track.artist, title: track.title, album: track.album)]
+    /// view), tagged with its row `index` as the priority order so the shared
+    /// cache drains top-down (top of the page first), not in `onAppear` order.
+    /// The cache dedups by key + in-flight + queued, so this is safe to call
+    /// repeatedly as rows recycle.
+    func resolveVisible(_ track: IosPlaylistTrack, index: Int) {
+        IosTrackResolverCache.shared.resolve(
+            ResolveRequest(artist: track.artist, title: track.title, album: track.album),
+            order: index
         )
     }
 
@@ -104,8 +107,9 @@ struct PlaylistDetailView: View {
                         .buttonStyle(.plain)
                         // Visibility-scoped resolution (desktop parity): each
                         // row resolves itself only when it scrolls into view,
-                        // instead of bursting the whole list on open.
-                        .onAppear { model.resolveVisible(track) }
+                        // tagged with `index` so the shared cache resolves
+                        // top-down rather than in onAppear order.
+                        .onAppear { model.resolveVisible(track, index: index) }
                     }
                 }
             }
