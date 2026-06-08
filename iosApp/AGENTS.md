@@ -364,6 +364,37 @@ Conformance checklist (audited 2026-06-07):
   (`saveTracks`, `createPlaylist`, `replacePlaylistTracks`, follow). They should
   also consult `rateLimitRemainingMs()` — tracked in parachord-mobile #176.
 
+### Why iOS can't silently wake Spotify like Android (don't re-litigate)
+
+Recurring question: "Android wakes Spotify silently — why can't iOS just do
+what Android does?" It **cannot**, and not because we missed a trick:
+
+- **Android's silent wake is an OS broadcast, not a Connect call.**
+  `SpotifyPlaybackHandler.ensureSpotifyRunning()` sends a targeted
+  `KEYCODE_MEDIA_PLAY` media-button **broadcast** to `com.spotify.music`
+  (`sendBroadcast(Intent(ACTION_MEDIA_BUTTON).setPackage(...))`), which wakes
+  Spotify's background `MediaBrowserService` with no UI. The Connect Web API
+  (`startPlayback?device_id=…`) only runs **afterward**, once Spotify has
+  registered as a device.
+- **"Call Connect with its own device ID" can't wake a cold Spotify.**
+  Chicken-and-egg: `startPlayback`/`transfer` can only target a device already
+  in `GET /me/player/devices`. A killed Spotify isn't in that list, so there's
+  no id to call, and the Web API has no "wake device X" endpoint. That's
+  exactly *why* Android needs the broadcast first.
+- **iOS forbids the broadcast.** App sandboxing blocks sending a media-button
+  (or any targeted IPC) into another app's background service — there is no iOS
+  equivalent of `sendBroadcast(setPackage("com.spotify.music"))`. The only
+  inter-app mechanism is the URL scheme (`spotify://` / `spotify:track:<id>`),
+  which **foregrounds** Spotify. The SDK's `authorizeAndPlayURI` foregrounds it
+  too. So **there is no silent cold-wake on iOS by any path.**
+
+**Resulting iOS contract:** silent when Spotify is already a live Connect
+device (warm path controls it via Web API); one unavoidable foreground when
+Spotify is cold (URL-scheme wake → poll → `startPlayback`, made reliable by the
+background-task assertion in `resolveLocalDevice`). This is the best achievable;
+the SDK does not improve the cold case. See
+`docs/plans/2026-06-08-ios-spotify-app-remote-design.md` §0.
+
 ---
 
 ## What's intentionally deferred (don't "fix")
