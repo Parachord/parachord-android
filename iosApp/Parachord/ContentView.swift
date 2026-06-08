@@ -117,6 +117,23 @@ final class IosSpotifyConnect {
         }
     }
 
+    /// EXPERIMENT: wake Spotify by opening the TRACK deep link
+    /// (`spotify:track:<id>`) instead of bare `spotify://`, to test whether iOS
+    /// auto-plays the track on open. If it does, we get reliable cold
+    /// wake-and-play with NO SPTAppRemote SDK; if Spotify only navigates to the
+    /// track page without playing, the SDK's `authorizeAndPlayURI` is required.
+    /// Falls back to the bare scheme if `trackUri` isn't a valid URL.
+    func wakeSpotifyPlaying(_ trackUri: String) {
+        guard let url = URL(string: trackUri) else { wakeSpotify(); return }
+        UIApplication.shared.open(url, options: [:]) { [weak self] success in
+            Task { @MainActor in
+                self?.lastAction = success
+                    ? "Opened \(trackUri) (testing autoplay)"
+                    : "Couldn't open Spotify (app not installed)"
+            }
+        }
+    }
+
     /// Whether Spotify playback can currently run. True once a Spotify OAuth
     /// token is present (observed from `getSpotifyConnectedFlow()`). The
     /// PlaybackRouter gates on this and falls through to the next source when
@@ -183,7 +200,7 @@ final class IosSpotifyConnect {
 
         var target: SpDevice?
         if preferred == Self.localDeviceId {
-            target = await resolveLocalDevice(client)
+            target = await resolveLocalDevice(client, playUri: uri)
         } else if let pid = preferred, let match = usable.first(where: { $0.id == pid }) {
             target = match
         } else {
@@ -191,7 +208,7 @@ final class IosSpotifyConnect {
                 try? await settings.clearPreferredSpotifyDeviceId() // stale
             }
             if usable.isEmpty {
-                target = await resolveLocalDevice(client)
+                target = await resolveLocalDevice(client, playUri: uri)
             } else {
                 // Offer the live devices plus a synthetic "This device".
                 guard let chosen = await presentPicker(usable + [localDeviceEntry()]) else {
@@ -199,7 +216,7 @@ final class IosSpotifyConnect {
                     return false
                 }
                 try? await settings.setPreferredSpotifyDeviceId(deviceId: chooseStableId(chosen))
-                target = isLocalPlaceholder(chosen) ? await resolveLocalDevice(client) : chosen
+                target = isLocalPlaceholder(chosen) ? await resolveLocalDevice(client, playUri: uri) : chosen
             }
         }
 
@@ -326,25 +343,32 @@ final class IosSpotifyConnect {
     /// LOCAL Spotify running, so finding *a* device isn't enough (mirrors
     /// Android `resolveLocalDevice`). iOS wake = foreground `spotify://`.
     @MainActor
-    private func resolveLocalDevice(_ client: SpotifyClient) async -> SpDevice? {
+    private func resolveLocalDevice(_ client: SpotifyClient, playUri: String) async -> SpDevice? {
         let pollIntervalNs: UInt64 = 300_000_000
         // Spotify cold-launches in ~15-20s before it registers as a Connect
         // device, so poll up to ~20s (vs Android's 8s warm / 18s launch path).
         let maxPolls = 66 // ~20s at 300ms
 
-        // CRITICAL: `wakeSpotify()` foregrounds Spotify, which BACKGROUNDS
-        // Parachord — and iOS suspends a backgrounded app within a few seconds,
-        // freezing this poll loop so the device never registers (the reported
-        // symptom: "opened Spotify, didn't play; came back, tried again, it
-        // played"). A background-task assertion buys ~30s of continued
-        // execution so the wake+poll completes while Spotify is in front.
+        // CRITICAL: waking Spotify foregrounds it, which BACKGROUNDS Parachord —
+        // and iOS suspends a backgrounded app within a few seconds, freezing
+        // this poll loop so the device never registers. A background-task
+        // assertion buys ~30s of continued execution so the wake completes.
         let bgTask = UIApplication.shared.beginBackgroundTask(withName: "spotify-device-wake")
         defer { if bgTask != .invalid { UIApplication.shared.endBackgroundTask(bgTask) } }
 
-        wakeSpotify()
-        try? await Task.sleep(nanoseconds: 1_500_000_000) // let Spotify start
-        // Stop Spotify auto-resuming its own last track on wake.
-        _ = try? await client.pausePlayback()
+        // EXPERIMENT (no-SDK cold wake-and-play): open the TRACK uri instead of
+        // bare `spotify://` to see whether iOS auto-plays it. If it does, we get
+        // reliable on-device play with no SPTAppRemote. We deliberately do NOT
+        // pausePlayback here (that would kill any autoplay we're testing for).
+        wakeSpotifyPlaying(playUri)
+        try? await Task.sleep(nanoseconds: 2_000_000_000) // let Spotify start + (maybe) autoplay
+
+        // Definitive autoplay signal: did opening the track uri start playback?
+        if let state = try? await client.getPlaybackStateOrNull() {
+            print("SPWAKE: after opening \(playUri) — isPlaying=\(state.isPlaying) track=\(state.item?.name ?? "nil")")
+        } else {
+            print("SPWAKE: after opening \(playUri) — no playback state (no active device yet)")
+        }
 
         for _ in 0..<maxPolls {
             // Bail early if a 429 lands mid-wait — keep parity with the
