@@ -1,0 +1,223 @@
+/*
+ * Parachord Design System — Colors & Type Tokens
+ *
+ * Mirrors the Android app's Compose theme (app/src/main/java/com/parachord/android/ui/theme/Color.kt + Type.kt)
+ * which itself mirrors the desktop Parachord CSS design tokens.
+ *
+ * The brand is purple-accented, with always-dark player surfaces and a
+ * resolver-color system (each music source has a paired bg/text color).
+ */
+
+/* ───────── Fonts ───────── */
+/* Android app uses system Roboto (Android default).
+ * For web/HTML mocks we load Roboto from Google Fonts as the closest match.
+ * SUBSTITUTION FLAG: Roboto via Google Fonts (no .ttf bundled with the app).
+ */
+@import url('https://fonts.googleapis.com/css2?family=Roboto:wght@300;400;500;600;700&family=Roboto+Mono:wght@400;500&display=swap');
+
+:root {
+  /* ─── Accent: Purple Scale ─────────────────────────────────────── */
+  --accent-primary: #7c3aed;          /* Purple Light - main brand accent */
+  --accent-primary-hover: #6d28d9;    /* darker on hover */
+  --accent-secondary: #8b5cf6;
+  --accent-tertiary: #a855f7;
+  --accent-soft: #a78bfa;             /* dark theme primary, also "soft" */
+  --accent-surface: #ede9fe;          /* soft purple wash for selected rows */
+
+  /* Alpha variants (used for glows, hover, ring backgrounds) */
+  --accent-a06: rgba(124, 58, 237, 0.06);
+  --accent-a10: rgba(124, 58, 237, 0.10);
+  --accent-a20: rgba(124, 58, 237, 0.20);
+  --accent-a40: rgba(124, 58, 237, 0.40);
+  --accent-a60: rgba(124, 58, 237, 0.60);
+
+  /* ─── Semantic ─────────────────────────────────────────────────── */
+  --success: #10b981;
+  --warning: #f59e0b;
+  --error:   #ef4444;
+  --on-tour: #10c9b4;   /* teal dot next to artists with nearby concerts */
+
+  /* ─── Backgrounds (light) ──────────────────────────────────────── */
+  --bg-primary:   #ffffff;   /* main app surface */
+  --bg-secondary: #f9fafb;   /* top bar, list backgrounds */
+  --bg-elevated:  #ffffff;   /* cards on light */
+  --bg-inset:     #f3f4f6;   /* sunken / inset areas */
+
+  /* ─── Text (light) ─────────────────────────────────────────────── */
+  --fg1: #111827;   /* primary text */
+  --fg2: #6b7280;   /* secondary text (artist, meta) */
+  --fg3: #9ca3af;   /* tertiary (counts, hints) */
+
+  /* ─── Borders (light) ──────────────────────────────────────────── */
+  --border-default: #e5e7eb;
+  --border-light:   #f3f4f6;
+
+  /* ─── Card (light) ─────────────────────────────────────────────── */
+  --card-bg:     #ffffff;
+  --card-border: #e5e7eb;
+
+  /* ─── Always-Dark Player Surface ───────────────────────────────── */
+  /* The mini-player + Now Playing screen ALWAYS use these colors,
+   * regardless of light/dark mode. Mirrors desktop's player bar. */
+  --player-bg:        #161616;
+  --player-bg-elev:   #1e1e1e;
+  --player-fg1:       #f3f4f6;
+  --player-fg2:       #9ca3af;
+
+  /* ─── Resolver colors (paired bg/fg per source) ────────────────── */
+  /* Used as small colored squares with white logo, plus optional pill badges. */
+  --r-spotify-bg:    rgba(5, 150, 105, 0.20);  /* green-600/20 */
+  --r-spotify-fg:    #4ade80;                  /* green-400 */
+  --r-spotify-solid: #1db954;                  /* spotify brand */
+
+  --r-applemusic-bg: rgba(220, 38, 38, 0.20);  /* red-600/20 */
+  --r-applemusic-fg: #f87171;                  /* red-400 */
+  --r-applemusic-solid: #fa233b;
+
+  --r-youtube-bg:    rgba(220, 38, 38, 0.20);
+  --r-youtube-fg:    #f87171;
+  --r-youtube-solid: #ff0033;
+
+  --r-bandcamp-bg:   rgba(8, 145, 178, 0.20);  /* cyan-600/20 */
+  --r-bandcamp-fg:   #22d3ee;                  /* cyan-400 */
+  --r-bandcamp-solid: #1da0c3;
+
+  --r-soundcloud-bg: rgba(234, 88, 12, 0.20);  /* orange-600/20 */
+  --r-soundcloud-fg: #fb923c;                  /* orange-400 */
+  --r-soundcloud-solid: #ff5500;
+
+  --r-localfiles-bg: rgba(75, 85, 99, 0.20);   /* gray-600/20 */
+  --r-localfiles-fg: #9ca3af;                  /* gray-400 */
+  --r-localfiles-solid: #4b5563;
+
+  /* "Hosted" XSPF chip — playlists mirroring a remote feed */
+  --hosted-bg: #eff6ff;
+  --hosted-fg: #3b82f6;
+
+  /* ─── Spacing scale (4px base) ─────────────────────────────────── */
+  --space-1: 4px;
+  --space-2: 8px;
+  --space-3: 12px;
+  --space-4: 16px;   /* default screen padding */
+  --space-5: 20px;
+  --space-6: 24px;
+  --space-8: 32px;
+  --space-10: 40px;
+  --space-12: 48px;
+
+  /* ─── Radii (matches Compose Shapes.kt) ────────────────────────── */
+  --r-xs: 4px;    /* badges, chips, small thumbs */
+  --r-sm: 6px;    /* inputs */
+  --r-md: 8px;    /* default card */
+  --r-lg: 12px;   /* album art, large cards */
+  --r-xl: 16px;   /* sheets, modals */
+  --r-pill: 999px;
+
+  /* ─── Shadows (subtle — Material 3 elevation parity) ───────────── */
+  --shadow-1: 0 1px 2px rgba(0, 0, 0, 0.04);
+  --shadow-2: 0 2px 4px rgba(0, 0, 0, 0.06);
+  --shadow-3: 0 4px 12px rgba(0, 0, 0, 0.08);
+
+  /* ─── Type ─────────────────────────────────────────────────────── */
+  --font-sans: 'Roboto', system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+  --font-mono: 'Roboto Mono', ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+
+  /* Scale (sp values from Compose Type.kt mapped to px for web) */
+  --display-lg: 36px;   /* line-height 40 */
+  --display-md: 32px;
+  --display-sm: 28px;
+
+  --h1: 28px;   /* headlineLarge — screen title (uppercase letterspaced) */
+  --h2: 24px;   /* headlineMedium */
+  --h3: 20px;   /* headlineSmall */
+
+  --title-lg: 18px;
+  --title-md: 16px;
+  --title-sm: 14px;
+
+  --body-lg: 16px;
+  --body-md: 14px;
+  --body-sm: 12px;
+
+  --label-lg: 14px;   /* section header (uppercase, accent color) */
+  --label-md: 12px;
+  --label-sm: 10px;
+}
+
+/* ─── Dark theme overrides ──────────────────────────────────────── */
+.dark, [data-theme="dark"] {
+  --accent-primary:       #a78bfa;
+  --accent-primary-hover: #8b5cf6;
+  --accent-surface:       #1e1e2e;
+
+  --accent-a06: rgba(167, 139, 250, 0.10);
+  --accent-a10: rgba(167, 139, 250, 0.10);
+  --accent-a20: rgba(167, 139, 250, 0.20);
+
+  --bg-primary:   #161616;
+  --bg-secondary: #1e1e1e;
+  --bg-elevated:  #252525;
+  --bg-inset:     #1a1a1a;
+
+  --fg1: #f3f4f6;
+  --fg2: #9ca3af;
+  --fg3: #6b7280;
+
+  --border-default: #2e2e2e;
+  --border-light:   #252525;
+
+  --card-bg:     #1e1e1e;
+  --card-border: #2a2a2a;
+
+  --hosted-bg: rgba(59, 130, 246, 0.15);
+  --hosted-fg: #60a5fa;
+}
+
+/* ─── Semantic typography classes ────────────────────────────────── */
+/* Letter-spacing values mirror Type.kt (Compose `em` units → CSS em). */
+
+html, body {
+  font-family: var(--font-sans);
+  color: var(--fg1);
+  background: var(--bg-primary);
+  -webkit-font-smoothing: antialiased;
+}
+
+.display-lg { font: 600 var(--display-lg)/40px var(--font-sans); letter-spacing: -0.02em; }
+.display-md { font: 600 var(--display-md)/1.15 var(--font-sans); letter-spacing: -0.02em; }
+.display-sm { font: 600 var(--display-sm)/1.2 var(--font-sans); letter-spacing: -0.01em; }
+
+h1, .h1 { font: 600 var(--h1)/36px var(--font-sans); letter-spacing: -0.01em; }
+h2, .h2 { font: 600 var(--h2)/32px var(--font-sans); letter-spacing: -0.005em; }
+h3, .h3 { font: 600 var(--h3)/28px var(--font-sans); letter-spacing: -0.005em; }
+
+.title-lg { font: 600 var(--title-lg)/1.35 var(--font-sans); letter-spacing: 0; }
+.title-md { font: 500 var(--title-md)/1.4 var(--font-sans); letter-spacing: 0.01em; }
+.title-sm { font: 500 var(--title-sm)/1.4 var(--font-sans); letter-spacing: 0.02em; }
+
+p, .body-lg { font: 400 var(--body-lg)/24px var(--font-sans); letter-spacing: 0.01em; color: var(--fg1); }
+.body-md     { font: 400 var(--body-md)/22px var(--font-sans); letter-spacing: 0.02em; }
+.body-sm     { font: 400 var(--body-sm)/18px var(--font-sans); letter-spacing: 0.02em; color: var(--fg2); }
+
+.label-lg { font: 500 var(--label-lg)/1.3 var(--font-sans); letter-spacing: 0.05em; }
+.label-md { font: 500 var(--label-md)/1.3 var(--font-sans); letter-spacing: 0.05em; }
+.label-sm { font: 500 var(--label-sm)/1.3 var(--font-sans); letter-spacing: 0.08em; }
+
+/* Section header — purple, uppercase, wide letter spacing.
+ * Used liberally on Home, Library, Sidebar. */
+.section-header {
+  color: var(--accent-primary);
+  font: 600 var(--label-lg)/1.3 var(--font-sans);
+  text-transform: uppercase;
+  letter-spacing: 0.12em;
+}
+
+/* App brand title style — wide-letter-spaced uppercase, e.g. "PARACHORD" top bar */
+.app-title {
+  font: 400 18px/1 var(--font-sans);
+  letter-spacing: 0.35em;
+  text-transform: uppercase;
+  color: var(--fg1);
+}
+
+code, .mono { font-family: var(--font-mono); }
