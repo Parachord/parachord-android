@@ -62,7 +62,10 @@ struct ContentView: View {
                     artNamespace: artNS,
                     onClose: { withAnimation(.spring(response: 0.42, dampingFraction: 0.82)) { showNowPlaying = false } }
                 )
-                .ignoresSafeArea()
+                // NOTE: do NOT add .ignoresSafeArea() here — the content must
+                // respect the top safe area (status bar / Dynamic Island). The
+                // dark background goes full-bleed via npBg.ignoresSafeArea()
+                // INSIDE PCNowPlaying.
                 .zIndex(5)
                 .transition(.move(edge: .bottom))
             }
