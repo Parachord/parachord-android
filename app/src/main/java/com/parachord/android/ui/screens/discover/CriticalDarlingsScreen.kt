@@ -470,10 +470,10 @@ private fun CriticsPickRow(
                 overflow = TextOverflow.Ellipsis,
                 modifier = Modifier.hapticClickable(onClick = onArtistClick),
             )
-            if (album.description.isNotBlank()) {
+            if (album.blurb.isNotBlank()) {
                 Spacer(modifier = Modifier.height(4.dp))
                 Text(
-                    text = album.description,
+                    text = album.blurb,
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.7f),
                 )

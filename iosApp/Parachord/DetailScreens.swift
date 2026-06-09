@@ -25,7 +25,7 @@ private func pcTrack(from t: TrackSearchResult) -> Track {
 }
 
 @ViewBuilder
-private func pcCover(_ url: String?, seed: String, size: CGFloat?, radius: CGFloat) -> some View {
+func pcCover(_ url: String?, seed: String, size: CGFloat?, radius: CGFloat) -> some View {
     if let url, let u = URL(string: url) {
         AsyncImage(url: u) { img in
             img.resizable().aspectRatio(contentMode: .fill)

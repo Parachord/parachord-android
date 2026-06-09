@@ -264,7 +264,7 @@ class CriticalDarlingsRepository(
                         title = parsed.first,
                         artist = parsed.second,
                         link = link,
-                        description = cleanHtml(description),
+                        blurb = cleanHtml(description),
                         spotifyUrl = extractSpotifyUrl(description),
                     ),
                 )
@@ -374,7 +374,10 @@ data class CriticsPickAlbum(
     val title: String,
     val artist: String,
     val link: String? = null,
-    val description: String = "",
+    // NB: `blurb`, not `description` — a Swift `description` property is shadowed
+    // by NSObject.description on iOS (AGENTS.md), so Swift would read back
+    // toString() instead of the critic blurb.
+    val blurb: String = "",
     val spotifyUrl: String? = null,
     val albumArt: String? = null,
 )

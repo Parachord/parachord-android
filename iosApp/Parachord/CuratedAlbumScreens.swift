@@ -1,39 +1,44 @@
 import SwiftUI
 import Shared
 
-// MARK: - Critical Darlings + Fresh Drops (Phase 4 — DB-backed curated lists)
+// MARK: - Critical Darlings + Fresh Drops (Android-parity layout)
 //
-// Both are album/release lists from the shared repos (now unblocked by the iOS
-// DB layer: CriticalDarlings → ImageEnrichmentService, FreshDrops → TrackDao).
-// Each row navigates to the AlbumScreen. NOTE: CriticsPickAlbum.description is
-// shadowed by NSObject.description on iOS (AGENTS.md rule), so the critic blurb
-// isn't shown until that shared field is renamed.
+// Match the Android screens (gradient header + list + Critical's critic blurb /
+// Fresh's filter chips + release badge), not the design's grid — per the
+// "Android wins on conflict" rule. Each row → AlbumScreen.
 
-private struct CuratedAlbumRow: View {
-    let art: String?
+/// Full-bleed gradient header used by the curated Discover screens (mirrors
+/// Android's HeaderGradient). Extends under the status bar.
+struct PCCuratedHeader: View {
     let title: String
-    let artist: String
-    let subtitle: String?
+    let subtitle: String
+    let count: String?
+    let gradient: [UInt32]
 
     var body: some View {
-        HStack(spacing: 12) {
-            if let art, let u = URL(string: art) {
-                AsyncImage(url: u) { img in img.resizable().aspectRatio(contentMode: .fill) }
-                    placeholder: { PCArtwork(name: title + artist, size: 52, radius: 8) }
-                    .frame(width: 52, height: 52).clipShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
-            } else {
-                PCArtwork(name: title + artist, size: 52, radius: 8)
-            }
-            VStack(alignment: .leading, spacing: 2) {
-                Text(title).font(.system(size: 15, weight: .medium)).foregroundStyle(PC.fg1).lineLimit(1)
-                Text(artist).font(.system(size: 13)).foregroundStyle(PC.fg2).lineLimit(1)
-                if let subtitle, !subtitle.isEmpty {
-                    Text(subtitle).font(.system(size: 12)).foregroundStyle(PC.fg3).lineLimit(1)
-                }
-            }
-            Spacer(minLength: 0)
+        VStack(alignment: .leading, spacing: 6) {
+            Text(title).font(.system(size: 28, weight: .bold)).foregroundStyle(.white)
+            Text(subtitle).font(.system(size: 14)).foregroundStyle(.white.opacity(0.85))
+            if let count { Text(count).font(.system(size: 13, weight: .medium)).foregroundStyle(.white.opacity(0.7)) }
         }
-        .padding(.vertical, 4)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .padding(.horizontal, 20).padding(.top, 64).padding(.bottom, 22)
+        .background(LinearGradient(
+            colors: gradient.map { Color(uiColor: UIColor(hex: $0)) },
+            startPoint: .leading, endPoint: .trailing))
+    }
+}
+
+/// Floating glass back button for the full-bleed curated screens.
+private struct PCBackButton: View {
+    let action: () -> Void
+    var body: some View {
+        Button(action: action) {
+            Image(systemName: "chevron.left").font(.system(size: 17, weight: .semibold))
+                .foregroundStyle(.white).frame(width: 36, height: 36)
+                .background(.ultraThinMaterial, in: Circle())
+        }
+        .padding(.leading, 16).padding(.top, 4)
     }
 }
 
@@ -45,35 +50,60 @@ final class CriticalDarlingsModel {
     var albums: [CriticsPickAlbum] = []
     var isLoading = false
     var loaded = false
-
     func load() async {
         guard !loaded else { return }
         isLoading = true
         albums = (try? await container.loadCriticalDarlings()) ?? []
-        isLoading = false
-        loaded = true
+        isLoading = false; loaded = true
     }
 }
 
 struct CriticalDarlingsScreen: View {
     @State private var model = CriticalDarlingsModel()
+    @Environment(\.dismiss) private var dismiss
 
     var body: some View {
-        Group {
-            if model.isLoading && !model.loaded {
-                ProgressView().frame(maxWidth: .infinity, maxHeight: .infinity)
-            } else {
-                List(Array(model.albums.enumerated()), id: \.element.id) { _, album in
-                    NavigationLink { AlbumScreen(title: album.title, artist: album.artist) } label: {
-                        CuratedAlbumRow(art: album.albumArt, title: album.title, artist: album.artist, subtitle: nil)
-                    }
+        ScrollView {
+            LazyVStack(spacing: 0) {
+                PCCuratedHeader(
+                    title: "Critical Darlings",
+                    subtitle: "Top-rated albums from leading music publications",
+                    count: model.albums.isEmpty ? nil : "\(model.albums.count) albums",
+                    gradient: [0xF59E0B, 0xF97316])
+                if model.isLoading && !model.loaded {
+                    ProgressView().frame(maxWidth: .infinity).padding(.vertical, 40)
                 }
-                .listStyle(.plain)
+                ForEach(Array(model.albums.enumerated()), id: \.element.id) { _, album in
+                    NavigationLink { AlbumScreen(title: album.title, artist: album.artist) } label: {
+                        row(album)
+                    }
+                    .buttonStyle(.plain)
+                    Divider().padding(.leading, 104)
+                }
             }
+            .padding(.bottom, 130)
         }
-        .navigationTitle("Critical Darlings")
-        .navigationBarTitleDisplayMode(.inline)
+        .ignoresSafeArea(edges: .top)
+        .toolbar(.hidden, for: .navigationBar)
+        .overlay(alignment: .topLeading) { PCBackButton { dismiss() } }
         .task { await model.load() }
+    }
+
+    private func row(_ album: CriticsPickAlbum) -> some View {
+        HStack(alignment: .top, spacing: 12) {
+            pcCover(album.albumArt, seed: album.title + album.artist, size: 80, radius: 8)
+            VStack(alignment: .leading, spacing: 3) {
+                Text(album.title).font(.system(size: 15, weight: .semibold)).foregroundStyle(PC.fg1).lineLimit(2)
+                Text(album.artist).font(.system(size: 13)).foregroundStyle(PC.fg2).lineLimit(1)
+                if !album.blurb.isEmpty {
+                    Text(album.blurb).font(.system(size: 12)).foregroundStyle(PC.fg3)
+                        .lineLimit(3).padding(.top, 2)
+                }
+            }
+            Spacer(minLength: 0)
+        }
+        .padding(.horizontal, 20).padding(.vertical, 12)
+        .contentShape(Rectangle())
     }
 }
 
@@ -85,35 +115,97 @@ final class FreshDropsModel {
     var drops: [FreshDrop] = []
     var isLoading = false
     var loaded = false
-
     func load() async {
         guard !loaded else { return }
         isLoading = true
         drops = (try? await container.loadFreshDrops()) ?? []
-        isLoading = false
-        loaded = true
+        isLoading = false; loaded = true
     }
 }
 
+private let freshFilters: [(key: String, label: String)] =
+    [("all", "All"), ("album", "Albums"), ("ep", "EPs"), ("single", "Singles")]
+
 struct FreshDropsScreen: View {
     @State private var model = FreshDropsModel()
+    @State private var filter = "all"
+    @Environment(\.dismiss) private var dismiss
+
+    private var filtered: [FreshDrop] {
+        filter == "all" ? model.drops : model.drops.filter { $0.releaseType.lowercased() == filter }
+    }
 
     var body: some View {
-        Group {
-            if model.isLoading && !model.loaded {
-                ProgressView().frame(maxWidth: .infinity, maxHeight: .infinity)
-            } else {
-                List(Array(model.drops.enumerated()), id: \.offset) { _, drop in
-                    NavigationLink { AlbumScreen(title: drop.title, artist: drop.artist) } label: {
-                        CuratedAlbumRow(art: drop.albumArt, title: drop.title, artist: drop.artist,
-                                        subtitle: drop.releaseType.capitalized)
+        ScrollView {
+            LazyVStack(spacing: 0, pinnedViews: [.sectionHeaders]) {
+                PCCuratedHeader(
+                    title: "Fresh Drops",
+                    subtitle: "New releases from artists you listen to",
+                    count: model.drops.isEmpty ? nil : "\(model.drops.count) releases",
+                    gradient: [0x10B981, 0x14B8A6, 0x06B6D4])
+
+                Section {
+                    if model.isLoading && !model.loaded {
+                        ProgressView().frame(maxWidth: .infinity).padding(.vertical, 40)
+                    }
+                    ForEach(Array(filtered.enumerated()), id: \.offset) { _, drop in
+                        NavigationLink { AlbumScreen(title: drop.title, artist: drop.artist) } label: {
+                            row(drop)
+                        }
+                        .buttonStyle(.plain)
+                        Divider().padding(.leading, 84)
+                    }
+                } header: {
+                    filterBar
+                }
+            }
+            .padding(.bottom, 130)
+        }
+        .ignoresSafeArea(edges: .top)
+        .toolbar(.hidden, for: .navigationBar)
+        .overlay(alignment: .topLeading) { PCBackButton { dismiss() } }
+        .task { await model.load() }
+    }
+
+    private var filterBar: some View {
+        ScrollView(.horizontal, showsIndicators: false) {
+            HStack(spacing: 8) {
+                ForEach(freshFilters, id: \.key) { f in
+                    let on = filter == f.key
+                    Button { filter = f.key } label: {
+                        Text(f.label).font(.system(size: 13, weight: .medium))
+                            .foregroundStyle(on ? .white : PC.fg1)
+                            .padding(.horizontal, 14).padding(.vertical, 6)
+                            .background(on ? PC.accent : PC.bgInset, in: Capsule())
+                    }
+                    .buttonStyle(.plain)
+                }
+            }
+            .padding(.horizontal, 20).padding(.vertical, 10)
+        }
+        .background(PC.bgPrimary)
+    }
+
+    private func row(_ drop: FreshDrop) -> some View {
+        HStack(spacing: 12) {
+            pcCover(drop.albumArt, seed: drop.title + drop.artist, size: 56, radius: 8)
+            VStack(alignment: .leading, spacing: 3) {
+                Text(drop.title).font(.system(size: 15, weight: .medium)).foregroundStyle(PC.fg1).lineLimit(1)
+                Text(drop.artist).font(.system(size: 13)).foregroundStyle(PC.fg2).lineLimit(1)
+                HStack(spacing: 8) {
+                    Text(drop.releaseType.uppercased()).font(.system(size: 9, weight: .bold)).tracking(0.5)
+                        .foregroundStyle(PC.accent)
+                        .padding(.horizontal, 6).padding(.vertical, 2)
+                        .background(PC.accent.opacity(0.12), in: RoundedRectangle(cornerRadius: 3))
+                    if let date = drop.date, !date.isEmpty {
+                        Text(date).font(.system(size: 12)).foregroundStyle(PC.fg3)
                     }
                 }
-                .listStyle(.plain)
+                .padding(.top, 1)
             }
+            Spacer(minLength: 0)
         }
-        .navigationTitle("Fresh Drops")
-        .navigationBarTitleDisplayMode(.inline)
-        .task { await model.load() }
+        .padding(.horizontal, 20).padding(.vertical, 9)
+        .contentShape(Rectangle())
     }
 }
