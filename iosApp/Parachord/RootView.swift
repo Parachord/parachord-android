@@ -14,6 +14,10 @@ struct ContentView: View {
     @State private var showAdd = false
     @State private var showNowPlaying = false
     @State private var showSettings = false
+    /// Bumped when the active tab is re-tapped; folded into the tab content's
+    /// `.id` so re-tapping pops that tab's NavigationStack to root (and thus
+    /// back to where the sidebar menu lives).
+    @State private var navResetCount = 0
     /// Shared namespace for the mini-player ↔ Now Playing artwork morph.
     @Namespace private var artNS
 
@@ -37,6 +41,9 @@ struct ContentView: View {
                 }
             }
             .frame(maxWidth: .infinity, maxHeight: .infinity)
+            // Re-tapping the active tab bumps navResetCount → new id → fresh
+            // NavigationStack (pops to root). Switching tabs already recreates.
+            .id("\(tab.rawValue)-\(navResetCount)")
 
             // ── Floating mini-player + tab bar ───────────────────────
             VStack(spacing: 10) {
@@ -50,7 +57,8 @@ struct ContentView: View {
                         onExpand: { withAnimation(.spring(response: 0.42, dampingFraction: 0.82)) { showNowPlaying = true } }
                     )
                 }
-                PCTabBar(selected: $tab, onCenter: { showAdd = true })
+                PCTabBar(selected: $tab, onCenter: { showAdd = true },
+                         onReselect: { _ in navResetCount += 1 })
             }
             .padding(.bottom, 6)
             .opacity(showNowPlaying ? 0 : 1)

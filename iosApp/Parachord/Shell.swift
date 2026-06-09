@@ -73,12 +73,17 @@ struct PCArtwork: View {
 struct PCTabBar: View {
     @Binding var selected: PCTab
     let onCenter: () -> Void
+    /// Fired when the already-active tab is tapped again — the shell uses this
+    /// to pop that tab's navigation stack to root (standard iOS behavior).
+    var onReselect: (PCTab) -> Void = { _ in }
 
     var body: some View {
         HStack(spacing: 10) {
             HStack(spacing: 0) {
                 ForEach(PCTab.allCases, id: \.self) { tab in
-                    Button { selected = tab } label: {
+                    Button {
+                        if selected == tab { onReselect(tab) } else { selected = tab }
+                    } label: {
                         VStack(spacing: 2) {
                             Image(systemName: tab.icon).font(.system(size: 21))
                             Text(tab.title).font(.system(size: 10, weight: .medium))
