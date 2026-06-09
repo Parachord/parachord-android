@@ -53,6 +53,39 @@ final class IosTrackResolverCache {
     /// all share it) + the shared Spotify gate. Matches desktop's 4-ish pool.
     private let cap = 3
 
+    // ── Disk persistence ───────────────────────────────────────────────
+    // iOS has no DB yet, so without this every app session re-searches every
+    // tracklist via Spotify/iTunes catalog search — the volume that keeps
+    // re-arming Spotify's shared-key abuse window. Persist the resolved-source
+    // map to disk and reload on launch so a track resolved once never
+    // re-searches. Mirrors Android's resolver-ID backfill.
+    private let persistURL: URL = {
+        let dir = FileManager.default.urls(for: .cachesDirectory, in: .userDomainMask)[0]
+        return dir.appendingPathComponent("resolver-cache.json")
+    }()
+    private var saveScheduled = false
+
+    init() { loadFromDisk() }
+
+    private func loadFromDisk() {
+        guard let data = try? Data(contentsOf: persistURL),
+              let blob = String(data: data, encoding: .utf8) else { return }
+        let map = container.decodeResolverCache(blob: blob)
+        cache = map as? [String: [ResolvedSource]] ?? [:]
+    }
+
+    /// Debounced full-map write (coalesces a burst of resolves into one save).
+    private func scheduleSave() {
+        guard !saveScheduled else { return }
+        saveScheduled = true
+        Task { @MainActor in
+            try? await Task.sleep(nanoseconds: 2_000_000_000)
+            saveScheduled = false
+            let blob = container.encodeResolverCache(map: cache)
+            try? blob.data(using: .utf8)?.write(to: persistURL, options: .atomic)
+        }
+    }
+
     func cached(artist: String, title: String, album: String?) -> [ResolvedSource]? {
         cache[ResolveRequest(artist: artist, title: title, album: album).key]
     }
@@ -91,6 +124,9 @@ final class IosTrackResolverCache {
                 let ranked = (try? await self.container.resolveSources(
                     artist: item.req.artist, title: item.req.title, album: item.req.album)) ?? []
                 self.cache[key] = ranked
+                // Persist only real results — never cache an empty/failed
+                // resolve to disk (it may be a transient rate-limit miss).
+                if !ranked.isEmpty { self.scheduleSave() }
                 self.inFlight.remove(key)
                 self.activeWorkers -= 1
                 self.pump()

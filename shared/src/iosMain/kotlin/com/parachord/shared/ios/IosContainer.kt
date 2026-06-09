@@ -25,6 +25,8 @@ import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.launch
+import kotlinx.serialization.decodeFromString
+import kotlinx.serialization.encodeToString
 import kotlinx.serialization.json.Json
 import platform.Foundation.NSBundle
 
@@ -281,6 +283,27 @@ class IosContainer private constructor() {
      */
     suspend fun resolveSources(artist: String, title: String, album: String?): List<ResolvedSource> =
         resolverCoordinator.resolveSources(artist, title, album)
+
+    /**
+     * Serialize / deserialize the persistent resolver-ID cache (Swift
+     * `IosTrackResolverCache`). iOS has no DB yet, so without this every app
+     * session re-searches every tracklist via Spotify/iTunes catalog search —
+     * the volume that keeps re-arming Spotify's shared-key abuse window. The
+     * Swift cache persists this blob to disk and reloads it on launch so a
+     * track resolved once never re-searches. Mirrors Android's resolver-ID
+     * backfill intent.
+     */
+    private val resolverCacheJson = Json { ignoreUnknownKeys = true; encodeDefaults = true }
+
+    fun encodeResolverCache(map: Map<String, List<ResolvedSource>>): String =
+        resolverCacheJson.encodeToString(map)
+
+    fun decodeResolverCache(blob: String): Map<String, List<ResolvedSource>> =
+        try {
+            resolverCacheJson.decodeFromString<Map<String, List<ResolvedSource>>>(blob)
+        } catch (e: Exception) {
+            emptyMap()
+        }
 
     /**
      * Weekly Jams / Weekly Exploration from ListenBrainz. Needs only the

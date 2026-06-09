@@ -366,10 +366,12 @@ final class IosSpotifyConnect {
     /// Android `resolveLocalDevice`). iOS wake = foreground `spotify://`.
     @MainActor
     private func resolveLocalDevice(_ client: SpotifyClient, playUri: String) async -> SpDevice? {
-        let pollIntervalNs: UInt64 = 300_000_000
-        // Spotify cold-launches in ~15-20s before it registers as a Connect
-        // device, so poll up to ~20s (vs Android's 8s warm / 18s launch path).
-        let maxPolls = 66 // ~20s at 300ms
+        // Poll at 1s (not 300ms) so a cold play makes ~18 getDevices calls over
+        // ~18s instead of 66 — those ungated /v1/me/player/devices calls add up
+        // fast and contribute to Spotify's shared-key abuse window. 1s
+        // granularity is plenty for device discovery.
+        let pollIntervalNs: UInt64 = 1_000_000_000
+        let maxPolls = 18 // ~18s at 1s (Spotify cold-launches in ~15-20s)
 
         // CRITICAL: waking Spotify foregrounds it, which BACKGROUNDS Parachord —
         // and iOS suspends a backgrounded app within a few seconds, freezing
