@@ -10,6 +10,46 @@ shipped bug. Don't relearn them.
 
 ---
 
+## Core principle: research before you build — NEVER guess
+
+**Before implementing or restyling ANY screen, component, or behavior, do
+the research first. Do not guess, approximate, or infer from memory.** This
+rule exists because guessing has repeatedly shipped iOS screens that looked
+nothing like the design and behaved unlike the other platforms — then had to
+be torn out and rebuilt. Half-built approximations are worse than nothing.
+
+For every UI/UX or behavior task, in this order:
+
+1. **Read the design files.** The Claude Design handoff lives at
+   `docs/design/parachord-ios/project/` — `screens.jsx`, `morescreens.jsx`,
+   `nowplaying.jsx`, `app.jsx`, and `styles.css`. Find the actual component
+   (search for its function / CSS classes) and read the real structure,
+   measurements, gradients, tabs, grids, badges — don't infer them.
+2. **Read how the OTHER platforms do it.** Android is the source of truth
+   (root `CLAUDE.md`: "Always match the desktop app's approach"). Find the
+   Android screen (`app/src/main/java/.../ui/screens/...`) and the shared
+   logic (`shared/src/commonMain/...`). Read the real component
+   (`ResolverIcon.kt`, the screen's `*Screen.kt` + `*ViewModel.kt`, the repo).
+3. **Resolve conflicts explicitly: Android wins.** When the design and
+   Android disagree (e.g. a grid in the design vs. a list on Android),
+   **Android wins** — match Android's structure, use the design for visual
+   polish where they agree. State the conflict and the choice; don't silently
+   pick one.
+4. **Only then implement.** Match the spec you just read, not an approximation
+   of it. Verify on-device against the design/Android (screenshot).
+
+**When debugging "it doesn't work", apply the same discipline (and the
+`systematic-debugging` skill): trace the real code path and read the wire/
+log evidence BEFORE theorizing a cause.** This session burned hours theorizing
+a Last.fm deserialization bug that was actually a dropped-query-param (the wire
+response said `error 6` the whole time), and asserting the resolver badges
+"don't play" was a code bug when the path was correct and the cause was
+environmental (simulator can't play Apple Music; Spotify not connected).
+Read the source-of-truth first — design file, other-platform code, actual
+log/wire output — then act.
+
+---
+
 ## Build / run / screenshot workflow
 
 **Build (headless):**
