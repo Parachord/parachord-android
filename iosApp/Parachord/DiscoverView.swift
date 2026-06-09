@@ -20,6 +20,9 @@ final class DiscoverViewModel {
 
     var jams: [IosWeeklyEntry] = []
     var exploration: [IosWeeklyEntry] = []
+    /// playlistId → track count, for the "N tracks" weekly-card subtitle
+    /// (matches Android's weeklyTrackCounts). Filled lazily in the background.
+    var trackCounts: [String: Int] = [:]
     var isLoading = false
     var loaded = false
 
@@ -55,6 +58,20 @@ final class DiscoverViewModel {
         exploration = entries.filter { $0.kind == "Weekly Exploration" }
         isLoading = false
         loaded = true
+        loadTrackCounts(entries)
+    }
+
+    /// Fetch each weekly playlist's tracks just for its count (ListenBrainz,
+    /// not rate-limited). Fire-and-forget per entry so the carousel renders
+    /// immediately and each subtitle fills in as its count lands.
+    private func loadTrackCounts(_ entries: [IosWeeklyEntry]) {
+        for entry in entries where trackCounts[entry.id] == nil {
+            Task { @MainActor [weak self] in
+                guard let self else { return }
+                let tracks = (try? await self.container.loadWeeklyPlaylistTracks(playlistId: entry.id)) ?? []
+                if !tracks.isEmpty { self.trackCounts[entry.id] = tracks.count }
+            }
+        }
     }
 }
 

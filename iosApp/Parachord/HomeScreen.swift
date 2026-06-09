@@ -99,7 +99,8 @@ struct HomeScreen: View {
     }
 
     private struct Tile: Identifiable {
-        let id = UUID(); let title: String; let icon: String; let c1: UInt32; let c2: UInt32; let preset: String
+        let id = UUID(); let title: String; let icon: String; let c1: UInt32; let c2: UInt32
+        let subtitle: String; let preset: String
         var route: PCRoute? {
             switch preset {
             case "foryou": return .recommendations
@@ -110,11 +111,12 @@ struct HomeScreen: View {
             }
         }
     }
+    // Subtitles match Android's fallbackSubtitle (HomeScreen.kt).
     private let tiles: [Tile] = [
-        .init(title: "For You", icon: "star.fill", c1: 0x7c3aed, c2: 0x6d28d9, preset: "foryou"),
-        .init(title: "Critical Darlings", icon: "heart.fill", c1: 0xea580c, c2: 0xf59e0b, preset: "critical"),
-        .init(title: "Pop of the Tops", icon: "chart.line.uptrend.xyaxis", c1: 0xec4899, c2: 0xf59e0b, preset: "pop"),
-        .init(title: "Fresh Drops", icon: "drop.fill", c1: 0x10b981, c2: 0x0d9488, preset: "fresh"),
+        .init(title: "For You", icon: "star.fill", c1: 0x7c3aed, c2: 0x6d28d9, subtitle: "Personalized picks", preset: "foryou"),
+        .init(title: "Critical Darlings", icon: "heart.fill", c1: 0xea580c, c2: 0xf59e0b, subtitle: "Staff picks", preset: "critical"),
+        .init(title: "Pop of the Tops", icon: "chart.line.uptrend.xyaxis", c1: 0xec4899, c2: 0xf59e0b, subtitle: "Top charts", preset: "pop"),
+        .init(title: "Fresh Drops", icon: "drop.fill", c1: 0x10b981, c2: 0x0d9488, subtitle: "New releases", preset: "fresh"),
     ]
 
     private var discoverGrid: some View {
@@ -136,7 +138,7 @@ struct HomeScreen: View {
             Label(tile.title, systemImage: tile.icon)
                 .font(.system(size: 14, weight: .semibold)).foregroundStyle(.white)
             Spacer(minLength: 0)
-            Text("Curated").font(.system(size: 12)).foregroundStyle(.white.opacity(0.85))
+            Text(tile.subtitle).font(.system(size: 12)).foregroundStyle(.white.opacity(0.85))
         }
         .padding(14)
         .frame(maxWidth: .infinity, minHeight: 110, alignment: .topLeading)
@@ -188,7 +190,8 @@ struct HomeScreen: View {
             .shadow(color: .black.opacity(0.10), radius: 9, y: 4)
 
             Text(entry.weekLabel).font(.system(size: 14, weight: .semibold)).foregroundStyle(PC.fg1).lineLimit(1)
-            Text("Weekly playlist").font(.system(size: 12)).foregroundStyle(PC.fg2)
+            Text(model.trackCounts[entry.id].map { "\($0) tracks" } ?? "Weekly playlist")
+                .font(.system(size: 12)).foregroundStyle(PC.fg2)
         }
         .frame(width: 150)
     }
