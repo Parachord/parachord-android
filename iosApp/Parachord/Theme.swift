@@ -14,7 +14,7 @@ private func dyn(_ light: UInt32, _ dark: UInt32) -> Color {
     })
 }
 
-private extension UIColor {
+extension UIColor {
     convenience init(hex: UInt32) {
         self.init(
             red: CGFloat((hex >> 16) & 0xFF) / 255,

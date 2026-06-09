@@ -1,62 +1,80 @@
 import SwiftUI
+import Shared
 
-/// App shell (phase 5.0). The real ContentView — a TabView whose first
-/// tab is the first production screen (Settings), with the phase 1–4
-/// platform-actual smoke tests preserved behind a "Dev" tab so they
-/// stay verifiable while the rest of the screens get built.
+/// App shell (Phase 1 redesign — docs/design/parachord-ios).
 ///
-/// As real screens land (Library, Now Playing, Search, Playlists…) they
-/// become tabs here and the Dev tab eventually retires.
+/// Custom floating chrome instead of the system TabView: Home / Search /
+/// Collection / Playlists with a center Shuffleupagus FAB, a liquid-glass
+/// tab bar, a floating mini-player that expands to Now Playing, a slide-in
+/// Sidebar, and the Add action sheet. Components live in `Shell.swift`.
 struct ContentView: View {
-    /// Single app-wide playback engine, shared by the Now Playing tab
-    /// and the persistent mini player.
     @State private var playback = AppPlayback()
-    /// Open on Discover — a music app landing on real content beats an
-    /// empty Now Playing.
-    @State private var selectedTab = 1  // Discover
+    @State private var tab: PCTab = .home
+    @State private var showSidebar = false
+    @State private var showAdd = false
+    @State private var showNowPlaying = false
+    @State private var showSettings = false
+
+    private var coordinator: QueuePlaybackCoordinator { playback.coordinator }
 
     var body: some View {
-        TabView(selection: $selectedTab) {
+        ZStack(alignment: .bottom) {
+            // ── Active tab content ───────────────────────────────────
+            Group {
+                switch tab {
+                case .home:       DiscoverView()   // real content until the Phase-3 Home lands
+                case .search:     SearchView()
+                case .collection: PCPlaceholder(title: "Collection",
+                                                systemImage: "square.stack",
+                                                note: "Your saved tracks, albums & artists. Lands with the iOS library layer.",
+                                                onMenu: { showSidebar = true })
+                case .playlists:  PCPlaceholder(title: "Playlists",
+                                                systemImage: "music.note.list",
+                                                note: "Your playlists. Lands with the iOS library layer.",
+                                                onMenu: { showSidebar = true })
+                }
+            }
+            .frame(maxWidth: .infinity, maxHeight: .infinity)
+
+            // ── Floating mini-player + tab bar ───────────────────────
+            VStack(spacing: 10) {
+                if let t = coordinator.currentTrack {
+                    PCMiniPlayer(
+                        title: t.title, artist: t.artist,
+                        isPlaying: coordinator.isPlaying,
+                        progress: coordinator.duration > 0 ? coordinator.currentTime / coordinator.duration : 0,
+                        onToggle: { coordinator.togglePlayPause() },
+                        onExpand: { showNowPlaying = true }
+                    )
+                }
+                PCTabBar(selected: $tab, onCenter: { showAdd = true })
+            }
+            .padding(.bottom, 6)
+
+            // ── Sidebar drawer (slide-in over a scrim) ───────────────
+            if showSidebar {
+                Color.black.opacity(0.44).ignoresSafeArea()
+                    .transition(.opacity)
+                    .onTapGesture { withAnimation(.easeOut(duration: 0.25)) { showSidebar = false } }
+                HStack(spacing: 0) {
+                    PCSidebar(onNav: handleSidebar, onClose: { closeSidebar() })
+                        .ignoresSafeArea()
+                    Spacer(minLength: 0)
+                }
+                .transition(.move(edge: .leading))
+            }
+        }
+        .environment(coordinator)
+        .sheet(isPresented: $showAdd) {
+            PCAddSheet(onShuffleupagus: { /* Phase: DJ chat */ }, onDismiss: { showAdd = false })
+        }
+        .sheet(isPresented: $showNowPlaying) {
             NowPlayingView(playback: playback)
-                .tabItem {
-                    Label("Playing", systemImage: "play.circle")
-                }
-                .tag(0)
-
-            DiscoverView()
-                .tabItem {
-                    Label("Discover", systemImage: "sparkles")
-                }
-                .tag(1)
-
-            SearchView()
-                .tabItem {
-                    Label("Search", systemImage: "magnifyingglass")
-                }
-                .tag(2)
-
-            SettingsView()
-                .tabItem {
-                    Label("Settings", systemImage: "gearshape")
-                }
-                .tag(3)
-
-            DevSmokeTestView()
-                .tabItem {
-                    Label("Dev", systemImage: "hammer")
-                }
-                .tag(4)
         }
-        // Mini player floats above the tab bar on every tab whenever
-        // something is queued.
-        .safeAreaInset(edge: .bottom) {
-            MiniPlayer(playback: playback)
+        .sheet(isPresented: $showSettings) {
+            NavigationStack { SettingsView() }
         }
-        // The one shared coordinator, reachable by pushed screens
-        // (Discover → PlaylistDetail) for tap-to-play.
-        .environment(playback.coordinator)
-        // Spotify Connect device picker (Android parity) — shown when play
-        // hits ambiguous live devices with no remembered preference.
+        // Spotify Connect device picker (Phase: Spotify) — hosted at the shell.
         .sheet(item: Binding(
             get: { playback.spotify.pickerRequest },
             set: { if $0 == nil { playback.spotify.onDevicePicked(nil) } }
@@ -64,8 +82,58 @@ struct ContentView: View {
             SpotifyDevicePickerSheet(request: request) { playback.spotify.onDevicePicked($0) }
         }
     }
+
+    private func closeSidebar() { withAnimation(.easeOut(duration: 0.25)) { showSidebar = false } }
+
+    private func handleSidebar(_ id: String) {
+        closeSidebar()
+        switch id {
+        case "collection": tab = .collection
+        case "playlists":  tab = .playlists
+        case "settings":   showSettings = true
+        default: break // history / discover lists land in later phases
+        }
+    }
 }
 
-#Preview {
-    ContentView()
+/// Simple styled placeholder for tabs whose data layer isn't wired yet
+/// (Collection / Playlists need the iOS SQLDelight DB). Top nav (menu) +
+/// large title to match the shell, with a note about what's coming.
+struct PCPlaceholder: View {
+    let title: String
+    let systemImage: String
+    let note: String
+    let onMenu: () -> Void
+
+    var body: some View {
+        VStack(spacing: 0) {
+            HStack {
+                Button(action: onMenu) {
+                    Image(systemName: "line.3.horizontal").font(.system(size: 18, weight: .semibold))
+                        .foregroundStyle(PC.fg1).frame(width: 36, height: 36)
+                        .background(.ultraThinMaterial, in: Circle())
+                }
+                .buttonStyle(.plain)
+                Spacer()
+            }
+            .padding(.horizontal, 16).padding(.top, 10)
+
+            Text(title).font(.system(size: 34, weight: .bold)).tracking(0.36)
+                .foregroundStyle(PC.fg1)
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .padding(.horizontal, 20).padding(.top, 6)
+
+            Spacer()
+            VStack(spacing: 12) {
+                Image(systemName: systemImage).font(.system(size: 44)).foregroundStyle(PC.fg3)
+                Text(note).font(.system(size: 14)).foregroundStyle(PC.fg2)
+                    .multilineTextAlignment(.center).padding(.horizontal, 40)
+            }
+            Spacer(); Spacer()
+        }
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
+        .background(PC.bgPrimary)
+    }
 }
+
+#Preview { ContentView() }
