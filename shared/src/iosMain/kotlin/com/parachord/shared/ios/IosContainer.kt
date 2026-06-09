@@ -256,9 +256,26 @@ class IosContainer private constructor() {
     // ── Curated lists that need DB DAOs (now unblocked) ────────────────
     // composeMosaic is a no-op on iOS for now (single art instead of a 2x2
     // playlist mosaic). Disk/rotation caches are no-ops (fetch fresh).
+    // Spotify-FREE metadata service for image enrichment. The enrichment path
+    // searches per-album to resolve art, so including SpotifyProvider fires a
+    // burst of Spotify album-searches on every cold Discover load (~20 albums)
+    // — which re-trips Spotify's 3600s abuse window on the shared BYO key.
+    // Album art comes from MusicBrainz Cover Art Archive (+ Last.fm once a key
+    // is configured), neither of which is the rate-limited Spotify key. The
+    // user-initiated Album/Artist screens keep the full Spotify cascade.
+    private val enrichMetadataService: MetadataService by lazy {
+        MetadataService(
+            providers = listOf(
+                MusicBrainzProvider(musicBrainzClient),
+                LastFmProvider(lastFmClient, appConfig.lastFmApiKey),
+            ),
+            getDisabledProviders = { emptySet() },
+        )
+    }
+
     val imageEnrichmentService: ImageEnrichmentService by lazy {
         ImageEnrichmentService(
-            metadataService, artistDao, albumDao, trackDao, playlistDao, playlistTrackDao,
+            enrichMetadataService, artistDao, albumDao, trackDao, playlistDao, playlistTrackDao,
             httpClient,
             composeMosaic = { _, _ -> null },
         )
