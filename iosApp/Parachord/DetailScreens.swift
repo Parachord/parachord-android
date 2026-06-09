@@ -71,6 +71,7 @@ final class AlbumDetailModel {
 struct AlbumScreen: View {
     @State private var model: AlbumDetailModel
     @Environment(QueuePlaybackCoordinator.self) private var coordinator
+    @Environment(\.dismiss) private var dismiss
     /// Observed so the resolver badges re-render as background resolution lands.
     private var resolverCache = IosTrackResolverCache.shared
 
@@ -79,7 +80,9 @@ struct AlbumScreen: View {
     }
 
     var body: some View {
-        ScrollView {
+        VStack(spacing: 0) {
+            PCTopBar(title: model.title, leading: .back, onLeading: { dismiss() })
+            ScrollView {
             VStack(alignment: .leading, spacing: 0) {
                 header
                 if !model.entities.isEmpty {
@@ -98,9 +101,9 @@ struct AlbumScreen: View {
                 }
             }
             .padding(.bottom, 130)
+            }
         }
-        .navigationTitle(model.title)
-        .navigationBarTitleDisplayMode(.inline)
+        .toolbar(.hidden, for: .navigationBar)
         .task { await model.load() }
     }
 

@@ -153,10 +153,16 @@ private let freshFilters: [(key: String, label: String)] =
 struct FreshDropsScreen: View {
     @State private var model = FreshDropsModel()
     @State private var filter = "all"
+    @State private var search = ""
+    @State private var searchOpen = false
     @Environment(\.dismiss) private var dismiss
 
     private var filtered: [FreshDrop] {
-        filter == "all" ? model.drops : model.drops.filter { $0.releaseType.lowercased() == filter }
+        let q = search.lowercased()
+        return model.drops.filter { d in
+            (filter == "all" || d.releaseType.lowercased() == filter) &&
+            (q.isEmpty || d.title.lowercased().contains(q) || d.artist.lowercased().contains(q))
+        }
     }
 
     var body: some View {
@@ -193,20 +199,49 @@ struct FreshDropsScreen: View {
     }
 
     private var filterBar: some View {
-        ScrollView(.horizontal, showsIndicators: false) {
+        VStack(spacing: 0) {
             HStack(spacing: 8) {
-                ForEach(freshFilters, id: \.key) { f in
-                    let on = filter == f.key
-                    Button { filter = f.key } label: {
-                        Text(f.label).font(.system(size: 13, weight: .medium))
-                            .foregroundStyle(on ? .white : PC.fg1)
-                            .padding(.horizontal, 14).padding(.vertical, 6)
-                            .background(on ? PC.accent : PC.bgInset, in: Capsule())
+                ScrollView(.horizontal, showsIndicators: false) {
+                    HStack(spacing: 8) {
+                        ForEach(freshFilters, id: \.key) { f in
+                            let on = filter == f.key
+                            Button { filter = f.key } label: {
+                                Text(f.label).font(.system(size: 13, weight: .medium))
+                                    .foregroundStyle(on ? .white : PC.fg1)
+                                    .padding(.horizontal, 14).padding(.vertical, 6)
+                                    .background(on ? PC.accent : PC.bgInset, in: Capsule())
+                            }
+                            .buttonStyle(.plain)
+                        }
                     }
-                    .buttonStyle(.plain)
+                    .padding(.leading, 20)
                 }
+                Button {
+                    withAnimation(.easeOut(duration: 0.2)) { searchOpen.toggle() }
+                    if !searchOpen { search = "" }
+                } label: {
+                    Image(systemName: "magnifyingglass").font(.system(size: 17, weight: .regular))
+                        .foregroundStyle(searchOpen ? PC.accent : PC.fg1).frame(width: 34, height: 34)
+                }
+                .buttonStyle(.plain).padding(.trailing, 14)
             }
-            .padding(.horizontal, 20).padding(.vertical, 10)
+            .padding(.vertical, 10)
+
+            if searchOpen {
+                HStack(spacing: 8) {
+                    Image(systemName: "magnifyingglass").font(.system(size: 14)).foregroundStyle(PC.fg3)
+                    TextField("Search releases or artists…", text: $search)
+                        .font(.system(size: 14)).textInputAutocapitalization(.never).autocorrectionDisabled()
+                    if !search.isEmpty {
+                        Button { search = "" } label: {
+                            Image(systemName: "xmark.circle.fill").foregroundStyle(PC.fg3)
+                        }.buttonStyle(.plain)
+                    }
+                }
+                .padding(.horizontal, 12).padding(.vertical, 8)
+                .background(PC.bgInset, in: RoundedRectangle(cornerRadius: 8, style: .continuous))
+                .padding(.horizontal, 20).padding(.bottom, 10)
+            }
         }
         .background(PC.bgPrimary)
     }

@@ -53,6 +53,7 @@ struct RecommendationsScreen: View {
     @State private var navArtist: String?
     @State private var navAlbum: PCAlbumRef?
     @Environment(QueuePlaybackCoordinator.self) private var coordinator
+    @Environment(\.dismiss) private var dismiss
 
     private let sources: [(key: String, label: String)] =
         [("all", "All"), ("listenbrainz", "ListenBrainz"), ("lastfm", "Last.fm")]
@@ -67,6 +68,7 @@ struct RecommendationsScreen: View {
 
     var body: some View {
         VStack(spacing: 0) {
+            PCTopBar(title: "For You", leading: .back, onLeading: { dismiss() })
             Picker("", selection: $tab) {
                 ForEach(RecTab.allCases, id: \.self) { Text($0.rawValue).tag($0) }
             }
@@ -91,8 +93,7 @@ struct RecommendationsScreen: View {
                 }
             }
         }
-        .navigationTitle("For You")
-        .navigationBarTitleDisplayMode(.inline)
+        .toolbar(.hidden, for: .navigationBar)
         .navigationDestination(item: $navArtist) { ArtistScreen(artistName: $0) }
         .navigationDestination(item: $navAlbum) { AlbumScreen(title: $0.title, artist: $0.artist) }
         .task { await model.load() }
