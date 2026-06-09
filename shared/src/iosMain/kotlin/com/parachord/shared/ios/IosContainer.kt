@@ -104,16 +104,19 @@ class IosContainer private constructor() {
     }
 
     val appConfig: AppConfig by lazy {
-        // The Spotify client ID comes from Info.plist (SpotifyClientID).
-        // Other API keys (Last.fm, Ticketmaster, etc.) get populated from
-        // the same config mechanism when those services come online. The
-        // User-Agent matters today regardless: MusicBrainz 403s the
-        // default Ktor UA.
+        // Built-in app keys come from Info.plist (same mechanism as Android's
+        // BuildConfig). The Last.fm API key powers metadata — album art,
+        // artist images/bios, top songs, charts — and is a built-in app key,
+        // NOT a user BYO field (matches Android's BuildConfig.LASTFM_API_KEY).
+        // The User-Agent matters regardless: MusicBrainz 403s the default UA.
+        fun plist(key: String): String =
+            NSBundle.mainBundle.objectForInfoDictionaryKey(key) as? String ?: ""
         AppConfig(
             userAgent = "Parachord/0.1 (iOS; https://parachord.com)",
             isDebug = true,
-            spotifyClientId = NSBundle.mainBundle
-                .objectForInfoDictionaryKey("SpotifyClientID") as? String ?: "",
+            spotifyClientId = plist("SpotifyClientID"),
+            lastFmApiKey = plist("LastFmApiKey"),
+            lastFmSharedSecret = plist("LastFmSharedSecret"),
         )
     }
 
