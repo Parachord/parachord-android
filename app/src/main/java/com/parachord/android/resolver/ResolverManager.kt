@@ -103,24 +103,35 @@ class ResolverManager constructor(
         query: String,
         targetTitle: String? = null,
         targetArtist: String? = null,
+        /**
+         * Resolver ids to SKIP this run. Used by [resolveWithHints] to avoid
+         * re-searching a resolver it already has an authoritative ID hint for
+         * — notably Spotify, whose search is both redundant (the ID verify
+         * already returns artwork) and a wasted poke that re-arms the abuse
+         * cooldown. Skipped resolvers never reach the network.
+         */
+        excludeResolvers: Set<String> = emptySet(),
     ): List<ResolvedSource> = coroutineScope {
         // Proactively refresh stale tokens before resolving
         ensureTokensFresh()
         val activeResolvers = settingsStore.getActiveResolvers()
 
+        fun enabled(id: String): Boolean =
+            (activeResolvers.isEmpty() || id in activeResolvers) && id !in excludeResolvers
+
         // Build resolver tasks for enabled resolvers only.
         // Empty activeResolvers list means all are enabled (no filtering).
         val tasks = buildList {
-            if (activeResolvers.isEmpty() || "spotify" in activeResolvers) {
+            if (enabled("spotify")) {
                 add(async { resolveSpotify(query) })
             }
-            if (activeResolvers.isEmpty() || "applemusic" in activeResolvers) {
+            if (enabled("applemusic")) {
                 add(async { resolveAppleMusic(query) })
             }
-            if (activeResolvers.isEmpty() || "soundcloud" in activeResolvers) {
+            if (enabled("soundcloud")) {
                 add(async { resolveSoundCloud(query) })
             }
-            if (activeResolvers.isEmpty() || "localfiles" in activeResolvers) {
+            if (enabled("localfiles")) {
                 add(async { resolveLocalFile(targetTitle, targetArtist) })
             }
             // .axe-only resolvers (bandcamp, youtube, etc.) — executed via JsBridge.
@@ -131,7 +142,7 @@ class ResolverManager constructor(
                 .filter { it.capabilities["resolve"] == true && it.id !in nativeResolverIds && it.id !in disabledPlugins }
                 .map { it.id }
             for (resolverId in axeResolverIds) {
-                if (activeResolvers.isEmpty() || resolverId in activeResolvers) {
+                if (enabled(resolverId)) {
                     add(async { resolveViaPlugin(resolverId, query, targetTitle, targetArtist) })
                 }
             }
@@ -178,10 +189,25 @@ class ResolverManager constructor(
 
         // If we have a Spotify ID from metadata, verify it's actually playable
         // before trusting it (metadata IDs can reference tracks unavailable in
-        // the user's market)
+        // the user's market).
         if (spotifyId != null) {
-            val verified = async { verifySpotifyTrack(spotifyId) }
-            val source = verified.await()
+            val source = try {
+                verifySpotifyTrack(spotifyId)
+            } catch (e: com.parachord.shared.api.SpotifyRateLimitedException) {
+                // Spotify is rate-limited. Do NOT drop a known-good ID — that's
+                // what made the Spotify badges vanish across a whole list the
+                // moment the account got 429'd. Emit the cached ID as a source
+                // (playback can use it directly) so the badge persists; artwork
+                // fills in on a later resolve once the cooldown clears.
+                ResolvedSource(
+                    url = "spotify:track:$spotifyId",
+                    sourceType = "spotify",
+                    resolver = "spotify",
+                    spotifyUri = "spotify:track:$spotifyId",
+                    spotifyId = spotifyId,
+                    confidence = 1.0,
+                )
+            }
             if (source != null) {
                 results.add(source)
             }
@@ -230,7 +256,16 @@ class ResolverManager constructor(
         // image-enrichment cascade to RE-ASK metadata providers. Same root
         // cause as the AM-artwork-propagation work in [resolveAppleMusic] /
         // [SpotifyClient.searchTrack].
-        val cascadeResults = resolve(query, targetTitle, targetArtist)
+        // Skip the cascade's Spotify SEARCH when we already produced an
+        // authoritative Spotify source from the ID hint (verified, or the
+        // cached-ID fallback above). The search is redundant — verifySpotifyTrack
+        // already returns artwork — and during an abuse window it's a second
+        // wasted poke that re-arms the cooldown. (AM/SC hints still run their
+        // cascade search for artwork backfill; they aren't the rate-limit
+        // offender. See #176/#177.)
+        val excludeFromCascade =
+            if (results.any { it.resolver == "spotify" }) setOf("spotify") else emptySet()
+        val cascadeResults = resolve(query, targetTitle, targetArtist, excludeResolvers = excludeFromCascade)
         val cascadeByResolver = cascadeResults.associateBy { it.resolver }
         val mergedHints = results.map { hint ->
             if (hint.artworkUrl == null) {
@@ -295,11 +330,10 @@ class ResolverManager constructor(
                 artworkUrl = track.album?.images?.firstOrNull()?.url,
             )
         } catch (e: com.parachord.shared.api.SpotifyRateLimitedException) {
-            // Cooldown active — silently skip. SpotifyClient logs the first 429
-            // of each cooldown cycle; logging per-track here would produce
-            // hundreds of identical lines while a hosted-XSPF playlist's cached
-            // spotifyIds drain through the cooldown.
-            null
+            // Cooldown active — rethrow so the caller (resolveWithHints) can keep
+            // the known-good ID as a source instead of dropping the badge. The
+            // gate already logged the first 429 of the cycle, so no per-track log.
+            throw e
         } catch (e: Exception) {
             Log.w(TAG, "Failed to verify Spotify track $spotifyId: ${e.message}")
             null

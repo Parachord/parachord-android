@@ -77,8 +77,33 @@ class RateLimitGate(
     private val maxCooldownMs: Long = 60L * 60L * 1000L,
     loadCooldownEpochMs: (() -> Long)? = null,
     private val saveCooldownEpochMs: (suspend (Long) -> Unit)? = null,
+    /**
+     * Escalating circuit breaker. When true, each CONSECUTIVE rate-limited
+     * response doubles the backoff (`base * 2^(strikes-1)`, capped at
+     * [maxCooldownMs]); the first non-rate-limited response resets the
+     * counter. Default false → flat backoff (the original behavior;
+     * LastFm/MusicBrainz keep it).
+     *
+     * Why Spotify opts in: its abuse-mode ban routinely outlasts a flat 1h
+     * cooldown. With a flat cap, every time our local cooldown lapses the
+     * next call re-pokes the still-banned account and Spotify re-extends its
+     * window — so it never clears. Escalation pushes our local cooldown past
+     * Spotify's window after a few consecutive strikes, so we stop poking and
+     * the ban can decay. Pair with a higher [maxCooldownMs] (e.g. 6h).
+     */
+    private val escalateOnRepeat: Boolean = false,
+    /**
+     * Clock source (epoch ms). Injectable so tests can drive the cooldown
+     * deterministically; production passes the real [currentTimeMillis].
+     */
+    private val nowMs: () -> Long = { currentTimeMillis() },
 ) {
     private val limiter = Semaphore(maxConcurrent)
+
+    /** Consecutive rate-limited responses with no intervening success.
+     *  Drives [escalateOnRepeat]. Reset to 0 on any non-rate-limited response. */
+    @Volatile
+    private var consecutiveStrikes: Int = 0
 
     /** Background scope for fire-and-forget cooldown persistence writes.
      *  Kept tiny — only ever does a single `setLong` per 429 cycle. */
@@ -131,11 +156,26 @@ class RateLimitGate(
         isRateLimited: (HttpResponse) -> Boolean = { it.status.value == 429 },
         exceptionFactory: (retryAfterSeconds: Long?) -> Exception,
     ) {
-        if (!isRateLimited(response)) return
+        if (!isRateLimited(response)) {
+            // A clean response ends any consecutive-strike streak. Critical for
+            // the escalating breaker: a recovered call must drop the backoff
+            // back to base so a single later 429 doesn't inherit a long cooldown.
+            consecutiveStrikes = 0
+            return
+        }
+        consecutiveStrikes++
         val retryAfterSec = response.headers["Retry-After"]?.toLongOrNull()
-        val backoffMs = ((retryAfterSec ?: defaultCooldownSec) * 1000L).coerceAtMost(maxCooldownMs)
-        val wasAlreadyLimited = currentTimeMillis() < cooldownUntilMs
-        val newCooldown = currentTimeMillis() + backoffMs
+        val baseMs = (retryAfterSec ?: defaultCooldownSec) * 1000L
+        // Escalate: double per consecutive strike (base * 2^(strikes-1)), capped.
+        // Shift is bounded so the Long can't overflow before the cap clamps it.
+        val backoffMs = if (escalateOnRepeat) {
+            val shift = (consecutiveStrikes - 1).coerceIn(0, 32)
+            (baseMs shl shift).coerceAtMost(maxCooldownMs)
+        } else {
+            baseMs.coerceAtMost(maxCooldownMs)
+        }
+        val wasAlreadyLimited = nowMs() < cooldownUntilMs
+        val newCooldown = nowMs() + backoffMs
         cooldownUntilMs = newCooldown
         // Persist (fire-and-forget) so the cooldown survives a process
         // restart. See class KDoc for why this matters with abuse-window
@@ -144,13 +184,14 @@ class RateLimitGate(
             persistScope.launch { runCatching { save(newCooldown) } }
         }
         if (!wasAlreadyLimited) {
-            Log.w(tag, "$tag rate-limited (HTTP ${response.status.value}). Backing off ${backoffMs / 1000}s; subsequent calls in this window will short-circuit.")
+            val strikeNote = if (escalateOnRepeat && consecutiveStrikes > 1) " (strike #$consecutiveStrikes, escalated)" else ""
+            Log.w(tag, "$tag rate-limited (HTTP ${response.status.value}). Backing off ${backoffMs / 1000}s$strikeNote; subsequent calls in this window will short-circuit.")
         }
         throw exceptionFactory(retryAfterSec)
     }
 
     private fun checkCooldown(exceptionFactory: (retryAfterSeconds: Long?) -> Exception) {
-        val now = currentTimeMillis()
+        val now = nowMs()
         if (now < cooldownUntilMs) {
             throw exceptionFactory(((cooldownUntilMs - now + 999L) / 1000L).coerceAtLeast(1L))
         }
@@ -168,5 +209,5 @@ class RateLimitGate(
      * the cooldown — so it never clears. See the ResolverManager
      * `ensureTokensFresh` KDoc for the original Android post-mortem.
      */
-    fun remainingCooldownMs(): Long = (cooldownUntilMs - currentTimeMillis()).coerceAtLeast(0L)
+    fun remainingCooldownMs(): Long = (cooldownUntilMs - nowMs()).coerceAtLeast(0L)
 }

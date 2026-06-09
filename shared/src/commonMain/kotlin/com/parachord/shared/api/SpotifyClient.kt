@@ -123,6 +123,15 @@ class SpotifyClient(
         tag = "SpotifyClient",
         loadCooldownEpochMs = loadCooldownEpochMs,
         saveCooldownEpochMs = saveCooldownEpochMs,
+        // Spotify's abuse-mode ban routinely outlasts a flat 1h cooldown
+        // (observed: still 429ing 12+ hours later despite a quiet network).
+        // With a flat cap, each lapse re-pokes the still-banned account and
+        // Spotify re-extends its window — so it never clears. Escalate the
+        // cooldown on consecutive 429s (1h→2h→4h→6h cap) so a persistent ban
+        // pushes our local cooldown past Spotify's window and we stop poking,
+        // letting the ban decay. Resets to base on the first clean response.
+        escalateOnRepeat = true,
+        maxCooldownMs = 6L * 60L * 60L * 1000L,
     )
 
     /**
