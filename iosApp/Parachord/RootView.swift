@@ -64,6 +64,13 @@ struct ContentView: View {
                 .transition(.move(edge: .leading))
             }
         }
+        .overlay(alignment: .top) {
+            // Mock Dynamic Island live activity — hidden while Now Playing is up.
+            if let t = coordinator.currentTrack, !showNowPlaying {
+                PCDynamicIsland(title: t.title, isPlaying: coordinator.isPlaying)
+                    .padding(.top, 11)
+            }
+        }
         .environment(coordinator)
         .sheet(isPresented: $showAdd) {
             PCAddSheet(onShuffleupagus: { /* Phase: DJ chat */ }, onDismiss: { showAdd = false })
