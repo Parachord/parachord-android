@@ -17,6 +17,7 @@ import com.parachord.shared.metadata.MetadataService
 import com.parachord.shared.metadata.MusicBrainzProvider
 import com.parachord.shared.metadata.SpotifyProvider
 import com.parachord.shared.metadata.TrackSearchResult
+import com.parachord.shared.model.ChartAlbum
 import com.parachord.shared.model.ChartSong
 import com.parachord.shared.repository.ChartsRepository
 import com.parachord.shared.resolver.ResolvedSource
@@ -158,7 +159,11 @@ class IosContainer private constructor() {
         ChartsRepository(appleMusicClient, lastFmClient, lastFmApiKey = appConfig.lastFmApiKey)
     }
 
-    /** Pop of the Tops — Apple Music (iTunes RSS) top songs. No auth/key. */
+    /** Pop of the Tops — Apple Music (iTunes RSS) top albums (default tab) +
+     *  top songs. No auth/key. Mirrors Android's Albums/Songs tabs. */
+    suspend fun loadPopOfTheTopsAlbums(countryCode: String): List<ChartAlbum> =
+        chartsRepository.getAppleMusicAlbums(countryCode)
+
     suspend fun loadPopOfTheTops(countryCode: String): List<ChartSong> =
         chartsRepository.getAppleMusicSongs(countryCode)
 
