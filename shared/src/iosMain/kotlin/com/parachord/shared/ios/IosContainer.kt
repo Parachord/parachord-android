@@ -19,7 +19,11 @@ import com.parachord.shared.metadata.SpotifyProvider
 import com.parachord.shared.metadata.TrackSearchResult
 import com.parachord.shared.model.ChartAlbum
 import com.parachord.shared.model.ChartSong
+import com.parachord.shared.model.RecommendedArtist
+import com.parachord.shared.model.RecommendedTrack
+import com.parachord.shared.model.Resource
 import com.parachord.shared.repository.ChartsRepository
+import com.parachord.shared.repository.RecommendationsRepository
 import com.parachord.shared.resolver.ResolvedSource
 import com.parachord.shared.resolver.ResolverScoring
 import com.parachord.shared.repository.WeeklyPlaylistEntry
@@ -192,6 +196,38 @@ class IosContainer private constructor() {
 
     suspend fun getArtistAlbums(artistName: String): List<AlbumSearchResult> =
         metadataService.getArtistAlbums(artistName, 50)
+
+    // ── Recommendations ("For You") ────────────────────────────────────
+    // The other curated repos (Critical Darlings, Fresh Drops) need the iOS DB
+    // (ImageEnrichmentService's DAOs / TrackDao) and stay blocked until it
+    // lands. Recommendations only needs ListenBrainz + MetadataService. Disk
+    // cache is a no-op for now (stale-while-revalidate optimization only).
+    val recommendationsRepository: RecommendationsRepository by lazy {
+        RecommendationsRepository(
+            httpClient = httpClient,
+            listenBrainzClient = listenBrainzClient,
+            settingsStore = settingsStore,
+            metadataService = metadataService,
+            cacheRead = { null },
+            cacheWrite = { },
+        )
+    }
+
+    suspend fun loadRecommendedTracks(): List<RecommendedTrack> {
+        var out = emptyList<RecommendedTrack>()
+        recommendationsRepository.getRecommendedTracks().collect { res ->
+            if (res is Resource.Success) out = res.data
+        }
+        return out
+    }
+
+    suspend fun loadRecommendedArtists(): List<RecommendedArtist> {
+        var out = emptyList<RecommendedArtist>()
+        recommendationsRepository.getRecommendedArtists().collect { res ->
+            if (res is Resource.Success) out = res.data
+        }
+        return out
+    }
 
     /** Shared Spotify Web API client, authed via [spotifyAuthProvider]. The
      *  rate-limit cooldown is persisted to [kvStore] (matching Android) so a

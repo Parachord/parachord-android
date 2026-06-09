@@ -89,11 +89,15 @@ struct HomeScreen: View {
     private var discoverGrid: some View {
         LazyVGrid(columns: [GridItem(.flexible(), spacing: 12), GridItem(.flexible(), spacing: 12)], spacing: 12) {
             ForEach(tiles) { tile in
-                if tile.preset == "pop" {
+                switch tile.preset {
+                case "pop":
                     NavigationLink { PopOfTheTopsScreen() } label: { tileLabel(tile) }
                         .buttonStyle(.plain)
-                } else {
-                    tileLabel(tile) // other curated lists land next in Phase 4
+                case "foryou":
+                    NavigationLink { RecommendationsScreen() } label: { tileLabel(tile) }
+                        .buttonStyle(.plain)
+                default:
+                    tileLabel(tile) // Critical Darlings / Fresh Drops need the iOS DB
                 }
             }
         }
