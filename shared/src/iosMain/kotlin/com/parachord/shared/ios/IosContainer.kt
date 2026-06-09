@@ -7,6 +7,10 @@ import com.parachord.shared.config.AppConfig
 import com.parachord.shared.plugin.IosJsRuntime
 import com.parachord.shared.plugin.PluginFileAccess
 import com.parachord.shared.plugin.PluginManager
+import com.parachord.shared.api.AppleMusicClient
+import com.parachord.shared.api.LastFmClient
+import com.parachord.shared.model.ChartSong
+import com.parachord.shared.repository.ChartsRepository
 import com.parachord.shared.resolver.ResolvedSource
 import com.parachord.shared.resolver.ResolverScoring
 import com.parachord.shared.repository.WeeklyPlaylistEntry
@@ -138,6 +142,17 @@ class IosContainer private constructor() {
     }
 
     val musicBrainzClient: MusicBrainzClient by lazy { MusicBrainzClient(httpClient) }
+
+    // ── Charts (Pop of the Tops) ───────────────────────────────────────
+    val appleMusicClient: AppleMusicClient by lazy { AppleMusicClient(httpClient) }
+    val lastFmClient: LastFmClient by lazy { LastFmClient(httpClient) }
+    val chartsRepository: ChartsRepository by lazy {
+        ChartsRepository(appleMusicClient, lastFmClient, lastFmApiKey = appConfig.lastFmApiKey)
+    }
+
+    /** Pop of the Tops — Apple Music (iTunes RSS) top songs. No auth/key. */
+    suspend fun loadPopOfTheTops(countryCode: String): List<ChartSong> =
+        chartsRepository.getAppleMusicSongs(countryCode)
 
     /** Shared Spotify Web API client, authed via [spotifyAuthProvider]. The
      *  rate-limit cooldown is persisted to [kvStore] (matching Android) so a

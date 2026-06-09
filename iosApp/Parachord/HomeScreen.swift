@@ -77,34 +77,43 @@ struct HomeScreen: View {
     }
 
     private struct Tile: Identifiable {
-        let id = UUID(); let title: String; let icon: String; let c1: UInt32; let c2: UInt32
+        let id = UUID(); let title: String; let icon: String; let c1: UInt32; let c2: UInt32; let preset: String
     }
     private let tiles: [Tile] = [
-        .init(title: "For You", icon: "star.fill", c1: 0x7c3aed, c2: 0x6d28d9),
-        .init(title: "Critical Darlings", icon: "heart.fill", c1: 0xea580c, c2: 0xf59e0b),
-        .init(title: "Pop of the Tops", icon: "chart.line.uptrend.xyaxis", c1: 0xec4899, c2: 0xf59e0b),
-        .init(title: "Fresh Drops", icon: "drop.fill", c1: 0x10b981, c2: 0x0d9488),
+        .init(title: "For You", icon: "star.fill", c1: 0x7c3aed, c2: 0x6d28d9, preset: "foryou"),
+        .init(title: "Critical Darlings", icon: "heart.fill", c1: 0xea580c, c2: 0xf59e0b, preset: "critical"),
+        .init(title: "Pop of the Tops", icon: "chart.line.uptrend.xyaxis", c1: 0xec4899, c2: 0xf59e0b, preset: "pop"),
+        .init(title: "Fresh Drops", icon: "drop.fill", c1: 0x10b981, c2: 0x0d9488, preset: "fresh"),
     ]
 
     private var discoverGrid: some View {
         LazyVGrid(columns: [GridItem(.flexible(), spacing: 12), GridItem(.flexible(), spacing: 12)], spacing: 12) {
             ForEach(tiles) { tile in
-                VStack(alignment: .leading, spacing: 12) {
-                    Label(tile.title, systemImage: tile.icon)
-                        .font(.system(size: 14, weight: .semibold)).foregroundStyle(.white)
-                    Spacer(minLength: 0)
-                    Text("Curated").font(.system(size: 12)).foregroundStyle(.white.opacity(0.85))
+                if tile.preset == "pop" {
+                    NavigationLink { PopOfTheTopsScreen() } label: { tileLabel(tile) }
+                        .buttonStyle(.plain)
+                } else {
+                    tileLabel(tile) // other curated lists land next in Phase 4
                 }
-                .padding(14)
-                .frame(maxWidth: .infinity, minHeight: 110, alignment: .topLeading)
-                .background(
-                    LinearGradient(colors: [Color(uiColor: UIColor(hex: tile.c1)), Color(uiColor: UIColor(hex: tile.c2))],
-                                   startPoint: .topLeading, endPoint: .bottomTrailing),
-                    in: RoundedRectangle(cornerRadius: 16, style: .continuous))
-                .shadow(color: .black.opacity(0.10), radius: 9, y: 6)
             }
         }
         .padding(.horizontal, 20).padding(.bottom, 8)
+    }
+
+    private func tileLabel(_ tile: Tile) -> some View {
+        VStack(alignment: .leading, spacing: 12) {
+            Label(tile.title, systemImage: tile.icon)
+                .font(.system(size: 14, weight: .semibold)).foregroundStyle(.white)
+            Spacer(minLength: 0)
+            Text("Curated").font(.system(size: 12)).foregroundStyle(.white.opacity(0.85))
+        }
+        .padding(14)
+        .frame(maxWidth: .infinity, minHeight: 110, alignment: .topLeading)
+        .background(
+            LinearGradient(colors: [Color(uiColor: UIColor(hex: tile.c1)), Color(uiColor: UIColor(hex: tile.c2))],
+                           startPoint: .topLeading, endPoint: .bottomTrailing),
+            in: RoundedRectangle(cornerRadius: 16, style: .continuous))
+        .shadow(color: .black.opacity(0.10), radius: 9, y: 6)
     }
 
     @ViewBuilder
