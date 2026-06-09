@@ -51,6 +51,9 @@ import io.ktor.serialization.kotlinx.json.json
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.async
+import kotlinx.coroutines.awaitAll
+import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.launch
@@ -206,7 +209,45 @@ class IosContainer private constructor() {
                 SpotifyProvider(spotifyClient, settingsStore),
             ),
             getDisabledProviders = { emptySet() },
+            // Mirrors AndroidModule.enrichAlbumArtworkViaItunes: upgrade Cover
+            // Art Archive URLs to iTunes art via the shared AppleMusicClient.
+            enrichAlbumArtwork = { artistName, albums ->
+                enrichAlbumArtworkViaItunes(appleMusicClient, artistName, albums)
+            },
         )
+    }
+
+    /** Verbatim port of AndroidModule.enrichAlbumArtworkViaItunes — a DI
+     *  closure over the shared AppleMusicClient, not enrichment logic. */
+    private suspend fun enrichAlbumArtworkViaItunes(
+        appleMusicClient: AppleMusicClient,
+        artistName: String,
+        albums: List<AlbumSearchResult>,
+    ): List<AlbumSearchResult> = coroutineScope {
+        albums.map { album ->
+            async {
+                val url = album.artworkUrl
+                if (url != null && url.contains("coverartarchive.org")) {
+                    try {
+                        val response = appleMusicClient.search(
+                            term = "$artistName ${album.title}",
+                            entity = "album",
+                            limit = 3,
+                        )
+                        val match = response.results.firstOrNull { item ->
+                            item.collectionName != null &&
+                                item.artistName?.lowercase()?.contains(artistName.lowercase()) == true
+                        }
+                        val itunesArt = match?.artworkUrl100?.replace("100x100", "600x600")
+                        if (itunesArt != null) album.copy(artworkUrl = itunesArt) else album
+                    } catch (_: Exception) {
+                        album
+                    }
+                } else {
+                    album
+                }
+            }
+        }.awaitAll()
     }
 
     suspend fun getAlbumDetail(albumTitle: String, artistName: String): AlbumDetail? =
@@ -261,13 +302,13 @@ class IosContainer private constructor() {
     // ── Curated lists that need DB DAOs (now unblocked) ────────────────
     // composeMosaic is a no-op on iOS for now (single art instead of a 2x2
     // playlist mosaic). Disk/rotation caches are no-ops (fetch fresh).
-    // Spotify-FREE metadata service for image enrichment. The enrichment path
-    // searches per-album to resolve art, so including SpotifyProvider fires a
-    // burst of Spotify album-searches on every cold Discover load (~20 albums)
-    // — which re-trips Spotify's 3600s abuse window on the shared BYO key.
-    // Album art comes from MusicBrainz Cover Art Archive (+ Last.fm once a key
-    // is configured), neither of which is the rate-limited Spotify key. The
-    // user-initiated Album/Artist screens keep the full Spotify cascade.
+    // Spotify-FREE metadata service for image enrichment. Album art's primary
+    // source is MusicBrainz → Cover Art Archive, upgraded to iTunes via the
+    // same enrichAlbumArtwork lambda as the full service. Spotify is only a
+    // priority-20 last-resort art gap-filler, so dropping it from enrichment
+    // loses almost no art while removing the per-album Spotify search burst
+    // that re-trips the shared key's 3600s window on every cold Discover load.
+    // User-initiated Album/Artist screens keep the full Spotify cascade.
     private val enrichMetadataService: MetadataService by lazy {
         MetadataService(
             providers = listOf(
@@ -275,6 +316,9 @@ class IosContainer private constructor() {
                 LastFmProvider(lastFmClient, appConfig.lastFmApiKey),
             ),
             getDisabledProviders = { emptySet() },
+            enrichAlbumArtwork = { artistName, albums ->
+                enrichAlbumArtworkViaItunes(appleMusicClient, artistName, albums)
+            },
         )
     }
 
