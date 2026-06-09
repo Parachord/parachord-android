@@ -71,6 +71,8 @@ final class AlbumDetailModel {
 struct AlbumScreen: View {
     @State private var model: AlbumDetailModel
     @Environment(QueuePlaybackCoordinator.self) private var coordinator
+    /// Observed so the resolver badges re-render as background resolution lands.
+    private var resolverCache = IosTrackResolverCache.shared
 
     init(title: String, artist: String) {
         _model = State(initialValue: AlbumDetailModel(title: title, artist: artist))
@@ -135,11 +137,20 @@ struct AlbumScreen: View {
                     HStack(spacing: 12) {
                         Text("\(index + 1)").font(.system(size: 13, design: .monospaced))
                             .foregroundStyle(PC.fg3).frame(width: 22)
-                        VStack(alignment: .leading, spacing: 2) {
-                            Text(t.title).font(.system(size: 15, weight: .medium)).foregroundStyle(PC.fg1).lineLimit(1)
-                            Text(t.artist).font(.system(size: 13)).foregroundStyle(PC.fg2).lineLimit(1)
+                        VStack(alignment: .leading, spacing: 3) {
+                            Text(t.title)
+                                .font(.system(size: 15, weight: .medium))
+                                .foregroundStyle(coordinator.currentTrack?.id == model.entities[index].id ? PC.accent : PC.fg1)
+                                .lineLimit(1)
+                            if let sources = resolverCache.cached(artist: t.artist, title: t.title, album: t.album),
+                               !sources.isEmpty {
+                                ResolverBadgeRow(sources: sources)
+                            }
                         }
                         Spacer(minLength: 0)
+                        if let d = t.duration, d.int64Value > 0 {
+                            Text(pcDur(d.int64Value)).font(.system(size: 13, design: .monospaced)).foregroundStyle(PC.fg3)
+                        }
                     }
                     .padding(.horizontal, 20).padding(.vertical, 9)
                     .contentShape(Rectangle())
