@@ -218,9 +218,9 @@ struct PCSidebar: View {
 
     private struct Row: Identifiable { let id: String; let label: String; let icon: String; let color: Color }
 
+    // Playlists + Collection live in the bottom glass nav bar (like Android),
+    // so the sidebar only carries Your Music = History.
     private let yourMusic: [Row] = [
-        .init(id: "playlists", label: "Playlists", icon: "music.note.list", color: PC.accent),
-        .init(id: "collection", label: "Collection", icon: "square.stack.fill", color: PC.accent),
         .init(id: "history", label: "History", icon: "clock.arrow.circlepath", color: Color(uiColor: UIColor(hex: 0x3b82f6))),
     ]
     private let discover: [Row] = [

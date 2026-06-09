@@ -32,7 +32,7 @@ struct ContentView: View {
             Group {
                 switch tab {
                 case .home:       HomeScreen(pendingRoute: $homePendingRoute, onMenu: { showSidebar = true })
-                case .search:     SearchView()
+                case .search:     SearchView(onMenu: { showSidebar = true })
                 case .collection: PCPlaceholder(title: "Collection",
                                                 systemImage: "square.stack",
                                                 note: "Your saved tracks, albums & artists. Lands with the iOS library layer.",
@@ -158,22 +158,7 @@ struct PCPlaceholder: View {
 
     var body: some View {
         VStack(spacing: 0) {
-            HStack {
-                Button(action: onMenu) {
-                    Image(systemName: "line.3.horizontal").font(.system(size: 18, weight: .semibold))
-                        .foregroundStyle(PC.fg1).frame(width: 36, height: 36)
-                        .background(.ultraThinMaterial, in: Circle())
-                }
-                .buttonStyle(.plain)
-                Spacer()
-            }
-            .padding(.horizontal, 16).padding(.top, 10)
-
-            Text(title).font(.system(size: 34, weight: .bold)).tracking(0.36)
-                .foregroundStyle(PC.fg1)
-                .frame(maxWidth: .infinity, alignment: .leading)
-                .padding(.horizontal, 20).padding(.top, 6)
-
+            PCTopBar(title: title, leading: .menu, onLeading: onMenu)
             Spacer()
             VStack(spacing: 12) {
                 Image(systemName: systemImage).font(.system(size: 44)).foregroundStyle(PC.fg3)

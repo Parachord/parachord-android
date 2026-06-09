@@ -60,9 +60,21 @@ final class SearchViewModel {
 
 struct SearchView: View {
     @State private var model = SearchViewModel()
+    var onMenu: () -> Void = {}
 
     var body: some View {
         NavigationStack {
+            VStack(spacing: 0) {
+                PCTopBar(title: "Search", leading: .menu, onLeading: onMenu)
+                HStack(spacing: 8) {
+                    Image(systemName: "magnifyingglass").font(.system(size: 14)).foregroundStyle(PC.fg3)
+                    TextField("Artists & releases (MusicBrainz)", text: Binding(
+                        get: { model.query }, set: { model.onQueryChange($0) }))
+                        .font(.system(size: 15)).textInputAutocapitalization(.never).autocorrectionDisabled()
+                }
+                .padding(.horizontal, 12).padding(.vertical, 9)
+                .background(PC.bgInset, in: RoundedRectangle(cornerRadius: 10, style: .continuous))
+                .padding(.horizontal, 16).padding(.bottom, 6)
             List {
                 if !model.artists.isEmpty {
                     Section("Artists") {
@@ -106,19 +118,13 @@ struct SearchView: View {
                     ContentUnavailableView.search(text: model.query)
                 }
             }
-            .navigationTitle("Search")
             .overlay {
                 if model.isSearching && model.artists.isEmpty && model.releases.isEmpty {
                     ProgressView()
                 }
             }
-            .searchable(
-                text: Binding(
-                    get: { model.query },
-                    set: { model.onQueryChange($0) }
-                ),
-                prompt: "Artists & releases (MusicBrainz)"
-            )
+            }
+            .toolbar(.hidden, for: .navigationBar)
         }
     }
 }

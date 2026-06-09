@@ -257,8 +257,9 @@ struct FreshDropsScreen: View {
                         .foregroundStyle(PC.accent)
                         .padding(.horizontal, 6).padding(.vertical, 2)
                         .background(PC.accent.opacity(0.12), in: RoundedRectangle(cornerRadius: 3))
-                    if let date = drop.date, !date.isEmpty {
-                        Text(date).font(.system(size: 12)).foregroundStyle(PC.fg3)
+                    if let d = freshDate(drop.date) {
+                        Text(d.text).font(.system(size: 12))
+                            .foregroundStyle(d.upcoming ? Color(uiColor: UIColor(hex: 0x10B981)) : PC.fg3)
                     }
                 }
                 .padding(.top, 1)
@@ -268,4 +269,21 @@ struct FreshDropsScreen: View {
         .padding(.horizontal, 20).padding(.vertical, 9)
         .contentShape(Rectangle())
     }
+}
+
+/// Fresh Drops date label — mirrors Android's displayDate/isUpcoming:
+/// "MMM d, yyyy" for past releases (grey), "Coming MMM d, yyyy" for future
+/// (emerald). Input is ISO `yyyy-MM-dd`.
+private let freshInFmt: DateFormatter = {
+    let f = DateFormatter(); f.dateFormat = "yyyy-MM-dd"; f.locale = Locale(identifier: "en_US_POSIX"); return f
+}()
+private let freshOutFmt: DateFormatter = {
+    let f = DateFormatter(); f.dateFormat = "MMM d, yyyy"; f.locale = Locale(identifier: "en_US"); return f
+}()
+func freshDate(_ raw: String?) -> (text: String, upcoming: Bool)? {
+    guard let raw, !raw.isEmpty else { return nil }
+    guard let date = freshInFmt.date(from: String(raw.prefix(10))) else { return (raw, false) }
+    let formatted = freshOutFmt.string(from: date)
+    let upcoming = date > Date()
+    return (upcoming ? "Coming \(formatted)" : formatted, upcoming)
 }
