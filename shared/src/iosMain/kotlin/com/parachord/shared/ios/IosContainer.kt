@@ -232,8 +232,8 @@ class IosContainer private constructor() {
             listenBrainzClient = listenBrainzClient,
             settingsStore = settingsStore,
             metadataService = metadataService,
-            cacheRead = { null },
-            cacheWrite = { },
+            cacheRead = { IosFileCache.read("recommendations_cache.json") },
+            cacheWrite = { IosFileCache.write("recommendations_cache.json", it) },
         )
     }
 
@@ -267,7 +267,8 @@ class IosContainer private constructor() {
     val criticalDarlingsRepository: CriticalDarlingsRepository by lazy {
         CriticalDarlingsRepository(
             httpClient, musicBrainzClient, imageEnrichmentService,
-            cacheRead = { null }, cacheWrite = { },
+            cacheRead = { IosFileCache.read("critical_darlings_cache.json") },
+            cacheWrite = { IosFileCache.write("critical_darlings_cache.json", it) },
         )
     }
 
@@ -282,8 +283,10 @@ class IosContainer private constructor() {
     val freshDropsRepository: FreshDropsRepository by lazy {
         FreshDropsRepository(
             musicBrainzClient, lastFmClient, listenBrainzClient, settingsStore, trackDao,
-            cacheRead = { null }, cacheWrite = { },
-            rotationRead = { null }, rotationWrite = { },
+            cacheRead = { IosFileCache.read("fresh_drops_cache.json") },
+            cacheWrite = { IosFileCache.write("fresh_drops_cache.json", it) },
+            rotationRead = { IosFileCache.read("fresh_drops_rotation.json") },
+            rotationWrite = { IosFileCache.write("fresh_drops_rotation.json", it) },
             mbidLookupCached = { null },
             mbidLookupViaMapper = { artist, title -> listenBrainzClient.mbidMapperLookup(artist, title)?.artistMbid },
             imageEnrichmentService = imageEnrichmentService,
