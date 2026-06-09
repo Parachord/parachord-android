@@ -24,7 +24,7 @@ struct ContentView: View {
             // ── Active tab content ───────────────────────────────────
             Group {
                 switch tab {
-                case .home:       DiscoverView()   // real content until the Phase-3 Home lands
+                case .home:       HomeScreen(onMenu: { showSidebar = true })
                 case .search:     SearchView()
                 case .collection: PCPlaceholder(title: "Collection",
                                                 systemImage: "square.stack",
