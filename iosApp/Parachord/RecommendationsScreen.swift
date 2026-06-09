@@ -48,7 +48,7 @@ private enum RecTab: String, CaseIterable { case artists = "Artists", songs = "S
 
 struct RecommendationsScreen: View {
     @State private var model = RecommendationsModel()
-    @State private var tab: RecTab = .artists
+    @State private var tabIndex = 0
     @State private var source = "all"
     @State private var navArtist: String?
     @State private var navAlbum: PCAlbumRef?
@@ -66,13 +66,20 @@ struct RecommendationsScreen: View {
         Array(zip(model.tracks, model.entities)).filter { matchSource($0.0.source) }.map { (track: $0.0, entity: $0.1) }
     }
 
+    private var bannerCount: String? {
+        guard !model.artists.isEmpty || !model.tracks.isEmpty else { return nil }
+        return "\(model.artists.count) artists · \(model.tracks.count) songs"
+    }
+
     var body: some View {
         VStack(spacing: 0) {
             PCTopBar(title: "For You", leading: .back, onLeading: { dismiss() })
-            Picker("", selection: $tab) {
-                ForEach(RecTab.allCases, id: \.self) { Text($0.rawValue).tag($0) }
-            }
-            .pickerStyle(.segmented).padding(.horizontal, 16).padding(.top, 8)
+            PCCuratedBanner(
+                icon: "star.fill",
+                subtitle: "A daily mix tuned to your listening",
+                count: bannerCount,
+                gradient: [0x7C3AED, 0xA855F7, 0xEC4899])
+            PCTabs(tabs: ["Artists", "Songs"], selection: $tabIndex)
 
             sourceChips
 
@@ -86,10 +93,7 @@ struct RecommendationsScreen: View {
                 Spacer()
             } else {
                 ScrollView {
-                    switch tab {
-                    case .artists: artistsGrid
-                    case .songs:   songsList
-                    }
+                    if tabIndex == 0 { artistsGrid } else { songsList }
                 }
             }
         }

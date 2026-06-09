@@ -52,7 +52,7 @@ private enum PopTab: String, CaseIterable { case albums = "Albums", songs = "Son
 
 struct PopOfTheTopsScreen: View {
     @State private var model = PopOfTheTopsModel()
-    @State private var tab: PopTab = .albums
+    @State private var tabIndex = 0
     @State private var navArtist: String?
     @State private var navAlbum: PCAlbumRef?
     @Environment(QueuePlaybackCoordinator.self) private var coordinator
@@ -68,23 +68,17 @@ struct PopOfTheTopsScreen: View {
         VStack(spacing: 0) {
             PCTopBar(title: "Pop of the Tops", leading: .back, onLeading: { dismiss() })
             PCCuratedBanner(
+                icon: "chart.bar.fill",
                 subtitle: "What's trending around the world",
                 count: bannerCount,
                 gradient: [0xF97316, 0xEC4899, 0x8B5CF6])
-            Picker("", selection: $tab) {
-                ForEach(PopTab.allCases, id: \.self) { Text($0.rawValue).tag($0) }
-            }
-            .pickerStyle(.segmented)
-            .padding(.horizontal, 16).padding(.vertical, 8)
+            PCTabs(tabs: ["Albums", "Songs"], selection: $tabIndex)
 
             if model.isLoading && !model.loaded {
                 Spacer(); ProgressView(); Spacer()
             } else {
                 ScrollView {
-                    switch tab {
-                    case .albums: albumsGrid
-                    case .songs:  songsList
-                    }
+                    if tabIndex == 0 { albumsGrid } else { songsList }
                 }
             }
         }

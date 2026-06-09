@@ -36,6 +36,34 @@ struct PCTopBar: View {
     }
 }
 
+/// Shared tab strip — mirrors Android's SwipeableTabLayout: UPPERCASE, light,
+/// letter-spaced labels with a purple underline indicator under the active tab,
+/// no segmented-control chrome. Used by Pop / Recommendations / Artist.
+struct PCTabs: View {
+    let tabs: [String]
+    @Binding var selection: Int
+
+    var body: some View {
+        HStack(spacing: 28) {
+            ForEach(tabs.indices, id: \.self) { i in
+                Button { withAnimation(.easeOut(duration: 0.2)) { selection = i } } label: {
+                    VStack(spacing: 7) {
+                        Text(tabs[i].uppercased())
+                            .font(.system(size: 12, weight: .light)).tracking(1.3)
+                            .foregroundStyle(selection == i ? PC.fg1 : PC.fg3)
+                        Rectangle().fill(selection == i ? PC.accent : .clear).frame(height: 2)
+                    }
+                    .fixedSize()
+                }
+                .buttonStyle(.plain)
+            }
+            Spacer(minLength: 0)
+        }
+        .padding(.horizontal, 18).padding(.top, 6)
+        .overlay(Rectangle().fill(PC.border).frame(height: 1), alignment: .bottom)
+    }
+}
+
 /// Gradient metadata banner that sits BELOW the plain PCTopBar on the curated
 /// screens (mirrors Android's CriticsHeader / FreshDropsHeader). Carries the
 /// subtitle + count only — the title lives in the top bar now.
