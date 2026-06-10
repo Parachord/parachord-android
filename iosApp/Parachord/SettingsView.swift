@@ -112,6 +112,10 @@ final class SettingsViewModel {
     var libreFmBusy = false
 
     var pluginCount = 0
+    /// Plugin ids declaring `capabilities.mobile == false` — hidden everywhere
+    /// (youtube, ollama). Seeded with the known defaults so filtering holds even
+    /// if the .axe layer hasn't loaded yet; augmented from plugin metadata.
+    var mobileBlocked: Set<String> = ["youtube", "ollama"]
     enum SyncState: Equatable { case idle, syncing, done(String), failed }
     var syncState: SyncState = .idle
 
@@ -136,7 +140,6 @@ final class SettingsViewModel {
 
     private func loadAll() {
         Task { @MainActor in
-            resolverOrder = ((try? await store.getResolverOrder()) as? [String]) ?? resolverOrder
             selectedAiProvider = (try? await store.getSelectedChatProvider()) ?? "chatgpt"
             values["lastfm"] = (try? await store.getLastFmUsername()) ?? ""
             values["listenbrainz"] = (try? await store.getListenBrainzToken()) ?? ""
@@ -151,8 +154,23 @@ final class SettingsViewModel {
             values["bandsintown"] = (try? await store.getAiProviderApiKey(providerId: "bandsintown")) ?? ""
             values["songkick"] = (try? await store.getAiProviderApiKey(providerId: "songkick")) ?? ""
             concertCity = ((try? await store.getConcertLocation())?.city) ?? ""
-            let plugins = (try? await container.loadAllPlugins()) ?? []
-            pluginCount = plugins.count
+
+            // Mobile capability filter — mirror PluginManager.plugins (which keeps
+            // capabilities["mobile"] != false). loadPlugins() is already
+            // mobile-filtered; allLoadedPlugins surfaces the hidden ids.
+            let all = (try? await container.loadAllPlugins()) ?? []
+            var blocked = Set(all.filter { $0.capabilities["mobile"]?.boolValue == false }.map { $0.id })
+            blocked.formUnion(["youtube", "ollama"])
+            mobileBlocked = blocked
+            pluginCount = ((try? await container.loadPlugins()) ?? []).count
+
+            // Resolver order: drop mobile-blocked + uncatalogued ids, keep all
+            // catalogued resolvers (append any the stored order is missing).
+            let stored = ((try? await store.getResolverOrder()) as? [String]) ?? []
+            let cleaned = stored.filter { !blocked.contains($0) && PCServices.find($0) != nil }
+            let missing = PCServices.resolvers.map { $0.id }.filter { !cleaned.contains($0) }
+            let order = cleaned + missing
+            resolverOrder = order.isEmpty ? PCServices.resolvers.map { $0.id } : order
         }
     }
 
@@ -335,7 +353,7 @@ private struct PlugInsTab: View {
 
     private func serviceGrid(_ services: [PCService], columns: Int) -> some View {
         LazyVGrid(columns: Array(repeating: GridItem(.flexible(), spacing: 12), count: columns), spacing: 12) {
-            ForEach(services) { svc in
+            ForEach(services.filter { !model.mobileBlocked.contains($0.id) }) { svc in
                 Button { onConfig(svc) } label: {
                     VStack(spacing: 6) {
                         ZStack(alignment: .topTrailing) {
