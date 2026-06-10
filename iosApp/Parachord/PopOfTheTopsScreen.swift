@@ -75,7 +75,7 @@ struct PopOfTheTopsScreen: View {
             PCTabs(tabs: ["Albums", "Songs"], selection: $tabIndex)
 
             if model.isLoading && !model.loaded {
-                Spacer(); ProgressView(); Spacer()
+                ScrollView { PCSkeletonGrid(count: 6) }
             } else {
                 ScrollView {
                     if tabIndex == 0 { albumsGrid } else { songsList }

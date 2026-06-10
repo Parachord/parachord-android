@@ -36,6 +36,77 @@ struct PCTopBar: View {
     }
 }
 
+// MARK: - Loading skeletons (shimmer)
+//
+// Mirrors Android's shimmerBrush (a ~1.3s linear highlight sweep over a muted
+// base). PCSkeletonBox is the primitive; PCSkeletonRow/Grid are the templates
+// screens drop into their loading states.
+
+struct PCSkeletonBox: View {
+    var width: CGFloat? = nil
+    var height: CGFloat? = nil
+    var radius: CGFloat = 6
+    @State private var x: CGFloat = -1
+
+    var body: some View {
+        RoundedRectangle(cornerRadius: radius, style: .continuous)
+            .fill(PC.bgInset)
+            .frame(width: width, height: height)
+            .frame(maxWidth: width == nil ? .infinity : nil)
+            .overlay(
+                GeometryReader { g in
+                    LinearGradient(colors: [.clear, .white.opacity(0.32), .clear],
+                                   startPoint: .leading, endPoint: .trailing)
+                        .frame(width: g.size.width * 0.6)
+                        .offset(x: x * g.size.width)
+                }
+            )
+            .clipShape(RoundedRectangle(cornerRadius: radius, style: .continuous))
+            .onAppear { withAnimation(.linear(duration: 1.3).repeatForever(autoreverses: false)) { x = 1.5 } }
+    }
+}
+
+/// A track/album-row skeleton: art square + two text lines.
+struct PCSkeletonRow: View {
+    var art: CGFloat = 56
+    var body: some View {
+        HStack(spacing: 12) {
+            PCSkeletonBox(width: art, height: art, radius: 8)
+            VStack(alignment: .leading, spacing: 8) {
+                PCSkeletonBox(width: 170, height: 13, radius: 4)
+                PCSkeletonBox(width: 110, height: 11, radius: 4)
+            }
+            Spacer(minLength: 0)
+        }
+        .padding(.horizontal, 20).padding(.vertical, 10)
+    }
+}
+
+struct PCSkeletonList: View {
+    var count = 7
+    var art: CGFloat = 56
+    var body: some View {
+        VStack(spacing: 0) { ForEach(0..<count, id: \.self) { _ in PCSkeletonRow(art: art) } }
+    }
+}
+
+/// A grid of square-card skeletons (artwork + a title line) for album/artist grids.
+struct PCSkeletonGrid: View {
+    var count = 6
+    var columns = 2
+    var body: some View {
+        LazyVGrid(columns: Array(repeating: GridItem(.flexible(), spacing: 14), count: columns), spacing: 18) {
+            ForEach(0..<count, id: \.self) { _ in
+                VStack(alignment: .leading, spacing: 8) {
+                    PCSkeletonBox(radius: 10).aspectRatio(1, contentMode: .fit)
+                    PCSkeletonBox(width: 90, height: 12, radius: 4)
+                }
+            }
+        }
+        .padding(.horizontal, 20).padding(.vertical, 12)
+    }
+}
+
 /// Shared tab strip — mirrors Android's SwipeableTabLayout: UPPERCASE, light,
 /// letter-spaced labels with a purple underline indicator under the active tab,
 /// no segmented-control chrome. Used by Pop / Recommendations / Artist.
@@ -124,7 +195,7 @@ struct CriticalDarlingsScreen: View {
                         count: model.albums.isEmpty ? nil : "\(model.albums.count) albums",
                         gradient: [0xF59E0B, 0xF97316, 0xEF4444])
                     if model.isLoading && !model.loaded {
-                        ProgressView().frame(maxWidth: .infinity).padding(.vertical, 40)
+                        PCSkeletonList(count: 6, art: 80)
                     }
                     ForEach(Array(model.albums.enumerated()), id: \.element.id) { _, album in
                         NavigationLink { AlbumScreen(title: album.title, artist: album.artist) } label: {
@@ -206,7 +277,7 @@ struct FreshDropsScreen: View {
 
                     Section {
                         if model.isLoading && !model.loaded {
-                            ProgressView().frame(maxWidth: .infinity).padding(.vertical, 40)
+                            PCSkeletonList(count: 6, art: 80)
                         }
                         ForEach(Array(filtered.enumerated()), id: \.offset) { _, drop in
                             NavigationLink { AlbumScreen(title: drop.title, artist: drop.artist) } label: {

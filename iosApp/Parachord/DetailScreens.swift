@@ -97,7 +97,7 @@ struct AlbumScreen: View {
                 }
                 tracklist
                 if model.isLoading && !model.loaded {
-                    ProgressView().frame(maxWidth: .infinity).padding(.vertical, 40)
+                    PCSkeletonList(count: 8, art: 44)
                 }
             }
             .padding(.bottom, 130)
@@ -233,9 +233,10 @@ struct ArtistScreen: View {
                 hero
                 cta
                 tabBar
-                tabContent
                 if model.isLoading && !model.loaded {
-                    ProgressView().frame(maxWidth: .infinity).padding(.vertical, 40)
+                    PCSkeletonGrid(count: 6)
+                } else {
+                    tabContent
                 }
             }
             .padding(.bottom, 130)

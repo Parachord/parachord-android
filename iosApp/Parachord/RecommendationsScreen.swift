@@ -84,7 +84,7 @@ struct RecommendationsScreen: View {
             sourceChips
 
             if model.isLoading && !model.loaded {
-                Spacer(); ProgressView(); Spacer()
+                ScrollView { PCSkeletonGrid(count: 9, columns: 3) }
             } else if model.loaded && model.tracks.isEmpty && model.artists.isEmpty {
                 Spacer()
                 Text("No recommendations yet — connect ListenBrainz and listen to a few tracks.")
@@ -124,31 +124,43 @@ struct RecommendationsScreen: View {
 
     // ── Artists tab: grid of circular artist cards ─────────────────────
     private var artistsGrid: some View {
-        LazyVGrid(columns: [GridItem(.flexible(), spacing: 12), GridItem(.flexible(), spacing: 12), GridItem(.flexible(), spacing: 12)], spacing: 18) {
-            ForEach(Array(filteredArtists.enumerated()), id: \.offset) { _, a in
-                NavigationLink { ArtistScreen(artistName: a.name) } label: {
-                    VStack(spacing: 8) {
-                        artistCircle(a)
-                        Text(a.name).font(.system(size: 12, weight: .medium))
-                            .foregroundStyle(PC.fg1).lineLimit(1).multilineTextAlignment(.center)
+        VStack(alignment: .leading, spacing: 0) {
+            Text("Based on your listening").font(.system(size: 12, weight: .medium))
+                .foregroundStyle(PC.fg3).padding(.horizontal, 20).padding(.top, 14).padding(.bottom, 2)
+            LazyVGrid(columns: [GridItem(.flexible(), spacing: 12), GridItem(.flexible(), spacing: 12), GridItem(.flexible(), spacing: 12)], spacing: 18) {
+                ForEach(Array(filteredArtists.enumerated()), id: \.offset) { _, a in
+                    NavigationLink { ArtistScreen(artistName: a.name) } label: {
+                        VStack(spacing: 6) {
+                            artistSquare(a)
+                            Text(a.name).font(.system(size: 12, weight: .medium))
+                                .foregroundStyle(PC.fg1).lineLimit(1).multilineTextAlignment(.center)
+                            if let r = a.reason, !r.isEmpty {
+                                Text(r).font(.system(size: 10)).foregroundStyle(PC.fg3)
+                                    .lineLimit(1).multilineTextAlignment(.center)
+                            }
+                        }
                     }
+                    .buttonStyle(.plain)
                 }
-                .buttonStyle(.plain)
             }
+            .padding(.horizontal, 20).padding(.vertical, 12).padding(.bottom, 120)
         }
-        .padding(.horizontal, 20).padding(.vertical, 16)
-        .padding(.bottom, 120)
     }
 
+    // Square 96dp-style cards (radius 12) — matches Android's AlbumArtCard.
     @ViewBuilder
-    private func artistCircle(_ a: RecommendedArtist) -> some View {
-        if let url = a.imageUrl, let u = URL(string: url) {
-            AsyncImage(url: u) { img in img.resizable().aspectRatio(contentMode: .fill) }
-                placeholder: { PCArtwork(name: a.name, size: nil, radius: 999) }
-                .aspectRatio(1, contentMode: .fit).clipShape(Circle())
-        } else {
-            PCArtwork(name: a.name, size: nil, radius: 999).aspectRatio(1, contentMode: .fit).clipShape(Circle())
+    private func artistSquare(_ a: RecommendedArtist) -> some View {
+        Group {
+            if let url = a.imageUrl, let u = URL(string: url) {
+                AsyncImage(url: u) { img in img.resizable().aspectRatio(contentMode: .fill) }
+                    placeholder: { PCArtwork(name: a.name, size: nil, radius: 12) }
+            } else {
+                PCArtwork(name: a.name, size: nil, radius: 12)
+            }
         }
+        .aspectRatio(1, contentMode: .fit)
+        .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
+        .shadow(color: .black.opacity(0.10), radius: 6, y: 3)
     }
 
     // ── Songs tab: track list (resolver pipeline per row) ──────────────
