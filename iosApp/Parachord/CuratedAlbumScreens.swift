@@ -386,3 +386,132 @@ func freshDate(_ raw: String?) -> (text: String, upcoming: Bool)? {
     let upcoming = date > Date()
     return (upcoming ? "Coming \(formatted)" : formatted, upcoming)
 }
+
+// MARK: - Concerts (#10)
+//
+// Upcoming shows from the user's top recommended artists via the shared
+// ConcertsRepository (Ticketmaster + SeatGeek). Needs the user's API keys in
+// Settings; empty otherwise. Mirrors Android's ConcertsScreen layout.
+
+@MainActor @Observable
+final class ConcertsModel {
+    private let container = IosContainer.companion.shared
+    var events: [ConcertEvent] = []
+    var isLoading = false
+    var loaded = false
+    func load() async {
+        guard !loaded else { return }
+        isLoading = true
+        events = (try? await container.loadConcerts()) ?? []
+        isLoading = false; loaded = true
+    }
+}
+
+private let concertInFmt: DateFormatter = {
+    let f = DateFormatter(); f.dateFormat = "yyyy-MM-dd"; f.locale = Locale(identifier: "en_US_POSIX"); return f
+}()
+private func concertDate(_ raw: String?) -> Date? {
+    guard let raw, raw.count >= 10 else { return nil }
+    return concertInFmt.date(from: String(raw.prefix(10)))
+}
+private func concertFmt(_ raw: String?, _ pattern: String) -> String {
+    guard let d = concertDate(raw) else { return "" }
+    let f = DateFormatter(); f.dateFormat = pattern; f.locale = Locale(identifier: "en_US"); return f.string(from: d)
+}
+
+struct ConcertsScreen: View {
+    @State private var model = ConcertsModel()
+    @Environment(\.dismiss) private var dismiss
+
+    private var grouped: [(month: String, events: [ConcertEvent])] {
+        let sorted = model.events.filter { $0.date != nil }.sorted { ($0.date ?? "") < ($1.date ?? "") }
+        var groups: [String: [ConcertEvent]] = [:]; var order: [String] = []
+        for e in sorted {
+            let m = concertFmt(e.date, "MMMM yyyy")
+            if groups[m] == nil { order.append(m) }
+            groups[m, default: []].append(e)
+        }
+        return order.map { ($0, groups[$0]!) }
+    }
+
+    var body: some View {
+        VStack(spacing: 0) {
+            PCTopBar(title: "Concerts", leading: .back, onLeading: { dismiss() })
+            if model.isLoading && !model.loaded {
+                ScrollView { PCSkeletonList(count: 6, art: 56) }
+            } else {
+                ScrollView {
+                    PCCuratedBanner(
+                        icon: "ticket.fill",
+                        subtitle: "Upcoming shows from artists you listen to",
+                        count: model.events.isEmpty ? nil : "\(model.events.count) events",
+                        gradient: [0x14B8A6, 0x0891B2])
+                    if model.events.isEmpty {
+                        VStack(spacing: 10) {
+                            Image(systemName: "ticket").font(.system(size: 40)).foregroundStyle(PC.fg3)
+                            Text("No upcoming concerts found.\nAdd Ticketmaster / SeatGeek keys in Settings to see shows.")
+                                .font(.system(size: 14)).foregroundStyle(PC.fg2)
+                                .multilineTextAlignment(.center).padding(.horizontal, 40)
+                        }.padding(.vertical, 60)
+                    } else {
+                        LazyVStack(alignment: .leading, spacing: 0) {
+                            ForEach(grouped, id: \.month) { group in
+                                Text(group.month).font(.system(size: 13, weight: .semibold)).foregroundStyle(PC.fg2)
+                                    .padding(.horizontal, 20).padding(.top, 16).padding(.bottom, 6)
+                                ForEach(Array(group.events.enumerated()), id: \.offset) { _, e in
+                                    eventRow(e)
+                                    Divider().padding(.leading, 80)
+                                }
+                            }
+                        }
+                        .padding(.bottom, 130)
+                    }
+                }
+            }
+        }
+        .toolbar(.hidden, for: .navigationBar)
+        .task { await model.load() }
+    }
+
+    private func eventRow(_ e: ConcertEvent) -> some View {
+        HStack(alignment: .top, spacing: 12) {
+            VStack(spacing: 1) {
+                Text(concertFmt(e.date, "MMM").uppercased()).font(.system(size: 10, weight: .bold)).tracking(0.5)
+                    .foregroundStyle(PC.onTour)
+                Text(concertFmt(e.date, "d")).font(.system(size: 20, weight: .bold)).foregroundStyle(PC.fg1)
+                Text(concertFmt(e.date, "EEE")).font(.system(size: 10)).foregroundStyle(PC.fg3)
+            }
+            .frame(width: 44)
+            concertImage(e.imageUrl, seed: e.artistName ?? e.name)
+            VStack(alignment: .leading, spacing: 2) {
+                HStack(spacing: 6) {
+                    Text(e.artistName ?? e.name).font(.system(size: 15, weight: .medium)).foregroundStyle(PC.fg1).lineLimit(1)
+                    Spacer(minLength: 0)
+                    if let url = e.ticketUrl, let u = URL(string: url) {
+                        Link(destination: u) {
+                            Image(systemName: "arrow.up.right.square").font(.system(size: 16)).foregroundStyle(PC.onTour)
+                        }
+                    }
+                }
+                if let v = e.venueName, !v.isEmpty { Text(v).font(.system(size: 13)).foregroundStyle(PC.fg2).lineLimit(1) }
+                let loc = e.displayLocation ?? [e.city, e.state].compactMap { $0 }.joined(separator: ", ")
+                if !loc.isEmpty {
+                    HStack(spacing: 6) {
+                        Text(loc).font(.system(size: 11)).foregroundStyle(PC.fg3).lineLimit(1)
+                        if let t = e.time, !t.isEmpty { Text("· \(t)").font(.system(size: 11)).foregroundStyle(PC.fg3) }
+                    }
+                }
+            }
+        }
+        .padding(.horizontal, 20).padding(.vertical, 10)
+    }
+
+    @ViewBuilder
+    private func concertImage(_ url: String?, seed: String) -> some View {
+        if let url, let u = URL(string: url) {
+            AsyncImage(url: u) { img in img.resizable().aspectRatio(contentMode: .fill) }
+                placeholder: { PCArtwork(name: seed, size: 56, radius: 8) }
+                .frame(width: 56, height: 56).clipShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
+        } else { PCArtwork(name: seed, size: 56, radius: 8) }
+    }
+}

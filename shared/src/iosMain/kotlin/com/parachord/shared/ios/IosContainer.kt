@@ -30,7 +30,12 @@ import com.parachord.shared.db.dao.ArtistDao
 import com.parachord.shared.db.dao.PlaylistDao
 import com.parachord.shared.db.dao.PlaylistTrackDao
 import com.parachord.shared.db.dao.TrackDao
+import com.parachord.shared.api.TicketmasterClient
+import com.parachord.shared.api.SeatGeekClient
 import com.parachord.shared.repository.ChartsRepository
+import com.parachord.shared.repository.ConcertsRepository
+import com.parachord.shared.repository.ConcertArtist
+import com.parachord.shared.repository.ConcertEvent
 import com.parachord.shared.repository.CriticalDarlingsRepository
 import com.parachord.shared.repository.CriticsPickAlbum
 import com.parachord.shared.repository.FreshDrop
@@ -346,6 +351,34 @@ class IosContainer private constructor() {
     suspend fun loadCriticalDarlings(): List<CriticsPickAlbum> {
         var out = emptyList<CriticsPickAlbum>()
         criticalDarlingsRepository.getCriticsPicks(false).collect { res ->
+            if (res is Resource.Success) out = res.data
+        }
+        return out
+    }
+
+    // ── Concerts ────────────────────────────────────────────────────────
+    private val ticketmasterClient by lazy { TicketmasterClient(httpClient) }
+    private val seatGeekClient by lazy { SeatGeekClient(httpClient) }
+    val concertsRepository: ConcertsRepository by lazy {
+        ConcertsRepository(
+            ticketmasterClient, seatGeekClient, settingsStore,
+            cacheRead = { IosFileCache.read("concerts_cache.json") },
+            cacheWrite = { IosFileCache.write("concerts_cache.json", it) },
+            ticketmasterApiKeyFallback = "",
+            seatGeekClientIdFallback = "",
+        )
+    }
+
+    /** Upcoming shows from the user's top recommended artists (the iOS stand-in
+     *  for the library until the DB lands). Bounded to keep the per-artist
+     *  Ticketmaster/SeatGeek fan-out small. */
+    suspend fun loadConcerts(): List<ConcertEvent> {
+        val artists = (try { loadRecommendedArtists() } catch (e: Exception) { emptyList() })
+            .take(12)
+            .map { ConcertArtist(name = it.name, source = "history", imageUrl = it.imageUrl) }
+        if (artists.isEmpty()) return emptyList()
+        var out = emptyList<ConcertEvent>()
+        concertsRepository.getPersonalizedEvents(artists).collect { res ->
             if (res is Resource.Success) out = res.data
         }
         return out
