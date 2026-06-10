@@ -94,34 +94,49 @@ class LastFmClient(private val httpClient: HttpClient) {
     }
 
     suspend fun searchTracks(track: String, apiKey: String, limit: Int = 20): LfmTrackSearchResponse =
-        guardedGet(LfmTrackSearchResponse.serializer()) { parameter("method", "track.search"); parameter("track", track); parameter("api_key", apiKey); parameter("limit", limit) }
+        guardedGet(LfmTrackSearchResponse.serializer()) { parameter("method", "track.search"); parameter("track", lfmName(track)); parameter("api_key", apiKey); parameter("limit", limit) }
 
     suspend fun searchAlbums(album: String, apiKey: String, limit: Int = 10): LfmAlbumSearchResponse =
-        guardedGet(LfmAlbumSearchResponse.serializer()) { parameter("method", "album.search"); parameter("album", album); parameter("api_key", apiKey); parameter("limit", limit) }
+        guardedGet(LfmAlbumSearchResponse.serializer()) { parameter("method", "album.search"); parameter("album", lfmName(album)); parameter("api_key", apiKey); parameter("limit", limit) }
 
     suspend fun searchArtists(artist: String, apiKey: String, limit: Int = 10): LfmArtistSearchResponse =
-        guardedGet(LfmArtistSearchResponse.serializer()) { parameter("method", "artist.search"); parameter("artist", artist); parameter("api_key", apiKey); parameter("limit", limit) }
+        guardedGet(LfmArtistSearchResponse.serializer()) { parameter("method", "artist.search"); parameter("artist", lfmName(artist)); parameter("api_key", apiKey); parameter("limit", limit) }
 
+    /**
+     * Pre-encode a Last.fm name param so a literal "+" survives. Last.fm
+     * DOUBLE-decodes query values and form-decodes "+"→space, so a normal "+"
+     * (sent as %2B) arrives as a space — e.g. "Florence + the Machine" became
+     * "Florence   the Machine" and returned the "incorrect tag" placeholder bio
+     * + zero similar artists. Replacing "+" with the literal "%2B" makes Ktor
+     * encode it to "%252B", which Last.fm double-decodes back to "+". Verified
+     * against the live API.
+     */
+    private fun lfmName(s: String): String = s.replace("+", "%2B")
+
+    // autocorrect=1 — without it, a name that isn't Last.fm's EXACT canonical
+    // (e.g. "Florence + The Machine" vs "…the Machine") returns the "incorrect
+    // tag" placeholder bio AND empty similar artists. Autocorrect redirects to
+    // the canonical artist so bio / similar / top-tracks resolve correctly.
     suspend fun getArtistInfo(artist: String, apiKey: String): LfmArtistInfoResponse =
-        guardedGet(LfmArtistInfoResponse.serializer()) { parameter("method", "artist.getinfo"); parameter("artist", artist); parameter("api_key", apiKey) }
+        guardedGet(LfmArtistInfoResponse.serializer()) { parameter("method", "artist.getinfo"); parameter("artist", lfmName(artist)); parameter("api_key", apiKey); parameter("autocorrect", 1) }
 
     suspend fun getSimilarArtists(artist: String, apiKey: String, limit: Int = 20): LfmSimilarArtistsResponse =
-        guardedGet(LfmSimilarArtistsResponse.serializer()) { parameter("method", "artist.getsimilar"); parameter("artist", artist); parameter("api_key", apiKey); parameter("limit", limit) }
+        guardedGet(LfmSimilarArtistsResponse.serializer()) { parameter("method", "artist.getsimilar"); parameter("artist", lfmName(artist)); parameter("api_key", apiKey); parameter("limit", limit); parameter("autocorrect", 1) }
 
     suspend fun getArtistTopTracks(artist: String, apiKey: String, limit: Int = 10): LfmTopTracksResponse =
-        guardedGet(LfmTopTracksResponse.serializer()) { parameter("method", "artist.gettoptracks"); parameter("artist", artist); parameter("api_key", apiKey); parameter("limit", limit) }
+        guardedGet(LfmTopTracksResponse.serializer()) { parameter("method", "artist.gettoptracks"); parameter("artist", lfmName(artist)); parameter("api_key", apiKey); parameter("limit", limit); parameter("autocorrect", 1) }
 
     suspend fun getArtistTopAlbums(artist: String, apiKey: String, limit: Int = 50): LfmTopAlbumsResponse =
-        guardedGet(LfmTopAlbumsResponse.serializer()) { parameter("method", "artist.gettopalbums"); parameter("artist", artist); parameter("api_key", apiKey); parameter("limit", limit) }
+        guardedGet(LfmTopAlbumsResponse.serializer()) { parameter("method", "artist.gettopalbums"); parameter("artist", lfmName(artist)); parameter("api_key", apiKey); parameter("limit", limit); parameter("autocorrect", 1) }
 
     suspend fun getTrackInfo(track: String, artist: String, apiKey: String): LfmTrackInfoResponse =
-        guardedGet(LfmTrackInfoResponse.serializer()) { parameter("method", "track.getInfo"); parameter("track", track); parameter("artist", artist); parameter("api_key", apiKey) }
+        guardedGet(LfmTrackInfoResponse.serializer()) { parameter("method", "track.getInfo"); parameter("track", lfmName(track)); parameter("artist", lfmName(artist)); parameter("api_key", apiKey) }
 
     suspend fun getSimilarTracks(track: String, artist: String, apiKey: String, limit: Int = 20): LfmSimilarTracksResponse =
-        guardedGet(LfmSimilarTracksResponse.serializer()) { parameter("method", "track.getsimilar"); parameter("track", track); parameter("artist", artist); parameter("api_key", apiKey); parameter("limit", limit) }
+        guardedGet(LfmSimilarTracksResponse.serializer()) { parameter("method", "track.getsimilar"); parameter("track", lfmName(track)); parameter("artist", lfmName(artist)); parameter("api_key", apiKey); parameter("limit", limit) }
 
     suspend fun getAlbumInfo(album: String, artist: String, apiKey: String): LfmAlbumInfoResponse =
-        guardedGet(LfmAlbumInfoResponse.serializer()) { parameter("method", "album.getinfo"); parameter("album", album); parameter("artist", artist); parameter("api_key", apiKey) }
+        guardedGet(LfmAlbumInfoResponse.serializer()) { parameter("method", "album.getinfo"); parameter("album", lfmName(album)); parameter("artist", lfmName(artist)); parameter("api_key", apiKey) }
 
     suspend fun getUserInfo(user: String, apiKey: String): LfmUserInfoResponse =
         guardedGet(LfmUserInfoResponse.serializer()) { parameter("method", "user.getinfo"); parameter("user", user); parameter("api_key", apiKey) }
