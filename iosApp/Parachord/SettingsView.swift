@@ -98,7 +98,16 @@ final class SettingsViewModel {
     var scrobblingEnabled = false
     var spotifyConnected = false
     var spotifyError: String?
+    /// Enabled resolvers, in priority order (disabled ones are absent — mirrors
+    /// desktop's `resolver_order`, which only holds enabled resolvers).
     var resolverOrder: [String] = PCServices.resolvers.map { $0.id }
+    /// The enabled set (`active_resolvers`). Disabling drops the id from both
+    /// this and resolverOrder; enabling re-inserts at canonical position.
+    var activeResolvers: Set<String> = Set(PCServices.resolvers.map { $0.id })
+    /// Catalogued resolvers not currently enabled — shown grayed below the list.
+    var disabledResolvers: [String] {
+        PCServices.resolvers.map { $0.id }.filter { !activeResolvers.contains($0) && !mobileBlocked.contains($0) }
+    }
 
     /// service id → its stored key/token/username (empty = not configured).
     var values: [String: String] = [:]
@@ -164,13 +173,21 @@ final class SettingsViewModel {
             mobileBlocked = blocked
             pluginCount = ((try? await container.loadPlugins()) ?? []).count
 
-            // Resolver order: drop mobile-blocked + uncatalogued ids, keep all
-            // catalogued resolvers (append any the stored order is missing).
+            // Enabled set: empty stored = all catalogued resolvers enabled.
+            let catalogIds = PCServices.resolvers.map { $0.id }
+            let storedActive = ((try? await store.getActiveResolvers()) as? [String]) ?? []
+            let active = storedActive.isEmpty ? Set(catalogIds) : Set(storedActive).intersection(catalogIds)
+            activeResolvers = active
+
+            // Priority order: enabled + mobile-allowed + catalogued, in stored
+            // order; append any enabled resolver missing from the order at its
+            // canonical position (shared insertInCanonicalOrder).
             let stored = ((try? await store.getResolverOrder()) as? [String]) ?? []
-            let cleaned = stored.filter { !blocked.contains($0) && PCServices.find($0) != nil }
-            let missing = PCServices.resolvers.map { $0.id }.filter { !cleaned.contains($0) }
-            let order = cleaned + missing
-            resolverOrder = order.isEmpty ? PCServices.resolvers.map { $0.id } : order
+            var order = stored.filter { active.contains($0) && !blocked.contains($0) && PCServices.find($0) != nil }
+            for id in catalogIds where active.contains(id) && !order.contains(id) {
+                order = container.resolverScoring.insertInCanonicalOrder(order: order, newId: id)
+            }
+            resolverOrder = order
         }
     }
 
@@ -191,6 +208,28 @@ final class SettingsViewModel {
         resolverOrder.insert(item, at: to)
         let order = resolverOrder
         Task { try? await store.setResolverOrder(order: order) }
+    }
+
+    func isResolverEnabled(_ id: String) -> Bool { activeResolvers.contains(id) }
+
+    /// Enable/disable a resolver. Disabling drops it from both active_resolvers
+    /// and resolver_order (so it leaves the priority list); enabling re-inserts
+    /// at its canonical position. Mirrors desktop's toggleResolver.
+    func setResolverEnabled(_ id: String, _ enabled: Bool) {
+        if enabled {
+            activeResolvers.insert(id)
+            if !resolverOrder.contains(id) {
+                resolverOrder = container.resolverScoring.insertInCanonicalOrder(order: resolverOrder, newId: id)
+            }
+        } else {
+            activeResolvers.remove(id)
+            resolverOrder.removeAll { $0 == id }
+        }
+        let active = Array(activeResolvers); let order = resolverOrder
+        Task {
+            try? await store.setActiveResolvers(resolvers: active)
+            try? await store.setResolverOrder(order: order)
+        }
     }
 
     // ── BYO key/token writes (routes to the right SettingsStore method) ─
@@ -318,6 +357,16 @@ private struct PlugInsTab: View {
                 }
             }
 
+            if !model.disabledResolvers.isEmpty {
+                Text("DISABLED").font(.system(size: 10, weight: .bold)).tracking(1.2).foregroundStyle(PC.fg3)
+                    .padding(.horizontal, 20).padding(.top, 14).padding(.bottom, 4)
+                VStack(spacing: 0) {
+                    ForEach(model.disabledResolvers, id: \.self) { id in
+                        if let svc = PCServices.find(id) { disabledResolverRow(svc) }
+                    }
+                }
+            }
+
             sectionLabel("Meta Services")
             serviceGrid(PCServices.meta, columns: 3)
 
@@ -347,6 +396,18 @@ private struct PlugInsTab: View {
                     .disabled(index == model.resolverOrder.count - 1).buttonStyle(.plain)
                     .foregroundStyle(index == model.resolverOrder.count - 1 ? PC.fg3.opacity(0.4) : PC.fg2)
             }
+        }
+        .padding(.horizontal, 20).padding(.vertical, 9)
+    }
+
+    private func disabledResolverRow(_ svc: PCService) -> some View {
+        HStack(spacing: 12) {
+            tileIcon(svc, size: 34).opacity(0.4).grayscale(1)
+            Text(svc.name).font(.system(size: 15, weight: .medium)).foregroundStyle(PC.fg3)
+            Spacer(minLength: 0)
+            Button { onConfig(svc) } label: { Image(systemName: "gearshape").foregroundStyle(PC.fg3) }.buttonStyle(.plain)
+            Button("Enable") { model.setResolverEnabled(svc.id, true) }
+                .font(.system(size: 14, weight: .medium)).foregroundStyle(PC.accent).buttonStyle(.plain)
         }
         .padding(.horizontal, 20).padding(.vertical, 9)
     }
@@ -432,6 +493,16 @@ private struct PluginConfigSheet: View {
                                 .font(.system(size: 13)).foregroundStyle(model.isConnected(service.id) ? .green : .secondary)
                         }
                         Spacer()
+                    }
+                }
+
+                if service.kind == .resolver {
+                    Section {
+                        Toggle("Enable resolver", isOn: Binding(
+                            get: { model.isResolverEnabled(service.id) },
+                            set: { model.setResolverEnabled(service.id, $0) }))
+                    } footer: {
+                        Text("Include in search and playback. Disabling removes it from the priority order.")
                     }
                 }
 
