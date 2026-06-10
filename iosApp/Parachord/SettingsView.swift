@@ -370,6 +370,7 @@ struct SettingsView: View {
 private struct PlugInsTab: View {
     @Bindable var model: SettingsViewModel
     let onConfig: (PCService) -> Void
+    @State private var draggingResolver: String?
 
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
@@ -380,6 +381,21 @@ private struct PlugInsTab: View {
                 ForEach(Array(model.resolverOrder.enumerated()), id: \.element) { i, id in
                     if let svc = PCServices.find(id) {
                         resolverRow(svc, index: i)
+                            .opacity(draggingResolver == id ? 0.4 : 1)
+                            .draggable(id) {
+                                resolverRow(svc, index: i)
+                                    .frame(width: 300)
+                                    .background(PC.bgElevated)
+                                    .onAppear { draggingResolver = id }
+                            }
+                            .dropDestination(for: String.self) { dropped, _ in
+                                draggingResolver = nil
+                                guard let dragged = dropped.first, dragged != id,
+                                      let from = model.resolverOrder.firstIndex(of: dragged),
+                                      let to = model.resolverOrder.firstIndex(of: id) else { return false }
+                                withAnimation { model.moveResolver(from, to) }
+                                return true
+                            } isTargeted: { _ in }
                         if i < model.resolverOrder.count - 1 { Divider().padding(.leading, 64) }
                     }
                 }
@@ -417,15 +433,11 @@ private struct PlugInsTab: View {
             }
             Spacer(minLength: 0)
             Button { onConfig(svc) } label: { Image(systemName: "gearshape").foregroundStyle(PC.fg2) }.buttonStyle(.plain)
-            VStack(spacing: 2) {
-                Button { model.moveResolver(index, index - 1) } label: { Image(systemName: "chevron.up").font(.system(size: 12, weight: .bold)) }
-                    .disabled(index == 0).buttonStyle(.plain).foregroundStyle(index == 0 ? PC.fg3.opacity(0.4) : PC.fg2)
-                Button { model.moveResolver(index, index + 1) } label: { Image(systemName: "chevron.down").font(.system(size: 12, weight: .bold)) }
-                    .disabled(index == model.resolverOrder.count - 1).buttonStyle(.plain)
-                    .foregroundStyle(index == model.resolverOrder.count - 1 ? PC.fg3.opacity(0.4) : PC.fg2)
-            }
+            // Drag handle — long-press a row and drag to reorder priority.
+            Image(systemName: "line.3.horizontal").font(.system(size: 16)).foregroundStyle(PC.fg3)
         }
         .padding(.horizontal, 20).padding(.vertical, 9)
+        .contentShape(Rectangle())
     }
 
     private func disabledResolverRow(_ svc: PCService) -> some View {
