@@ -212,6 +212,20 @@ struct ArtistScreen: View {
     @State private var discoFilter = "All"
     @Environment(QueuePlaybackCoordinator.self) private var coordinator
     @Environment(\.dismiss) private var dismiss
+    /// Observed so top-track art fills in from the resolver as rows resolve.
+    private var resolverCache = IosTrackResolverCache.shared
+
+    /// Real album art for a top track: prefer the resolver's artwork (Apple
+    /// Music / iTunes / Spotify) over Last.fm's, and drop Last.fm's "no image"
+    /// star placeholder so we fall back to our gradient until art lands.
+    private func topTrackArt(_ t: TrackSearchResult) -> String? {
+        if let resolved = resolverCache.cached(artist: t.artist, title: t.title, album: t.album)?
+            .compactMap({ $0.artworkUrl }).first(where: { !$0.isEmpty }) {
+            return resolved
+        }
+        if let a = t.artworkUrl, !a.isEmpty, !a.contains("2a96cbd8b46e442fc41c2b86b821562f") { return a }
+        return nil
+    }
 
     init(artistName: String) { _model = State(initialValue: ArtistDetailModel(name: artistName)) }
 
@@ -397,7 +411,7 @@ struct ArtistScreen: View {
                     HStack(spacing: 12) {
                         Text("\(index + 1)").font(.system(size: 15, weight: .bold)).foregroundStyle(PC.accent)
                             .frame(width: 22)
-                        pcCover(t.artworkUrl, seed: t.title + t.artist, size: 44, radius: 6)
+                        pcCover(topTrackArt(t), seed: t.title + t.artist, size: 44, radius: 6)
                         VStack(alignment: .leading, spacing: 2) {
                             Text(t.title).font(.system(size: 15, weight: .medium)).foregroundStyle(PC.fg1).lineLimit(1)
                             if let d = t.duration, d.int64Value > 0 {
