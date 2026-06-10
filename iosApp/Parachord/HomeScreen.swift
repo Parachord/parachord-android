@@ -11,7 +11,7 @@ import Shared
 /// Value-based routes pushed onto the Home tab's stack — driven by both the
 /// Discover tiles and the sidebar, so the sidebar navigates with the tab bar
 /// still visible (a push, not a modal).
-enum PCRoute: Hashable { case recommendations, pop, critical, fresh, concerts }
+enum PCRoute: Hashable { case recommendations, pop, critical, fresh, concerts, history }
 
 struct HomeScreen: View {
     /// One-shot route injected by the sidebar (consumed into `path`). The tab's
@@ -57,6 +57,7 @@ struct HomeScreen: View {
                 case .critical:        CriticalDarlingsScreen()
                 case .fresh:           FreshDropsScreen()
                 case .concerts:        ConcertsScreen()
+                case .history:         HistoryScreen()
                 }
             }
         }

@@ -132,6 +132,7 @@ struct ContentView: View {
         case "critical":        .critical
         case "fresh":           .fresh
         case "concerts":        .concerts
+        case "history":         .history
         default:                nil
         }
         if let route {

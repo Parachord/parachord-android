@@ -37,6 +37,11 @@ import com.parachord.shared.repository.ConcertsRepository
 import com.parachord.shared.repository.ConcertArtist
 import com.parachord.shared.repository.ConcertEvent
 import com.parachord.shared.repository.CriticalDarlingsRepository
+import com.parachord.shared.repository.HistoryRepository
+import com.parachord.shared.model.HistoryTrack
+import com.parachord.shared.model.HistoryAlbum
+import com.parachord.shared.model.HistoryArtist
+import com.parachord.shared.model.RecentTrack
 import com.parachord.shared.repository.CriticsPickAlbum
 import com.parachord.shared.repository.FreshDrop
 import com.parachord.shared.repository.FreshDropsRepository
@@ -381,6 +386,31 @@ class IosContainer private constructor() {
         concertsRepository.getPersonalizedEvents(artists).collect { res ->
             if (res is Resource.Success) out = res.data
         }
+        return out
+    }
+
+    // ── History (Last.fm top charts + Last.fm/ListenBrainz recent) ──────
+    val historyRepository: HistoryRepository by lazy {
+        HistoryRepository(lastFmClient, listenBrainzClient, settingsStore, metadataService, appConfig.lastFmApiKey)
+    }
+    suspend fun loadTopTracks(period: String): List<HistoryTrack> {
+        var out = emptyList<HistoryTrack>()
+        historyRepository.getTopTracks(period, 50).collect { if (it is Resource.Success) out = it.data }
+        return out
+    }
+    suspend fun loadTopAlbums(period: String): List<HistoryAlbum> {
+        var out = emptyList<HistoryAlbum>()
+        historyRepository.getTopAlbums(period, 50).collect { if (it is Resource.Success) out = it.data }
+        return out
+    }
+    suspend fun loadTopArtists(period: String): List<HistoryArtist> {
+        var out = emptyList<HistoryArtist>()
+        historyRepository.getTopArtists(period, 50).collect { if (it is Resource.Success) out = it.data }
+        return out
+    }
+    suspend fun loadRecentTracks(): List<RecentTrack> {
+        var out = emptyList<RecentTrack>()
+        historyRepository.getRecentTracks().collect { if (it is Resource.Success) out = it.data }
         return out
     }
 
