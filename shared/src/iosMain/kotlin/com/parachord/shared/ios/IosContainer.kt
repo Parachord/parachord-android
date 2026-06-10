@@ -383,8 +383,11 @@ class IosContainer private constructor() {
             .take(12)
             .map { ConcertArtist(name = it.name, source = "history", imageUrl = it.imageUrl) }
         if (artists.isEmpty()) return emptyList()
+        val loc = settingsStore.getConcertLocation()
         var out = emptyList<ConcertEvent>()
-        concertsRepository.getPersonalizedEvents(artists).collect { res ->
+        concertsRepository.getPersonalizedEvents(
+            artists, lat = loc.latitude, lon = loc.longitude, radiusMiles = loc.radiusMiles,
+        ).collect { res ->
             if (res is Resource.Success) out = res.data
         }
         return out

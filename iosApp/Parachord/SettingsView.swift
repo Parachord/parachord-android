@@ -44,7 +44,44 @@ enum PCServices {
     ]
     static let all = resolvers + meta + concerts
     static func find(_ id: String) -> PCService? { all.first { $0.id == id } }
+
+    /// "Where do I get my key?" dev-portal URLs (mirrors desktop + Android).
+    static func helpUrl(_ id: String) -> String? {
+        switch id {
+        case "soundcloud":   return "https://soundcloud.com/you/apps"
+        case "listenbrainz": return "https://listenbrainz.org/settings/"
+        case "discogs":      return "https://www.discogs.com/settings/developers"
+        case "chatgpt":      return "https://platform.openai.com/api-keys"
+        case "claude":       return "https://console.anthropic.com/settings/keys"
+        case "gemini":       return "https://aistudio.google.com/apikey"
+        case "ticketmaster": return "https://developer-acct.ticketmaster.com/"
+        case "seatgeek":     return "https://seatgeek.com/account/develop"
+        case "bandsintown":  return "https://artists.bandsintown.com/support/api-installation"
+        case "songkick":     return "https://www.songkick.com/developer"
+        default:             return nil
+        }
+    }
+    static func helpLabel(_ id: String) -> String {
+        guard let url = helpUrl(id), let host = URL(string: url)?.host else { return "Get a key →" }
+        return host.replacingOccurrences(of: "www.", with: "") + " →"
+    }
 }
+
+/// A handful of major cities for the Concerts location picker (mirrors Android's
+/// CONCERT_CITIES). The full set can search Nominatim; this is the quick list.
+struct PCCity: Identifiable { let id = UUID(); let name: String; let lat: Double; let lon: Double }
+let pcConcertCities: [PCCity] = [
+    .init(name: "New York", lat: 40.7128, lon: -74.0060),
+    .init(name: "Los Angeles", lat: 34.0522, lon: -118.2437),
+    .init(name: "Chicago", lat: 41.8781, lon: -87.6298),
+    .init(name: "London", lat: 51.5074, lon: -0.1278),
+    .init(name: "San Francisco", lat: 37.7749, lon: -122.4194),
+    .init(name: "Austin", lat: 30.2672, lon: -97.7431),
+    .init(name: "Seattle", lat: 47.6062, lon: -122.3321),
+    .init(name: "Toronto", lat: 43.6532, lon: -79.3832),
+    .init(name: "Berlin", lat: 52.5200, lon: 13.4050),
+    .init(name: "Nashville", lat: 36.1627, lon: -86.7816),
+]
 
 // MARK: - ViewModel
 
@@ -66,6 +103,7 @@ final class SettingsViewModel {
     var values: [String: String] = [:]
     var aiModels: [String: String] = ["chatgpt": "", "claude": "", "gemini": ""]
     var selectedAiProvider = "chatgpt"
+    var concertCity = ""
 
     var pluginCount = 0
     enum SyncState: Equatable { case idle, syncing, done(String), failed }
@@ -104,6 +142,7 @@ final class SettingsViewModel {
             }
             values["bandsintown"] = (try? await store.getAiProviderApiKey(providerId: "bandsintown")) ?? ""
             values["songkick"] = (try? await store.getAiProviderApiKey(providerId: "songkick")) ?? ""
+            concertCity = ((try? await store.getConcertLocation())?.city) ?? ""
             let plugins = (try? await container.loadAllPlugins()) ?? []
             pluginCount = plugins.count
         }
@@ -151,6 +190,10 @@ final class SettingsViewModel {
     func setSelectedAiProvider(_ p: String) {
         selectedAiProvider = p
         Task { try? await store.setSelectedChatProvider(providerId: p) }
+    }
+    func setConcertLocation(_ city: String, _ lat: Double, _ lon: Double) {
+        concertCity = city
+        Task { try? await store.setConcertLocation(lat: lat, lon: lon, city: city, radiusMiles: 50) }
     }
     func setTheme(_ m: String) { themeMode = m; Task { try? await store.setThemeMode(mode: m) } }
     func setScrobbling(_ b: Bool) { scrobblingEnabled = b; Task { try? await store.setScrobblingEnabled(enabled: b) } }
@@ -372,7 +415,11 @@ private struct PluginConfigSheet: View {
                 Label("Spotify Premium connected", systemImage: "checkmark.circle.fill").foregroundStyle(.green)
                 Button("Disconnect", role: .destructive) { model.disconnectSpotify() }
             } else {
-                Button("Connect Spotify") { model.connectSpotify() }
+                Button { model.connectSpotify() } label: {
+                    Text("Connect Spotify").bold().frame(maxWidth: .infinity)
+                }
+                .buttonStyle(.borderedProminent).tint(Color(uiColor: UIColor(hex: 0x1DB954)))
+                .listRowInsets(EdgeInsets(top: 6, leading: 16, bottom: 6, trailing: 16))
                 if let e = model.spotifyError { Text(e).font(.caption).foregroundStyle(.red) }
             }
         }
@@ -385,13 +432,26 @@ private struct PluginConfigSheet: View {
             if service.id == "soundcloud" {
                 SecureField("Client Secret", text: $secretDraft).textInputAutocapitalization(.never).autocorrectionDisabled()
             }
-            Button("Save") {
+            Button {
                 model.setValue(service.id, draft, secret: service.id == "soundcloud" ? secretDraft : nil)
-            }.disabled(draft.isEmpty)
+            } label: {
+                Text("Save").bold().frame(maxWidth: .infinity)
+            }
+            .buttonStyle(.borderedProminent)
+            .tint(PC.accent)
+            .disabled(draft.isEmpty)
+            .listRowInsets(EdgeInsets(top: 6, leading: 16, bottom: 6, trailing: 16))
             if !(model.values[service.id]?.isEmpty ?? true) {
                 Button("Clear", role: .destructive) { draft = ""; model.setValue(service.id, "") }
             }
+            if let url = PCServices.helpUrl(service.id), let u = URL(string: url) {
+                Link(destination: u) {
+                    Label("Get a key — \(PCServices.helpLabel(service.id))", systemImage: "key.fill").font(.system(size: 14))
+                }
+            }
         } header: { Text(keyHeader) } footer: { Text(keyFooter) }
+
+        if service.kind == .concert { concertLocationSection }
 
         if isAi {
             Section("Model") {
@@ -403,6 +463,23 @@ private struct PluginConfigSheet: View {
                     get: { model.selectedAiProvider == service.id },
                     set: { if $0 { model.setSelectedAiProvider(service.id) } }))
             }
+        }
+    }
+
+    private var concertLocationSection: some View {
+        Section {
+            if !model.concertCity.isEmpty {
+                HStack { Text("Near"); Spacer(); Text(model.concertCity).foregroundStyle(.secondary) }
+            }
+            Menu {
+                ForEach(pcConcertCities) { c in
+                    Button(c.name) { model.setConcertLocation(c.name, c.lat, c.lon) }
+                }
+            } label: {
+                Label(model.concertCity.isEmpty ? "Set your city" : "Change city", systemImage: "mappin.and.ellipse")
+            }
+        } header: { Text("Concert Location") } footer: {
+            Text("Filters concerts and the On Tour indicator to shows near you. Shared across all concert services.")
         }
     }
 
