@@ -31,6 +31,7 @@ enum PCServices {
     static let meta: [PCService] = [
         .init(id: "lastfm", name: "Last.fm", color: 0xD51007, icon: "waveform", kind: .meta),
         .init(id: "listenbrainz", name: "ListenBrainz", color: 0xEB743B, icon: "waveform", kind: .meta),
+        .init(id: "librefm", name: "Libre.fm", color: 0x4CAF50, icon: "waveform", kind: .meta),
         .init(id: "discogs", name: "Discogs", color: 0x333333, icon: "opticaldisc", kind: .meta),
         .init(id: "chatgpt", name: "ChatGPT", color: 0x10A37F, icon: "sparkles", kind: .meta),
         .init(id: "claude", name: "Claude", color: 0xD97757, icon: "sparkles", kind: .meta),
@@ -104,6 +105,11 @@ final class SettingsViewModel {
     var aiModels: [String: String] = ["chatgpt": "", "claude": "", "gemini": ""]
     var selectedAiProvider = "chatgpt"
     var concertCity = ""
+    var libreFmConnected = false
+    var libreFmUser = ""
+    var libreFmPass = ""
+    var libreFmError: String?
+    var libreFmBusy = false
 
     var pluginCount = 0
     enum SyncState: Equatable { case idle, syncing, done(String), failed }
@@ -122,6 +128,8 @@ final class SettingsViewModel {
         subs.append(watcher.watch(flow: store.scrobblingEnabled) { [weak self] v in if let b = v as? Bool { self?.scrobblingEnabled = b } })
         subs.append(watcher.watch(flow: container.getSpotifyConnectedFlow()) { [weak self] v in
             self?.spotifyConnected = (v as? Bool) ?? ((v as? KotlinBoolean)?.boolValue ?? false) })
+        subs.append(watcher.watch(flow: container.getLibreFmConnectedFlow()) { [weak self] v in
+            self?.libreFmConnected = (v as? Bool) ?? ((v as? KotlinBoolean)?.boolValue ?? false) })
         loadAll()
     }
     func stop() { subs.forEach { $0.cancel() }; subs.removeAll() }
@@ -152,6 +160,7 @@ final class SettingsViewModel {
     func isConnected(_ id: String) -> Bool {
         switch id {
         case "spotify": return spotifyConnected
+        case "librefm": return libreFmConnected
         case "localfiles", "bandcamp", "applemusic": return true   // no key needed / MusicKit at play time
         default: return !(values[id]?.isEmpty ?? true)
         }
@@ -212,6 +221,19 @@ final class SettingsViewModel {
         }
     }
     func disconnectSpotify() { Task { try? await container.disconnectSpotify() } }
+
+    // ── Libre.fm (username + password → session) ──────────────────────
+    func connectLibreFm() {
+        guard !libreFmUser.isEmpty, !libreFmPass.isEmpty else { return }
+        libreFmBusy = true; libreFmError = nil
+        Task { @MainActor in
+            let ok = (try? await container.connectLibreFm(username: libreFmUser, password: libreFmPass))?.boolValue ?? false
+            if ok { libreFmPass = ""; libreFmError = nil }
+            else { libreFmError = "Couldn't sign in — check your username and password." }
+            libreFmBusy = false
+        }
+    }
+    func disconnectLibreFm() { Task { try? await container.disconnectLibreFm() } }
 
     // ── Plugin marketplace ────────────────────────────────────────────
     func syncPlugins() {
@@ -397,6 +419,7 @@ private struct PluginConfigSheet: View {
 
                 switch service.id {
                 case "spotify": spotifySection
+                case "librefm": libreFmSection
                 case "applemusic": infoSection("Apple Music is authorized at playback time via MusicKit. No key needed.")
                 case "localfiles": infoSection("Local files are scanned from your device's music library automatically.")
                 case "bandcamp": infoSection("Bandcamp needs no credentials — it resolves and opens tracks in the browser.")
@@ -406,6 +429,31 @@ private struct PluginConfigSheet: View {
             .navigationTitle("Configure").navigationBarTitleDisplayMode(.inline)
             .toolbar { ToolbarItem(placement: .confirmationAction) { Button("Done") { dismiss() } } }
             .onAppear { draft = model.values[service.id] ?? "" }
+        }
+    }
+
+    @ViewBuilder private var libreFmSection: some View {
+        Section {
+            if model.libreFmConnected {
+                Label("Libre.fm connected", systemImage: "checkmark.circle.fill").foregroundStyle(.green)
+                Button("Disconnect", role: .destructive) { model.disconnectLibreFm() }
+            } else {
+                TextField("Username", text: $model.libreFmUser)
+                    .textInputAutocapitalization(.never).autocorrectionDisabled()
+                SecureField("Password", text: $model.libreFmPass)
+                Button { model.connectLibreFm() } label: {
+                    HStack {
+                        if model.libreFmBusy { ProgressView().controlSize(.small) }
+                        Text("Sign in").bold().frame(maxWidth: .infinity)
+                    }
+                }
+                .buttonStyle(.borderedProminent).tint(Color(uiColor: UIColor(hex: 0x4CAF50)))
+                .disabled(model.libreFmUser.isEmpty || model.libreFmPass.isEmpty || model.libreFmBusy)
+                .listRowInsets(EdgeInsets(top: 6, leading: 16, bottom: 6, trailing: 16))
+                if let e = model.libreFmError { Text(e).font(.caption).foregroundStyle(.red) }
+            }
+        } header: { Text("Connection") } footer: {
+            Text("Sign in with your Libre.fm account — the free, open scrobbling service. Password is sent once to get a session key and never stored.")
         }
     }
 

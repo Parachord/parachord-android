@@ -479,6 +479,20 @@ class IosContainer private constructor() {
     fun getSpotifyConnectedFlow(): Flow<Boolean> =
         settingsStore.getSpotifyAccessTokenFlow().map { it != null }
 
+    // ── Libre.fm (auth.getMobileSession via the shared LibreFmClient) ───
+    val libreFmClient: com.parachord.shared.api.LibreFmClient by lazy {
+        com.parachord.shared.api.LibreFmClient(httpClient)
+    }
+    /** Connect with username + password; persists the session key on success. */
+    suspend fun connectLibreFm(username: String, password: String): Boolean {
+        val key = libreFmClient.authenticate(username, password) ?: return false
+        settingsStore.setLibreFmSession(key)
+        return true
+    }
+    suspend fun disconnectLibreFm() { settingsStore.clearLibreFmSession() }
+    fun getLibreFmConnectedFlow(): Flow<Boolean> =
+        settingsStore.getLibreFmSessionKeyFlow().map { it != null }
+
     val listenBrainzClient: ListenBrainzClient by lazy { ListenBrainzClient(httpClient) }
 
     // ── .axe plugin host (the cross-platform resolver system) ──────────
