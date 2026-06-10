@@ -233,7 +233,10 @@ struct PCSidebar: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
-            Text("PARACHORD").pcAppTitle().padding(.horizontal, 24).padding(.bottom, 20)
+            Image("ParachordWordmark").renderingMode(.template).resizable().scaledToFit()
+                .frame(height: 26).foregroundStyle(PC.fg1)
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .padding(.horizontal, 24).padding(.top, 4).padding(.bottom, 22)
             group("Your Music", yourMusic)
             group("Discover", discover)
             Spacer(minLength: 0)
