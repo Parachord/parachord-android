@@ -1,172 +1,188 @@
 import SwiftUI
 import Shared
 
-// MARK: - Settings ViewModel (phase 5.0)
+// MARK: - Settings (full, tabbed) — Plug-ins / General / About
 //
-// First real screen wired to the shared module. Observes the shared
-// `SettingsStore`'s Kotlin Flows via `FlowWatcher` and republishes them
-// as @Observable state; writes go straight back to the store's suspend
-// setters. The store is the SAME class Android uses (KMP commonMain) —
-// backed on iOS by NSUserDefaults (KvStore) + Keychain (SecureTokenStore).
-//
-// This establishes the ViewModel-shim pattern every subsequent screen
-// follows: hold a shared service, bridge its Flows to @Observable, call
-// its suspend functions from button taps.
+// Mirrors Android's SettingsScreen: a Plug-ins tab with a reorderable Content
+// Resolvers strip (priority drives the resolver pipeline), Meta Services +
+// Concerts grids, and a Plugin Updates / marketplace row; a General tab
+// (theme, scrobbling); and an About tab. Tapping any service tile opens a
+// config sheet for OAuth / BYO API keys / model selection — all persisted to
+// the shared SettingsStore (Keychain for secrets).
 
-@MainActor
-@Observable
+// ── Service catalog (id, display name, brand color, kind) ──────────────
+struct PCService: Identifiable {
+    let id: String
+    let name: String
+    let color: UInt32
+    let icon: String
+    enum Kind { case resolver, meta, concert }
+    let kind: Kind
+}
+
+enum PCServices {
+    static let resolvers: [PCService] = [
+        .init(id: "spotify", name: "Spotify", color: 0x1DB954, icon: "music.note", kind: .resolver),
+        .init(id: "applemusic", name: "Apple Music", color: 0xFA243C, icon: "music.note", kind: .resolver),
+        .init(id: "bandcamp", name: "Bandcamp", color: 0x629AA9, icon: "music.note", kind: .resolver),
+        .init(id: "soundcloud", name: "SoundCloud", color: 0xFF5500, icon: "cloud", kind: .resolver),
+        .init(id: "localfiles", name: "Local Files", color: 0xA855F7, icon: "internaldrive", kind: .resolver),
+    ]
+    static let meta: [PCService] = [
+        .init(id: "lastfm", name: "Last.fm", color: 0xD51007, icon: "waveform", kind: .meta),
+        .init(id: "listenbrainz", name: "ListenBrainz", color: 0xEB743B, icon: "waveform", kind: .meta),
+        .init(id: "discogs", name: "Discogs", color: 0x333333, icon: "opticaldisc", kind: .meta),
+        .init(id: "chatgpt", name: "ChatGPT", color: 0x10A37F, icon: "sparkles", kind: .meta),
+        .init(id: "claude", name: "Claude", color: 0xD97757, icon: "sparkles", kind: .meta),
+        .init(id: "gemini", name: "Gemini", color: 0x4285F4, icon: "sparkles", kind: .meta),
+    ]
+    static let concerts: [PCService] = [
+        .init(id: "ticketmaster", name: "Ticketmaster", color: 0x026CDF, icon: "ticket", kind: .concert),
+        .init(id: "seatgeek", name: "SeatGeek", color: 0xFF5B49, icon: "ticket", kind: .concert),
+        .init(id: "bandsintown", name: "Bandsintown", color: 0x00B4B3, icon: "ticket", kind: .concert),
+        .init(id: "songkick", name: "Songkick", color: 0xF80046, icon: "ticket", kind: .concert),
+    ]
+    static let all = resolvers + meta + concerts
+    static func find(_ id: String) -> PCService? { all.first { $0.id == id } }
+}
+
+// MARK: - ViewModel
+
+@MainActor @Observable
 final class SettingsViewModel {
-
     private let container = IosContainer.companion.shared
-    private let store = IosContainer.companion.shared.settingsStore
+    private var store: SettingsStore { container.settingsStore }
     private let watcher = FlowWatcher(scope: IosContainer.companion.shared.appScope)
-    private var subscriptions: [Cancellable] = []
-
-    // Retained for the duration of the OAuth session — ASWebAuthenticationSession
-    // inside IosOAuthManager must stay alive until the callback fires, so it
-    // can't be a Task-local that deallocates mid-flow.
+    private var subs: [Cancellable] = []
     private var oauthManager: IosOAuthManager?
 
-    // Mirrored settings state.
-    var themeMode: String = "system"
-    var scrobblingEnabled: Bool = false
-    var lastFmUsername: String = ""
-    var listenBrainzUsername: String = ""
-    var spotifyConnected: Bool = false
-    var spotifyError: String? = nil
+    var themeMode = "system"
+    var scrobblingEnabled = false
+    var spotifyConnected = false
+    var spotifyError: String?
+    var resolverOrder: [String] = PCServices.resolvers.map { $0.id }
 
-    // BYO keys/tokens (Keychain-backed via the shared SecureTokenStore). These
-    // are one-shot secure reads (not Flows), loaded on start().
-    var listenBrainzToken: String = ""
-    var selectedAiProvider: String = "chatgpt"
-    var aiKeys: [String: String] = ["chatgpt": "", "claude": "", "gemini": ""]
-    var ticketmasterKey: String = ""
-    var seatGeekId: String = ""
+    /// service id → its stored key/token/username (empty = not configured).
+    var values: [String: String] = [:]
+    var aiModels: [String: String] = ["chatgpt": "", "claude": "", "gemini": ""]
+    var selectedAiProvider = "chatgpt"
+
+    var pluginCount = 0
+    enum SyncState: Equatable { case idle, syncing, done(String), failed }
+    var syncState: SyncState = .idle
 
     static let aiProviders = ["chatgpt", "claude", "gemini"]
+    static let aiModelOptions: [String: [String]] = [
+        "chatgpt": ["gpt-4o-mini", "gpt-4o", "gpt-4-turbo"],
+        "claude": ["claude-sonnet-4-20250514", "claude-3-5-sonnet-20241022", "claude-3-5-haiku-20241022"],
+        "gemini": ["gemini-2.5-flash", "gemini-2.0-flash", "gemini-1.5-pro"],
+    ]
 
     func start() {
-        guard subscriptions.isEmpty else { return }
-        // Each `watch` collects a shared Flow; the closure receives the
-        // emission as `Any?` (generics erase across the bridge) and casts.
-        subscriptions.append(
-            watcher.watch(flow: store.themeMode) { [weak self] value in
-                if let v = value as? String { self?.themeMode = v }
-            }
-        )
-        subscriptions.append(
-            watcher.watch(flow: store.scrobblingEnabled) { [weak self] value in
-                if let v = value as? Bool { self?.scrobblingEnabled = v }
-            }
-        )
-        subscriptions.append(
-            watcher.watch(flow: store.getLastFmUsernameFlow()) { [weak self] value in
-                self?.lastFmUsername = (value as? String) ?? ""
-            }
-        )
-        subscriptions.append(
-            watcher.watch(flow: store.getListenBrainzUsernameFlow()) { [weak self] value in
-                self?.listenBrainzUsername = (value as? String) ?? ""
-            }
-        )
-        subscriptions.append(
-            watcher.watch(flow: container.getSpotifyConnectedFlow()) { [weak self] value in
-                self?.spotifyConnected = (value as? Bool) ?? ((value as? KotlinBoolean)?.boolValue ?? false)
-            }
-        )
-        loadKeys()
+        guard subs.isEmpty else { return }
+        subs.append(watcher.watch(flow: store.themeMode) { [weak self] v in if let s = v as? String { self?.themeMode = s } })
+        subs.append(watcher.watch(flow: store.scrobblingEnabled) { [weak self] v in if let b = v as? Bool { self?.scrobblingEnabled = b } })
+        subs.append(watcher.watch(flow: container.getSpotifyConnectedFlow()) { [weak self] v in
+            self?.spotifyConnected = (v as? Bool) ?? ((v as? KotlinBoolean)?.boolValue ?? false) })
+        loadAll()
     }
+    func stop() { subs.forEach { $0.cancel() }; subs.removeAll() }
 
-    /// One-shot secure reads of the BYO keys (Keychain, not Flow-backed).
-    private func loadKeys() {
+    private func loadAll() {
         Task { @MainActor in
-            listenBrainzToken = (try? await store.getListenBrainzToken()) ?? ""
+            resolverOrder = ((try? await store.getResolverOrder()) as? [String]) ?? resolverOrder
             selectedAiProvider = (try? await store.getSelectedChatProvider()) ?? "chatgpt"
+            values["lastfm"] = (try? await store.getLastFmUsername()) ?? ""
+            values["listenbrainz"] = (try? await store.getListenBrainzToken()) ?? ""
+            values["discogs"] = (try? await store.getDiscogsToken()) ?? ""
+            values["soundcloud"] = (try? await store.getSoundCloudClientId()) ?? ""
+            values["ticketmaster"] = (try? await store.getTicketmasterApiKey()) ?? ""
+            values["seatgeek"] = (try? await store.getSeatGeekClientId()) ?? ""
             for p in Self.aiProviders {
-                aiKeys[p] = (try? await store.getAiProviderApiKey(providerId: p)) ?? ""
+                values[p] = (try? await store.getAiProviderApiKey(providerId: p)) ?? ""
+                aiModels[p] = (try? await store.getAiProviderModel(providerId: p)) ?? ""
             }
-            ticketmasterKey = (try? await store.getTicketmasterApiKey()) ?? ""
-            seatGeekId = (try? await store.getSeatGeekClientId()) ?? ""
+            values["bandsintown"] = (try? await store.getAiProviderApiKey(providerId: "bandsintown")) ?? ""
+            values["songkick"] = (try? await store.getAiProviderApiKey(providerId: "songkick")) ?? ""
+            let plugins = (try? await container.loadAllPlugins()) ?? []
+            pluginCount = plugins.count
         }
     }
 
-    func stop() {
-        subscriptions.forEach { $0.cancel() }
-        subscriptions.removeAll()
+    // ── Connect status ────────────────────────────────────────────────
+    func isConnected(_ id: String) -> Bool {
+        switch id {
+        case "spotify": return spotifyConnected
+        case "localfiles", "bandcamp", "applemusic": return true   // no key needed / MusicKit at play time
+        default: return !(values[id]?.isEmpty ?? true)
+        }
     }
 
-    // Writes — fire-and-forget into the shared store's suspend setters.
-
-    func setTheme(_ mode: String) {
-        themeMode = mode  // optimistic; the flow will confirm
-        Task { try? await store.setThemeMode(mode: mode) }
+    // ── Resolver priority ─────────────────────────────────────────────
+    func moveResolver(_ from: Int, _ to: Int) {
+        guard from >= 0, to >= 0, from < resolverOrder.count, to < resolverOrder.count else { return }
+        let item = resolverOrder.remove(at: from)
+        resolverOrder.insert(item, at: to)
+        let order = resolverOrder
+        Task { try? await store.setResolverOrder(order: order) }
     }
 
-    func setScrobbling(_ enabled: Bool) {
-        scrobblingEnabled = enabled
-        Task { try? await store.setScrobblingEnabled(enabled: enabled) }
+    // ── BYO key/token writes (routes to the right SettingsStore method) ─
+    func setValue(_ id: String, _ value: String, secret: String? = nil) {
+        values[id] = value
+        Task {
+            switch id {
+            case "lastfm": try? await store.setLastFmUsername(username: value)
+            case "listenbrainz": try? await store.setListenBrainzToken(token: value)
+            case "discogs": try? await store.setDiscogsToken(token: value)
+            case "ticketmaster": try? await store.setTicketmasterApiKey(key: value)
+            case "seatgeek": try? await store.setSeatGeekClientId(id: value)
+            case "soundcloud": try? await store.setSoundCloudCredentials(clientId: value, clientSecret: secret ?? "")
+            case "chatgpt", "claude", "gemini", "bandsintown", "songkick":
+                try? await store.setAiProviderApiKey(providerId: id, apiKey: value)
+            default: break
+            }
+        }
     }
-
-    func setLastFmUsername(_ username: String) {
-        Task { try? await store.setLastFmUsername(username: username) }
+    func setAiModel(_ id: String, _ model: String) {
+        aiModels[id] = model
+        Task { try? await store.setAiProviderModel(providerId: id, model: model) }
     }
-
-    func setListenBrainzUsername(_ username: String) {
-        Task { try? await store.setListenBrainzUsername(username: username) }
+    func setSelectedAiProvider(_ p: String) {
+        selectedAiProvider = p
+        Task { try? await store.setSelectedChatProvider(providerId: p) }
     }
+    func setTheme(_ m: String) { themeMode = m; Task { try? await store.setThemeMode(mode: m) } }
+    func setScrobbling(_ b: Bool) { scrobblingEnabled = b; Task { try? await store.setScrobblingEnabled(enabled: b) } }
 
-    func setListenBrainzToken(_ token: String) {
-        listenBrainzToken = token
-        Task { try? await store.setListenBrainzToken(token: token) }
-    }
-
-    func setSelectedAiProvider(_ provider: String) {
-        selectedAiProvider = provider
-        Task { try? await store.setSelectedChatProvider(providerId: provider) }
-    }
-
-    func setAiKey(_ provider: String, _ key: String) {
-        aiKeys[provider] = key
-        Task { try? await store.setAiProviderApiKey(providerId: provider, apiKey: key) }
-    }
-
-    func setTicketmasterKey(_ key: String) {
-        ticketmasterKey = key
-        Task { try? await store.setTicketmasterApiKey(key: key) }
-    }
-
-    func setSeatGeekId(_ id: String) {
-        seatGeekId = id
-        Task { try? await store.setSeatGeekClientId(id: id) }
-    }
-
-    // Spotify OAuth — drives the PKCE authorize flow then exchanges the code
-    // for tokens via the shared container. The connected flow republishes
-    // the result into `spotifyConnected`.
-
+    // ── Spotify OAuth ─────────────────────────────────────────────────
     func connectSpotify() {
         Task { @MainActor in
             do {
-                let manager = IosOAuthManager()
-                oauthManager = manager  // retain for the auth session
+                let m = IosOAuthManager(); oauthManager = m
                 let cfg = OAuthConfig.spotify(clientId: container.appConfig.spotifyClientId)
-                let result = try await manager.authorize(cfg)
-                try await container.connectSpotify(
-                    code: result.code,
-                    codeVerifier: result.codeVerifier
-                )
+                let r = try await m.authorize(cfg)
+                try await container.connectSpotify(code: r.code, codeVerifier: r.codeVerifier)
                 spotifyError = nil
-            } catch let e as OAuthError {
-                spotifyError = e.localizedDescription
-            } catch {
-                spotifyError = error.localizedDescription
-            }
+            } catch { spotifyError = error.localizedDescription }
             oauthManager = nil
         }
     }
+    func disconnectSpotify() { Task { try? await container.disconnectSpotify() } }
 
-    func disconnectSpotify() {
-        Task { try? await container.disconnectSpotify() }
+    // ── Plugin marketplace ────────────────────────────────────────────
+    func syncPlugins() {
+        guard syncState != .syncing else { return }
+        syncState = .syncing
+        Task { @MainActor in
+            if let r = try? await container.syncPluginsNow() {
+                let changed = Int(r.added.count) + Int(r.updated.count)
+                syncState = .done(changed > 0 ? "\(changed) updated" : "Up to date")
+                pluginCount = ((try? await container.loadAllPlugins()) ?? []).count
+            } else { syncState = .failed }
+            try? await Task.sleep(nanoseconds: 4_000_000_000)
+            syncState = .idle
+        }
     }
 }
 
@@ -174,133 +190,294 @@ final class SettingsViewModel {
 
 struct SettingsView: View {
     @State private var model = SettingsViewModel()
-
-    private static let themeOptions = ["system", "light", "dark"]
+    @State private var tab = 0
+    @State private var configService: PCService?
+    @Environment(\.dismiss) private var dismiss
 
     var body: some View {
-        NavigationStack {
-            Form {
-                Section("Appearance") {
-                    Picker("Theme", selection: themeBinding) {
-                        ForEach(Self.themeOptions, id: \.self) { option in
-                            Text(option.capitalized).tag(option)
-                        }
-                    }
-                    .pickerStyle(.segmented)
-                }
-
-                Section("Scrobbling") {
-                    Toggle("Enable scrobbling", isOn: scrobblingBinding)
-                }
-
-                Section("Last.fm") {
-                    TextField("Username", text: lastFmBinding)
-                        .textInputAutocapitalization(.never)
-                        .autocorrectionDisabled()
-                }
-
-                Section {
-                    TextField("Username", text: listenBrainzBinding)
-                        .textInputAutocapitalization(.never)
-                        .autocorrectionDisabled()
-                    SecureField("User token", text: lbTokenBinding)
-                        .textInputAutocapitalization(.never)
-                        .autocorrectionDisabled()
-                } header: { Text("ListenBrainz") } footer: {
-                    Text("The user token enables playlist sync, follows, and loved-track push. Find it at listenbrainz.org/settings.")
-                }
-
-                Section("Spotify") {
-                    if model.spotifyConnected {
-                        HStack(spacing: 8) {
-                            Image(systemName: "checkmark.circle.fill")
-                                .foregroundStyle(.green)
-                            Text("Spotify · Connected")
-                        }
-                        Button("Disconnect", role: .destructive) {
-                            model.disconnectSpotify()
-                        }
-                    } else {
-                        Button("Connect Spotify") {
-                            model.connectSpotify()
-                        }
-                        if let error = model.spotifyError {
-                            Text(error)
-                                .font(.caption)
-                                .foregroundStyle(.red)
-                        }
-                    }
-                }
-
-                Section {
-                    Picker("Provider", selection: aiProviderBinding) {
-                        Text("ChatGPT").tag("chatgpt")
-                        Text("Claude").tag("claude")
-                        Text("Gemini").tag("gemini")
-                    }
-                    SecureField("ChatGPT API key", text: aiKeyBinding("chatgpt"))
-                        .textInputAutocapitalization(.never).autocorrectionDisabled()
-                    SecureField("Claude API key", text: aiKeyBinding("claude"))
-                        .textInputAutocapitalization(.never).autocorrectionDisabled()
-                    SecureField("Gemini API key", text: aiKeyBinding("gemini"))
-                        .textInputAutocapitalization(.never).autocorrectionDisabled()
-                } header: { Text("AI Providers") } footer: {
-                    Text("Bring your own API key for Shuffleupagus (DJ chat) and AI recommendations. Only the selected provider is used.")
-                }
-
-                Section {
-                    SecureField("Ticketmaster API key", text: ticketmasterBinding)
-                        .textInputAutocapitalization(.never).autocorrectionDisabled()
-                    SecureField("SeatGeek client ID", text: seatGeekBinding)
-                        .textInputAutocapitalization(.never).autocorrectionDisabled()
-                } header: { Text("Concerts & Events") } footer: {
-                    Text("Keys for concert discovery. Without them the On Tour and Concerts features stay empty.")
-                }
-
-                Section {
-                    Text(
-                        "These read/write the SHARED SettingsStore (KMP " +
-                        "commonMain) — the same class Android uses. Backed " +
-                        "on iOS by NSUserDefaults + Keychain. Changes persist " +
-                        "across launches."
-                    )
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
+        VStack(spacing: 0) {
+            PCTopBar(title: "Settings", leading: .back, onLeading: { dismiss() })
+            PCTabs(tabs: ["Plug-ins", "General", "About"], selection: $tab)
+            ScrollView {
+                switch tab {
+                case 0: PlugInsTab(model: model, onConfig: { configService = $0 })
+                case 1: GeneralTab(model: model)
+                default: AboutTab()
                 }
             }
-            .navigationTitle("Settings")
+        }
+        .toolbar(.hidden, for: .navigationBar)
+        .sheet(item: $configService) { svc in
+            PluginConfigSheet(service: svc, model: model)
         }
         .onAppear { model.start() }
         .onDisappear { model.stop() }
     }
+}
 
-    // Bindings translate SwiftUI control changes into shared-store writes.
+// MARK: - Plug-ins tab
 
-    private var themeBinding: Binding<String> {
-        Binding(get: { model.themeMode }, set: { model.setTheme($0) })
+private struct PlugInsTab: View {
+    @Bindable var model: SettingsViewModel
+    let onConfig: (PCService) -> Void
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 0) {
+            sectionLabel("Content Resolvers")
+            Text("Drag priority sets which source plays first.")
+                .font(.system(size: 12)).foregroundStyle(PC.fg3).padding(.horizontal, 20).padding(.bottom, 6)
+            VStack(spacing: 0) {
+                ForEach(Array(model.resolverOrder.enumerated()), id: \.element) { i, id in
+                    if let svc = PCServices.find(id) {
+                        resolverRow(svc, index: i)
+                        if i < model.resolverOrder.count - 1 { Divider().padding(.leading, 64) }
+                    }
+                }
+            }
+
+            sectionLabel("Meta Services")
+            serviceGrid(PCServices.meta, columns: 3)
+
+            sectionLabel("Concerts & Events")
+            serviceGrid(PCServices.concerts, columns: 2)
+
+            pluginUpdates
+        }
+        .padding(.bottom, 130)
     }
-    private var scrobblingBinding: Binding<Bool> {
-        Binding(get: { model.scrobblingEnabled }, set: { model.setScrobbling($0) })
+
+    private func resolverRow(_ svc: PCService, index: Int) -> some View {
+        HStack(spacing: 12) {
+            Text("\(index + 1)").font(.system(size: 13, weight: .bold, design: .monospaced)).foregroundStyle(PC.fg3).frame(width: 18)
+            tileIcon(svc, size: 34)
+            VStack(alignment: .leading, spacing: 1) {
+                Text(svc.name).font(.system(size: 15, weight: .medium)).foregroundStyle(PC.fg1)
+                Text(model.isConnected(svc.id) ? "Connected" : "Not connected")
+                    .font(.system(size: 12)).foregroundStyle(model.isConnected(svc.id) ? Color(uiColor: UIColor(hex: 0x10B981)) : PC.fg3)
+            }
+            Spacer(minLength: 0)
+            Button { onConfig(svc) } label: { Image(systemName: "gearshape").foregroundStyle(PC.fg2) }.buttonStyle(.plain)
+            VStack(spacing: 2) {
+                Button { model.moveResolver(index, index - 1) } label: { Image(systemName: "chevron.up").font(.system(size: 12, weight: .bold)) }
+                    .disabled(index == 0).buttonStyle(.plain).foregroundStyle(index == 0 ? PC.fg3.opacity(0.4) : PC.fg2)
+                Button { model.moveResolver(index, index + 1) } label: { Image(systemName: "chevron.down").font(.system(size: 12, weight: .bold)) }
+                    .disabled(index == model.resolverOrder.count - 1).buttonStyle(.plain)
+                    .foregroundStyle(index == model.resolverOrder.count - 1 ? PC.fg3.opacity(0.4) : PC.fg2)
+            }
+        }
+        .padding(.horizontal, 20).padding(.vertical, 9)
     }
-    private var lastFmBinding: Binding<String> {
-        Binding(get: { model.lastFmUsername }, set: { model.setLastFmUsername($0) })
+
+    private func serviceGrid(_ services: [PCService], columns: Int) -> some View {
+        LazyVGrid(columns: Array(repeating: GridItem(.flexible(), spacing: 12), count: columns), spacing: 12) {
+            ForEach(services) { svc in
+                Button { onConfig(svc) } label: {
+                    VStack(spacing: 6) {
+                        ZStack(alignment: .topTrailing) {
+                            tileIcon(svc, size: 48)
+                            if model.isConnected(svc.id) {
+                                Image(systemName: "checkmark.circle.fill").font(.system(size: 15))
+                                    .foregroundStyle(Color(uiColor: UIColor(hex: 0x10B981)), .white).offset(x: 5, y: -5)
+                            }
+                        }
+                        .opacity(model.isConnected(svc.id) ? 1 : 0.55)
+                        Text(svc.name).font(.system(size: 11)).foregroundStyle(PC.fg1).lineLimit(1)
+                    }
+                }
+                .buttonStyle(.plain)
+            }
+        }
+        .padding(.horizontal, 20).padding(.bottom, 8)
     }
-    private var listenBrainzBinding: Binding<String> {
-        Binding(get: { model.listenBrainzUsername }, set: { model.setListenBrainzUsername($0) })
+
+    private var pluginUpdates: some View {
+        HStack {
+            VStack(alignment: .leading, spacing: 2) {
+                Text("Plugin Updates").font(.system(size: 15, weight: .medium)).foregroundStyle(PC.fg1)
+                Text("\(model.pluginCount) plugins loaded").font(.system(size: 12)).foregroundStyle(PC.fg3)
+            }
+            Spacer()
+            Button { model.syncPlugins() } label: {
+                switch model.syncState {
+                case .idle: Text("Check for updates").font(.system(size: 14, weight: .medium)).foregroundStyle(PC.accent)
+                case .syncing: HStack(spacing: 6) { ProgressView().controlSize(.small); Text("Checking…").font(.system(size: 14)).foregroundStyle(PC.fg2) }
+                case .done(let s): Text("✓ \(s)").font(.system(size: 14)).foregroundStyle(Color(uiColor: UIColor(hex: 0x10B981)))
+                case .failed: Text("⚠ Failed").font(.system(size: 14)).foregroundStyle(PC.error)
+                }
+            }
+            .buttonStyle(.plain).disabled(model.syncState == .syncing)
+        }
+        .padding(.horizontal, 20).padding(.vertical, 14)
+        .overlay(Rectangle().fill(PC.border).frame(height: 1), alignment: .top)
+        .padding(.top, 10)
     }
-    private var lbTokenBinding: Binding<String> {
-        Binding(get: { model.listenBrainzToken }, set: { model.setListenBrainzToken($0) })
+
+    private func sectionLabel(_ t: String) -> some View {
+        Text(t.uppercased()).font(.system(size: 11, weight: .bold)).tracking(1.4).foregroundStyle(PC.fg3)
+            .padding(.horizontal, 20).padding(.top, 18).padding(.bottom, 8)
     }
-    private var aiProviderBinding: Binding<String> {
-        Binding(get: { model.selectedAiProvider }, set: { model.setSelectedAiProvider($0) })
+    private func tileIcon(_ svc: PCService, size: CGFloat) -> some View {
+        RoundedRectangle(cornerRadius: size * 0.22, style: .continuous)
+            .fill(Color(uiColor: UIColor(hex: svc.color)))
+            .frame(width: size, height: size)
+            .overlay(Image(systemName: svc.icon).font(.system(size: size * 0.42, weight: .semibold)).foregroundStyle(.white))
     }
-    private func aiKeyBinding(_ provider: String) -> Binding<String> {
-        Binding(get: { model.aiKeys[provider] ?? "" }, set: { model.setAiKey(provider, $0) })
+}
+
+// MARK: - Plugin config sheet
+
+private struct PluginConfigSheet: View {
+    let service: PCService
+    @Bindable var model: SettingsViewModel
+    @Environment(\.dismiss) private var dismiss
+    @State private var draft = ""
+    @State private var secretDraft = ""
+
+    private var isAi: Bool { ["chatgpt", "claude", "gemini"].contains(service.id) }
+
+    var body: some View {
+        NavigationStack {
+            Form {
+                Section {
+                    HStack(spacing: 12) {
+                        RoundedRectangle(cornerRadius: 12, style: .continuous).fill(Color(uiColor: UIColor(hex: service.color)))
+                            .frame(width: 52, height: 52)
+                            .overlay(Image(systemName: service.icon).font(.system(size: 22, weight: .semibold)).foregroundStyle(.white))
+                        VStack(alignment: .leading, spacing: 3) {
+                            Text(service.name).font(.system(size: 18, weight: .semibold))
+                            Text(model.isConnected(service.id) ? "Connected" : "Not connected")
+                                .font(.system(size: 13)).foregroundStyle(model.isConnected(service.id) ? .green : .secondary)
+                        }
+                        Spacer()
+                    }
+                }
+
+                switch service.id {
+                case "spotify": spotifySection
+                case "applemusic": infoSection("Apple Music is authorized at playback time via MusicKit. No key needed.")
+                case "localfiles": infoSection("Local files are scanned from your device's music library automatically.")
+                case "bandcamp": infoSection("Bandcamp needs no credentials — it resolves and opens tracks in the browser.")
+                default: keySection
+                }
+            }
+            .navigationTitle("Configure").navigationBarTitleDisplayMode(.inline)
+            .toolbar { ToolbarItem(placement: .confirmationAction) { Button("Done") { dismiss() } } }
+            .onAppear { draft = model.values[service.id] ?? "" }
+        }
     }
-    private var ticketmasterBinding: Binding<String> {
-        Binding(get: { model.ticketmasterKey }, set: { model.setTicketmasterKey($0) })
+
+    private var spotifySection: some View {
+        Section("Connection") {
+            if model.spotifyConnected {
+                Label("Spotify Premium connected", systemImage: "checkmark.circle.fill").foregroundStyle(.green)
+                Button("Disconnect", role: .destructive) { model.disconnectSpotify() }
+            } else {
+                Button("Connect Spotify") { model.connectSpotify() }
+                if let e = model.spotifyError { Text(e).font(.caption).foregroundStyle(.red) }
+            }
+        }
     }
-    private var seatGeekBinding: Binding<String> {
-        Binding(get: { model.seatGeekId }, set: { model.setSeatGeekId($0) })
+
+    @ViewBuilder private var keySection: some View {
+        Section {
+            SecureField(keyPlaceholder, text: $draft)
+                .textInputAutocapitalization(.never).autocorrectionDisabled()
+            if service.id == "soundcloud" {
+                SecureField("Client Secret", text: $secretDraft).textInputAutocapitalization(.never).autocorrectionDisabled()
+            }
+            Button("Save") {
+                model.setValue(service.id, draft, secret: service.id == "soundcloud" ? secretDraft : nil)
+            }.disabled(draft.isEmpty)
+            if !(model.values[service.id]?.isEmpty ?? true) {
+                Button("Clear", role: .destructive) { draft = ""; model.setValue(service.id, "") }
+            }
+        } header: { Text(keyHeader) } footer: { Text(keyFooter) }
+
+        if isAi {
+            Section("Model") {
+                Picker("Model", selection: Binding(get: { model.aiModels[service.id] ?? "" }, set: { model.setAiModel(service.id, $0) })) {
+                    Text("Default").tag("")
+                    ForEach(SettingsViewModel.aiModelOptions[service.id] ?? [], id: \.self) { Text($0).tag($0) }
+                }
+                Toggle("Use as DJ provider", isOn: Binding(
+                    get: { model.selectedAiProvider == service.id },
+                    set: { if $0 { model.setSelectedAiProvider(service.id) } }))
+            }
+        }
+    }
+
+    private func infoSection(_ s: String) -> some View {
+        Section { Text(s).font(.system(size: 14)).foregroundStyle(.secondary) }
+    }
+
+    private var keyPlaceholder: String {
+        switch service.id {
+        case "lastfm": return "Last.fm username"
+        case "listenbrainz": return "ListenBrainz user token"
+        case "seatgeek": return "SeatGeek client ID"
+        case "soundcloud": return "Client ID"
+        default: return "API key"
+        }
+    }
+    private var keyHeader: String { service.id == "lastfm" ? "Username" : "Credentials" }
+    private var keyFooter: String {
+        switch service.id {
+        case "lastfm": return "Enables Top Songs/Albums/Artists, recent plays, and charts."
+        case "listenbrainz": return "Find it at listenbrainz.org/settings. Enables playlists, follows, and recent plays."
+        case "chatgpt", "claude", "gemini": return "Bring your own key for Shuffleupagus (DJ chat) and AI recommendations."
+        case "ticketmaster", "seatgeek", "bandsintown", "songkick": return "Powers the Concerts page + On Tour indicators."
+        case "discogs": return "Supplements artist/album metadata."
+        case "soundcloud": return "Client ID + Secret enable SoundCloud streaming."
+        default: return ""
+        }
+    }
+}
+
+// MARK: - General tab
+
+private struct GeneralTab: View {
+    @Bindable var model: SettingsViewModel
+    private let themes = ["system", "light", "dark"]
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 0) {
+            label("Appearance")
+            Picker("Theme", selection: Binding(get: { model.themeMode }, set: { model.setTheme($0) })) {
+                ForEach(themes, id: \.self) { Text($0.capitalized).tag($0) }
+            }.pickerStyle(.segmented).padding(.horizontal, 20)
+
+            label("Scrobbling")
+            Toggle("Send listening history", isOn: Binding(get: { model.scrobblingEnabled }, set: { model.setScrobbling($0) }))
+                .padding(.horizontal, 20)
+            Text("Connect Last.fm / ListenBrainz under Plug-ins to scrobble your plays.")
+                .font(.system(size: 12)).foregroundStyle(PC.fg3).padding(.horizontal, 20).padding(.top, 6)
+        }
+        .padding(.bottom, 130)
+    }
+    private func label(_ t: String) -> some View {
+        Text(t.uppercased()).font(.system(size: 11, weight: .bold)).tracking(1.4).foregroundStyle(PC.fg3)
+            .padding(.horizontal, 20).padding(.top, 18).padding(.bottom, 8)
+    }
+}
+
+// MARK: - About tab
+
+private struct AboutTab: View {
+    var body: some View {
+        VStack(spacing: 12) {
+            Image("ParachordWordmark").renderingMode(.template).resizable().scaledToFit()
+                .frame(height: 30).foregroundStyle(PC.fg1).padding(.top, 32)
+            Text("A modern multi-source music player inspired by Tomahawk.")
+                .font(.system(size: 14)).foregroundStyle(PC.fg2).multilineTextAlignment(.center).padding(.horizontal, 40)
+            Divider().frame(width: 64).padding(.vertical, 6)
+            Text("OPEN SOURCE SOFTWARE").font(.system(size: 11, weight: .semibold)).tracking(1.2).foregroundStyle(PC.fg3)
+            Text("Built with Kotlin Multiplatform, SwiftUI, and JavaScriptCore.")
+                .font(.system(size: 13)).foregroundStyle(PC.fg2).multilineTextAlignment(.center).padding(.horizontal, 40)
+            Link("View on GitHub →", destination: URL(string: "https://github.com/Parachord/parachord-mobile")!)
+                .font(.system(size: 13)).foregroundStyle(PC.accent)
+            Text("© Jason Herskowitz · Licensed under the MIT License")
+                .font(.system(size: 11)).foregroundStyle(PC.fg3).padding(.top, 4)
+        }
+        .frame(maxWidth: .infinity).padding(.bottom, 130)
     }
 }

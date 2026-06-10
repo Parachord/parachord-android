@@ -7,6 +7,7 @@ import com.parachord.shared.config.AppConfig
 import com.parachord.shared.plugin.IosJsRuntime
 import com.parachord.shared.plugin.PluginFileAccess
 import com.parachord.shared.plugin.PluginManager
+import com.parachord.shared.plugin.PluginSyncService
 import com.parachord.shared.api.AppleMusicClient
 import com.parachord.shared.api.LastFmClient
 import com.parachord.shared.metadata.AlbumDetail
@@ -548,6 +549,27 @@ class IosContainer private constructor() {
         }
         return null
     }
+
+    /** Full plugin metadata for the Settings UI (id/name/version/type/icon/color/capabilities). */
+    suspend fun loadPlugins(): List<PluginManager.PluginInfo> {
+        pluginManager.ensureInitialized()
+        return pluginManager.plugins.value
+    }
+    /** Includes platform-filtered plugins (e.g. youtube) — for the "N plugins loaded" count. */
+    suspend fun loadAllPlugins(): List<PluginManager.PluginInfo> {
+        pluginManager.ensureInitialized()
+        return pluginManager.allLoadedPlugins.value
+    }
+
+    // ── Plugin marketplace (GitHub parachord-plugins → hot-reload) ──────
+    val pluginSyncService: PluginSyncService by lazy {
+        PluginSyncService(
+            httpClient, pluginManager, PluginFileAccess(),
+            getLastSyncTimestamp = { settingsStore.getLastPluginSyncTimestamp() },
+            setLastSyncTimestamp = { settingsStore.setLastPluginSyncTimestamp(it) },
+        )
+    }
+    suspend fun syncPluginsNow(): PluginSyncService.SyncResult = pluginSyncService.sync()
 
     // ── Resolver pipeline (.axe-only, the iOS ResolverManager-equivalent) ──
 
