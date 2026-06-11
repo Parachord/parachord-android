@@ -651,6 +651,8 @@ class IosContainer private constructor() {
             scoring = resolverScoring,
             settingsStore = settingsStore,
             spotifyClient = spotifyClient,
+            httpClient = httpClient,
+            appleMusicDeveloperToken = appConfig.appleMusicDeveloperToken,
         )
     }
 

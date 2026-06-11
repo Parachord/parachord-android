@@ -12,8 +12,17 @@ import kotlinx.coroutines.awaitAll
 import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.CancellationException
+import io.ktor.client.HttpClient
+import io.ktor.client.request.get
+import io.ktor.client.request.header
+import io.ktor.client.statement.bodyAsText
+import io.ktor.http.encodeURLParameter
 import kotlinx.serialization.Serializable
 import kotlinx.serialization.json.Json
+import kotlinx.serialization.json.contentOrNull
+import kotlinx.serialization.json.jsonArray
+import kotlinx.serialization.json.jsonObject
+import kotlinx.serialization.json.jsonPrimitive
 
 /**
  * iOS's `.axe`-only equivalent of Android's `ResolverManager`.
@@ -47,6 +56,8 @@ class IosResolverCoordinator(
     private val scoring: ResolverScoring,
     private val settingsStore: SettingsStore,
     private val spotifyClient: SpotifyClient,
+    private val httpClient: HttpClient,
+    private val appleMusicDeveloperToken: String,
 ) {
     private val json = Json { ignoreUnknownKeys = true; isLenient = true }
 
@@ -76,7 +87,15 @@ class IosResolverCoordinator(
         val spotifyActive = active.isEmpty() || "spotify" in active
         val spotifyConnected = spotifyActive && settingsStore.getSpotifyAccessToken() != null
 
-        if (ids.isEmpty() && !spotifyConnected) return emptyList()
+        // Native Apple Music branch (Android parity). Android resolves Apple Music
+        // via the MusicKit catalog, not the iTunes-Search .axe — the .axe missed
+        // tracks Apple Music actually has. This hits the SAME catalog API MusicKit
+        // uses (Bearer dev token) for far better matching. `applemusic` is excluded
+        // from the .axe STREAMING_RESOLVERS so only this native path runs.
+        val amActive = active.isEmpty() || "applemusic" in active
+        val amAvailable = amActive && appleMusicDeveloperToken.isNotBlank()
+
+        if (ids.isEmpty() && !spotifyConnected && !amAvailable) return emptyList()
 
         val resolved: List<ResolvedSource> = coroutineScope {
             val axeDeferred = ids.map { id -> async { resolveOne(id, artist, title, album) } }
@@ -93,7 +112,12 @@ class IosResolverCoordinator(
             } else {
                 null
             }
-            (axeDeferred + listOfNotNull(spotifyDeferred)).awaitAll()
+            val amDeferred = if (amAvailable) {
+                async { resolveAppleMusicNative(artist, title) }
+            } else {
+                null
+            }
+            (axeDeferred + listOfNotNull(spotifyDeferred, amDeferred)).awaitAll()
         }.filterNotNull()
 
         // Re-score against the target (Android ResolverManager parity): the
@@ -195,16 +219,75 @@ class IosResolverCoordinator(
         return null
     }
 
+    /**
+     * Native Apple Music catalog resolution (Android parity). Searches the
+     * catalog `songs` endpoint with the dev-token Bearer — the same catalog
+     * MusicKit queries — and returns the best title+artist match as a routable
+     * `applemusic` source (appleMusicId + artwork + 30s preview). The placeholder
+     * 0.9 confidence is overridden by [scoreConfidence] in [resolveSources], so a
+     * wrong-song catalog hit is still dropped by the 0.60 floor.
+     */
+    private suspend fun resolveAppleMusicNative(artist: String, title: String): ResolvedSource? {
+        val storefront = settingsStore.getAppleMusicStorefront()?.ifBlank { null } ?: "us"
+        val term = "$artist $title".encodeURLParameter()
+        val url = "https://api.music.apple.com/v1/catalog/$storefront/search?types=songs&limit=10&term=$term"
+        val body = try {
+            httpClient.get(url) { header("Authorization", "Bearer $appleMusicDeveloperToken") }.bodyAsText()
+        } catch (e: CancellationException) {
+            throw e
+        } catch (e: Exception) {
+            return null
+        }
+        if (body.isBlank()) return null
+
+        val data = runCatching {
+            json.parseToJsonElement(body).jsonObject["results"]?.jsonObject
+                ?.get("songs")?.jsonObject?.get("data")?.jsonArray
+        }.getOrNull() ?: return null
+        if (data.isEmpty()) return null
+
+        fun norm(s: String?) = (s ?: "").lowercase().filter { it.isLetterOrDigit() }
+        val nt = norm(title)
+        val na = norm(artist)
+        // Prefer the first song whose title AND artist both substring-match the
+        // target; else the catalog's top hit (scoreConfidence then validates).
+        val best = data.firstOrNull { el ->
+            val at = el.jsonObject["attributes"]?.jsonObject
+            norm(at?.get("name")?.jsonPrimitive?.contentOrNull).contains(nt) &&
+                norm(at?.get("artistName")?.jsonPrimitive?.contentOrNull).contains(na)
+        } ?: data.first()
+
+        val attrs = best.jsonObject["attributes"]?.jsonObject ?: return null
+        val id = best.jsonObject["id"]?.jsonPrimitive?.contentOrNull ?: return null
+        val artwork = attrs["artwork"]?.jsonObject?.get("url")?.jsonPrimitive?.contentOrNull
+            ?.replace("{w}", "600")?.replace("{h}", "600")?.replace("{f}", "jpg")
+        val preview = attrs["previews"]?.jsonArray?.firstOrNull()?.jsonObject
+            ?.get("url")?.jsonPrimitive?.contentOrNull
+
+        return ResolvedSource(
+            url = preview ?: "",
+            sourceType = "applemusic",
+            resolver = "applemusic",
+            appleMusicId = id,
+            confidence = 0.9, // overridden by scoreConfidence in resolveSources
+            matchedTitle = attrs["name"]?.jsonPrimitive?.contentOrNull,
+            matchedArtist = attrs["artistName"]?.jsonPrimitive?.contentOrNull,
+            artworkUrl = artwork,
+        )
+    }
+
     private fun String.jsEsc(): String = replace("\\", "\\\\").replace("'", "\\'")
 
     private companion object {
         /**
          * CLAUDE.md `stream: true` content resolvers run through `.axe`.
-         * `spotify` is intentionally ABSENT — it resolves natively via the
-         * shared [SpotifyClient] (Android parity); `spotify.axe` stays loaded
-         * but dormant for resolution. localfiles is a no-op on iOS today.
+         * `spotify` AND `applemusic` are intentionally ABSENT — both resolve
+         * natively (Android parity): Spotify via the shared [SpotifyClient],
+         * Apple Music via the catalog API ([resolveAppleMusicNative]). Their
+         * `.axe` plugins stay loaded but dormant for resolution. localfiles is a
+         * no-op on iOS today.
          */
-        val STREAMING_RESOLVERS = listOf("applemusic", "soundcloud", "localfiles")
+        val STREAMING_RESOLVERS = listOf("soundcloud", "localfiles")
         const val POLL_ATTEMPTS = 50
         const val POLL_INTERVAL_MS = 100L
     }
