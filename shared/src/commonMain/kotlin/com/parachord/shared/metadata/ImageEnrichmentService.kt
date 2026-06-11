@@ -99,8 +99,10 @@ class ImageEnrichmentService(
             if (cur != null && cur.isActive) return@withLock cur
             val d = scope.async {
                 try {
-                    val info = metadataService.getArtistInfo(artistName)
-                    val imageUrl = info?.imageUrl
+                    // Fast image-only path (streaming-first, short-circuits) — NOT
+                    // the full getArtistInfo cascade, which awaitAll's the slow
+                    // Wikipedia MB→Wikidata chain just to read an image.
+                    val imageUrl = metadataService.getArtistImage(artistName)
                     if (imageUrl != null) {
                         artistDao.updateImageByName(artistName, imageUrl)
                     }

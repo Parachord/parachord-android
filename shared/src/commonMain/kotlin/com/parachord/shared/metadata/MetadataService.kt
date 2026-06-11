@@ -3,6 +3,7 @@ package com.parachord.shared.metadata
 import kotlinx.coroutines.async
 import kotlinx.coroutines.awaitAll
 import kotlinx.coroutines.coroutineScope
+import kotlinx.coroutines.withTimeoutOrNull
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.channelFlow
 import kotlinx.coroutines.launch
@@ -32,6 +33,13 @@ class MetadataService constructor(
     private val getDisabledProviders: suspend () -> Set<String>,
     private val enrichAlbumArtwork: (suspend (artistName: String, albums: List<AlbumSearchResult>) -> List<AlbumSearchResult>)? = null,
 ) {
+
+    private companion object {
+        /** Max time any single provider may take inside the getArtistInfo merge
+         *  before it's dropped (null) — keeps a slow/hung provider from stalling
+         *  the whole awaitAll. Fast providers return in <1s; this only cuts hangs. */
+        const val PROVIDER_TIMEOUT_MS = 8_000L
+    }
 
     /** Search tracks across all available providers in parallel, merge and deduplicate. */
     suspend fun searchTracks(query: String, limit: Int = 20): List<TrackSearchResult> = coroutineScope {
@@ -75,9 +83,18 @@ class MetadataService constructor(
      * later providers fill in gaps left by earlier ones.
      */
     suspend fun getArtistInfo(artistName: String): ArtistInfo? = coroutineScope {
+        // Per-provider timeout so one SLOW provider can't stall the awaitAll
+        // merge. The shared HttpClient has a 60s request budget (AI endpoints
+        // need it), but a metadata provider that hangs — e.g. Wikipedia's
+        // 4-call MB→Wikidata→Wikipedia chain under MusicBrainz-gate contention,
+        // or a rate-limited Discogs — must NOT block the artist image from the
+        // fast providers (MusicBrainz/Spotify/Apple Music) for that long. A
+        // timed-out provider just contributes null.
         val results = availableProviders()
             .map { provider -> async {
-                try { provider.getArtistInfo(artistName) } catch (_: Exception) { null }
+                try {
+                    withTimeoutOrNull(PROVIDER_TIMEOUT_MS) { provider.getArtistInfo(artistName) }
+                } catch (_: Exception) { null }
             } }
             .awaitAll()
             .filterNotNull()
@@ -100,7 +117,46 @@ class MetadataService constructor(
             )
         }
 
+        // Image source preference — SEPARATE from the bio order, mirroring
+        // desktop's getArtistImage (Spotify -> Apple Music). Streaming art first
+        // (Spotify when connected, then the always-populated Apple Music catalog),
+        // with the encyclopedia sources only as a last-ditch fallback. Without
+        // this override the priority merge above prefers Wikipedia/MusicBrainz —
+        // wrong for images, since encyclopedia thumbnails and Last.fm's grey-star
+        // placeholder beat real streaming art.
+        val imagePreference = listOf("spotify", "applemusic", "wikipedia", "discogs", "lastfm", "musicbrainz")
+        val bestImage = imagePreference.firstNotNullOfOrNull { src ->
+            results.firstOrNull { it.provider == src && !it.imageUrl.isNullOrBlank() }?.imageUrl
+        }
+        if (bestImage != null && bestImage != merged.imageUrl) {
+            merged = merged.copy(imageUrl = bestImage)
+        }
+
         merged
+    }
+
+    /**
+     * Fast artist-IMAGE lookup, separate from the full [getArtistInfo] cascade.
+     * Mirrors desktop's `getArtistImage`: streaming art first (Spotify when
+     * connected, then the always-populated Apple Music catalog), encyclopedia
+     * (Wikipedia/Discogs/Last.fm) only as a last-ditch fallback. Queries
+     * providers in preference order and SHORT-CIRCUITS at the first image — no
+     * full-cascade awaitAll, and the slow Wikipedia MB→Wikidata chain never runs
+     * when a streaming image is available. This is what the background
+     * ImageEnrichmentService should call so artist images load fast and don't
+     * saturate the MusicBrainz rate-gate.
+     */
+    suspend fun getArtistImage(artistName: String): String? {
+        val available = availableProviders().associateBy { it.name }
+        val order = listOf("spotify", "applemusic", "wikipedia", "discogs", "lastfm", "musicbrainz")
+        for (name in order) {
+            val provider = available[name] ?: continue
+            val img = try {
+                withTimeoutOrNull(PROVIDER_TIMEOUT_MS) { provider.getArtistInfo(artistName)?.imageUrl }
+            } catch (_: Exception) { null }
+            if (!img.isNullOrBlank()) return img
+        }
+        return null
     }
 
     /** Get an artist's top tracks from all available providers, merged and deduplicated. */
