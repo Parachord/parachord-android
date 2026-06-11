@@ -239,7 +239,7 @@ private enum ArtistTab: String, CaseIterable {
 struct ArtistScreen: View {
     @State private var model: ArtistDetailModel
     @State private var tab: ArtistTab = .discography
-    @State private var discoFilter = "All"
+    @State private var discoFilter = "all"
     @Environment(QueuePlaybackCoordinator.self) private var coordinator
     @Environment(\.dismiss) private var dismiss
     /// Observed so top-track art fills in from the resolver as rows resolve.
@@ -386,46 +386,66 @@ struct ArtistScreen: View {
 
     // MARK: Discography (chips + 2-col grid)
 
-    private func releaseKind(_ a: AlbumSearchResult) -> String {
-        // Live releases (MB secondary type) get their OWN bucket so they don't
-        // pollute Studio Albums.
-        if a.secondaryTypes.contains(where: { $0.lowercased() == "live" }) { return "Live" }
-        switch (a.releaseType ?? "album").lowercased() {
-        case "single": return "Singles"
-        case "ep": return "EPs"
-        default: return "Studio Albums"
+    // Release-type filters — same categories, order, logic, and colors as Android's
+    // DiscographyTab (#197). The MB mapper's normalizeReleaseType already folds Live
+    // and Compilation (MB secondary types) into `releaseType`, so we filter / count /
+    // colour by releaseType directly, exactly like Android.
+    private struct DiscoFilter: Hashable { let label: String; let key: String }
+    private static let discoFilters: [DiscoFilter] = [
+        DiscoFilter(label: "All", key: "all"),
+        DiscoFilter(label: "Studio Albums", key: "album"),
+        DiscoFilter(label: "Singles", key: "single"),
+        DiscoFilter(label: "EPs", key: "ep"),
+        DiscoFilter(label: "Live", key: "live"),
+        DiscoFilter(label: "Compilations", key: "compilation"),
+    ]
+
+    /// Per-type chip/badge colour — verbatim from Android's releaseTypeBadgeColor.
+    private func releaseTypeColor(_ key: String?) -> Color {
+        switch key?.lowercased() {
+        case "album":       return Color(uiColor: UIColor(hex: 0x6366F1)) // indigo
+        case "ep":          return Color(uiColor: UIColor(hex: 0xA855F7)) // purple
+        case "single":      return Color(uiColor: UIColor(hex: 0xEC4899)) // pink
+        case "live":        return Color(uiColor: UIColor(hex: 0xF59E0B)) // amber
+        case "compilation": return Color(uiColor: UIColor(hex: 0x14B8A6)) // teal
+        default:            return Color(uiColor: UIColor(hex: 0x9CA3AF)) // gray
         }
     }
+
+    private func albumTypeKey(_ a: AlbumSearchResult) -> String { (a.releaseType ?? "album").lowercased() }
+
     private var discoFiltered: [AlbumSearchResult] {
-        discoFilter == "All" ? model.albums : model.albums.filter { releaseKind($0) == discoFilter }
+        discoFilter == "all" ? model.albums : model.albums.filter { albumTypeKey($0) == discoFilter }
     }
 
     private var discographyTab: some View {
         VStack(alignment: .leading, spacing: 0) {
-            let counts: [(String, Int)] = [
-                ("All", model.albums.count),
-                ("Studio Albums", model.albums.filter { releaseKind($0) == "Studio Albums" }.count),
-                ("EPs", model.albums.filter { releaseKind($0) == "EPs" }.count),
-                ("Singles", model.albums.filter { releaseKind($0) == "Singles" }.count),
-                ("Live", model.albums.filter { releaseKind($0) == "Live" }.count),
-            ]
-            ScrollView(.horizontal, showsIndicators: false) {
-                HStack(spacing: 8) {
-                    ForEach(counts.filter { $0.1 > 0 || $0.0 == "All" }, id: \.0) { name, n in
-                        let on = discoFilter == name
-                        Button { discoFilter = name } label: {
-                            Text("\(name) (\(n))").font(.system(size: 13, weight: .medium))
-                                .foregroundStyle(on ? PC.bgPrimary : PC.fg1)
-                                .padding(.horizontal, 14).padding(.vertical, 6)
-                                .background(on ? PC.fg1 : PC.bgInset, in: Capsule())
-                                .overlay(Capsule().strokeBorder(on ? .clear : PC.border))
+            // Counts per releaseType (only albums with an explicit type — Android parity).
+            let typeCounts = Dictionary(grouping: model.albums.compactMap { $0.releaseType?.lowercased() }, by: { $0 })
+                .mapValues { $0.count }
+            let available = Self.discoFilters.filter { $0.key == "all" || typeCounts[$0.key] != nil }
+            if available.count > 1 {
+                ScrollView(.horizontal, showsIndicators: false) {
+                    HStack(spacing: 8) {
+                        ForEach(available, id: \.key) { f in
+                            let on = discoFilter == f.key
+                            let color = releaseTypeColor(f.key == "all" ? nil : f.key)
+                            let count = f.key == "all" ? nil : typeCounts[f.key]
+                            let label = count != nil ? "\(f.label) (\(count!))" : f.label
+                            Button { discoFilter = f.key } label: {
+                                Text(label).font(.system(size: 13, weight: .medium))
+                                    .foregroundStyle(on ? color : PC.fg2)
+                                    .padding(.horizontal, 14).padding(.vertical, 6)
+                                    .background(on ? color.opacity(0.20) : PC.bgInset, in: Capsule())
+                                    .overlay(Capsule().strokeBorder(on ? Color.clear : PC.border))
+                            }
+                            .buttonStyle(.plain)
                         }
-                        .buttonStyle(.plain)
                     }
+                    .padding(.horizontal, 20)
                 }
-                .padding(.horizontal, 20)
+                .padding(.vertical, 12)
             }
-            .padding(.vertical, 12)
 
             LazyVGrid(columns: [GridItem(.flexible(), spacing: 16), GridItem(.flexible(), spacing: 16)], spacing: 18) {
                 ForEach(Array(discoFiltered.enumerated()), id: \.offset) { _, album in
@@ -437,12 +457,13 @@ struct ArtistScreen: View {
                             Text(album.title).font(.system(size: 14, weight: .semibold)).foregroundStyle(PC.fg1)
                                 .lineLimit(1).padding(.top, 10)
                             HStack(spacing: 8) {
-                                let isAlbum = releaseKind(album) == "Studio Albums"
-                                Text((album.releaseType ?? "album").uppercased())
+                                let typeKey = albumTypeKey(album)
+                                let typeColor = releaseTypeColor(typeKey)
+                                Text(typeKey.uppercased())
                                     .font(.system(size: 9, weight: .bold)).tracking(1)
-                                    .foregroundStyle(isAlbum ? PC.accent : PC.fg2)
+                                    .foregroundStyle(typeColor)
                                     .padding(.horizontal, 6).padding(.vertical, 3)
-                                    .background((isAlbum ? PC.accent.opacity(0.10) : PC.bgInset), in: RoundedRectangle(cornerRadius: 3))
+                                    .background(typeColor.opacity(0.15), in: RoundedRectangle(cornerRadius: 3))
                                 if let y = album.year { Text(String(y.intValue)).font(.system(size: 12)).foregroundStyle(PC.fg2) }
                             }
                             .padding(.top, 4)
