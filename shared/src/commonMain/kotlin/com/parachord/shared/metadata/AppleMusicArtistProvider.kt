@@ -17,10 +17,14 @@ import kotlinx.serialization.json.jsonPrimitive
 /**
  * Apple Music artist-image provider (KMP / commonMain).
  *
- * GAP-FILLER: priority 25 — the LAST provider, after Spotify (20). The cascade
- * fills artist-image gaps in priority order, so this only supplies an image when
- * MusicBrainz / Wikipedia / Last.fm / Discogs / Spotify all came up empty.
- * Mirrors the desktop's Spotify→Apple-Music artist-image fallback.
+ * PRIMARY artist-image source. Its `priority` is 25 (its slot in the
+ * getArtistInfo MERGE, which only affects non-image fields like bio/tags), but
+ * MetadataService queries Apple Music FIRST for images — both its image-source
+ * preference and the fast getArtistImage() path — because the AM catalog has a
+ * real image for virtually every artist via a single call on a separate dev
+ * token that does NOT draw on the Spotify client_id shared across
+ * desktop/iOS/Android, so bulk image enrichment never bursts Spotify
+ * (RateLimitGate / #177).
  *
  * Uses the built-in Apple Music DEVELOPER token (Bearer). Catalog artist data is
  * public, so NO Music-User-Token is required. `isAvailable()` is false when no

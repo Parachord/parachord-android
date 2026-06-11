@@ -117,14 +117,15 @@ class MetadataService constructor(
             )
         }
 
-        // Image source preference — SEPARATE from the bio order, mirroring
-        // desktop's getArtistImage (Spotify -> Apple Music). Streaming art first
-        // (Spotify when connected, then the always-populated Apple Music catalog),
-        // with the encyclopedia sources only as a last-ditch fallback. Without
-        // this override the priority merge above prefers Wikipedia/MusicBrainz —
-        // wrong for images, since encyclopedia thumbnails and Last.fm's grey-star
-        // placeholder beat real streaming art.
-        val imagePreference = listOf("spotify", "applemusic", "wikipedia", "discogs", "lastfm", "musicbrainz")
+        // Image source preference — SEPARATE from the bio order. Apple Music
+        // FIRST: it reliably has a real image for every artist via a single call
+        // on a separate dev token that doesn't draw on the shared Spotify
+        // client_id (desktop/iOS/Android), so it never feeds the abuse window
+        // (RateLimitGate / #177). Then Spotify, then the encyclopedia sources.
+        // Without this override the priority merge prefers Wikipedia/MusicBrainz
+        // — wrong for images (encyclopedia thumbnails / Last.fm's grey-star
+        // placeholder beat real streaming art).
+        val imagePreference = listOf("applemusic", "spotify", "wikipedia", "discogs", "lastfm", "musicbrainz")
         val bestImage = imagePreference.firstNotNullOfOrNull { src ->
             results.firstOrNull { it.provider == src && !it.imageUrl.isNullOrBlank() }?.imageUrl
         }
@@ -137,18 +138,18 @@ class MetadataService constructor(
 
     /**
      * Fast artist-IMAGE lookup, separate from the full [getArtistInfo] cascade.
-     * Mirrors desktop's `getArtistImage`: streaming art first (Spotify when
-     * connected, then the always-populated Apple Music catalog), encyclopedia
-     * (Wikipedia/Discogs/Last.fm) only as a last-ditch fallback. Queries
-     * providers in preference order and SHORT-CIRCUITS at the first image — no
-     * full-cascade awaitAll, and the slow Wikipedia MB→Wikidata chain never runs
-     * when a streaming image is available. This is what the background
-     * ImageEnrichmentService should call so artist images load fast and don't
-     * saturate the MusicBrainz rate-gate.
+     * Apple Music FIRST: its catalog has a real image for virtually every artist,
+     * it's a single call, and it uses a separate dev token that does NOT draw on
+     * the Spotify client_id shared across desktop/iOS/Android — so bulk image
+     * enrichment never bursts Spotify (the account-wide abuse window that
+     * RateLimitGate / #177 guards against). Spotify is only a fallback, then the
+     * encyclopedia sources (Wikipedia/Discogs/Last.fm). SHORT-CIRCUITS at the
+     * first image — no full-cascade awaitAll, and the slow Wikipedia MB→Wikidata
+     * chain never runs once a streaming image is found.
      */
     suspend fun getArtistImage(artistName: String): String? {
         val available = availableProviders().associateBy { it.name }
-        val order = listOf("spotify", "applemusic", "wikipedia", "discogs", "lastfm", "musicbrainz")
+        val order = listOf("applemusic", "spotify", "wikipedia", "discogs", "lastfm", "musicbrainz")
         for (name in order) {
             val provider = available[name] ?: continue
             val img = try {

@@ -78,15 +78,17 @@ class SpotifyProvider(
 
     override suspend fun getArtistInfo(artistName: String): ArtistInfo? =
         withAuth {
-            // Search to find artist ID, then fetch full artist for reliable images
+            // The artist search result already carries images + genres + name
+            // (SpArtist), so the old second getArtist() call was redundant.
+            // Dropping it HALVES Spotify calls per artist — critical because the
+            // Spotify client_id is shared across desktop/iOS/Android and bursts
+            // trip the account-wide abuse window (RateLimitGate / #177).
             val response = api.search(query = "artist:\"$artistName\"", type = "artist", limit = 1)
-            val searchArtist = response.artists?.items?.firstOrNull() ?: return@withAuth null
-            val searchArtistId = searchArtist.id ?: return@withAuth null
-            val fullArtist = api.getArtist(artistId = searchArtistId)
+            val artist = response.artists?.items?.firstOrNull() ?: return@withAuth null
             ArtistInfo(
-                name = fullArtist.name ?: return@withAuth null,
-                imageUrl = fullArtist.images.bestImageUrl(),
-                tags = fullArtist.genres,
+                name = artist.name ?: return@withAuth null,
+                imageUrl = artist.images.bestImageUrl(),
+                tags = artist.genres,
                 provider = name,
             )
         }
