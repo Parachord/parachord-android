@@ -105,6 +105,9 @@ final class ResolverPrefs {
     var order: [String] = []
     /// Enabled ("active") resolver ids.
     var active: Set<String> = []
+    /// Suppress additive re-resolution on the FIRST active-flow emit (initial
+    /// load isn't a user "enable").
+    @ObservationIgnored private var activeInitialized = false
 
     private let container = IosContainer.companion.shared
     private let watcher = FlowWatcher(scope: IosContainer.companion.shared.appScope)
@@ -119,7 +122,18 @@ final class ResolverPrefs {
             if let list = v as? [String] { self?.order = list }
         })
         subs.append(watcher.watch(flow: container.settingsStore.getActiveResolversFlow()) { [weak self] v in
-            if let list = v as? [String] { self?.active = Set(list) }
+            guard let self, let list = v as? [String] else { return }
+            let newSet = Set(list)
+            // Additive re-resolution (#1): when a resolver is newly enabled,
+            // resolve just it for already-cached tracks and merge the result.
+            // Skip the first emit (initial load isn't a user enable).
+            if self.activeInitialized {
+                for r in newSet.subtracting(self.active) {
+                    Task { @MainActor in IosTrackResolverCache.shared.resolverEnabled(r) }
+                }
+            }
+            self.active = newSet
+            self.activeInitialized = true
         })
     }
 }

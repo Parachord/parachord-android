@@ -38,11 +38,16 @@ final class IosTrackResolverCache {
     private(set) var cache: [String: [ResolvedSource]] = [:]
     private var inFlight: Set<String> = []
 
+    /// Last-seen request per key, so a newly-enabled resolver (#1) can
+    /// additively re-resolve a cached track (we need its artist/title/album).
+    private var requests: [String: ResolveRequest] = [:]
+
     /// Pending work, drained LOWEST-`order`-first so a tracklist resolves
     /// top-down (the row at the top of the page resolves before the row below
     /// it), never bottom-up. Mirrors desktop ResolutionScheduler's
-    /// visibility-index priority.
-    private var queue: [(order: Int, req: ResolveRequest)] = []
+    /// visibility-index priority. `merge` = a resolver id for an additive
+    /// single-resolver merge (#1); nil for a normal full resolve.
+    private var queue: [(order: Int, req: ResolveRequest, merge: String?)] = []
 
     /// In-flight worker count, bounded by `cap`. This is a SHARED pool across
     /// every submission — submitting tracks one-per-row must not exceed the cap
@@ -96,11 +101,28 @@ final class IosTrackResolverCache {
     /// rows resolve, in the order they sit on the page.
     func resolve(_ req: ResolveRequest, order: Int) {
         let key = req.key
+        requests[key] = req   // record for additive re-resolution (#1), even if cached
         guard cache[key] == nil,
               !inFlight.contains(key),
-              !queue.contains(where: { $0.req.key == key })
+              !queue.contains(where: { $0.req.key == key && $0.merge == nil })
         else { return }
-        queue.append((order, req))
+        queue.append((order, req, nil))
+        pump()
+    }
+
+    /// A resolver was just ENABLED in Settings (#1). Additively resolve ONLY that
+    /// resolver for every track we've already resolved, and MERGE its source into
+    /// the cached results — existing (still-good) sources are KEPT, never
+    /// invalidated. Mirrors the user's intent: enabling Spotify adds Spotify to
+    /// the cached Apple Music results, it doesn't re-resolve from scratch.
+    func resolverEnabled(_ resolverId: String) {
+        for (key, req) in requests {
+            guard let existing = cache[key],
+                  !existing.contains(where: { $0.resolver == resolverId && !$0.noMatch }),
+                  !queue.contains(where: { $0.req.key == key && $0.merge == resolverId })
+            else { continue }
+            queue.append((order: 0, req: req, merge: resolverId))
+        }
         pump()
     }
 
@@ -117,6 +139,34 @@ final class IosTrackResolverCache {
             queue.sort { $0.order < $1.order }           // top-of-page first
             let item = queue.removeFirst()
             let key = item.req.key
+
+            if let mergeResolver = item.merge {
+                // ── Additive single-resolver merge (#1) ──────────────────────
+                guard let existing = cache[key],
+                      !existing.contains(where: { $0.resolver == mergeResolver && !$0.noMatch })
+                else { continue }
+                let flightKey = "\(key)\u{1}\(mergeResolver)"
+                if inFlight.contains(flightKey) { continue }
+                inFlight.insert(flightKey)
+                activeWorkers += 1
+                Task { @MainActor in
+                    if let resolved = try? await self.container.resolveSingleResolver(
+                        resolverId: mergeResolver,
+                        artist: item.req.artist, title: item.req.title, album: item.req.album) {
+                        var merged = (self.cache[key] ?? []).filter { $0.resolver != mergeResolver }
+                        merged.append(resolved)
+                        let ranked = (try? await self.container.rankSources(sources: merged)) ?? merged
+                        self.cache[key] = ranked
+                        self.scheduleSave()
+                    }
+                    self.inFlight.remove(flightKey)
+                    self.activeWorkers -= 1
+                    self.pump()
+                }
+                continue
+            }
+
+            // ── Normal full resolve ──────────────────────────────────────────
             if cache[key] != nil || inFlight.contains(key) { continue }
             inFlight.insert(key)
             activeWorkers += 1

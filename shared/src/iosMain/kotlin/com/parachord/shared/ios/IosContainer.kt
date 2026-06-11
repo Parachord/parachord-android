@@ -664,6 +664,15 @@ class IosContainer private constructor() {
     suspend fun resolveSources(artist: String, title: String, album: String?): List<ResolvedSource> =
         resolverCoordinator.resolveSources(artist, title, album)
 
+    /** Additive single-resolver resolution for [IosTrackResolverCache] when a
+     *  resolver is enabled after a track was already cached (#1). */
+    suspend fun resolveSingleResolver(resolverId: String, artist: String, title: String, album: String?): ResolvedSource? =
+        resolverCoordinator.resolveSingle(resolverId, artist, title, album)
+
+    /** Re-rank merged sources (best first) after an additive merge (#1). */
+    suspend fun rankSources(sources: List<ResolvedSource>): List<ResolvedSource> =
+        resolverScoring.selectRanked(sources, null)
+
     /**
      * Serialize / deserialize the persistent resolver-ID cache (Swift
      * `IosTrackResolverCache`). iOS has no DB yet, so without this every app

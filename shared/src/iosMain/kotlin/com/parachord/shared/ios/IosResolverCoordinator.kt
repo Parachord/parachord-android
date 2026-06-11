@@ -276,6 +276,45 @@ class IosResolverCoordinator(
         )
     }
 
+    /**
+     * Resolve ONE specific resolver for a track (additive re-resolution, #1).
+     * When the user enables a resolver AFTER a track was already cached, we
+     * resolve just the newly-enabled resolver and merge it into the existing
+     * (still-good) sources — rather than re-resolving everything. Re-scored +
+     * 0.60-floor-filtered like [resolveSources]; null on miss / below floor.
+     */
+    suspend fun resolveSingle(resolverId: String, artist: String, title: String, album: String?): ResolvedSource? {
+        pluginManager.ensureInitialized()
+        val raw: ResolvedSource? = when (resolverId) {
+            "spotify" -> {
+                if (settingsStore.getSpotifyAccessToken() == null) return null
+                try {
+                    spotifyClient.searchTrack("$artist $title")
+                } catch (e: CancellationException) {
+                    throw e
+                } catch (e: Exception) {
+                    null
+                }
+            }
+            "applemusic" -> {
+                if (appleMusicDeveloperToken.isBlank()) return null
+                resolveAppleMusicNative(artist, title)
+            }
+            else -> {
+                val loaded = pluginManager.plugins.value.map { it.id }.toSet()
+                if (resolverId !in loaded) return null
+                resolveOne(resolverId, artist, title, album)
+            }
+        }
+        val source = raw ?: return null
+        val scored = if (source.matchedTitle != null || source.matchedArtist != null) {
+            source.copy(confidence = scoreConfidence(title, artist, source.matchedTitle, source.matchedArtist))
+        } else {
+            source
+        }
+        return if (!scored.noMatch && (scored.confidence ?: 0.0) >= ResolverScoring.MIN_CONFIDENCE_THRESHOLD) scored else null
+    }
+
     private fun String.jsEsc(): String = replace("\\", "\\\\").replace("'", "\\'")
 
     private companion object {
