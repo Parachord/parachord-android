@@ -13,6 +13,7 @@ import com.parachord.shared.api.LastFmClient
 import com.parachord.shared.metadata.AlbumDetail
 import com.parachord.shared.metadata.AlbumSearchResult
 import com.parachord.shared.metadata.ArtistInfo
+import com.parachord.shared.metadata.AppleMusicArtistProvider
 import com.parachord.shared.metadata.DiscogsProvider
 import com.parachord.shared.metadata.LastFmProvider
 import com.parachord.shared.metadata.WikipediaProvider
@@ -132,6 +133,10 @@ class IosContainer private constructor() {
             spotifyClientId = "",   // BYO — Parachord ships no Spotify key; user adds theirs in Settings
             lastFmApiKey = plist("LastFmApiKey"),
             lastFmSharedSecret = plist("LastFmSharedSecret"),
+            // Built-in Apple Music developer token (Bearer) for catalog artist
+            // images. From Info.plist -> Secrets.xcconfig $(APPLE_MUSIC_DEVELOPER_TOKEN).
+            // Blank = AppleMusicArtistProvider stays inert (no error).
+            appleMusicDeveloperToken = plist("AppleMusicDeveloperToken"),
         )
     }
 
@@ -232,6 +237,9 @@ class IosContainer private constructor() {
                 LastFmProvider(lastFmClient, appConfig.lastFmApiKey),
                 DiscogsProvider(httpClient, settingsStore),
                 SpotifyProvider(spotifyClient, settingsStore),
+                // Gap-filler (priority 25, last): Apple Music catalog artist art
+                // when nothing above had an image. Inert without a dev token.
+                AppleMusicArtistProvider(httpClient, appConfig.appleMusicDeveloperToken),
             ),
             getDisabledProviders = { emptySet() },
             // Mirrors AndroidModule.enrichAlbumArtworkViaItunes: upgrade Cover
@@ -346,6 +354,7 @@ class IosContainer private constructor() {
                 WikipediaProvider(musicBrainzClient, mbProvider, httpClient),
                 LastFmProvider(lastFmClient, appConfig.lastFmApiKey),
                 DiscogsProvider(httpClient, settingsStore),
+                AppleMusicArtistProvider(httpClient, appConfig.appleMusicDeveloperToken),
             ),
             getDisabledProviders = { emptySet() },
             enrichAlbumArtwork = { artistName, albums ->

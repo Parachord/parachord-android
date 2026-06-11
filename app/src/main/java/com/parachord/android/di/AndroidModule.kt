@@ -403,7 +403,12 @@ val androidModule = module {
         val settingsStore: com.parachord.shared.settings.SettingsStore = get()
         val appleMusicClient: com.parachord.shared.api.AppleMusicClient = get()
 
-        val providers = listOf(musicBrainz, wikipedia, lastFm, discogs, spotify)
+        // Gap-filler (priority 25, last): Apple Music catalog artist art when no
+        // higher provider had an image. Uses the built-in dev token (Bearer).
+        val appleMusicArtist = com.parachord.shared.metadata.AppleMusicArtistProvider(
+            get(), get<com.parachord.shared.config.AppConfig>().appleMusicDeveloperToken,
+        )
+        val providers = listOf(musicBrainz, wikipedia, lastFm, discogs, spotify, appleMusicArtist)
             .sortedBy { it.priority }
 
         com.parachord.shared.metadata.MetadataService(
