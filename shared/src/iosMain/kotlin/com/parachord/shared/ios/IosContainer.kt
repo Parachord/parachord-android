@@ -289,6 +289,11 @@ class IosContainer private constructor() {
     suspend fun getArtistInfo(artistName: String): ArtistInfo? =
         metadataService.getArtistInfo(artistName)
 
+    /** Fast artist-IMAGE lookup (Apple-Music-first, short-circuit) for the iOS
+     *  ArtistImageCache — header + related-artist images (#187). */
+    suspend fun getArtistImage(artistName: String): String? =
+        metadataService.getArtistImage(artistName)
+
     suspend fun getArtistTopTracks(artistName: String): List<TrackSearchResult> =
         metadataService.getArtistTopTracks(artistName, 10)
 

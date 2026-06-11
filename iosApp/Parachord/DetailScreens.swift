@@ -213,6 +213,7 @@ final class ArtistDetailModel {
         guard !loaded else { return }
         isLoading = true
         info = try? await container.getArtistInfo(artistName: name)
+        ArtistImageCache.shared.fetch(name)   // header image (#187)
         topTracks = (try? await container.getArtistTopTracks(artistName: name)) ?? []
         topEntities = topTracks.map { pcTrack(from: $0) }
         albums = (try? await container.getArtistAlbums(artistName: name)) ?? []
@@ -299,12 +300,31 @@ struct ArtistScreen: View {
 
     // MARK: Hero
 
+    /// Header artwork (#187): cached Apple-Music-first artist image, falling back
+    /// to whatever getArtistInfo populated, then the gradient.
+    private var heroImage: String? {
+        ArtistImageCache.shared.image(for: model.name) ?? model.info?.imageUrl
+    }
+
     private var hero: some View {
         ZStack(alignment: .bottom) {
-            LinearGradient(colors: [gradient.0, gradient.1], startPoint: .topLeading, endPoint: .bottomTrailing)
-            // bottom fade into the page background
+            // Base: the artist photo (fill-cropped) when available, else gradient.
+            if let u = heroImage, !u.isEmpty, let url = URL(string: u) {
+                AsyncImage(url: url) { phase in
+                    if let img = phase.image {
+                        img.resizable().scaledToFill()
+                    } else {
+                        LinearGradient(colors: [gradient.0, gradient.1],
+                                       startPoint: .topLeading, endPoint: .bottomTrailing)
+                    }
+                }
+            } else {
+                LinearGradient(colors: [gradient.0, gradient.1],
+                               startPoint: .topLeading, endPoint: .bottomTrailing)
+            }
+            // Dark scrim for text legibility + fade into the page background.
             LinearGradient(
-                colors: [.clear, .clear, .black.opacity(0.35), PC.bgPrimary],
+                colors: [.black.opacity(0.2), .clear, .black.opacity(0.4), PC.bgPrimary],
                 startPoint: .top, endPoint: .bottom)
             Text(model.name.uppercased())
                 .font(.system(size: 28, weight: .light)).tracking(5)
@@ -485,29 +505,62 @@ struct ArtistScreen: View {
 
     // MARK: Related Artists (2-col grid)
 
+    // Related Artists — matches Android RelatedArtistsTab (#192): a 3-column grid
+    // of CIRCULAR artist images with an initial-letter placeholder and a centered
+    // 2-line name. Each circle fetches its Apple-Music-first image via the shared
+    // ArtistImageCache (#187).
     private var relatedTab: some View {
         let related = model.info?.similarArtists ?? []
         return Group {
             if related.isEmpty {
                 Text("No related artists.").font(.system(size: 14)).foregroundStyle(PC.fg3).padding(40)
             } else {
-                LazyVGrid(columns: [GridItem(.flexible(), spacing: 16), GridItem(.flexible(), spacing: 16)], spacing: 18) {
+                LazyVGrid(columns: Array(repeating: GridItem(.flexible(), spacing: 12), count: 3), spacing: 16) {
                     ForEach(Array(related.enumerated()), id: \.offset) { _, a in
                         NavigationLink { ArtistScreen(artistName: a.name) } label: {
-                            VStack(alignment: .leading, spacing: 0) {
-                                pcCover(a.imageUrl, seed: a.name, size: nil, radius: 10)
-                                    .aspectRatio(1, contentMode: .fit)
-                                    .shadow(color: .black.opacity(0.12), radius: 8, y: 4)
-                                Text(a.name).font(.system(size: 14, weight: .semibold)).foregroundStyle(PC.fg1)
-                                    .lineLimit(1).padding(.top, 10)
+                            VStack(spacing: 6) {
+                                relatedCircle(a)
+                                Text(a.name).font(.system(size: 12, weight: .medium)).foregroundStyle(PC.fg1)
+                                    .multilineTextAlignment(.center).lineLimit(2)
+                                    .frame(maxWidth: .infinity)
                             }
                         }
                         .buttonStyle(.plain)
+                        .onAppear { ArtistImageCache.shared.fetch(a.name) }
                     }
                 }
-                .padding(.horizontal, 20).padding(.vertical, 12)
+                .padding(.horizontal, 16).padding(.vertical, 12)
             }
         }
+    }
+
+    /// Circular related-artist image: AM-first cached image fill-cropped in a
+    /// circle, with an initial-letter placeholder until it lands (Android parity).
+    private func relatedCircle(_ a: SimilarArtist) -> some View {
+        let url = ArtistImageCache.shared.image(for: a.name) ?? nonPlaceholderArt(a.imageUrl)
+        let initial = a.name.prefix(1).uppercased()
+        return ZStack {
+            Circle().fill(PC.bgInset)
+            if let u = url, !u.isEmpty, let parsed = URL(string: u) {
+                AsyncImage(url: parsed) { phase in
+                    if let img = phase.image { img.resizable().scaledToFill() }
+                    else { Text(initial).font(.system(size: 24, weight: .semibold)).foregroundStyle(PC.fg3) }
+                }
+            } else {
+                Text(initial).font(.system(size: 24, weight: .semibold)).foregroundStyle(PC.fg3)
+            }
+        }
+        .aspectRatio(1, contentMode: .fit)
+        .frame(maxWidth: .infinity)
+        .clipShape(Circle())
+        .shadow(color: .black.opacity(0.1), radius: 6, y: 3)
+    }
+
+    /// Drop Last.fm's grey-star "no image" placeholder so we fall back to the
+    /// initial-letter circle until a real image lands.
+    private func nonPlaceholderArt(_ url: String?) -> String? {
+        guard let u = url, !u.isEmpty, !u.contains("2a96cbd8b46e442fc41c2b86b821562f") else { return nil }
+        return u
     }
 }
 

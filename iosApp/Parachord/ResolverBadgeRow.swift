@@ -1,4 +1,5 @@
 import SwiftUI
+import Foundation
 import Shared
 
 // MARK: - Resolver icon squares (matches Android's ResolverIconSquare/Row)
@@ -135,5 +136,62 @@ final class ResolverPrefs {
             self.active = newSet
             self.activeInitialized = true
         })
+    }
+}
+
+// MARK: - ArtistImageCache (#187: header + related-artist images, cached)
+//
+// iOS has no DB, so artist images would re-fetch every session. This in-memory
+// + disk cache maps artist name → image URL, populated via the shared
+// Apple-Music-first getArtistImage. Observed by views so images fill in as they
+// land. Used by the Artist hero header and the Related Artists grid.
+@MainActor
+@Observable
+final class ArtistImageCache {
+    static let shared = ArtistImageCache()
+
+    private let container = IosContainer.companion.shared
+    /// lowercased artist name → image URL.
+    private(set) var images: [String: String] = [:]
+    private var inFlight: Set<String> = []
+
+    private let persistURL: URL = {
+        let dir = FileManager.default.urls(for: .cachesDirectory, in: .userDomainMask)[0]
+        return dir.appendingPathComponent("artist-images.json")
+    }()
+    private var saveScheduled = false
+
+    init() { loadFromDisk() }
+
+    func image(for name: String) -> String? { images[name.lowercased()] }
+
+    /// Fetch + cache an artist's image (no-op if cached or in flight).
+    func fetch(_ name: String) {
+        let key = name.lowercased()
+        guard !key.isEmpty, images[key] == nil, !inFlight.contains(key) else { return }
+        inFlight.insert(key)
+        Task { @MainActor in
+            let url = try? await container.getArtistImage(artistName: name)
+            if let u = url, !u.isEmpty { images[key] = u; scheduleSave() }
+            inFlight.remove(key)
+        }
+    }
+
+    private func loadFromDisk() {
+        guard let data = try? Data(contentsOf: persistURL),
+              let map = try? JSONDecoder().decode([String: String].self, from: data) else { return }
+        images = map
+    }
+
+    private func scheduleSave() {
+        guard !saveScheduled else { return }
+        saveScheduled = true
+        Task { @MainActor in
+            try? await Task.sleep(nanoseconds: 2_000_000_000)
+            saveScheduled = false
+            if let data = try? JSONEncoder().encode(images) {
+                try? data.write(to: persistURL, options: .atomic)
+            }
+        }
     }
 }
