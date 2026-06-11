@@ -203,15 +203,22 @@ class ArtistViewModel constructor(
     private fun enrichSimilarArtistImages(info: ArtistInfo) {
         viewModelScope.launch {
             val artists = info.similarArtists.toMutableList()
-            val toEnrich = artists.withIndex().filter { it.value.imageUrl == null }
+            // Enrich artists with no image OR Last.fm's grey-star placeholder.
+            val toEnrich = artists.withIndex().filter {
+                it.value.imageUrl.isNullOrBlank() ||
+                    it.value.imageUrl?.contains("2a96cbd8b46e442fc41c2b86b821562f") == true
+            }
             if (toEnrich.isEmpty()) return@launch
 
             Log.d("ArtistVM", "Enriching images for ${toEnrich.size}/${artists.size} similar artists")
             for ((index, artist) in toEnrich) {
                 try {
-                    val results = metadataService.searchArtists(artist.name, limit = 1)
-                    val imageUrl = results.firstOrNull()?.imageUrl
-                    if (imageUrl != null) {
+                    // Apple-Music-first getArtistImage (#187): a single reliable
+                    // catalog call on the AM dev token, NOT the Spotify-dependent
+                    // searchArtists cascade (which returned Last.fm placeholders
+                    // and drew on the shared Spotify key).
+                    val imageUrl = metadataService.getArtistImage(artist.name)
+                    if (!imageUrl.isNullOrBlank()) {
                         artists[index] = artist.copy(imageUrl = imageUrl)
                         _artistInfo.value = _artistInfo.value?.copy(similarArtists = artists.toList())
                     }
