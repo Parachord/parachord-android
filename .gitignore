@@ -30,3 +30,8 @@ iosApp/build/
 iosApp/Parachord.xcodeproj/xcuserdata/
 iosApp/Parachord.xcodeproj/project.xcworkspace/xcuserdata/
 iosApp/Parachord.xcodeproj/project.xcworkspace/xcshareddata/IDEWorkspaceChecks.plist
+
+# iOS built-in app secrets (Last.fm key/secret). Info.plist references these as
+# $(LASTFM_API_KEY) / $(LASTFM_SHARED_SECRET); real values live here only.
+# Committed Config.xcconfig optionally #includes this; copy from the .example.
+iosApp/Parachord/Secrets.xcconfig

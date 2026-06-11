@@ -1,0 +1,12 @@
+// Committed base build configuration for the Parachord iOS target.
+//
+// Built-in app secrets (the Last.fm app key/secret — like Android's
+// BuildConfig.LASTFM_API_KEY) live in a SEPARATE, gitignored Secrets.xcconfig
+// so they never enter version control. Info.plist references them as
+// $(LASTFM_API_KEY) / $(LASTFM_SHARED_SECRET), which Xcode expands at build
+// time. The `?` makes the include optional: the project still builds without
+// Secrets.xcconfig (Last.fm features are just inert until you add it).
+//
+// To enable Last.fm locally: copy Secrets.xcconfig.example -> Secrets.xcconfig
+// and fill in the values. (Spotify is BYO — entered in Settings, not here.)
+#include? "Secrets.xcconfig"

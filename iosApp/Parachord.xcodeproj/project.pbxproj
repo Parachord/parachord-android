@@ -35,6 +35,7 @@
 
 /* Begin PBXFileReference section */
 		AA0000000000000000000005 /* Parachord.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = Parachord.app; sourceTree = BUILT_PRODUCTS_DIR; };
+		AA00000000000000000000C1 /* Config.xcconfig */ = {isa = PBXFileReference; lastKnownFileType = text.xcconfig; path = Parachord/Config.xcconfig; sourceTree = SOURCE_ROOT; };
 		AA0000000000000000000010 /* ParachordApp.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ParachordApp.swift; sourceTree = "<group>"; };
 		AA0000000000000000000011 /* ContentView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ContentView.swift; sourceTree = "<group>"; };
 		AA0000000000000000000012 /* Assets.xcassets */ = {isa = PBXFileReference; lastKnownFileType = folder.assetcatalog; path = Assets.xcassets; sourceTree = "<group>"; };
@@ -359,6 +360,7 @@
 		};
 		AA0000000000000000000052 /* Debug */ = {
 			isa = XCBuildConfiguration;
+			baseConfigurationReference = AA00000000000000000000C1 /* Config.xcconfig */;
 			buildSettings = {
 				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
 				ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME = AccentColor;
@@ -395,6 +397,7 @@
 		};
 		AA0000000000000000000053 /* Release */ = {
 			isa = XCBuildConfiguration;
+			baseConfigurationReference = AA00000000000000000000C1 /* Config.xcconfig */;
 			buildSettings = {
 				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
 				ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME = AccentColor;

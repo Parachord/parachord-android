@@ -20,54 +20,18 @@
 	<string>$(MARKETING_VERSION)</string>
 	<key>CFBundleVersion</key>
 	<string>$(CURRENT_PROJECT_VERSION)</string>
-	<key>LSRequiresIPhoneOS</key>
-	<true/>
-	<!--
-	  Required before MusicKit's MusicAuthorization.request() can show
-	  the Apple Music access prompt. Safe to ship without the MusicKit
-	  *entitlement* — reading MusicAuthorization.currentStatus works
-	  with just this string; actually requesting access + playing
-	  catalog tracks additionally needs the MusicKit capability enabled
-	  on the App ID (Xcode → Signing & Capabilities → + → MusicKit) and
-	  an Apple Music subscription on the device.
-	-->
-	<key>NSAppleMusicUsageDescription</key>
-	<string>Parachord uses Apple Music to play tracks resolved to the Apple Music catalog.</string>
-	<!--
-	  Schemes Parachord queries via `UIApplication.canOpenURL`. iOS
-	  returns false for any unlisted scheme regardless of whether the
-	  target app is installed, so the Spotify Connect wake-detection
-	  (phase 4.8) needs `spotify` declared here.
-	-->
 	<key>LSApplicationQueriesSchemes</key>
 	<array>
 		<string>spotify</string>
 	</array>
-	<!--
-	  Spotify OAuth (PKCE) client id, read by IosContainer via
-	  NSBundle.objectForInfoDictionaryKey("SpotifyClientID"). PKCE public
-	  client ids are not secret (they appear in the authorize URL), so this
-	  is safe to commit. ⚠️ FILL IN with the Parachord Spotify app's client
-	  id (same one Android uses — SPOTIFY_CLIENT_ID in local.properties) and
-	  register the redirect URI `parachord://auth/callback/spotify` in that
-	  Spotify app's dashboard. Empty = Spotify auth is inert (Connect button
-	  errors with "invalid client").
-	-->
-	<key>SpotifyClientID</key>
-	<string></string>
-	<!--
-	  UIBackgroundModes: `audio` keeps AVPlayer / MusicKit / Spotify
-	  Connect playback alive when the app is backgrounded or the screen
-	  is locked. Without it, iOS suspends the process on background and
-	  audio stops. This is the load-bearing reason this Info.plist
-	  exists as a real file (the INFOPLIST_KEY_* build-setting mechanism
-	  doesn't expose UIBackgroundModes — it's not in Xcode's
-	  synthesizable allowlist).
-	-->
-	<key>UIBackgroundModes</key>
-	<array>
-		<string>audio</string>
-	</array>
+	<key>LSRequiresIPhoneOS</key>
+	<true/>
+	<key>LastFmApiKey</key>
+	<string>$(LASTFM_API_KEY)</string>
+	<key>LastFmSharedSecret</key>
+	<string>$(LASTFM_SHARED_SECRET)</string>
+	<key>NSAppleMusicUsageDescription</key>
+	<string>Parachord uses Apple Music to play tracks resolved to the Apple Music catalog.</string>
 	<key>UIApplicationSceneManifest</key>
 	<dict>
 		<key>UIApplicationSupportsMultipleScenes</key>
@@ -75,8 +39,15 @@
 	</dict>
 	<key>UIApplicationSupportsIndirectInputEvents</key>
 	<true/>
+	<key>UIBackgroundModes</key>
+	<array>
+		<string>audio</string>
+	</array>
 	<key>UILaunchScreen</key>
-	<dict/>
+	<dict>
+		<key>UIColorName</key>
+		<string>LaunchBg</string>
+	</dict>
 	<key>UIRequiredDeviceCapabilities</key>
 	<array>
 		<string>arm64</string>
