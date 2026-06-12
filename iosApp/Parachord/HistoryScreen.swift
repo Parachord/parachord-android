@@ -23,29 +23,63 @@ final class HistoryModel {
     var recent: [RecentTrack] = []
     var recentEntities: [Track] = []
     var loading = false
+
+    // Per-window caches (keyed by tab+period). The displayed `top*` fields are a
+    // single slot, so WITHOUT storing each window's result the early TTL return
+    // left the PREVIOUS window's data on screen when you switched windows. Now
+    // every load applies the SELECTED window's cached data first (instant), then
+    // revalidates only if stale.
+    private var tracksCache: [String: ([HistoryTrack], [Track])] = [:]
+    private var albumsCache: [String: [HistoryAlbum]] = [:]
+    private var artistsCache: [String: [HistoryArtist]] = [:]
+    private var recentCache: ([RecentTrack], [Track])?
     private var lastLoad: [String: Date] = [:]
     private let ttl: TimeInterval = 6 * 3600
 
     func load(tab: Int, period: String) async {
         let key = tab == 3 ? "recent" : "\(tab)-\(period)"
+        // 1) Show THIS window's cached data immediately so switching windows never
+        //    leaves the prior window's results displayed.
+        applyCache(tab: tab, key: key)
+        let hasCache = lastLoad[key] != nil
+        // 2) Fresh enough → done (instant, no refetch).
         if let l = lastLoad[key], Date().timeIntervalSince(l) < ttl { return }
-        loading = (lastLoad[key] == nil)   // spinner only the first time for this key
+        // 3) Skeleton only when there's nothing cached for this window; a stale
+        //    revalidation updates the already-shown data in place.
+        loading = !hasCache
         switch tab {
         case 0:
             let t = (try? await container.loadTopTracks(period: period)) ?? []
-            if !t.isEmpty { topTracks = t; trackEntities = t.map { Self.track(title: $0.title, artist: $0.artist, album: $0.album, art: $0.artworkUrl) } }
+            if !t.isEmpty {
+                let e = t.map { Self.track(title: $0.title, artist: $0.artist, album: $0.album, art: $0.artworkUrl) }
+                tracksCache[key] = (t, e); topTracks = t; trackEntities = e
+            }
         case 1:
             let a = (try? await container.loadTopAlbums(period: period)) ?? []
-            if !a.isEmpty { topAlbums = a }
+            if !a.isEmpty { albumsCache[key] = a; topAlbums = a }
         case 2:
             let a = (try? await container.loadTopArtists(period: period)) ?? []
-            if !a.isEmpty { topArtists = a }
+            if !a.isEmpty { artistsCache[key] = a; topArtists = a }
         default:
             let r = (try? await container.loadRecentTracks()) ?? []
-            if !r.isEmpty { recent = r; recentEntities = r.map { Self.track(title: $0.title, artist: $0.artist, album: $0.album, art: $0.artworkUrl) } }
+            if !r.isEmpty {
+                let e = r.map { Self.track(title: $0.title, artist: $0.artist, album: $0.album, art: $0.artworkUrl) }
+                recentCache = (r, e); recent = r; recentEntities = e
+            }
         }
         lastLoad[key] = Date()
         loading = false
+    }
+
+    /// Point the displayed fields at the selected window's cached data (or empty
+    /// if not yet loaded — so an uncached window shows a skeleton, not stale data).
+    private func applyCache(tab: Int, key: String) {
+        switch tab {
+        case 0: topTracks = tracksCache[key]?.0 ?? []; trackEntities = tracksCache[key]?.1 ?? []
+        case 1: topAlbums = albumsCache[key] ?? []
+        case 2: topArtists = artistsCache[key] ?? []
+        default: recent = recentCache?.0 ?? []; recentEntities = recentCache?.1 ?? []
+        }
     }
 
     func resolveVisible(artist: String, title: String, album: String?, index: Int) {
@@ -133,7 +167,8 @@ struct HistoryScreen: View {
                         pcCover(pcTrackArt(t.artworkUrl, artist: t.artist, title: t.title, album: t.album), seed: t.title + t.artist, size: 44, radius: 6)
                         VStack(alignment: .leading, spacing: 2) {
                             Text(t.title).font(.system(size: 15, weight: .medium))
-                                .foregroundStyle(coordinator.currentTrack?.id == model.trackEntities[i].id ? PC.accent : PC.fg1).lineLimit(1)
+                                .foregroundStyle(pcTrackNoMatch(artist: t.artist, title: t.title, album: t.album) ? PC.fg3
+                                    : (coordinator.currentTrack?.id == model.trackEntities[i].id ? PC.accent : PC.fg1)).lineLimit(1)
                             Text("\(t.artist) · \(plays(t.playCount))").font(.system(size: 13)).foregroundStyle(PC.fg2).lineLimit(1)
                         }
                         Spacer(minLength: 8)
@@ -205,7 +240,8 @@ struct HistoryScreen: View {
                         pcCover(pcTrackArt(t.artworkUrl, artist: t.artist, title: t.title, album: t.album), seed: t.title + t.artist, size: 44, radius: 6)
                         VStack(alignment: .leading, spacing: 2) {
                             Text((t.nowPlaying ? "▶ " : "") + t.title).font(.system(size: 15, weight: .medium))
-                                .foregroundStyle(t.nowPlaying ? PC.accent : (coordinator.currentTrack?.id == model.recentEntities[i].id ? PC.accent : PC.fg1)).lineLimit(1)
+                                .foregroundStyle(pcTrackNoMatch(artist: t.artist, title: t.title, album: t.album) && !t.nowPlaying ? PC.fg3
+                                    : (t.nowPlaying ? PC.accent : (coordinator.currentTrack?.id == model.recentEntities[i].id ? PC.accent : PC.fg1))).lineLimit(1)
                             HStack(spacing: 6) {
                                 Text(t.artist).font(.system(size: 13)).foregroundStyle(PC.fg2).lineLimit(1)
                                 if !t.source.isEmpty {

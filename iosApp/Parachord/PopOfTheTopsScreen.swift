@@ -148,7 +148,8 @@ struct PopOfTheTopsScreen: View {
                         songArt(song.artworkUrl, seed: song.title + song.artist)
                         VStack(alignment: .leading, spacing: 2) {
                             Text(song.title).font(.system(size: 15, weight: .medium))
-                                .foregroundStyle(coordinator.currentTrack?.id == model.songEntities[index].id ? PC.accent : PC.fg1)
+                                .foregroundStyle(pcTrackNoMatch(artist: song.artist, title: song.title, album: song.album) ? PC.fg3
+                                    : (coordinator.currentTrack?.id == model.songEntities[index].id ? PC.accent : PC.fg1))
                                 .lineLimit(1)
                             Text(song.artist).font(.system(size: 13)).foregroundStyle(PC.fg2).lineLimit(1)
                         }

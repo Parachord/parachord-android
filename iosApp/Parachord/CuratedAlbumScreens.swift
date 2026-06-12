@@ -270,11 +270,28 @@ final class FreshDropsModel {
     var loaded = false
     private var lastLoad: Date?
     private let ttl: TimeInterval = 6 * 3600   // mirrors desktop Fresh Drops 6h TTL
+
+    // Cold-start cache (same pattern as Critical Darlings / Concerts) — show the
+    // last list instantly on launch instead of a blank skeleton, then fade in.
+    private let cacheURL: URL = {
+        FileManager.default.urls(for: .cachesDirectory, in: .userDomainMask)[0]
+            .appendingPathComponent("ios_fresh_view.json")
+    }()
+    init() {
+        if let blob = try? String(contentsOf: cacheURL, encoding: .utf8) {
+            let cached = container.decodeFreshDrops(blob: blob)
+            if !cached.isEmpty { drops = cached; loaded = true }
+        }
+    }
+
     func load() async {
         if loaded, let l = lastLoad, Date().timeIntervalSince(l) < ttl { return }
         isLoading = true
         let fresh = (try? await container.loadFreshDrops()) ?? []
-        if !fresh.isEmpty { drops = fresh }
+        if !fresh.isEmpty {
+            withAnimation(.easeInOut(duration: 0.4)) { drops = fresh }
+            try? container.encodeFreshDrops(list: fresh).write(to: cacheURL, atomically: true, encoding: .utf8)
+        }
         lastLoad = Date(); isLoading = false; loaded = true
     }
 }

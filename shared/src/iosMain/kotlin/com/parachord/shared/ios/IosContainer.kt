@@ -718,6 +718,12 @@ class IosContainer private constructor() {
     fun decodeConcerts(blob: String): List<ConcertEvent> =
         try { resolverCacheJson.decodeFromString<List<ConcertEvent>>(blob) } catch (e: Exception) { emptyList() }
 
+    fun encodeFreshDrops(list: List<FreshDrop>): String =
+        resolverCacheJson.encodeToString(list)
+
+    fun decodeFreshDrops(blob: String): List<FreshDrop> =
+        try { resolverCacheJson.decodeFromString<List<FreshDrop>>(blob) } catch (e: Exception) { emptyList() }
+
     /**
      * Weekly Jams / Weekly Exploration from ListenBrainz. Needs only the
      * LB client + the SettingsStore (for the username the user set in

@@ -41,6 +41,16 @@ private func pcTrack(from t: TrackSearchResult) -> Track {
 /// Spotify artwork, so we fall back to that. Filters Last.fm's grey-star
 /// placeholder hash. Use anywhere a track row shows a cover so art fills in
 /// uniformly across the app.
+/// True when a track has been RESOLVED but has no playable source — i.e. no
+/// resolver matched it above the confidence floor (same filter as the badge row).
+/// Used to gray out unplayable track titles. Returns false while still
+/// unresolved (cached == nil) so titles don't flash gray before resolution lands.
+@MainActor
+func pcTrackNoMatch(artist: String, title: String, album: String?) -> Bool {
+    guard let s = IosTrackResolverCache.shared.cached(artist: artist, title: title, album: album) else { return false }
+    return !s.contains { !$0.noMatch && ($0.confidence?.doubleValue ?? 0) >= 0.60 }
+}
+
 @MainActor
 func pcTrackArt(_ artworkUrl: String?, artist: String, title: String, album: String?) -> String? {
     if let a = artworkUrl, !a.isEmpty, !a.contains("2a96cbd8b46e442fc41c2b86b821562f") { return a }
@@ -428,7 +438,8 @@ struct AlbumScreen: View {
                         VStack(alignment: .leading, spacing: 2) {
                             Text(t.title)
                                 .font(.system(size: 15, weight: .medium))
-                                .foregroundStyle(coordinator.currentTrack?.id == model.entities[index].id ? PC.accent : PC.fg1)
+                                .foregroundStyle(pcTrackNoMatch(artist: t.artist, title: t.title, album: t.album) ? PC.fg3
+                                    : (coordinator.currentTrack?.id == model.entities[index].id ? PC.accent : PC.fg1))
                                 .lineLimit(1)
                             // Compilations are various-artists — show the per-track
                             // artist under the title, like a playlist row (bug 2).
@@ -918,7 +929,8 @@ struct ArtistScreen: View {
                             .frame(width: 22)
                         pcCover(topTrackArt(t), seed: t.title + t.artist, size: 44, radius: 6)
                         VStack(alignment: .leading, spacing: 2) {
-                            Text(t.title).font(.system(size: 15, weight: .medium)).foregroundStyle(PC.fg1).lineLimit(1)
+                            Text(t.title).font(.system(size: 15, weight: .medium))
+                                .foregroundStyle(pcTrackNoMatch(artist: t.artist, title: t.title, album: t.album) ? PC.fg3 : PC.fg1).lineLimit(1)
                             if let d = t.duration, d.int64Value > 0 {
                                 Text(pcDur(d.int64Value)).font(.system(size: 13)).foregroundStyle(PC.fg2)
                             }

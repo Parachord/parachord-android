@@ -179,7 +179,8 @@ struct RecommendationsScreen: View {
                         pcCover(pcTrackArt(pair.track.artworkUrl, artist: pair.track.artist, title: pair.track.title, album: pair.track.album), seed: pair.track.title + pair.track.artist, size: 44, radius: 6)
                         VStack(alignment: .leading, spacing: 2) {
                             Text(pair.track.title).font(.system(size: 15, weight: .medium))
-                                .foregroundStyle(coordinator.currentTrack?.id == pair.entity.id ? PC.accent : PC.fg1).lineLimit(1)
+                                .foregroundStyle(pcTrackNoMatch(artist: pair.track.artist, title: pair.track.title, album: pair.track.album) ? PC.fg3
+                                    : (coordinator.currentTrack?.id == pair.entity.id ? PC.accent : PC.fg1)).lineLimit(1)
                             Text(pair.track.artist).font(.system(size: 13)).foregroundStyle(PC.fg2).lineLimit(1)
                         }
                         Spacer(minLength: 0)

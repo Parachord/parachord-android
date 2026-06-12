@@ -187,7 +187,8 @@ struct PlaylistDetailView: View {
             trackArt(track)
             VStack(alignment: .leading, spacing: 2) {
                 Text(track.title).font(.system(size: 15, weight: .medium))
-                    .foregroundStyle(isCurrent ? PC.accent : PC.fg1).lineLimit(1)
+                    .foregroundStyle(pcTrackNoMatch(artist: track.artist, title: track.title, album: track.album) ? PC.fg3
+                        : (isCurrent ? PC.accent : PC.fg1)).lineLimit(1)
                 Text(albumLine(track)).font(.system(size: 13)).foregroundStyle(PC.fg2).lineLimit(1)
             }
             Spacer(minLength: 8)

@@ -409,7 +409,8 @@ struct PCQueuePanel: View {
                                     .foregroundStyle(.white.opacity(0.4)).frame(width: 24, alignment: .trailing)
                                 pcCover(pcTrackArt(t.artworkUrl, artist: t.artist, title: t.title, album: t.album), seed: t.title, size: 38, radius: 6)
                                 VStack(alignment: .leading, spacing: 2) {
-                                    Text(t.title).font(.system(size: 14, weight: .medium)).foregroundStyle(.white).lineLimit(1)
+                                    Text(t.title).font(.system(size: 14, weight: .medium))
+                                        .foregroundStyle(pcTrackNoMatch(artist: t.artist, title: t.title, album: t.album) ? Color.white.opacity(0.4) : .white).lineLimit(1)
                                     Text(t.artist).font(.system(size: 12)).foregroundStyle(.white.opacity(0.55)).lineLimit(1)
                                 }
                                 Spacer(minLength: 8)

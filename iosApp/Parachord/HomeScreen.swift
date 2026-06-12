@@ -233,11 +233,19 @@ struct HomeScreen: View {
     }
 
     private func weeklyCard(_ entry: IosWeeklyEntry) -> some View {
-        let covers = model.trackCovers[entry.id] ?? []
+        // nil = covers not fetched yet (show skeleton); non-nil = loaded, so a
+        // missing slot is a genuine no-art fallback. Previously `?? []` collapsed
+        // "loading" into "empty", so every tile flashed 4 identical letter
+        // placeholders before the artwork arrived.
+        let covers = model.trackCovers[entry.id]
         return VStack(alignment: .leading, spacing: 8) {
             LazyVGrid(columns: [GridItem(.fixed(75), spacing: 0), GridItem(.fixed(75), spacing: 0)], spacing: 0) {
                 ForEach(0..<4, id: \.self) { j in
-                    mosaicCell(j < covers.count ? covers[j] : nil, seed: "\(entry.id)\(j)")
+                    if let covers {
+                        mosaicCell(j < covers.count ? covers[j] : nil, seed: "\(entry.id)\(j)")
+                    } else {
+                        PCSkeletonBox(radius: 0).frame(width: 75, height: 75)   // loading — shimmer, not a letter
+                    }
                 }
             }
             .frame(width: 150, height: 150)
