@@ -260,14 +260,22 @@ class IosResolverCoordinator(
         if (data.isEmpty()) return null
 
         fun norm(s: String?) = (s ?: "").lowercase().filter { it.isLetterOrDigit() }
+        // BIDIRECTIONAL substring — MUST match ResolverScoring.stringsMatch, which
+        // scoreConfidence uses. A one-directional check (AM ⊇ target) skipped the
+        // correct song whenever Apple Music's string was a substring of the target
+        // (e.g. AM "Tallest Man on Earth" vs target "THE Tallest Man on Earth"),
+        // fell back to data.first() — a weaker hit — and that scored 0.50, so a
+        // genuinely-playable AM track showed dimmed with no badge.
+        fun matches(amVal: String?, target: String): Boolean {
+            val a = norm(amVal)
+            return a.isNotEmpty() && target.isNotEmpty() && (a.contains(target) || target.contains(a))
+        }
         val nt = norm(title)
         val na = norm(artist)
-        // Prefer the first song whose title AND artist both substring-match the
-        // target; else the catalog's top hit (scoreConfidence then validates).
         val best = data.firstOrNull { el ->
             val at = el.jsonObject["attributes"]?.jsonObject
-            norm(at?.get("name")?.jsonPrimitive?.contentOrNull).contains(nt) &&
-                norm(at?.get("artistName")?.jsonPrimitive?.contentOrNull).contains(na)
+            matches(at?.get("name")?.jsonPrimitive?.contentOrNull, nt) &&
+                matches(at?.get("artistName")?.jsonPrimitive?.contentOrNull, na)
         } ?: data.first()
 
         val attrs = best.jsonObject["attributes"]?.jsonObject ?: return null
