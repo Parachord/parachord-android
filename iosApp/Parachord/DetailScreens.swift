@@ -173,10 +173,14 @@ struct PCArtistImage<Placeholder: View>: View {
             let s = max(size.width / img.size.width, size.height / img.size.height)
             let dW = img.size.width * s
             let dH = img.size.height * s
+            // Shift so the face center lands at the container center, clamped so
+            // the image still covers the container (no gaps). offset ∈ [C - d, 0].
+            let ox = min(0, max(size.width - dW, size.width / 2 - center.x * dW))
+            let oy = min(0, max(size.height - dH, size.height / 2 - center.y * dH))
             Image(uiImage: img)
                 .resizable()
                 .frame(width: dW, height: dH)
-                .offset(x: (size.width - dW) * center.x, y: (size.height - dH) * center.y)
+                .offset(x: ox, y: oy)
                 .frame(width: size.width, height: size.height, alignment: .topLeading)
                 .clipped()
         } else if url == nil || failed {
