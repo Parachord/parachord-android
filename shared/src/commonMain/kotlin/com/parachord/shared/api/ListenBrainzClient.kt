@@ -150,7 +150,10 @@ class ListenBrainzClient(private val httpClient: HttpClient) {
      * POST /1/submit-listens — scrobble a play to ListenBrainz (shared so iOS gets
      * scrobbling too; #193). `listenedAt == null` ⇒ a `playing_now` now-playing
      * update (no timestamp); otherwise a `single` listen. MBIDs (recording / artist /
-     * release) are included per the LB spec — both top-level and in additional_info.
+     * release) are included per the LB spec (top-level + additional_info), AND the
+     * streaming-source link/service (`origin_url`, `music_service`,
+     * `music_service_name`, `spotify_id`) so the listen carries where it played from
+     * — matching the Android ListenBrainzScrobbler payload.
      */
     suspend fun submitListens(
         token: String,
@@ -162,6 +165,10 @@ class ListenBrainzClient(private val httpClient: HttpClient) {
         releaseMbid: String? = null,
         durationMs: Long? = null,
         listenedAt: Long? = null,
+        originUrl: String? = null,
+        musicService: String? = null,
+        musicServiceName: String? = null,
+        spotifyId: String? = null,
     ): Boolean {
         return try {
             val payload = buildJsonObject {
@@ -183,6 +190,11 @@ class ListenBrainzClient(private val httpClient: HttpClient) {
                                 if (artistMbids.isNotEmpty()) {
                                     putJsonArray("artist_mbids") { artistMbids.forEach { add(it) } }
                                 }
+                                // Streaming source link/service (Android parity).
+                                if (!originUrl.isNullOrBlank()) put("origin_url", originUrl)
+                                if (!musicService.isNullOrBlank()) put("music_service", musicService)
+                                if (!musicServiceName.isNullOrBlank()) put("music_service_name", musicServiceName)
+                                if (!spotifyId.isNullOrBlank()) put("spotify_id", spotifyId)
                             }
                         }
                     }
