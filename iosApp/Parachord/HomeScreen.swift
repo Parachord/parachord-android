@@ -163,8 +163,13 @@ struct HomeScreen: View {
                     }
                     Spacer(minLength: 0)
                 }
+                // New id when the featured item changes → cross-fades the cached
+                // preview out and the fresh one in (the VM mutates in withAnimation).
+                .id("\(tile.preset)-\(p.title)-\(p.subtitle)")
+                .transition(.opacity)
             } else {
                 Text(tile.subtitle).font(.system(size: 12)).foregroundStyle(.white.opacity(0.85))
+                    .transition(.opacity)
             }
         }
         .padding(14)

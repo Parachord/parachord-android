@@ -1,4 +1,5 @@
 import SwiftUI
+import Foundation
 import Shared
 
 // MARK: - Discover ViewModel (phase 5.3)
@@ -9,7 +10,7 @@ import Shared
 // Settings. No auth — the createdfor endpoint is public.
 
 /// Featured item shown inside a Discover tile (matches Android's DiscoverPreview).
-struct TilePreview {
+struct TilePreview: Codable, Equatable {
     let title: String
     let subtitle: String
     let artworkUrl: String?
@@ -52,11 +53,30 @@ final class DiscoverViewModel {
     /// of edits is debounced into a single fetch.
     func start() {
         guard subscription == nil else { return }
+        loadPreviewsFromDisk()   // show the last-known Discover previews instantly
         subscription = watcher.watch(flow: container.settingsStore.getListenBrainzUsernameFlow()) { [weak self] value in
             let username = (value as? String) ?? ""
             Task { @MainActor in self?.onUsernameChanged(username) }
         }
         loadPreviews()
+    }
+
+    // Persist the per-tile previews so a cold start shows the LAST ones instantly,
+    // then fades in fresh ones as each repo responds (instead of empty cards).
+    private let previewsURL: URL = {
+        let dir = FileManager.default.urls(for: .cachesDirectory, in: .userDomainMask)[0]
+        return dir.appendingPathComponent("discover_previews.json")
+    }()
+    private func loadPreviewsFromDisk() {
+        guard previews.isEmpty,
+              let data = try? Data(contentsOf: previewsURL),
+              let map = try? JSONDecoder().decode([String: TilePreview].self, from: data) else { return }
+        previews = map
+    }
+    private func savePreviews() {
+        if let data = try? JSONEncoder().encode(previews) {
+            try? data.write(to: previewsURL, options: .atomic)
+        }
     }
 
     /// Each Discover tile's featured item, from its own repo's first entry
@@ -66,19 +86,23 @@ final class DiscoverViewModel {
         Task { @MainActor [weak self] in
             guard let self, let a = (try? await self.container.loadRecommendedArtists())?.first else { return }
             let reason = a.reason.flatMap { $0.isEmpty ? nil : $0 } ?? "Based on your listening"
-            self.previews["foryou"] = TilePreview(title: a.name, subtitle: reason, artworkUrl: a.imageUrl)
+            withAnimation(.easeInOut(duration: 0.45)) { self.previews["foryou"] = TilePreview(title: a.name, subtitle: reason, artworkUrl: a.imageUrl) }
+            self.savePreviews()
         }
         Task { @MainActor [weak self] in
             guard let self, let al = (try? await self.container.loadCriticalDarlings())?.first else { return }
-            self.previews["critical"] = TilePreview(title: al.title, subtitle: al.artist, artworkUrl: al.albumArt)
+            withAnimation(.easeInOut(duration: 0.45)) { self.previews["critical"] = TilePreview(title: al.title, subtitle: al.artist, artworkUrl: al.albumArt) }
+            self.savePreviews()
         }
         Task { @MainActor [weak self] in
             guard let self, let d = (try? await self.container.loadFreshDrops())?.first else { return }
-            self.previews["fresh"] = TilePreview(title: d.title, subtitle: d.artist, artworkUrl: d.albumArt)
+            withAnimation(.easeInOut(duration: 0.45)) { self.previews["fresh"] = TilePreview(title: d.title, subtitle: d.artist, artworkUrl: d.albumArt) }
+            self.savePreviews()
         }
         Task { @MainActor [weak self] in
             guard let self, let al = (try? await self.container.loadPopOfTheTopsAlbums(countryCode: "us"))?.first else { return }
-            self.previews["pop"] = TilePreview(title: al.title, subtitle: al.artist, artworkUrl: al.artworkUrl)
+            withAnimation(.easeInOut(duration: 0.45)) { self.previews["pop"] = TilePreview(title: al.title, subtitle: al.artist, artworkUrl: al.artworkUrl) }
+            self.savePreviews()
         }
     }
 
