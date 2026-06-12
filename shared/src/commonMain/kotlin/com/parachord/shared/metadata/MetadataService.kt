@@ -9,6 +9,9 @@ import kotlinx.coroutines.flow.channelFlow
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
+import kotlinx.serialization.decodeFromString
+import kotlinx.serialization.encodeToString
+import kotlinx.serialization.json.Json
 
 /**
  * Cascading metadata service that aggregates results from multiple providers.
@@ -42,7 +45,17 @@ class MetadataService constructor(
     private val providers: List<MetadataProvider>,
     private val getDisabledProviders: suspend () -> Set<String>,
     private val enrichAlbumArtwork: (suspend (artistName: String, albums: List<AlbumSearchResult>) -> List<AlbumSearchResult>)? = null,
+    // Optional persistent artist-name → image-URL cache (shared so the URL lookup
+    // is memoized across sessions on every platform — previously an iOS-only
+    // artist-images.json). Read/write the whole JSON-map blob; null = no caching
+    // (Android keeps its ImageEnrichmentService/DB path).
+    private val artistImageCacheRead: (suspend () -> String?)? = null,
+    private val artistImageCacheWrite: (suspend (String) -> Unit)? = null,
 ) {
+
+    private val artistImageMutex = Mutex()
+    private var artistImageMap: MutableMap<String, String>? = null
+    private val artistImageJson = Json { ignoreUnknownKeys = true }
 
     private companion object {
         /** Max time any single provider may take inside the getArtistInfo merge
@@ -158,6 +171,16 @@ class MetadataService constructor(
      * chain never runs once a streaming image is found.
      */
     suspend fun getArtistImage(artistName: String): String? {
+        val key = artistName.lowercase().trim()
+        // Persistent cache hit (shared, both platforms) — skip the network cascade.
+        artistImageMutex.withLock {
+            if (artistImageMap == null) {
+                artistImageMap = artistImageCacheRead?.invoke()?.let {
+                    runCatching { artistImageJson.decodeFromString<Map<String, String>>(it).toMutableMap() }.getOrNull()
+                } ?: mutableMapOf()
+            }
+            artistImageMap!![key]?.let { return it }
+        }
         val available = availableProviders().associateBy { it.name }
         val order = listOf("applemusic", "spotify", "wikipedia", "discogs", "lastfm", "musicbrainz")
         for (name in order) {
@@ -165,7 +188,13 @@ class MetadataService constructor(
             val img = try {
                 withTimeoutOrNull(PROVIDER_TIMEOUT_MS) { provider.getArtistInfo(artistName)?.imageUrl }
             } catch (_: Exception) { null }
-            if (!img.isNullOrBlank()) return img
+            if (!img.isNullOrBlank()) {
+                artistImageMutex.withLock {
+                    artistImageMap!![key] = img
+                    artistImageCacheWrite?.invoke(artistImageJson.encodeToString(artistImageMap!!.toMap()))
+                }
+                return img
+            }
         }
         return null
     }

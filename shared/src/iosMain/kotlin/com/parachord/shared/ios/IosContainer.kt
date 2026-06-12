@@ -250,6 +250,10 @@ class IosContainer private constructor() {
             enrichAlbumArtwork = { artistName, albums ->
                 enrichAlbumArtworkViaItunes(appleMusicClient, artistName, albums)
             },
+            // Persistent artist-image URL cache lives in the shared service now
+            // (was the iOS-only artist-images.json); reuse it across sessions.
+            artistImageCacheRead = { IosFileCache.read("artist_images_cache.json") },
+            artistImageCacheWrite = { IosFileCache.write("artist_images_cache.json", it) },
         )
     }
 
