@@ -51,9 +51,10 @@ final class DiscoverViewModel {
     /// changing). The flow emits the current value on subscribe, which drives
     /// the initial load. The Settings field persists per keystroke, so a burst
     /// of edits is debounced into a single fetch.
+    private var previewSubs: [Cancellable] = []
+
     func start() {
         guard subscription == nil else { return }
-        loadPreviewsFromDisk()   // show the last-known Discover previews instantly
         subscription = watcher.watch(flow: container.settingsStore.getListenBrainzUsernameFlow()) { [weak self] value in
             let username = (value as? String) ?? ""
             Task { @MainActor in self?.onUsernameChanged(username) }
@@ -61,48 +62,31 @@ final class DiscoverViewModel {
         loadPreviews()
     }
 
-    // Persist the per-tile previews so a cold start shows the LAST ones instantly,
-    // then fades in fresh ones as each repo responds (instead of empty cards).
-    private let previewsURL: URL = {
-        let dir = FileManager.default.urls(for: .cachesDirectory, in: .userDomainMask)[0]
-        return dir.appendingPathComponent("discover_previews.json")
-    }()
-    private func loadPreviewsFromDisk() {
-        guard previews.isEmpty,
-              let data = try? Data(contentsOf: previewsURL),
-              let map = try? JSONDecoder().decode([String: TilePreview].self, from: data) else { return }
-        previews = map
-    }
-    private func savePreviews() {
-        if let data = try? JSONEncoder().encode(previews) {
-            try? data.write(to: previewsURL, options: .atomic)
-        }
-    }
-
     /// Each Discover tile's featured item, from its own repo's first entry
     /// (matches Android: For You = top recommended artist, Critical = latest
-    /// reviewed album, Fresh = latest release, Pop = #1 album). Fire-and-forget.
+    /// reviewed album, Fresh = latest release, Pop = #1 album). The first three
+    /// WATCH the shared repo value-flows, so each repo's cached-first emission
+    /// fills the tile instantly on cold start and fresh data fades in — no
+    /// discover_previews.json. (Pop's ChartsRepository has no cached flow yet, so
+    /// it stays a one-shot fetch; giving Charts a cache is a shared follow-up.)
     private func loadPreviews() {
-        Task { @MainActor [weak self] in
-            guard let self, let a = (try? await self.container.loadRecommendedArtists())?.first else { return }
+        guard previewSubs.isEmpty else { return }
+        previewSubs.append(watcher.watch(flow: container.recommendedArtistsFlow()) { [weak self] v in
+            guard let self, let a = (v as? [RecommendedArtist])?.first else { return }
             let reason = a.reason.flatMap { $0.isEmpty ? nil : $0 } ?? "Based on your listening"
             withAnimation(.easeInOut(duration: 0.45)) { self.previews["foryou"] = TilePreview(title: a.name, subtitle: reason, artworkUrl: a.imageUrl) }
-            self.savePreviews()
-        }
-        Task { @MainActor [weak self] in
-            guard let self, let al = (try? await self.container.loadCriticalDarlings())?.first else { return }
+        })
+        previewSubs.append(watcher.watch(flow: container.criticsPicksFlow()) { [weak self] v in
+            guard let self, let al = (v as? [CriticsPickAlbum])?.first else { return }
             withAnimation(.easeInOut(duration: 0.45)) { self.previews["critical"] = TilePreview(title: al.title, subtitle: al.artist, artworkUrl: al.albumArt) }
-            self.savePreviews()
-        }
-        Task { @MainActor [weak self] in
-            guard let self, let d = (try? await self.container.loadFreshDrops())?.first else { return }
+        })
+        previewSubs.append(watcher.watch(flow: container.freshDropsFlow()) { [weak self] v in
+            guard let self, let d = (v as? [FreshDrop])?.first else { return }
             withAnimation(.easeInOut(duration: 0.45)) { self.previews["fresh"] = TilePreview(title: d.title, subtitle: d.artist, artworkUrl: d.albumArt) }
-            self.savePreviews()
-        }
+        })
         Task { @MainActor [weak self] in
             guard let self, let al = (try? await self.container.loadPopOfTheTopsAlbums(countryCode: "us"))?.first else { return }
             withAnimation(.easeInOut(duration: 0.45)) { self.previews["pop"] = TilePreview(title: al.title, subtitle: al.artist, artworkUrl: al.artworkUrl) }
-            self.savePreviews()
         }
     }
 
