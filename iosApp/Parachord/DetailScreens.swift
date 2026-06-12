@@ -327,6 +327,13 @@ struct AlbumScreen: View {
     @Environment(\.dismiss) private var dismiss
     /// Observed so the resolver badges re-render as background resolution lands.
     private var resolverCache = IosTrackResolverCache.shared
+    /// LOCAL item-based navigation. AlbumScreen is pushed from many different
+    /// stacks (Home's PCRoute path, Search, and item-based navAlbum in
+    /// Recommendations/History/Pop/Playlist). A value-based `PCRoute.artist` link
+    /// only resolves in the Home stack, so from any other host it mis-routed
+    /// (pushed the artist onto the wrong path → "album opened, artist appeared on
+    /// top"). A self-contained `navigationDestination(item:)` works in ANY host.
+    @State private var navArtist: String?
 
     init(title: String, artist: String) {
         _model = State(initialValue: AlbumDetailModel(title: title, artist: artist))
@@ -357,6 +364,7 @@ struct AlbumScreen: View {
             }
         }
         .toolbar(.hidden, for: .navigationBar)
+        .navigationDestination(item: $navArtist) { ArtistScreen(artistName: $0) }
         .task { await model.load() }
     }
 
@@ -366,7 +374,7 @@ struct AlbumScreen: View {
                 .shadow(color: .black.opacity(0.18), radius: 9, y: 6)
             VStack(alignment: .leading, spacing: 6) {
                 Text(model.title).font(.system(size: 21, weight: .semibold)).foregroundStyle(PC.fg1)
-                NavigationLink(value: PCRoute.artist(model.artist)) {
+                Button { navArtist = model.artist } label: {
                     Text(model.artist).font(.system(size: 16, weight: .medium)).foregroundStyle(PC.accent)
                 }
                 .buttonStyle(.plain)
@@ -518,6 +526,12 @@ struct ArtistScreen: View {
     @Environment(\.dismiss) private var dismiss
     /// Observed so top-track art fills in from the resolver as rows resolve.
     private var resolverCache = IosTrackResolverCache.shared
+    /// LOCAL item-based navigation (see AlbumScreen.navArtist). ArtistScreen is
+    /// reached from many stacks; value-based `PCRoute` links only resolve in the
+    /// Home stack, so tapping an album from a non-Home-hosted artist page
+    /// mis-routed. Self-contained destinations work from any host.
+    @State private var navAlbum: PCAlbumRef?
+    @State private var navArtist: String?
 
     /// Real album art for a top track: prefer the resolver's artwork (Apple
     /// Music / iTunes / Spotify) over Last.fm's, and drop Last.fm's "no image"
@@ -572,6 +586,8 @@ struct ArtistScreen: View {
             }
             .padding(.leading, 16).padding(.top, 4)
         }
+        .navigationDestination(item: $navAlbum) { AlbumScreen(title: $0.title, artist: $0.artist) }
+        .navigationDestination(item: $navArtist) { ArtistScreen(artistName: $0) }
         .task { await model.load() }
     }
 
@@ -781,7 +797,7 @@ struct ArtistScreen: View {
                     // gives each cell stable identity — the art refreshes with the
                     // title instead of reusing the prior cell's cached image (bug 7).
                     ForEach(discoFiltered, id: \.discoId) { album in
-                        NavigationLink(value: PCRoute.album(title: album.title, artist: album.artist)) {
+                        Button { navAlbum = PCAlbumRef(title: album.title, artist: album.artist) } label: {
                             VStack(alignment: .leading, spacing: 0) {
                                 pcCover(album.artworkUrl, seed: album.title + album.artist, size: nil, radius: 10)
                                     .aspectRatio(1, contentMode: .fit)
@@ -885,7 +901,7 @@ struct ArtistScreen: View {
             } else {
                 LazyVGrid(columns: Array(repeating: GridItem(.flexible(), spacing: 12, alignment: .top), count: 3), spacing: 16) {
                     ForEach(Array(related.enumerated()), id: \.offset) { _, a in
-                        NavigationLink(value: PCRoute.artist(a.name)) {
+                        Button { navArtist = a.name } label: {
                             VStack(spacing: 6) {
                                 relatedCircle(a)
                                 // Reserve a fixed 2-line height so 1- and 2-line
