@@ -420,6 +420,23 @@ Playlist shares fall back to the `https://parachord.com/go?uri=parachord://...` 
 - `app/.../ui/components/{Track,Album,Artist}ContextMenu.kt`, `app/.../ui/screens/playlists/PlaylistsScreen.kt` (PlaylistContextMenu)
 - `parachord-desktop/plugins/achordion.axe` — reference implementation
 
+### Scrobbling — Shared Stack (KMP, #193)
+
+The scrobbler stack lives in `shared/commonMain/.../playback/scrobbler/` so iOS scrobbles through the **same** `ScrobbleManager` + scrobbler instances as Android. App-side `app/.../playback/scrobbler/*` and `app/.../playback/ScrobbleManager.kt` are now **typealias shims** to the shared classes. The three native scrobblers (`ListenBrainzScrobbler`, `LastFmScrobbler`, `LibreFmScrobbler`) call the shared Ktor clients (`ListenBrainzClient.submitListens`, `LastFmClient.updateNowPlaying`/`scrobble`/`loveTrack`); MD5 `api_sig` signing is shared in `LastFmSigning.kt` (regression-guarded by `LastFmSigningTest`).
+
+**Two platform-coupled concerns are lambda-forwarded into `ScrobbleManager`'s constructor** (the codebase's standard pattern), so the threshold/dedup/MBID-re-read/enabled-gate core stays shared:
+1. `playbackStateFlow: Flow<ScrobbleState>` — Android maps `PlaybackStateHolder.state`; iOS pushes from `QueuePlaybackCoordinator` via `IosContainer.updateScrobbleState(...)` on a 1s engine-agnostic tick. `ScrobbleState` is `(currentTrack, isPlaying, positionMs, durationMs)`.
+2. `dispatchToPlugins: (eventName, Track) -> Unit` — the JS-side `window.scrobbleManager` hand-off (achordion telemetry). Android wires `JsScrobblePluginDispatcher` (WebView + resolver-cache `sources` map + Base64); iOS routes `ScrobblePluginDispatch.dispatchScript(...)` through `PluginManager.evaluateJs` (JSC). The shared `PluginManager` loads the same bootstrap on both, so the contract is identical. **Dormant on both until a scrobble-telemetry `.axe` (achordion) is installed** — no such plugin is bundled, so this currently iterates zero plugins; native LB/Last.fm/Libre.fm scrobbling does not depend on it.
+
+**Per-scrobbler auth credential — the load-bearing rule (hard-won, June 2026).** Each scrobbler's `isEnabled()` gates on a **specific** stored credential, and the platform's connect UI MUST populate *that exact credential* — not a look-alike. Scrobbling/now-playing/love are **writes** and need the write-capable token, never a read-only identifier:
+- **ListenBrainz** → `getListenBrainzToken()`. A user token (token field in settings). No signing.
+- **Last.fm** → `getLastFmSessionKey()`. **NOT the username** — the username powers read-only metadata (top tracks, charts) but cannot authenticate writes. Requires the OAuth `auth.getSession` flow (web-auth token → session key). The original iOS Last.fm UI captured only a username, so `isEnabled()` was always false and every Last.fm scrobble silently early-returned. Fixed by adding `LastFmClient.getSession` (shared) + `IosOAuthManager.authorizeLastFm` (ASWebAuthenticationSession, opens `last.fm/api/auth`, intercepts `parachord://auth/callback/lastfm?token=…`) + `IosContainer.connectLastFm(token)`. Android does this via `OAuthManager.handleLastFmCallback`.
+- **Libre.fm** → `getLibreFmSessionKey()`. Username/password → `auth.getMobileSession` session key. **Auth and scrobble must use the SAME api_key/secret** (the conventional all-zeros placeholder) or the session key can't sign scrobbles — the same class of mismatch that, in a different form, broke Last.fm.
+
+When adding a scrobbler or a new platform's connect UI: trace `isEnabled()`'s exact key from the connect handler to the scrobble signer, and confirm the connect flow stores precisely that key. A connect screen that "looks connected" (stores a username / display name) but doesn't capture the write credential fails silently — no error, just no scrobbles.
+
+**Key files:** `shared/.../playback/scrobbler/{ScrobbleManager,Scrobbler,ListenBrainzScrobbler,LastFmScrobbler,LibreFmScrobbler,LbSourceEnrichment,ScrobblePluginDispatch}.kt`, `shared/.../api/{LastFmSigning,LastFmClient,ListenBrainzClient}.kt`, `app/.../playback/JsScrobblePluginDispatcher.kt`, `app/.../auth/OAuthManager.kt#handleLastFmCallback`, `iosApp/.../ContentView.swift#IosOAuthManager.authorizeLastFm`, `shared/.../ios/IosContainer.kt#connectLastFm`/`updateScrobbleState`/`startScrobbling`.
+
 ### Loved Tracks → ListenBrainz / Last.fm Push
 
 When the user adds a track to their collection (a "love"), Parachord can mirror that to ListenBrainz's `recording-feedback` endpoint and Last.fm's `track.love` — same direction as scrobbles. Mirrors desktop's design doc `docs/plans/2026-05-03-loved-tracks-scrobbler-push-design.md`.
@@ -436,7 +453,7 @@ When the user adds a track to their collection (a "love"), Parachord can mirror 
 - **ListenBrainz**: needs `recording_mbid` (validates against the 36-char canonical regex). Tracks without one are silently skipped — the next mapper backfill via `MbidEnrichmentService` will eventually populate the MBID, and the next love (or backfill run) catches them.
 - **Last.fm**: needs (artist, title) + a valid Last.fm session token. No MBID dependency.
 
-**Key files:** `playback/LovesPushService.kt`, `playback/scrobbler/{Scrobbler,ListenBrainzScrobbler,LastFmScrobbler}.kt#loveTrack`, `ui/screens/settings/SettingsViewModel.kt#runLoveBackfill`.
+**Key files:** `playback/LovesPushService.kt`, `shared/.../playback/scrobbler/{Scrobbler,ListenBrainzScrobbler,LastFmScrobbler}.kt#loveTrack` (KMP-shared, #193), `ui/screens/settings/SettingsViewModel.kt#runLoveBackfill`.
 
 ### Friend Follow / Unfollow
 
@@ -872,7 +889,7 @@ static let darkAccentPurple = Color(hex: "#a78bfa")
 | Metadata cascade | `data/metadata/MetadataService.kt`, `*Provider.kt` |
 | MBID enrichment | `shared/.../metadata/MbidEnrichmentService.kt` (typealias shim in `data/metadata/`), `shared/.../api/ListenBrainzClient.kt` (`mbidMapperLookup`) |
 | Image enrichment | `shared/.../metadata/ImageEnrichmentService.kt` (typealias shim in `data/metadata/`); platform-specific 2x2 mosaic via `composeMosaicAndroid` lambda |
-| Scrobbling | `playback/ScrobbleManager.kt`, `playback/scrobbler/ListenBrainzScrobbler.kt`, `LastFmScrobbler.kt`, `LibreFmScrobbler.kt` |
+| Scrobbling | `shared/.../playback/scrobbler/{ScrobbleManager,Scrobbler,ListenBrainzScrobbler,LastFmScrobbler,LibreFmScrobbler,LbSourceEnrichment,ScrobblePluginDispatch}.kt` (KMP-shared, #193; app-side `playback/scrobbler/*` are typealias shims). Android JS dispatch: `playback/JsScrobblePluginDispatcher.kt`. Last.fm signing: `shared/.../api/LastFmSigning.kt` |
 | Local file scanning | `data/scanner/MediaScanner.kt` |
 | Playback handlers | `playback/handlers/SpotifyPlaybackHandler.kt`, `AppleMusicPlaybackHandler.kt`, `SoundCloudPlaybackHandler.kt` |
 | Apple Music bridge | `playback/handlers/MusicKitWebBridge.kt`, `assets/js/musickit-bridge.html` |

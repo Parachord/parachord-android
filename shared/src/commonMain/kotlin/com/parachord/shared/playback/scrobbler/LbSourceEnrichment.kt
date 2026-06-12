@@ -1,6 +1,6 @@
-package com.parachord.android.playback.scrobbler
+package com.parachord.shared.playback.scrobbler
 
-import com.parachord.android.data.db.entity.TrackEntity
+import com.parachord.shared.model.Track
 
 /**
  * Derived ListenBrainz `additional_info` enrichment for a played track.
@@ -41,18 +41,18 @@ private fun String?.isHttpUrl(): Boolean =
     this != null && (startsWith("http://", ignoreCase = true) || startsWith("https://", ignoreCase = true))
 
 /**
- * Build the LB source/MBID enrichment for a played [TrackEntity].
+ * Build the LB source/MBID enrichment for a played [Track].
  *
- * Designed never to throw — every field is independently optional. Android's
- * flat Track model has no per-resolver `sources` map; the scrobbler receives
- * the single resolved row, so [TrackEntity.resolver] is the played source and
- * the flat IDs (`spotifyId` / `appleMusicId` / `sourceUrl`) are that source's.
+ * Designed never to throw — every field is independently optional. The flat
+ * Track model has no per-resolver `sources` map; the scrobbler receives the
+ * single resolved row, so [Track.resolver] is the played source and the flat
+ * IDs (`spotifyId` / `appleMusicId` / `sourceUrl`) are that source's.
  *
  * No explicit confidence gate: a resolved row is already the high-confidence
  * winner (MIN_CONFIDENCE_THRESHOLD filtered <0.60 out of selection), and the
  * scrobble threshold is the empirical confidence signal (issue #170).
  */
-internal fun deriveLbSourceEnrichment(track: TrackEntity): LbSourceEnrichment {
+internal fun deriveLbSourceEnrichment(track: Track): LbSourceEnrichment {
     // Group 2: cross-platform Spotify anchor — independent of the played source.
     val spotifyAnchor = track.spotifyId
         ?.takeIf { it.isNotBlank() }

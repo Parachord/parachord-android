@@ -79,6 +79,7 @@ import org.koin.core.module.dsl.viewModelOf
 import org.koin.dsl.bind
 import org.koin.dsl.module
 import kotlinx.coroutines.async
+import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.awaitAll
 import kotlinx.coroutines.coroutineScope
 import java.util.concurrent.TimeUnit
@@ -366,7 +367,28 @@ val androidModule = module {
     singleOf(::QueuePersistence)
     singleOf(::PlaybackRouter)
     singleOf(::PlaybackController)
-    singleOf(::ScrobbleManager)
+    singleOf(::JsScrobblePluginDispatcher)
+    // ScrobbleManager moved to shared/commonMain (#193). Forward the two
+    // platform-coupled concerns: the playback-state flow (mapped from
+    // PlaybackStateHolder) and the JS-plugin dispatch (achordion telemetry).
+    single {
+        val jsDispatcher = get<JsScrobblePluginDispatcher>()
+        ScrobbleManager(
+            settingsStore = get(),
+            playbackStateFlow = get<PlaybackStateHolder>().state.map {
+                com.parachord.shared.playback.scrobbler.ScrobbleState(
+                    currentTrack = it.currentTrack,
+                    isPlaying = it.isPlaying,
+                    position = it.position,
+                    duration = it.duration,
+                )
+            },
+            scrobblers = get(),
+            trackDao = get(),
+            mbidEnrichment = get(),
+            dispatchToPlugins = jsDispatcher::dispatch,
+        )
+    }
     singleOf(::SpotifyPlaybackHandler)
     singleOf(::AppleMusicPlaybackHandler)
     singleOf(::SoundCloudPlaybackHandler)
