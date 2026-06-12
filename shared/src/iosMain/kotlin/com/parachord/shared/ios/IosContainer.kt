@@ -69,6 +69,8 @@ import kotlinx.coroutines.async
 import kotlinx.coroutines.awaitAll
 import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.flow.emitAll
+import kotlinx.coroutines.flow.flow
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.mapNotNull
 import kotlinx.coroutines.launch
@@ -404,6 +406,40 @@ class IosContainer private constructor() {
         criticalDarlingsRepository.getCriticsPicks(false)
             .mapNotNull { (it as? Resource.Success)?.data }
 
+    // Same stale-while-revalidate flows for the other curated lists — the repos own
+    // their caches; Swift watches these so no iOS-side duplicate cache is needed
+    // (architecture realignment, plan 2026-06-12).
+    fun freshDropsFlow(): Flow<List<FreshDrop>> =
+        freshDropsRepository.getFreshDrops(false)
+            .mapNotNull { (it as? Resource.Success)?.data }
+
+    fun recommendedTracksFlow(): Flow<List<RecommendedTrack>> =
+        recommendationsRepository.getRecommendedTracks()
+            .mapNotNull { (it as? Resource.Success)?.data }
+
+    fun recommendedArtistsFlow(): Flow<List<RecommendedArtist>> =
+        recommendationsRepository.getRecommendedArtists()
+            .mapNotNull { (it as? Resource.Success)?.data }
+
+    /**
+     * Concerts is two-step (recommended artists → personalized events). We build
+     * the artist seed, then stream the ConcertsRepository's own cached-first +
+     * fresh emissions (it persists to concerts_cache.json). Swift watches this;
+     * no iOS-side duplicate cache (fixes the two-caches-fighting bug).
+     */
+    fun concertsFlow(): Flow<List<ConcertEvent>> = flow {
+        val artists = (try { loadRecommendedArtists() } catch (e: Exception) { emptyList() })
+            .take(12)
+            .map { ConcertArtist(name = it.name, source = "history", imageUrl = it.imageUrl) }
+        if (artists.isEmpty()) { emit(emptyList()); return@flow }
+        val loc = settingsStore.getConcertLocation()
+        emitAll(
+            concertsRepository.getPersonalizedEvents(
+                artists, lat = loc.latitude, lon = loc.longitude, radiusMiles = loc.radiusMiles,
+            ).mapNotNull { (it as? Resource.Success)?.data },
+        )
+    }
+
     // ── Concerts ────────────────────────────────────────────────────────
     private val ticketmasterClient by lazy { TicketmasterClient(httpClient) }
     private val seatGeekClient by lazy { SeatGeekClient(httpClient) }
@@ -711,30 +747,10 @@ class IosContainer private constructor() {
             emptyMap()
         }
 
-    // ── Curated-screen view caches (Swift-managed, decoupled from the repo's
-    //    internal disk cache) ────────────────────────────────────────────────
-    // The iOS Critical Darlings / Concerts models are app-lifetime singletons,
-    // so they reset to BLANK on every cold start and show a skeleton until the
-    // network returns. These let the Swift model persist its last rendered list
-    // and reload it on launch — so a cold start shows the previous list instantly
-    // and fades in fresh data (same pattern as the Discover tile previews).
-    fun encodeCriticsPicks(list: List<CriticsPickAlbum>): String =
-        resolverCacheJson.encodeToString(list)
-
-    fun decodeCriticsPicks(blob: String): List<CriticsPickAlbum> =
-        try { resolverCacheJson.decodeFromString<List<CriticsPickAlbum>>(blob) } catch (e: Exception) { emptyList() }
-
-    fun encodeConcerts(list: List<ConcertEvent>): String =
-        resolverCacheJson.encodeToString(list)
-
-    fun decodeConcerts(blob: String): List<ConcertEvent> =
-        try { resolverCacheJson.decodeFromString<List<ConcertEvent>>(blob) } catch (e: Exception) { emptyList() }
-
-    fun encodeFreshDrops(list: List<FreshDrop>): String =
-        resolverCacheJson.encodeToString(list)
-
-    fun decodeFreshDrops(blob: String): List<FreshDrop> =
-        try { resolverCacheJson.decodeFromString<List<FreshDrop>>(blob) } catch (e: Exception) { emptyList() }
+    // (Removed: the Swift-managed curated-list view caches — Critical Darlings /
+    // Concerts / Fresh Drops now watch the repository value-flows directly via
+    // FlowWatcher, so the repos' own disk caches surface cached-first with no
+    // parallel iOS cache. Architecture realignment, plan 2026-06-12.)
 
     /**
      * Weekly Jams / Weekly Exploration from ListenBrainz. Needs only the

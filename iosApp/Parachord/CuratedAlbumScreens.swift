@@ -255,34 +255,23 @@ struct CriticalDarlingsScreen: View {
 final class FreshDropsModel {
     static let shared = FreshDropsModel()
     private let container = IosContainer.companion.shared
+    private let watcher = FlowWatcher(scope: IosContainer.companion.shared.appScope)
+    private var sub: Cancellable?
     var drops: [FreshDrop] = []
     var isLoading = false
     var loaded = false
-    private var lastLoad: Date?
-    private let ttl: TimeInterval = 6 * 3600   // mirrors desktop Fresh Drops 6h TTL
-
-    // Cold-start cache (same pattern as Critical Darlings / Concerts) — show the
-    // last list instantly on launch instead of a blank skeleton, then fade in.
-    private let cacheURL: URL = {
-        FileManager.default.urls(for: .cachesDirectory, in: .userDomainMask)[0]
-            .appendingPathComponent("ios_fresh_view.json")
-    }()
-    init() {
-        if let blob = try? String(contentsOf: cacheURL, encoding: .utf8) {
-            let cached = container.decodeFreshDrops(blob: blob)
-            if !cached.isEmpty { drops = cached; loaded = true }
-        }
-    }
 
     func load() async {
-        if loaded, let l = lastLoad, Date().timeIntervalSince(l) < ttl { return }
+        guard sub == nil else { return }   // watch the shared repo flow (cached-first → fresh)
         isLoading = true
-        let fresh = (try? await container.loadFreshDrops()) ?? []
-        if !fresh.isEmpty {
-            withAnimation(.easeInOut(duration: 0.4)) { drops = fresh }
-            try? container.encodeFreshDrops(list: fresh).write(to: cacheURL, atomically: true, encoding: .utf8)
+        sub = watcher.watch(flow: container.freshDropsFlow()) { [weak self] v in
+            guard let self else { return }
+            if let list = v as? [FreshDrop], !list.isEmpty {
+                withAnimation(.easeInOut(duration: 0.4)) { self.drops = list }
+            }
+            self.isLoading = false
+            self.loaded = true
         }
-        lastLoad = Date(); isLoading = false; loaded = true
     }
 }
 
@@ -453,35 +442,26 @@ func freshDate(_ raw: String?) -> (text: String, upcoming: Bool)? {
 final class ConcertsModel {
     static let shared = ConcertsModel()
     private let container = IosContainer.companion.shared
+    private let watcher = FlowWatcher(scope: IosContainer.companion.shared.appScope)
+    private var sub: Cancellable?
     var events: [ConcertEvent] = []
     var isLoading = false
     var loaded = false
-    private var lastLoad: Date?
-    private let ttl: TimeInterval = 6 * 3600
 
-    // Cold-start cache (see CriticalDarlingsModel) — concerts are doubly slow
-    // since loadConcerts() first fetches recommended artists, so surfacing the
-    // last list instantly matters most here.
-    private let cacheURL: URL = {
-        FileManager.default.urls(for: .cachesDirectory, in: .userDomainMask)[0]
-            .appendingPathComponent("ios_concerts_view.json")
-    }()
-    init() {
-        if let blob = try? String(contentsOf: cacheURL, encoding: .utf8) {
-            let cached = container.decodeConcerts(blob: blob)
-            if !cached.isEmpty { events = cached; loaded = true }
-        }
-    }
-
+    // Watch the shared concerts flow (builds the artist seed, then streams the
+    // ConcertsRepository's cached-first + fresh events). The repo owns persistence
+    // — no iOS-side cache fighting it (architecture realignment; fixes the cache bug).
     func load() async {
-        if loaded, let l = lastLoad, Date().timeIntervalSince(l) < ttl { return }
+        guard sub == nil else { return }
         isLoading = true
-        let fresh = (try? await container.loadConcerts()) ?? []
-        if !fresh.isEmpty {
-            withAnimation(.easeInOut(duration: 0.4)) { events = fresh }
-            try? container.encodeConcerts(list: fresh).write(to: cacheURL, atomically: true, encoding: .utf8)
+        sub = watcher.watch(flow: container.concertsFlow()) { [weak self] v in
+            guard let self else { return }
+            if let list = v as? [ConcertEvent], !list.isEmpty {
+                withAnimation(.easeInOut(duration: 0.4)) { self.events = list }
+            }
+            self.isLoading = false
+            self.loaded = true
         }
-        lastLoad = Date(); isLoading = false; loaded = true
     }
 }
 

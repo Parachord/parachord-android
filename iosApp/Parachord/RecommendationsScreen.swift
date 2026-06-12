@@ -11,27 +11,34 @@ import Shared
 final class RecommendationsModel {
     static let shared = RecommendationsModel()
     private let container = IosContainer.companion.shared
+    private let watcher = FlowWatcher(scope: IosContainer.companion.shared.appScope)
+    private var subTracks: Cancellable?
+    private var subArtists: Cancellable?
     var tracks: [RecommendedTrack] = []
     var entities: [Track] = []
     var artists: [RecommendedArtist] = []
     var isLoading = false
     var loaded = false
-    private var lastLoad: Date?
-    private let ttl: TimeInterval = 6 * 3600
 
+    // Watch the shared recommendation flows (cached-first → fresh); the repo owns
+    // its disk cache (architecture realignment).
     func load() async {
-        if loaded, let l = lastLoad, Date().timeIntervalSince(l) < ttl { return }
+        guard subTracks == nil else { return }
         isLoading = true
-        let t = (try? await container.loadRecommendedTracks()) ?? []
-        if !t.isEmpty {
-            tracks = t
-            entities = t.map { Self.makeTrack($0) }
+        subTracks = watcher.watch(flow: container.recommendedTracksFlow()) { [weak self] v in
+            guard let self else { return }
+            if let t = v as? [RecommendedTrack], !t.isEmpty {
+                self.tracks = t
+                self.entities = t.map { Self.makeTrack($0) }
+            }
+            self.isLoading = false
+            self.loaded = true
         }
-        let a = (try? await container.loadRecommendedArtists()) ?? []
-        if !a.isEmpty { artists = a }
-        lastLoad = Date()
-        isLoading = false
-        loaded = true
+        subArtists = watcher.watch(flow: container.recommendedArtistsFlow()) { [weak self] v in
+            guard let self else { return }
+            if let a = v as? [RecommendedArtist], !a.isEmpty { self.artists = a }
+            self.loaded = true
+        }
     }
 
     func resolveVisible(_ t: RecommendedTrack, index: Int) {
