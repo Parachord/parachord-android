@@ -184,6 +184,7 @@ class ListenBrainzClient(private val httpClient: HttpClient) {
                             putJsonObject("additional_info") {
                                 put("media_player", "Parachord")
                                 put("submission_client", "Parachord")
+                                put("submission_client_version", "1.0.0")
                                 if (durationMs != null) put("duration_ms", durationMs)
                                 if (!recordingMbid.isNullOrBlank()) put("recording_mbid", recordingMbid)
                                 if (!releaseMbid.isNullOrBlank()) put("release_mbid", releaseMbid)

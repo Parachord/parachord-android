@@ -138,13 +138,14 @@ class LastFmClient(private val httpClient: HttpClient) {
     suspend fun scrobble(
         artist: String, title: String, timestamp: Long,
         apiKey: String, sessionKey: String, sharedSecret: String,
-        album: String? = null, recordingMbid: String? = null,
+        album: String? = null, recordingMbid: String? = null, durationSec: Long? = null,
         apiUrl: String = BASE_URL,
     ): Boolean = postSigned(
         buildMap {
             put("method", "track.scrobble")
             put("artist[0]", artist); put("track[0]", title); put("timestamp[0]", timestamp.toString())
             if (!album.isNullOrBlank()) put("album[0]", album)
+            if (durationSec != null) put("duration[0]", durationSec.toString())
             if (!recordingMbid.isNullOrBlank()) put("mbid[0]", recordingMbid)
         }, apiKey, sessionKey, sharedSecret, apiUrl,
     )
