@@ -459,6 +459,27 @@ struct AlbumScreen: View {
 
 // MARK: - Artist
 
+// Cross-screen cache of loaded artist pages (info + top tracks + discography),
+// keyed by artist name. ArtistScreen — and thus ArtistDetailModel — is recreated
+// on every navigation, so WITHOUT this every reopen of the SAME artist re-fetched
+// from the network and flashed the skeletons (the reported "still see the shimmer"
+// on reopen). Session-scoped; stale entries revalidate quietly in the background.
+@MainActor
+final class ArtistDetailCache {
+    static let shared = ArtistDetailCache()
+    struct Entry {
+        var info: ArtistInfo?
+        var topTracks: [TrackSearchResult]
+        var topEntities: [Track]
+        var albums: [AlbumSearchResult]
+        var albumsError: Bool
+        var ts: Date
+    }
+    private var cache: [String: Entry] = [:]
+    func get(_ name: String) -> Entry? { cache[name.lowercased()] }
+    func put(_ name: String, _ e: Entry) { cache[name.lowercased()] = e }
+}
+
 @MainActor @Observable
 final class ArtistDetailModel {
     private let container = IosContainer.companion.shared
@@ -476,8 +497,21 @@ final class ArtistDetailModel {
 
     init(name: String) { self.name = name }
 
+    private let ttl: TimeInterval = 30 * 60
+
     func load() async {
         guard !loaded else { return }
+        // Reuse a previously-loaded artist INSTANTLY (no skeleton on reopen).
+        if let c = ArtistDetailCache.shared.get(name) {
+            info = c.info; topTracks = c.topTracks; topEntities = c.topEntities
+            albums = c.albums; albumsError = c.albumsError
+            loaded = true
+            ArtistImageCache.shared.fetch(name)
+            // Stale-while-revalidate: refresh quietly in the background past the
+            // TTL — updates in place, no skeleton.
+            if Date().timeIntervalSince(c.ts) > ttl { Task { await refresh() } }
+            return
+        }
         isLoading = true
         info = try? await container.getArtistInfo(artistName: name)
         ArtistImageCache.shared.fetch(name)   // header image (#187)
@@ -486,6 +520,23 @@ final class ArtistDetailModel {
         await loadDiscography()
         isLoading = false
         loaded = true
+    }
+
+    private func saveToCache() {
+        ArtistDetailCache.shared.put(name, .init(
+            info: info, topTracks: topTracks, topEntities: topEntities,
+            albums: albums, albumsError: albumsError, ts: Date()))
+    }
+
+    /// Background revalidation (stale-while-revalidate) — updates in place.
+    private func refresh() async {
+        if let fresh = try? await container.getArtistInfo(artistName: name) { info = fresh }
+        let freshTop = (try? await container.getArtistTopTracks(artistName: name)) ?? []
+        if !freshTop.isEmpty { topTracks = freshTop; topEntities = freshTop.map { pcTrack(from: $0) } }
+        if let fresh = try? await container.getArtistAlbums(artistName: name), !fresh.isEmpty {
+            albums = sortedByYearDesc(fresh); albumsError = false
+        }
+        saveToCache()
     }
 
     /// Fetch the discography, distinguishing a provider FAILURE (→ friendly error)
@@ -497,6 +548,7 @@ final class ArtistDetailModel {
             albumsError = false
         } catch {
             albumsError = true
+            saveToCache()
             return
         }
         // Android parity (ArtistViewModel.retryDiscography): the first fetch can
@@ -510,6 +562,7 @@ final class ArtistDetailModel {
                 albums = sortedByYearDesc(retry)
             }
         }
+        saveToCache()
     }
 
     /// User-triggered retry from the discography error state.
