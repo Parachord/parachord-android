@@ -2,10 +2,13 @@ package com.parachord.shared.api
 
 import io.ktor.client.HttpClient
 import io.ktor.client.request.HttpRequestBuilder
+import io.ktor.client.request.forms.submitForm
 import io.ktor.client.request.get
 import io.ktor.client.request.parameter
 import io.ktor.client.statement.HttpResponse
 import io.ktor.client.statement.bodyAsText
+import io.ktor.http.Parameters
+import io.ktor.http.isSuccess
 import kotlinx.serialization.KSerializer
 import kotlinx.serialization.SerialName
 import kotlinx.serialization.Serializable
@@ -92,6 +95,70 @@ class LastFmClient(private val httpClient: HttpClient) {
         gate.handleResponse(response) { LastFmRateLimitedException(it) }
         json.decodeFromString(deserializer, response.bodyAsText())
     }
+
+    // ── Scrobbling (#193, shared so iOS scrobbles too) ──────────────────────
+    // Signed, authenticated POSTs (api_sig via LastFmSigning). Routed through the
+    // SAME rate-limit gate as reads (CLAUDE.md: write methods must honor the gate).
+    // `apiUrl` lets Libre.fm reuse this against its own endpoint.
+
+    private suspend fun postSigned(
+        params: Map<String, String>,
+        apiKey: String,
+        sessionKey: String,
+        sharedSecret: String,
+        apiUrl: String,
+    ): Boolean = gate.withPermit(exceptionFactory = { LastFmRateLimitedException(it) }) {
+        val all = params.toMutableMap()
+        all["api_key"] = apiKey
+        all["sk"] = sessionKey
+        all["api_sig"] = LastFmSigning.apiSig(all, sharedSecret)   // sign BEFORE adding format
+        all["format"] = "json"
+        val response = httpClient.submitForm(
+            url = apiUrl,
+            formParameters = Parameters.build { all.forEach { (k, v) -> append(k, v) } },
+        )
+        gate.handleResponse(response) { LastFmRateLimitedException(it) }
+        response.status.isSuccess() && !response.bodyAsText().contains("\"error\"")
+    }
+
+    suspend fun updateNowPlaying(
+        artist: String, title: String,
+        apiKey: String, sessionKey: String, sharedSecret: String,
+        album: String? = null, recordingMbid: String? = null, durationSec: Long? = null,
+        apiUrl: String = BASE_URL,
+    ): Boolean = postSigned(
+        buildMap {
+            put("method", "track.updateNowPlaying"); put("artist", artist); put("track", title)
+            if (!album.isNullOrBlank()) put("album", album)
+            if (!recordingMbid.isNullOrBlank()) put("mbid", recordingMbid)
+            if (durationSec != null) put("duration", durationSec.toString())
+        }, apiKey, sessionKey, sharedSecret, apiUrl,
+    )
+
+    suspend fun scrobble(
+        artist: String, title: String, timestamp: Long,
+        apiKey: String, sessionKey: String, sharedSecret: String,
+        album: String? = null, recordingMbid: String? = null,
+        apiUrl: String = BASE_URL,
+    ): Boolean = postSigned(
+        buildMap {
+            put("method", "track.scrobble")
+            put("artist[0]", artist); put("track[0]", title); put("timestamp[0]", timestamp.toString())
+            if (!album.isNullOrBlank()) put("album[0]", album)
+            if (!recordingMbid.isNullOrBlank()) put("mbid[0]", recordingMbid)
+        }, apiKey, sessionKey, sharedSecret, apiUrl,
+    )
+
+    suspend fun loveTrack(
+        artist: String, title: String,
+        apiKey: String, sessionKey: String, sharedSecret: String,
+        recordingMbid: String? = null, apiUrl: String = BASE_URL,
+    ): Boolean = postSigned(
+        buildMap {
+            put("method", "track.love"); put("artist", artist); put("track", title)
+            if (!recordingMbid.isNullOrBlank()) put("mbid", recordingMbid)
+        }, apiKey, sessionKey, sharedSecret, apiUrl,
+    )
 
     suspend fun searchTracks(track: String, apiKey: String, limit: Int = 20): LfmTrackSearchResponse =
         guardedGet(LfmTrackSearchResponse.serializer()) { parameter("method", "track.search"); parameter("track", lfmName(track)); parameter("api_key", apiKey); parameter("limit", limit) }
