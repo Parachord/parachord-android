@@ -20,6 +20,27 @@ struct PCService: Identifiable {
     let kind: Kind
 }
 
+/// A plugin actually loaded by the shared PluginManager (mirrors Android's
+/// dynamic `buildPluginList`). The Settings grids render from THESE — not the
+/// static PCServices catalog — so marketplace-downloaded plugins (Achordion) and
+/// bundled-but-uncataloged ones (Wikipedia) appear, and the "N plugins loaded"
+/// count always matches what's shown.
+struct PCLoadedPlugin: Identifiable {
+    let id: String
+    let name: String
+    let colorHex: String
+    let version: String
+    let caps: [String]
+    let kind: PCService.Kind
+}
+
+/// Parse a `.axe` hex color ("#1DB954") into the UInt32 PCService uses; falls
+/// back to brand purple.
+func pcParseHex(_ hex: String) -> UInt32 {
+    let s = hex.hasPrefix("#") ? String(hex.dropFirst()) : hex
+    return UInt32(s, radix: 16) ?? 0x7C3AED
+}
+
 enum PCServices {
     static let resolvers: [PCService] = [
         .init(id: "spotify", name: "Spotify", color: 0x1DB954, icon: "music.note", kind: .resolver),
@@ -134,10 +155,39 @@ final class SettingsViewModel {
     var libreFmBusy = false
 
     var pluginCount = 0
+    /// The live set of loaded plugins, mapped from PluginManager (Android parity).
+    /// Drives the Meta/Concerts grids + the count.
+    var loadedPlugins: [PCLoadedPlugin] = []
     /// Plugin ids declaring `capabilities.mobile == false` — hidden everywhere
     /// (youtube, ollama). Seeded with the known defaults so filtering holds even
     /// if the .axe layer hasn't loaded yet; augmented from plugin metadata.
     var mobileBlocked: Set<String> = ["youtube", "ollama"]
+
+    /// Re-read the loaded plugins (mobile-filtered — same set everywhere) and map
+    /// them to display models. `pluginCount` == `loadedPlugins.count` so the count
+    /// and the grids never disagree.
+    func refreshLoadedPlugins() async {
+        let loaded = (try? await container.loadPlugins()) ?? []
+        loadedPlugins = loaded.map { p in
+            let kind: PCService.Kind =
+                (p.capabilities["resolve"]?.boolValue == true) ? .resolver
+                : (p.capabilities["concerts"]?.boolValue == true) ? .concert : .meta
+            let caps = p.capabilities.compactMap { $0.value.boolValue ? $0.key.capitalized : nil }.sorted()
+            return PCLoadedPlugin(id: p.id, name: p.name, colorHex: p.color, version: p.version, caps: caps, kind: kind)
+        }
+        pluginCount = loadedPlugins.count
+    }
+
+    /// The services to render for a category — built from the LIVE loaded plugins,
+    /// using the PCServices catalog for rich presentation when available and
+    /// synthesizing a tile (axe name/color, generic icon) for uncataloged ones.
+    func displayServices(_ kind: PCService.Kind) -> [PCService] {
+        loadedPlugins.filter { $0.kind == kind }.map { p in
+            PCServices.find(p.id)
+                ?? PCService(id: p.id, name: p.name, color: pcParseHex(p.colorHex),
+                             icon: "puzzlepiece.extension.fill", kind: kind)
+        }
+    }
     enum SyncState: Equatable { case idle, syncing, done(String), failed }
     var syncState: SyncState = .idle
 
@@ -186,7 +236,7 @@ final class SettingsViewModel {
             var blocked = Set(all.filter { $0.capabilities["mobile"]?.boolValue == false }.map { $0.id })
             blocked.formUnion(["youtube", "ollama"])
             mobileBlocked = blocked
-            pluginCount = ((try? await container.loadPlugins()) ?? []).count
+            await refreshLoadedPlugins()
 
             spotifyClientId = (try? await store.getSpotifyClientId()) ?? ""
             // Read Spotify connection up-front so the load-time recompute gates
@@ -362,7 +412,7 @@ final class SettingsViewModel {
             if let r = try? await container.syncPluginsNow() {
                 let changed = Int(r.added.count) + Int(r.updated.count)
                 syncState = .done(changed > 0 ? "\(changed) updated" : "Up to date")
-                pluginCount = ((try? await container.loadAllPlugins()) ?? []).count
+                await refreshLoadedPlugins()   // same (mobile-filtered) source as initial load
             } else { syncState = .failed }
             try? await Task.sleep(nanoseconds: 4_000_000_000)
             syncState = .idle
@@ -446,10 +496,10 @@ private struct PlugInsTab: View {
             }
 
             sectionLabel("Meta Services")
-            serviceGrid(PCServices.meta, columns: 3)
+            serviceGrid(model.displayServices(.meta), columns: 3)
 
             sectionLabel("Concerts & Events")
-            serviceGrid(PCServices.concerts, columns: 2)
+            serviceGrid(model.displayServices(.concert), columns: 2)
 
             pluginUpdates
         }
@@ -604,6 +654,9 @@ private struct PluginConfigSheet: View {
                 case "applemusic": infoSection("Apple Music is authorized at playback time via MusicKit. No key needed.")
                 case "localfiles": infoSection("Local files are scanned from your device's music library automatically.")
                 case "bandcamp": infoSection("Bandcamp needs no credentials — it resolves and opens tracks in the browser.")
+                // Uncataloged loaded plugins (e.g. Wikipedia, Achordion) have no
+                // BYO-key config — show read-only info instead of a stray key field.
+                case let id where PCServices.find(id) == nil: pluginInfoSection
                 default: keySection
                 }
             }
@@ -737,6 +790,26 @@ private struct PluginConfigSheet: View {
 
     private func infoSection(_ s: String) -> some View {
         Section { Text(s).font(.system(size: 14)).foregroundStyle(.secondary) }
+    }
+
+    /// Read-only detail for a loaded plugin that has no user configuration
+    /// (version + capabilities), mirroring Android's plugin detail sheet.
+    @ViewBuilder private var pluginInfoSection: some View {
+        let plugin = model.loadedPlugins.first { $0.id == service.id }
+        Section {
+            if let plugin {
+                HStack { Text("Version"); Spacer(); Text("v\(plugin.version)").foregroundStyle(.secondary) }
+                if !plugin.caps.isEmpty {
+                    HStack(alignment: .top) {
+                        Text("Capabilities"); Spacer()
+                        Text(plugin.caps.joined(separator: ", "))
+                            .foregroundStyle(.secondary).multilineTextAlignment(.trailing)
+                    }
+                }
+            }
+        } header: { Text("Plugin") } footer: {
+            Text("This plugin runs automatically and needs no configuration.")
+        }
     }
 
     private var keyPlaceholder: String {
