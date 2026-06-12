@@ -237,13 +237,10 @@ struct HistoryScreen: View {
     // ── Helpers ────────────────────────────────────────────────────────
     @ViewBuilder
     private func artistCircle(_ url: String?, seed: String) -> some View {
-        Group {
-            if let url, let u = URL(string: url) {
-                PCCachedImage(url: u) { img in img.resizable().aspectRatio(contentMode: .fill) }
-                    placeholder: { PCArtwork(name: seed, size: nil, radius: 999) }
-            } else { PCArtwork(name: seed, size: nil, radius: 999) }
-        }
-        .aspectRatio(1, contentMode: .fit).clipShape(Circle())
+        Color.clear
+            .aspectRatio(1, contentMode: .fit)
+            .overlay { PCArtistImage(url: url.flatMap { URL(string: $0) }) { PCArtwork(name: seed, size: nil, radius: 999) } }
+            .clipShape(Circle())
     }
 
     @ViewBuilder private func emptyIfNeeded(_ empty: Bool) -> some View {

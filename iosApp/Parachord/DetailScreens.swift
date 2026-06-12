@@ -1,5 +1,6 @@
 import SwiftUI
 import Shared
+import Vision
 
 // MARK: - Album & Artist detail (Phase 4 — docs/design/parachord-ios)
 //
@@ -127,6 +128,99 @@ struct PCCachedImage<Content: View, Placeholder: View>: View {
         }
         pcImageCache.setObject(ui, forKey: key)
         loaded = ui
+    }
+}
+
+// MARK: - Face-aware artist image
+//
+// iOS parity with Android's FaceAwareImage (ML Kit). Runs Vision face detection
+// once per image, biases the fill-crop so the face stays in frame (vs a plain
+// center crop that can clip a face in the top third), and caches both the decoded
+// image (pcImageCache) and the face center (pcFaceCenters) so revisiting is
+// instant with no re-detection. Falls back to a centered crop when no face is
+// found, a shimmer while loading, and `placeholder` when there's no URL.
+private let pcFaceCache = NSCache<NSString, NSValue>()
+
+struct PCArtistImage<Placeholder: View>: View {
+    let url: URL?
+    @ViewBuilder var placeholder: () -> Placeholder
+    @State private var loaded: UIImage?
+    @State private var detected: UnitPoint?
+    @State private var failed = false
+
+    private var uiImage: UIImage? {
+        loaded ?? url.flatMap { pcImageCache.object(forKey: $0.absoluteString as NSString) }
+    }
+    private var center: UnitPoint {
+        if let detected { return detected }
+        if let url, let v = pcFaceCache.object(forKey: url.absoluteString as NSString) {
+            return UnitPoint(x: v.cgPointValue.x, y: v.cgPointValue.y)
+        }
+        return .center
+    }
+
+    var body: some View {
+        GeometryReader { geo in
+            cropped(geo.size)
+        }
+        .task(id: url) { await load() }
+    }
+
+    @ViewBuilder private func cropped(_ size: CGSize) -> some View {
+        if let img = uiImage, size.width > 0, size.height > 0, img.size.width > 0, img.size.height > 0 {
+            // Aspect-fill the container, then offset so the face center maps to the
+            // container center (continuous bias, like Android's BiasAlignment).
+            let s = max(size.width / img.size.width, size.height / img.size.height)
+            let dW = img.size.width * s
+            let dH = img.size.height * s
+            Image(uiImage: img)
+                .resizable()
+                .frame(width: dW, height: dH)
+                .offset(x: (size.width - dW) * center.x, y: (size.height - dH) * center.y)
+                .frame(width: size.width, height: size.height, alignment: .topLeading)
+                .clipped()
+        } else if url == nil || failed {
+            placeholder()
+        } else {
+            PCSkeletonBox(radius: 8)
+        }
+    }
+
+    private func load() async {
+        guard let url else { return }
+        let key = url.absoluteString
+        if uiImage == nil {
+            failed = false
+            guard let (data, _) = try? await URLSession.shared.data(from: url),
+                  let ui = UIImage(data: data) else { failed = true; return }
+            pcImageCache.setObject(ui, forKey: key as NSString)
+            loaded = ui
+        }
+        if pcFaceCache.object(forKey: key as NSString) == nil, let img = uiImage {
+            let pt = await Self.detectFaceCenter(img)
+            pcFaceCache.setObject(NSValue(cgPoint: CGPoint(x: pt.x, y: pt.y)), forKey: key as NSString)
+            detected = pt
+        }
+    }
+
+    /// Average detected face center as a top-left-origin UnitPoint (.center if none).
+    private static func detectFaceCenter(_ image: UIImage) async -> UnitPoint {
+        guard let cg = image.cgImage else { return .center }
+        return await withCheckedContinuation { cont in
+            let request = VNDetectFaceRectanglesRequest { req, _ in
+                guard let faces = req.results as? [VNFaceObservation], !faces.isEmpty else {
+                    cont.resume(returning: .center); return
+                }
+                let n = CGFloat(faces.count)
+                let x = faces.map { $0.boundingBox.midX }.reduce(0, +) / n
+                // Vision is bottom-left origin → flip Y for SwiftUI (top-left).
+                let yBottom = faces.map { $0.boundingBox.midY }.reduce(0, +) / n
+                cont.resume(returning: UnitPoint(x: x, y: 1 - yBottom))
+            }
+            DispatchQueue.global(qos: .userInitiated).async {
+                try? VNImageRequestHandler(cgImage: cg, orientation: .up, options: [:]).perform([request])
+            }
+        }
     }
 }
 
@@ -371,14 +465,8 @@ struct ArtistScreen: View {
     private var hero: some View {
         ZStack(alignment: .bottom) {
             // Base: the artist photo (fill-cropped) when available, else gradient.
-            if let u = heroImage, !u.isEmpty, let url = URL(string: u) {
-                PCCachedImage(url: url) { img in
-                    img.resizable().scaledToFill()
-                } placeholder: {
-                    LinearGradient(colors: [gradient.0, gradient.1],
-                                   startPoint: .topLeading, endPoint: .bottomTrailing)
-                }
-            } else {
+            // Face-aware so the artist's face isn't cropped out of the header.
+            PCArtistImage(url: heroImage.flatMap { $0.isEmpty ? nil : URL(string: $0) }) {
                 LinearGradient(colors: [gradient.0, gradient.1],
                                startPoint: .topLeading, endPoint: .bottomTrailing)
             }
@@ -630,12 +718,7 @@ struct ArtistScreen: View {
         return Color.clear
             .aspectRatio(1, contentMode: .fit)
             .overlay {
-                if let url, let u = URL(string: url) {
-                    PCCachedImage(url: u) { img in img.resizable().aspectRatio(contentMode: .fill) }
-                        placeholder: { initialCircle(a.name) }
-                } else {
-                    initialCircle(a.name)
-                }
+                PCArtistImage(url: url.flatMap { URL(string: $0) }) { initialCircle(a.name) }
             }
             .clipShape(Circle())
             .shadow(color: .black.opacity(0.1), radius: 6, y: 3)

@@ -157,17 +157,15 @@ struct RecommendationsScreen: View {
     // Square 96dp-style cards (radius 12) — matches Android's AlbumArtCard.
     @ViewBuilder
     private func artistSquare(_ a: RecommendedArtist) -> some View {
-        Group {
-            if let url = a.imageUrl, let u = URL(string: url) {
-                PCCachedImage(url: u) { img in img.resizable().aspectRatio(contentMode: .fill) }
-                    placeholder: { PCArtwork(name: a.name, size: nil, radius: 12) }
-            } else {
-                PCArtwork(name: a.name, size: nil, radius: 12)
+        Color.clear
+            .aspectRatio(1, contentMode: .fit)
+            .overlay {
+                PCArtistImage(url: a.imageUrl.flatMap { URL(string: $0) }) {
+                    PCArtwork(name: a.name, size: nil, radius: 12)
+                }
             }
-        }
-        .aspectRatio(1, contentMode: .fit)
-        .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
-        .shadow(color: .black.opacity(0.10), radius: 6, y: 3)
+            .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
+            .shadow(color: .black.opacity(0.10), radius: 6, y: 3)
     }
 
     // ── Songs tab: track list (resolver pipeline per row) ──────────────
