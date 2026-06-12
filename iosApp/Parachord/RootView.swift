@@ -115,6 +115,17 @@ struct ContentView: View {
         // Live Activity for background playback is a separate, larger feature.)
         .environment(coordinator)
         .task { ResolverPrefs.shared.start() }
+        // Resolve the current track as soon as it changes (incl. natural
+        // auto-advance, where the next track may not have been pre-resolved) so
+        // the mini-player art is ready and crossfades reliably — not only when the
+        // upcoming track happened to already be cached. The resolver cache is
+        // @Observable, so the mini's pcTrackArt re-renders when this lands.
+        .task(id: coordinator.currentTrack?.id) {
+            if let t = coordinator.currentTrack {
+                IosTrackResolverCache.shared.resolve(
+                    ResolveRequest(artist: t.artist, title: t.title, album: t.album), order: 0)
+            }
+        }
         .sheet(isPresented: $showAdd) {
             PCAddSheet(onShuffleupagus: { /* Phase: DJ chat */ }, onDismiss: { showAdd = false })
         }
