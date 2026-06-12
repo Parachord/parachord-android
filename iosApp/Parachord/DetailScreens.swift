@@ -18,7 +18,10 @@ struct PCAlbumRef: Hashable { let title: String; let artist: String }
 /// else title+artist. Used so `ForEach`/`.id` recreate cells per album (not per
 /// array slot) when the filter changes, refreshing the artwork (bug 7).
 extension AlbumSearchResult {
-    var discoId: String { "\(mbid ?? "")|\(title)|\(artist)" }
+    // Includes releaseType so a same-titled album AND single/EP (distinct
+    // releases the discography shows in different buckets) get DISTINCT ids and
+    // don't collide in ForEach.
+    var discoId: String { "\(mbid ?? "")|\(releaseType ?? "")|\(title)|\(artist)" }
 }
 
 private func pcTrack(from t: TrackSearchResult) -> Track {
@@ -690,35 +693,24 @@ struct ArtistScreen: View {
         }
     }
 
-    /// Collapse duplicate titles to ONE entry, keeping the MOST-SPECIFIC release
-    /// type. MusicBrainz tags a greatest-hits as `compilation` while Spotify
-    /// reports the same title as `album`; the shared dedup keeps both, so without
-    /// this the compilation ALSO surfaces under Studio Albums (the reported bug).
+    /// Collapse duplicate titles to ONE entry, keeping the most meaningful release
+    /// type. Two distinct cases:
+    ///   • Cross-provider conflict: MusicBrainz tags a greatest-hits `compilation`
+    ///     while Spotify reports the same title as `album` — prefer compilation.
+    ///   • MusicBrainz itself lists a studio album AND a promo/early EP or lead
+    ///     single under the SAME title (e.g. Fontaines D.C. "Dogrel" = EP + Album,
+    ///     "Skinty Fia" = Single + Album) — the STUDIO ALBUM must win, not the EP.
+    /// So `album` outranks `ep`/`single`, while `compilation`/`live` (meaningful
+    /// re-categorizations of what would otherwise be an album) outrank `album`.
     /// Preserves the model's most-recent-first order (first appearance wins slot).
-    private var dedupedAlbums: [AlbumSearchResult] {
-        func rank(_ t: String?) -> Int {
-            switch t?.lowercased() {
-            case "compilation", "live": return 3
-            case "ep", "single":        return 2
-            case "album":               return 1
-            default:                    return 0
-            }
-        }
-        var best: [String: AlbumSearchResult] = [:]
-        var order: [String] = []
-        for a in model.albums {
-            let key = a.title.lowercased()
-            if let cur = best[key] {
-                if rank(a.releaseType) > rank(cur.releaseType) { best[key] = a }
-            } else { best[key] = a; order.append(key) }
-        }
-        return order.compactMap { best[$0] }
-    }
-
     private var discoFiltered: [AlbumSearchResult] {
-        // Android parity: filter by the RAW releaseType — never default null to
-        // "album" (that's what force-labeled compilations/untyped as Studio Albums).
-        discoFilter == "all" ? dedupedAlbums : dedupedAlbums.filter { $0.releaseType?.lowercased() == discoFilter }
+        // Use the shared-deduped list as-is (Android parity). The shared
+        // `deduplicateAlbums` already collapses true duplicates but KEEPS distinct
+        // release types under the same title — an artist can have both an album AND
+        // a same-named single/EP (e.g. Fontaines D.C. "Skinty Fia" = Single + Album),
+        // and BOTH should appear, each in its own bucket. Filter by the RAW
+        // releaseType — never default null to "album".
+        discoFilter == "all" ? model.albums : model.albums.filter { $0.releaseType?.lowercased() == discoFilter }
     }
 
     // Reserve the chip-row footprint while loading so the grid doesn't jump when
@@ -754,11 +746,11 @@ struct ArtistScreen: View {
             if model.isLoading && !model.loaded {
                 discoFilterSkeleton
                 PCSkeletonGrid(count: 6, columns: 2)
-            } else if model.albumsError && dedupedAlbums.isEmpty {
+            } else if model.albumsError && model.albums.isEmpty {
                 discographyError
             } else {
                 // Counts per releaseType (only albums with an explicit type — Android parity).
-                let typeCounts = Dictionary(grouping: dedupedAlbums.compactMap { $0.releaseType?.lowercased() }, by: { $0 })
+                let typeCounts = Dictionary(grouping: model.albums.compactMap { $0.releaseType?.lowercased() }, by: { $0 })
                     .mapValues { $0.count }
                 let available = Self.discoFilters.filter { $0.key == "all" || typeCounts[$0.key] != nil }
                 if available.count > 1 {
@@ -812,7 +804,13 @@ struct ArtistScreen: View {
                             }
                         }
                         .buttonStyle(.plain)
-                        .id(album.discoId)   // fresh cell view per album → fresh PCCachedImage state
+                        // NOTE: do NOT put `.id(album.discoId)` here. ArtistScreen
+                        // re-renders often (it observes coordinator + resolverCache);
+                        // an `.id` on a value-based NavigationLink makes SwiftUI
+                        // recreate the link subtree on those renders, which tears
+                        // down an in-flight push and pops AlbumScreen back to the
+                        // artist. The ForEach `id: \.discoId` above already gives
+                        // each cell stable per-album identity for the art refresh.
                     }
                 }
                 .padding(.horizontal, 20).padding(.vertical, 12)
