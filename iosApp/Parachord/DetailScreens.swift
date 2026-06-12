@@ -149,6 +149,15 @@ struct PCCachedImage<Content: View, Placeholder: View>: View {
         self.url = url
         self.content = content
         self.placeholder = placeholder
+        // Seed SYNCHRONOUSLY from the cache (memory, then disk) at construction.
+        // NSCache purges under memory pressure as you browse, so by the time you
+        // reopen an artist page its discography art was usually evicted from
+        // memory — and the disk tier was only consulted in the async `.task`,
+        // which rendered a skeleton first. That skeleton→image churn read as
+        // "reloading every time". A disk hit here means a previously-loaded image
+        // shows instantly with NO skeleton. LazyVGrid only builds visible cells,
+        // so this is ~a handful of small synchronous decodes, not the whole grid.
+        _loaded = State(initialValue: url.flatMap { PCImageStore.load($0) })
     }
 
     private var cachedImage: UIImage? {
@@ -197,11 +206,22 @@ struct PCArtistImage<Placeholder: View>: View {
     /// Top area covered by the Dynamic Island / status bar in a full-bleed hero.
     /// The face is biased BELOW this; 0 (the default, used by circles) just
     /// centers the face normally.
-    var topInset: CGFloat = 0
-    @ViewBuilder var placeholder: () -> Placeholder
+    let topInset: CGFloat
+    let placeholder: () -> Placeholder
     @State private var loaded: UIImage?
     @State private var detected: UnitPoint?
     @State private var failed = false
+
+    init(url: URL?, topInset: CGFloat = 0, @ViewBuilder placeholder: @escaping () -> Placeholder) {
+        self.url = url
+        self.topInset = topInset
+        self.placeholder = placeholder
+        // Seed synchronously from memory/disk so a revisited hero/related image
+        // shows instantly (no skeleton/disappear after NSCache eviction). The
+        // face center is read separately from pcFaceCache by `center`, so the
+        // crop is correct on the first frame too.
+        _loaded = State(initialValue: url.flatMap { PCImageStore.load($0) })
+    }
 
     private var uiImage: UIImage? {
         loaded ?? url.flatMap { PCImageStore.memoryImage($0) }
