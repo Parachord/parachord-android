@@ -70,7 +70,7 @@ class ResolverCoordinator(
         query: String,
         targetTitle: String? = null,
         targetArtist: String? = null,
-        @Suppress("UNUSED_PARAMETER") album: String? = null,
+        album: String? = null,
         excludeResolvers: Set<String> = emptySet(),
     ): List<ResolvedSource> = coroutineScope {
         val active = getActive()
@@ -87,7 +87,7 @@ class ResolverCoordinator(
             }
             for (id in runtime.nativeResolverIds) {
                 if (isActive(id)) {
-                    add(async { runtime.resolveNative(id, query, targetTitle, targetArtist) })
+                    add(async { runtime.resolveNative(id, query, targetTitle, targetArtist, album) })
                 }
             }
             val axeIds = ResolverGating.axeResolverIds(
@@ -99,7 +99,7 @@ class ResolverCoordinator(
             )
             for (id in axeIds) {
                 if (id !in excludeResolvers) {
-                    add(async { runtime.resolveAxe(id, query, targetTitle, targetArtist) })
+                    add(async { runtime.resolveAxe(id, query, targetTitle, targetArtist, album) })
                 }
             }
         }
@@ -120,8 +120,8 @@ class ResolverCoordinator(
      * sources, order by resolver priority (a [preferredResolver] jumps to the
      * front). Mirrors iOS's `IosResolverCoordinator.resolveSources()`.
      *
-     * [album] is reserved for future per-resolver album-scoping (e.g. the
-     * desktop AM resolver's album-search path) — currently forwarded but unused.
+     * [album] is forwarded to the runtime's `.axe` / native resolve (iOS's
+     * `.axe` resolvers use it for disambiguation; Android drops it for `.axe`).
      * No `excludeResolvers` param by design: the ranked path (iOS
      * `resolveSources`) has no exclude concept; Android's exclude-aware path
      * calls [resolveScored] directly (via `resolveWithHints`).

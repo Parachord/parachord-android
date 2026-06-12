@@ -46,6 +46,7 @@ class ResolverCoordinatorTest {
             query: String,
             targetTitle: String?,
             targetArtist: String?,
+            album: String?,
         ): ResolvedSource? {
             askedNative += resolverId
             return natives[resolverId]
@@ -56,6 +57,7 @@ class ResolverCoordinatorTest {
             query: String,
             targetTitle: String?,
             targetArtist: String?,
+            album: String?,
         ): ResolvedSource? {
             askedAxe += resolverId
             return axes[resolverId]

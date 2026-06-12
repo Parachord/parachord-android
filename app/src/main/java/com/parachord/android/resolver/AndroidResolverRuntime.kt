@@ -51,7 +51,10 @@ class AndroidResolverRuntime constructor(
         query: String,
         targetTitle: String?,
         targetArtist: String?,
+        album: String?,
     ): ResolvedSource? = when (resolverId) {
+        // Android's native AM (MusicKit+iTunes), SoundCloud, and local-file
+        // resolvers don't take album — parity with the pre-#210 fan-out.
         "applemusic" -> resolveAppleMusic(query, targetTitle, targetArtist)
         "soundcloud" -> resolveSoundCloud(query)
         "localfiles" -> resolveLocalFile(targetTitle, targetArtist)
@@ -63,6 +66,8 @@ class AndroidResolverRuntime constructor(
         query: String,
         targetTitle: String?,
         targetArtist: String?,
+        album: String?,
+    // Android passed null for the .axe album arg pre-#210 (resolveViaPlugin) — keep it.
     ): ResolvedSource? = resolveViaPlugin(resolverId, query, targetTitle, targetArtist)
 
     // ── Apple Music Resolver ────────────────────────────────────────

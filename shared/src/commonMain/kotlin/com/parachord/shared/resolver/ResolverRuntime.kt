@@ -37,17 +37,24 @@ interface ResolverRuntime {
         query: String,
         targetTitle: String?,
         targetArtist: String?,
+        album: String?,
     ): ResolvedSource?
 
     /**
      * Resolve one `.axe` id (Android: `PluginManager.resolve`; iOS: JSC
      * unique-key polling). Returns null on no-match. The coordinator only calls
      * this for ids returned by [ResolverGating.axeResolverIds] (minus excludes).
+     *
+     * [album] is forwarded to the plugin's `resolve(artist, title, album, …)`.
+     * iOS passes it through (its `.axe` resolvers use it for disambiguation);
+     * Android's impl passes `null` (parity with its pre-#210 `resolveViaPlugin`,
+     * which always passed `null`) — each platform preserves its prior behavior.
      */
     suspend fun resolveAxe(
         resolverId: String,
         query: String,
         targetTitle: String?,
         targetArtist: String?,
+        album: String?,
     ): ResolvedSource?
 }
