@@ -559,22 +559,30 @@ struct ArtistScreen: View {
     /// circle, with an initial-letter placeholder until it lands (Android parity).
     private func relatedCircle(_ a: SimilarArtist) -> some View {
         let url = ArtistImageCache.shared.image(for: a.name) ?? nonPlaceholderArt(a.imageUrl)
-        let initial = a.name.prefix(1).uppercased()
-        return ZStack {
-            Circle().fill(PC.bgInset)
-            if let u = url, !u.isEmpty, let parsed = URL(string: u) {
-                AsyncImage(url: parsed) { phase in
-                    if let img = phase.image { img.resizable().scaledToFill() }
-                    else { Text(initial).font(.system(size: 24, weight: .semibold)).foregroundStyle(PC.fg3) }
-                }
+        // Same structure as HistoryScreen.artistCircle: a single Group whose
+        // outer .aspectRatio(1) makes the CELL drive the size (the image fills it
+        // via .aspectRatio(.fill)). A ZStack + scaledToFill let a loaded image
+        // drive the size instead, which broke the grid.
+        return Group {
+            if let url, let u = URL(string: url) {
+                AsyncImage(url: u) { img in img.resizable().aspectRatio(contentMode: .fill) }
+                    placeholder: { initialCircle(a.name) }
             } else {
-                Text(initial).font(.system(size: 24, weight: .semibold)).foregroundStyle(PC.fg3)
+                initialCircle(a.name)
             }
         }
         .aspectRatio(1, contentMode: .fit)
-        .frame(maxWidth: .infinity)
         .clipShape(Circle())
         .shadow(color: .black.opacity(0.1), radius: 6, y: 3)
+    }
+
+    /// Initial-letter placeholder circle (Android RelatedArtistsTab parity).
+    private func initialCircle(_ name: String) -> some View {
+        ZStack {
+            Circle().fill(PC.bgInset)
+            Text(name.prefix(1).uppercased())
+                .font(.system(size: 24, weight: .semibold)).foregroundStyle(PC.fg3)
+        }
     }
 
     /// Drop Last.fm's grey-star "no image" placeholder so we fall back to the
