@@ -72,6 +72,15 @@ class ArtistViewModel constructor(
     private val _albumsLoading = MutableStateFlow(true)
     val albumsLoading: StateFlow<Boolean> = _albumsLoading.asStateFlow()
 
+    /**
+     * True when the discography fetch FAILED (a provider — typically MusicBrainz
+     * — errored), as opposed to the artist genuinely having no releases. Lets the
+     * Discography tab show a friendly "couldn't load, try again" message instead
+     * of the bare "No discography available" empty state.
+     */
+    private val _albumsError = MutableStateFlow(false)
+    val albumsError: StateFlow<Boolean> = _albumsError.asStateFlow()
+
     private val _tourDates = MutableStateFlow<Resource<List<ConcertEvent>>>(Resource.Loading)
     val tourDates: StateFlow<Resource<List<ConcertEvent>>> = _tourDates.asStateFlow()
 
@@ -158,12 +167,18 @@ class ArtistViewModel constructor(
                 val albums = metadataService.getArtistAlbums(artistName)
                     .sortedByDescending { it.year ?: 0 }
                 _albums.value = albums
+                _albumsError.value = false
                 _isLoading.value = false
                 if (albums.isNotEmpty() && albums.none { it.year != null }) {
                     retryDiscography()
                 }
+            } catch (e: kotlinx.coroutines.CancellationException) {
+                throw e
             } catch (e: Exception) {
+                // A provider failed (e.g. MusicBrainz 503/429) — surface a friendly
+                // error rather than a misleading "No discography available".
                 Log.e("ArtistVM", "Failed loading albums for '$artistName'", e)
+                _albumsError.value = true
             } finally {
                 // Always clear the discography-specific flag — even on
                 // error/empty result we want the empty-state to render
@@ -174,6 +189,30 @@ class ArtistViewModel constructor(
 
         // Tour dates
         loadTourDates()
+    }
+
+    /**
+     * User-triggered retry from the discography error state (the "Try again"
+     * button shown when a provider failed). Re-runs ONLY the discography fetch.
+     */
+    fun reloadDiscography() {
+        _albumsError.value = false
+        _albumsLoading.value = true
+        viewModelScope.launch {
+            try {
+                val albums = metadataService.getArtistAlbums(artistName)
+                    .sortedByDescending { it.year ?: 0 }
+                _albums.value = albums
+                _albumsError.value = false
+            } catch (e: kotlinx.coroutines.CancellationException) {
+                throw e
+            } catch (e: Exception) {
+                Log.e("ArtistVM", "Retry: failed loading albums for '$artistName'", e)
+                _albumsError.value = true
+            } finally {
+                _albumsLoading.value = false
+            }
+        }
     }
 
     /**
@@ -189,8 +228,9 @@ class ArtistViewModel constructor(
                     .sortedByDescending { it.year ?: 0 }
                 if (albums.any { it.year != null }) {
                     _albums.value = albums
+                    _albumsError.value = false
                 }
-            } catch (_: Exception) { /* best effort */ }
+            } catch (_: Exception) { /* best effort — keep whatever we have */ }
         }
     }
 

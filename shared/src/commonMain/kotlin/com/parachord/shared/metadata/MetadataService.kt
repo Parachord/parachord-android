@@ -28,6 +28,16 @@ import kotlinx.coroutines.sync.withLock
  * @param getDisabledProviders Returns the set of provider names the user has disabled.
  * @param enrichAlbumArtwork Optional callback to enrich Cover Art Archive URLs with iTunes artwork.
  */
+/**
+ * Thrown by [MetadataService.getArtistAlbums] when the discography came back
+ * empty BECAUSE a provider failed (e.g. MusicBrainz 503/429/network), as opposed
+ * to the artist genuinely having no releases. Lets the UI show a friendly
+ * "couldn't load — try again" message instead of a bare empty state.
+ */
+class DiscographyUnavailableException(
+    message: String = "Couldn't load discography",
+) : Exception(message)
+
 class MetadataService constructor(
     private val providers: List<MetadataProvider>,
     private val getDisabledProviders: suspend () -> Set<String>,
@@ -174,18 +184,29 @@ class MetadataService constructor(
 
     /** Get an artist's discography from all available providers. */
     suspend fun getArtistAlbums(artistName: String, limit: Int = 50): List<AlbumSearchResult> = coroutineScope {
-        val results = availableProviders()
+        val perProvider: List<Result<List<AlbumSearchResult>>> = availableProviders()
             .map { provider -> async {
                 try {
-                    provider.getArtistAlbums(artistName, limit)
-                } catch (_: Exception) {
-                    emptyList()
+                    Result.success(provider.getArtistAlbums(artistName, limit))
+                } catch (e: kotlinx.coroutines.CancellationException) {
+                    throw e   // never swallow cancellation (CLAUDE.md)
+                } catch (e: Exception) {
+                    Result.failure(e)
                 }
             } }
             .awaitAll()
-            .flatten()
 
+        val results = perProvider.mapNotNull { it.getOrNull() }.flatten()
         val deduped = deduplicateAlbums(results).take(limit)
+
+        // Distinguish "this artist genuinely has no discography" (empty, no
+        // failures) from "we couldn't reach the discography providers" (empty,
+        // but a provider threw — typically a MusicBrainz 503/429/network error).
+        // The UI shows a friendly retry message for the latter instead of a bare
+        // "No discography" empty state.
+        if (deduped.isEmpty() && perProvider.any { it.isFailure }) {
+            throw DiscographyUnavailableException()
+        }
 
         // Enrich albums that only have Cover Art Archive URLs (which may 404)
         enrichAlbumArtwork?.invoke(artistName, deduped) ?: deduped

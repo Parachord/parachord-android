@@ -438,6 +438,10 @@ final class ArtistDetailModel {
     var albums: [AlbumSearchResult] = []
     var isLoading = false
     var loaded = false
+    /// True when the discography fetch FAILED (a provider — typically MusicBrainz
+    /// — errored) vs. the artist genuinely having no releases. Drives the friendly
+    /// "couldn't load, try again" state instead of a bare empty grid.
+    var albumsError = false
 
     init(name: String) { self.name = name }
 
@@ -448,18 +452,39 @@ final class ArtistDetailModel {
         ArtistImageCache.shared.fetch(name)   // header image (#187)
         topTracks = (try? await container.getArtistTopTracks(artistName: name)) ?? []
         topEntities = topTracks.map { pcTrack(from: $0) }
-        albums = sortedByYearDesc((try? await container.getArtistAlbums(artistName: name)) ?? [])
+        await loadDiscography()
         isLoading = false
         loaded = true
+    }
+
+    /// Fetch the discography, distinguishing a provider FAILURE (→ friendly error)
+    /// from a genuinely-empty discography. `getArtistAlbums` throws
+    /// DiscographyUnavailableException only when empty BECAUSE a provider errored.
+    func loadDiscography() async {
+        do {
+            albums = sortedByYearDesc(try await container.getArtistAlbums(artistName: name))
+            albumsError = false
+        } catch {
+            albumsError = true
+            return
+        }
         // Android parity (ArtistViewModel.retryDiscography): the first fetch can
         // come back without year/releaseType when MusicBrainz was rate-limited in
         // the parallel burst — so compilations/live get no type and can't bucket.
         // Re-fetch once after a short delay and adopt the typed result.
         if !albums.isEmpty && albums.allSatisfy({ $0.year == nil }) {
             try? await Task.sleep(nanoseconds: 2_000_000_000)
-            let retry = sortedByYearDesc((try? await container.getArtistAlbums(artistName: name)) ?? [])
-            if retry.contains(where: { $0.year != nil }) { albums = retry }
+            if let retry = try? await container.getArtistAlbums(artistName: name),
+               retry.contains(where: { $0.year != nil }) {
+                albums = sortedByYearDesc(retry)
+            }
         }
+    }
+
+    /// User-triggered retry from the discography error state.
+    func retryDiscography() async {
+        albumsError = false
+        await loadDiscography()
     }
 
     /// Most-recent-first by release year (Android: `.sortedByDescending { it.year ?: 0 }`).
@@ -706,11 +731,31 @@ struct ArtistScreen: View {
         .padding(.horizontal, 20).padding(.vertical, 12)
     }
 
+    // Friendly error shown when a provider (typically MusicBrainz) failed, rather
+    // than the misleading empty state. Parity with Android's DiscographyTab error.
+    private var discographyError: some View {
+        VStack(spacing: 12) {
+            Image(systemName: "icloud.slash").font(.system(size: 40)).foregroundStyle(PC.fg3)
+            Text("Couldn't load discography").font(.system(size: 16, weight: .semibold)).foregroundStyle(PC.fg1)
+            Text("Something went wrong reaching the music database. Please try again.")
+                .font(.system(size: 13)).foregroundStyle(PC.fg2)
+                .multilineTextAlignment(.center).padding(.horizontal, 40)
+            Button { Task { await model.retryDiscography() } } label: {
+                Text("Try Again").font(.system(size: 15, weight: .semibold)).foregroundStyle(.white)
+                    .padding(.horizontal, 22).frame(height: 42).background(PC.accent, in: Capsule())
+            }
+            .buttonStyle(.plain).padding(.top, 4)
+        }
+        .frame(maxWidth: .infinity).padding(.vertical, 50)
+    }
+
     private var discographyTab: some View {
         VStack(alignment: .leading, spacing: 0) {
             if model.isLoading && !model.loaded {
                 discoFilterSkeleton
                 PCSkeletonGrid(count: 6, columns: 2)
+            } else if model.albumsError && dedupedAlbums.isEmpty {
+                discographyError
             } else {
                 // Counts per releaseType (only albums with an explicit type — Android parity).
                 let typeCounts = Dictionary(grouping: dedupedAlbums.compactMap { $0.releaseType?.lowercased() }, by: { $0 })

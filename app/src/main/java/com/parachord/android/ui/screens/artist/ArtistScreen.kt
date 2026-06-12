@@ -39,9 +39,11 @@ import androidx.compose.material.icons.filled.LocationOn
 import androidx.compose.material.icons.filled.OpenInNew
 import androidx.compose.material.icons.filled.Star
 import androidx.compose.material.icons.outlined.StarOutline
+import androidx.compose.material.icons.outlined.CloudOff
 import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.items as lazyItems
 import androidx.compose.material3.AssistChip
+import androidx.compose.material3.Button
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.FilterChip
 import androidx.compose.material3.FilterChipDefaults
@@ -115,6 +117,7 @@ fun ArtistScreen(
     val albums by viewModel.albums.collectAsStateWithLifecycle()
     val isLoading by viewModel.isLoading.collectAsStateWithLifecycle()
     val albumsLoading by viewModel.albumsLoading.collectAsStateWithLifecycle()
+    val albumsError by viewModel.albumsError.collectAsStateWithLifecycle()
     val trackResolvers by viewModel.trackResolvers.collectAsStateWithLifecycle()
     val trackResolverConfidences by viewModel.trackResolverConfidences.collectAsStateWithLifecycle()
     val trackArtwork by viewModel.trackArtwork.collectAsStateWithLifecycle()
@@ -310,6 +313,8 @@ fun ArtistScreen(
                             // empty state to flash before MusicBrainz
                             // returns the actual album list.
                             isLoading = albumsLoading,
+                            isError = albumsError,
+                            onRetry = { viewModel.reloadDiscography() },
                             onNavigateToAlbum = onNavigateToAlbum,
                             onNavigateToArtist = onNavigateToArtist,
                             onQueueAlbum = { title, artist -> viewModel.queueAlbumByName(title, artist) },
@@ -393,6 +398,8 @@ private fun releaseTypeBadgeColor(type: String?): Color = when (type?.lowercase(
 private fun DiscographyTab(
     albums: List<AlbumSearchResult>,
     isLoading: Boolean = false,
+    isError: Boolean = false,
+    onRetry: () -> Unit = {},
     onNavigateToAlbum: (albumTitle: String, artistName: String) -> Unit,
     onNavigateToArtist: (String) -> Unit = {},
     onQueueAlbum: (title: String, artist: String) -> Unit = { _, _ -> },
@@ -583,8 +590,39 @@ private fun DiscographyTab(
             }
         }
 
-        // Only show "no discography" when loading is done and there's truly nothing
-        if (!isLoading && filteredAlbums.isEmpty()) {
+        // A provider failed (e.g. MusicBrainz) → friendly error + retry, NOT the
+        // misleading "No discography available" empty state.
+        if (!isLoading && isError && filteredAlbums.isEmpty()) {
+            item {
+                Column(
+                    modifier = Modifier.fillMaxWidth().padding(32.dp),
+                    horizontalAlignment = Alignment.CenterHorizontally,
+                ) {
+                    Icon(
+                        imageVector = Icons.Outlined.CloudOff,
+                        contentDescription = null,
+                        tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                        modifier = Modifier.size(40.dp),
+                    )
+                    Spacer(modifier = Modifier.height(12.dp))
+                    Text(
+                        text = "Couldn't load discography",
+                        style = MaterialTheme.typography.bodyLarge,
+                        color = MaterialTheme.colorScheme.onSurface,
+                    )
+                    Spacer(modifier = Modifier.height(4.dp))
+                    Text(
+                        text = "Something went wrong reaching the music database. Please try again.",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        textAlign = TextAlign.Center,
+                    )
+                    Spacer(modifier = Modifier.height(16.dp))
+                    Button(onClick = onRetry) { Text("Try again") }
+                }
+            }
+        } else if (!isLoading && filteredAlbums.isEmpty()) {
+            // Genuinely no releases for this artist.
             item {
                 Box(
                     modifier = Modifier.fillMaxWidth().padding(32.dp),

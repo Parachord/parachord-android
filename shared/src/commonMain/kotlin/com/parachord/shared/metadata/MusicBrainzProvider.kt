@@ -179,12 +179,15 @@ class MusicBrainzProvider(
      * Release-groups are deduplicated (one entry per album, not per pressing/country).
      * Steps: 1) search artist to get MBID, 2) browse release-groups by MBID.
      */
-    override suspend fun getArtistAlbums(artistName: String, limit: Int): List<AlbumSearchResult> =
-        try {
+    // NOTE: deliberately does NOT swallow exceptions. A "not found" artist returns
+    // an empty list (genuine empty), but a real API failure (network / 429 / 5xx)
+    // PROPAGATES so MetadataService can distinguish "no discography" from "couldn't
+    // load discography" and surface a friendly error instead of an empty state.
+    override suspend fun getArtistAlbums(artistName: String, limit: Int): List<AlbumSearchResult> {
             val artistMbid = resolveArtistMbid(artistName) ?: return emptyList()
             val response = api.browseReleaseGroups(artistId = artistMbid, limit = limit)
             val artistLower = artistName.lowercase()
-            response.releaseGroups
+            return response.releaseGroups
                 // Filter out releases where the artist credit doesn't match
                 // (e.g. "Various Artists" compilations the artist merely appears on)
                 .filter { rg ->
@@ -212,9 +215,7 @@ class MusicBrainzProvider(
                         provider = name,
                     )
                 }
-        } catch (_: Exception) {
-            emptyList()
-        }
+    }
 
     /** Resolve an artist name to their MusicBrainz MBID (uses cached search). */
     private suspend fun resolveArtistMbid(artistName: String): String? =
