@@ -19,6 +19,17 @@ import com.parachord.shared.metadata.LastFmProvider
 import com.parachord.shared.metadata.WikipediaProvider
 import com.parachord.shared.metadata.MetadataService
 import com.parachord.shared.metadata.ImageEnrichmentService
+import com.parachord.shared.metadata.MbidEnrichmentService
+import com.parachord.shared.model.Track
+import com.parachord.shared.playback.scrobbler.LastFmScrobbler
+import com.parachord.shared.playback.scrobbler.LibreFmScrobbler
+import com.parachord.shared.playback.scrobbler.ListenBrainzScrobbler
+import com.parachord.shared.platform.Log
+import com.parachord.shared.playback.scrobbler.ScrobbleManager
+import com.parachord.shared.playback.scrobbler.ScrobblePluginDispatch
+import com.parachord.shared.playback.scrobbler.ScrobbleState
+import com.parachord.shared.playback.scrobbler.Scrobbler
+import kotlinx.coroutines.flow.MutableStateFlow
 import com.parachord.shared.metadata.MusicBrainzProvider
 import com.parachord.shared.metadata.SpotifyProvider
 import com.parachord.shared.metadata.TrackSearchResult
@@ -580,7 +591,85 @@ class IosContainer private constructor() {
     fun getLibreFmConnectedFlow(): Flow<Boolean> =
         settingsStore.getLibreFmSessionKeyFlow().map { it != null }
 
+    // ── Last.fm (web-auth token → auth.getSession session key, for scrobbling) ──
+    /**
+     * Exchange the Last.fm web-auth `token` for a session key + username
+     * (#193). The session key is what scrobbling/now-playing/love require —
+     * the read-only username alone can't authenticate writes.
+     */
+    suspend fun connectLastFm(token: String): Boolean {
+        val result = lastFmClient.getSession(token, appConfig.lastFmApiKey, appConfig.lastFmSharedSecret)
+            ?: return false
+        settingsStore.setLastFmSession(result.key)
+        result.name?.let { settingsStore.setLastFmUsername(it) }
+        return true
+    }
+    suspend fun disconnectLastFm() { settingsStore.clearLastFmSession() }
+    fun getLastFmConnectedFlow(): Flow<Boolean> =
+        settingsStore.getLastFmSessionKeyFlow().map { it != null }
+
     val listenBrainzClient: ListenBrainzClient by lazy { ListenBrainzClient(httpClient) }
+
+    // ── Scrobbling (#193 — shared stack, identical to Android) ─────────
+    val mbidEnrichmentService: MbidEnrichmentService by lazy {
+        MbidEnrichmentService(
+            listenBrainzClient = listenBrainzClient,
+            trackDao = trackDao,
+            cacheRead = { IosFileCache.read("mbid_mapper_cache.json") },
+            cacheWrite = { IosFileCache.write("mbid_mapper_cache.json", it) },
+        )
+    }
+
+    private val scrobblers: Set<Scrobbler> by lazy {
+        setOf(
+            LastFmScrobbler(settingsStore, lastFmClient, appConfig),
+            ListenBrainzScrobbler(settingsStore, listenBrainzClient, mbidEnrichmentService),
+            LibreFmScrobbler(settingsStore, lastFmClient),
+        )
+    }
+
+    /**
+     * Live playback snapshot the scrobble threshold reads. Swift's playback
+     * coordinator MUST push updates via [updateScrobbleState] on play / pause /
+     * track-change / position tick — otherwise no scrobbles fire (#193 Step 3
+     * Swift hookup).
+     */
+    private val scrobbleState = MutableStateFlow(
+        ScrobbleState(currentTrack = null, isPlaying = false, position = 0L, duration = 0L),
+    )
+
+    val scrobbleManager: ScrobbleManager by lazy {
+        ScrobbleManager(
+            settingsStore = settingsStore,
+            playbackStateFlow = scrobbleState,
+            scrobblers = scrobblers,
+            trackDao = trackDao,
+            mbidEnrichment = mbidEnrichmentService,
+            // .axe playback-telemetry dispatch (achordion) into the JSC
+            // `window.scrobbleManager` registry — parity with Android's WebView
+            // path. Fire-and-forget; evaluateJs initializes the runtime if cold.
+            dispatchToPlugins = { event, track ->
+                appScope.launch {
+                    try {
+                        pluginManager.evaluateJs(ScrobblePluginDispatch.dispatchScript(event, track))
+                    } catch (e: Exception) {
+                        Log.w("IosScrobbleDispatch", "dispatch($event) failed: ${e.message}")
+                    }
+                }
+            },
+        )
+    }
+
+    /** Begin observing playback state for scrobbling. Call once at app start. */
+    fun startScrobbling() { scrobbleManager.startObserving() }
+
+    /**
+     * Push the current playback snapshot from Swift (positions in ms). Drives
+     * the now-playing + scrobble-threshold logic in the shared [ScrobbleManager].
+     */
+    fun updateScrobbleState(currentTrack: Track?, isPlaying: Boolean, positionMs: Long, durationMs: Long) {
+        scrobbleState.value = ScrobbleState(currentTrack, isPlaying, positionMs, durationMs)
+    }
 
     // ── .axe plugin host (the cross-platform resolver system) ──────────
 

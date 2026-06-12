@@ -705,6 +705,49 @@ final class IosOAuthManager: NSObject, ASWebAuthenticationPresentationContextPro
         return OAuthResult(code: code, codeVerifier: verifier, state: state)
     }
 
+    /// Last.fm web-auth (NOT OAuth2/PKCE — Last.fm's own flow): open
+    /// `last.fm/api/auth/?api_key&cb=`, intercept the `parachord://` redirect,
+    /// and return the `token` query param. The caller exchanges it for a
+    /// session key via the shared `LastFmClient.getSession` (#193). Mirrors
+    /// Android's OAuthManager.launchLastFmAuth + handleLastFmCallback.
+    func authorizeLastFm(apiKey: String) async throws -> String {
+        var components = URLComponents(string: "https://www.last.fm/api/auth/")!
+        components.queryItems = [
+            URLQueryItem(name: "api_key", value: apiKey),
+            URLQueryItem(name: "cb", value: "parachord://auth/callback/lastfm"),
+        ]
+        let authURL = components.url!
+
+        let callbackURL: URL = try await withCheckedThrowingContinuation { cont in
+            let session = ASWebAuthenticationSession(
+                url: authURL,
+                callbackURLScheme: "parachord"
+            ) { url, error in
+                if let error {
+                    let nsError = error as NSError
+                    if nsError.code == ASWebAuthenticationSessionError.canceledLogin.rawValue {
+                        cont.resume(throwing: OAuthError.cancelled)
+                    } else {
+                        cont.resume(throwing: OAuthError.sessionFailed(error.localizedDescription))
+                    }
+                    return
+                }
+                guard let url else { cont.resume(throwing: OAuthError.missingCode); return }
+                cont.resume(returning: url)
+            }
+            session.presentationContextProvider = self
+            session.prefersEphemeralWebBrowserSession = true
+            self.session = session
+            session.start()
+        }
+
+        let comps = URLComponents(url: callbackURL, resolvingAgainstBaseURL: false)
+        guard let token = comps?.queryItems?.first(where: { $0.name == "token" })?.value else {
+            throw OAuthError.missingCode
+        }
+        return token
+    }
+
     // MARK: ASWebAuthenticationPresentationContextProviding
 
     func presentationAnchor(for session: ASWebAuthenticationSession) -> ASPresentationAnchor {
@@ -1322,6 +1365,10 @@ final class QueuePlaybackCoordinator {
     /// track. Resolution is async, so the window is real on a slow lookup.
     @ObservationIgnored private var playTask: Task<Void, Never>?
 
+    /// 1s engine-agnostic tick that pushes the playback snapshot to the shared
+    /// ScrobbleManager (#193). Cancelled with the coordinator.
+    @ObservationIgnored private var scrobblePublishTask: Task<Void, Never>?
+
     /// Republished from `QueueManager.snapshot.value` after every
     /// mutation so SwiftUI can render the up-next list reactively.
     var currentTrack: Track?
@@ -1484,6 +1531,26 @@ final class QueuePlaybackCoordinator {
         Task { @MainActor [weak self] in
             if let ids = try? await IosContainer.companion.shared.nonStreamingResolverIds(), !ids.isEmpty {
                 self?.nonStreamingResolvers = Set(ids.map { String(describing: $0) })
+            }
+        }
+        // Scrobbling (#193): publish playback snapshots to the shared
+        // ScrobbleManager (LB / Last.fm / Libre.fm). Engine-agnostic 1s tick —
+        // the unified getters abstract AVPlayer / MusicKit / Spotify. The shared
+        // manager handles now-playing + the max(30s, min(½,4m)) threshold and
+        // the scrobbling-enabled gate, exactly like Android.
+        let scrobbleContainer = IosContainer.companion.shared
+        scrobbleContainer.startScrobbling()
+        scrobblePublishTask = Task { @MainActor [weak self] in
+            while !Task.isCancelled {
+                if let self {
+                    scrobbleContainer.updateScrobbleState(
+                        currentTrack: self.currentTrack,
+                        isPlaying: self.isPlaying,
+                        positionMs: Int64(self.currentTime * 1000),
+                        durationMs: Int64(self.duration * 1000)
+                    )
+                }
+                try? await Task.sleep(nanoseconds: 1_000_000_000)
             }
         }
     }

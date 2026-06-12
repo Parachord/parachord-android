@@ -22,6 +22,7 @@ import kotlinx.serialization.json.JsonArray
 import kotlinx.serialization.json.JsonDecoder
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.jsonObject
+import kotlinx.serialization.json.jsonPrimitive
 
 /**
  * Thrown by [LastFmClient] methods when Last.fm responds with HTTP 429.
@@ -55,6 +56,9 @@ class LastFmRateLimitedException(val retryAfterSeconds: Long? = null) : Exceptio
  * commit `79c5ed5`) lost the Retrofit/OkHttp interceptor 429 retry that
  * previously protected against this.
  */
+/** Result of a successful Last.fm `auth.getSession`: the session key + username. */
+data class LastFmSessionResult(val key: String, val name: String?)
+
 class LastFmClient(private val httpClient: HttpClient) {
 
     companion object {
@@ -160,6 +164,75 @@ class LastFmClient(private val httpClient: HttpClient) {
             if (!recordingMbid.isNullOrBlank()) put("mbid", recordingMbid)
         }, apiKey, sessionKey, sharedSecret, apiUrl,
     )
+
+    /**
+     * auth.getMobileSession — exchange username/password for a session key
+     * (Libre.fm has no OAuth). Signed but NOT session-authenticated (no `sk`),
+     * so it can't reuse [postSigned]. Returns the session key, or null on
+     * auth/network/parse failure. Routed through the same gate as other writes.
+     */
+    suspend fun getMobileSession(
+        username: String, password: String,
+        apiKey: String, sharedSecret: String, apiUrl: String = BASE_URL,
+    ): String? = gate.withPermit(exceptionFactory = { LastFmRateLimitedException(it) }) {
+        val all = buildMap {
+            put("method", "auth.getMobileSession")
+            put("username", username)
+            put("password", password)
+            put("api_key", apiKey)
+        }.toMutableMap()
+        all["api_sig"] = LastFmSigning.apiSig(all, sharedSecret)   // sign BEFORE adding format
+        all["format"] = "json"
+        val response = httpClient.submitForm(
+            url = apiUrl,
+            formParameters = Parameters.build { all.forEach { (k, v) -> append(k, v) } },
+        )
+        gate.handleResponse(response) { LastFmRateLimitedException(it) }
+        val body = response.bodyAsText()
+        if (!response.status.isSuccess() || body.contains("\"error\"")) {
+            null
+        } else {
+            try {
+                json.parseToJsonElement(body).jsonObject["session"]
+                    ?.jsonObject?.get("key")?.jsonPrimitive?.content
+            } catch (e: Exception) {
+                null
+            }
+        }
+    }
+
+    /**
+     * auth.getSession — exchange a web-auth `token` (from the
+     * `last.fm/api/auth/?api_key&cb=` redirect) for a permanent session key +
+     * username, used for scrobbling (#193 iOS Last.fm OAuth). Signed but NOT
+     * session-authenticated. Mirrors Android's OAuthManager.handleLastFmCallback.
+     * Returns null on auth/network/parse failure.
+     */
+    suspend fun getSession(token: String, apiKey: String, sharedSecret: String): LastFmSessionResult? =
+        gate.withPermit(exceptionFactory = { LastFmRateLimitedException(it) }) {
+            val params = mapOf("api_key" to apiKey, "method" to "auth.getSession", "token" to token)
+            val response = httpClient.get(BASE_URL) {
+                parameter("method", "auth.getSession")
+                parameter("api_key", apiKey)
+                parameter("token", token)
+                parameter("api_sig", LastFmSigning.apiSig(params, sharedSecret))
+                parameter("format", "json")
+            }
+            gate.handleResponse(response) { LastFmRateLimitedException(it) }
+            val body = response.bodyAsText()
+            if (!response.status.isSuccess() || body.contains("\"error\"")) {
+                null
+            } else {
+                try {
+                    val session = json.parseToJsonElement(body).jsonObject["session"]?.jsonObject
+                    val key = session?.get("key")?.jsonPrimitive?.content
+                    if (key == null) null
+                    else LastFmSessionResult(key, session["name"]?.jsonPrimitive?.content)
+                } catch (e: Exception) {
+                    null
+                }
+            }
+        }
 
     suspend fun searchTracks(track: String, apiKey: String, limit: Int = 20): LfmTrackSearchResponse =
         guardedGet(LfmTrackSearchResponse.serializer()) { parameter("method", "track.search"); parameter("track", lfmName(track)); parameter("api_key", apiKey); parameter("limit", limit) }

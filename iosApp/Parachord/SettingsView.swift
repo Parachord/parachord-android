@@ -120,6 +120,12 @@ final class SettingsViewModel {
     var spotifyConnected = false
     var spotifyClientId = ""        // BYO Developer Client ID (Parachord ships none)
     var spotifyError: String?
+    /// Last.fm session-key connection (scrobbling). Driven by the session-key
+    /// flow, NOT the read-only username — only the session key authenticates
+    /// writes (#193).
+    var lastFmConnected = false
+    var lastFmError: String?
+    var lastFmBusy = false
     /// Enabled-AND-usable resolvers, in priority order (mirrors desktop's
     /// `resolver_order`, which only holds resolvers that are actually usable).
     var resolverOrder: [String] = []
@@ -228,6 +234,8 @@ final class SettingsViewModel {
         })
         subs.append(watcher.watch(flow: container.getLibreFmConnectedFlow()) { [weak self] v in
             self?.libreFmConnected = (v as? Bool) ?? ((v as? KotlinBoolean)?.boolValue ?? false) })
+        subs.append(watcher.watch(flow: container.getLastFmConnectedFlow()) { [weak self] v in
+            self?.lastFmConnected = (v as? Bool) ?? ((v as? KotlinBoolean)?.boolValue ?? false) })
         loadAll()
     }
     func stop() { subs.forEach { $0.cancel() }; subs.removeAll() }
@@ -289,6 +297,8 @@ final class SettingsViewModel {
         // connection without the BYO Client ID — both are required.
         case "spotify": return spotifyConnected && !spotifyClientId.isEmpty
         case "librefm": return libreFmConnected
+        // Scrobbling needs the session key (OAuth), not the read-only username.
+        case "lastfm": return lastFmConnected
         case "localfiles", "bandcamp", "applemusic": return true   // no key needed / MusicKit at play time
         // No-key meta (Discogs) + any uncataloged loaded plugin (Wikipedia,
         // Achordion): they work without credentials, so "active" == enabled.
@@ -424,6 +434,26 @@ final class SettingsViewModel {
         Task { try? await container.disconnectSpotify() }
         recomputeResolvers()
     }
+
+    // ── Last.fm (web-auth token → auth.getSession session key) ────────
+    func connectLastFm() {
+        lastFmBusy = true; lastFmError = nil
+        Task { @MainActor in
+            do {
+                let m = IosOAuthManager(); oauthManager = m
+                let token = try await m.authorizeLastFm(apiKey: container.appConfig.lastFmApiKey)
+                let ok = (try? await container.connectLastFm(token: token))?.boolValue ?? false
+                lastFmError = ok ? nil : "Couldn't connect to Last.fm. Please try again."
+            } catch {
+                // A user cancel isn't an error worth surfacing.
+                if case OAuthError.cancelled = error { lastFmError = nil }
+                else { lastFmError = error.localizedDescription }
+            }
+            oauthManager = nil
+            lastFmBusy = false
+        }
+    }
+    func disconnectLastFm() { Task { try? await container.disconnectLastFm() } }
 
     // ── Libre.fm (username + password → session) ──────────────────────
     func connectLibreFm() {
@@ -696,8 +726,23 @@ private struct PluginConfigSheet: View {
                     }
                 }
 
+                // Scrobbling (#193): the "send my plays" toggle lives in each
+                // scrobbler's sheet (Android parity) rather than buried in
+                // General. Shown once the service is connected; backed by the
+                // single global scrobblingEnabled flag.
+                if ["lastfm", "listenbrainz", "librefm"].contains(service.id) && model.isConnected(service.id) {
+                    Section {
+                        Toggle("Scrobble my plays", isOn: Binding(
+                            get: { model.scrobblingEnabled },
+                            set: { model.setScrobbling($0) }))
+                    } footer: {
+                        Text("Send your listening history to connected scrobblers (Last.fm, ListenBrainz, Libre.fm).")
+                    }
+                }
+
                 switch service.id {
                 case "spotify": spotifySection
+                case "lastfm": lastFmSection
                 case "librefm": libreFmSection
                 case "applemusic": infoSection("Apple Music is authorized at playback time via MusicKit. No key needed.")
                 case "localfiles": infoSection("Local files are scanned from your device's music library automatically.")
@@ -718,6 +763,28 @@ private struct PluginConfigSheet: View {
                 draft = model.values[service.id] ?? ""
                 spotifyIdDraft = model.spotifyClientId
             }
+        }
+    }
+
+    @ViewBuilder private var lastFmSection: some View {
+        Section {
+            if model.lastFmConnected {
+                Label("Last.fm connected", systemImage: "checkmark.circle.fill").foregroundStyle(.green)
+                Button("Disconnect", role: .destructive) { model.disconnectLastFm() }
+            } else {
+                Button { model.connectLastFm() } label: {
+                    HStack {
+                        if model.lastFmBusy { ProgressView().controlSize(.small) }
+                        Text("Connect Last.fm").bold().frame(maxWidth: .infinity)
+                    }
+                }
+                .buttonStyle(.borderedProminent).tint(Color(uiColor: UIColor(hex: 0xD51007)))
+                .disabled(model.lastFmBusy)
+                .listRowInsets(EdgeInsets(top: 6, leading: 16, bottom: 6, trailing: 16))
+                if let e = model.lastFmError { Text(e).font(.caption).foregroundStyle(.red) }
+            }
+        } header: { Text("Connection") } footer: {
+            Text("Sign in through Last.fm to authorize scrobbling. Opens Last.fm in a secure in-app browser; Parachord never sees your password.")
         }
     }
 
@@ -901,9 +968,7 @@ private struct GeneralTab: View {
             }.pickerStyle(.segmented).padding(.horizontal, 20)
 
             label("Scrobbling")
-            Toggle("Send listening history", isOn: Binding(get: { model.scrobblingEnabled }, set: { model.setScrobbling($0) }))
-                .padding(.horizontal, 20)
-            Text("Connect Last.fm / ListenBrainz under Plug-ins to scrobble your plays.")
+            Text("Connect Last.fm, ListenBrainz, or Libre.fm under Plug-ins, then turn on “Scrobble my plays” in that service’s settings.")
                 .font(.system(size: 12)).foregroundStyle(PC.fg3).padding(.horizontal, 20).padding(.top, 6)
         }
         .padding(.bottom, 130)
