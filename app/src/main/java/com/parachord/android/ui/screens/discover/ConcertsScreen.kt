@@ -1,5 +1,8 @@
 package com.parachord.android.ui.screens.discover
 
+import android.Manifest
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.lifecycle.compose.LifecycleResumeEffect
@@ -46,6 +49,7 @@ import androidx.compose.material3.TextButton
 import androidx.compose.material3.TopAppBar
 import androidx.compose.material3.pulltorefresh.PullToRefreshBox
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -102,7 +106,37 @@ fun ConcertsScreen(
     val radiusMiles by viewModel.radiusMiles.collectAsStateWithLifecycle()
     val hasLocation by viewModel.hasLocation.collectAsStateWithLifecycle()
     val isDetectingLocation by viewModel.isDetectingLocation.collectAsStateWithLifecycle()
+    val showGeoIpConfirm by viewModel.showGeoIpConfirm.collectAsStateWithLifecycle()
     var showLocationPicker by remember { mutableStateOf(false) }
+
+    // Runtime COARSE-location permission request. Whether granted or denied, we
+    // still call detectLocation() — it uses GPS when granted, geoIP when not.
+    val locationPermissionLauncher = rememberLauncherForActivityResult(
+        ActivityResultContracts.RequestPermission(),
+    ) { _ ->
+        viewModel.detectLocation(userInitiated = true)
+    }
+
+    // Detect entry point: skip straight to detect if already granted, otherwise
+    // prompt for COARSE permission first. Always user-initiated (a Detect tap), so
+    // the geoIP fallback surfaces a confirmable suggestion (vs. the silent cold-
+    // launch auto-detect, which only auto-commits a trustworthy GPS fix).
+    val requestDetect: () -> Unit = {
+        if (viewModel.hasLocationPermission()) {
+            viewModel.detectLocation(userInitiated = true)
+        } else {
+            locationPermissionLauncher.launch(Manifest.permission.ACCESS_COARSE_LOCATION)
+        }
+    }
+
+    // When a geoIP fallback produced a confirmable suggestion, open the picker so
+    // the user can tap it to confirm (GPS commits directly; geoIP confirms).
+    LaunchedEffect(showGeoIpConfirm) {
+        if (showGeoIpConfirm) {
+            showLocationPicker = true
+            viewModel.consumeGeoIpConfirm()
+        }
+    }
 
     // Auto-refresh when returning to this screen if cache is stale
     LifecycleResumeEffect(Unit) {
@@ -199,7 +233,7 @@ fun ConcertsScreen(
         if (!hasLocation && !isDetectingLocation) {
             // No location set — show prompt with detect button
             LocationDetectPrompt(
-                onDetect = { viewModel.detectLocation() },
+                onDetect = requestDetect,
                 onPickManually = { showLocationPicker = true },
             )
         } else {
@@ -287,6 +321,8 @@ fun ConcertsScreen(
     if (showLocationPicker) {
         LocationSearchDialog(
             currentCity = locationCity,
+            isDetecting = isDetectingLocation,
+            onDetect = requestDetect,
             onDismiss = {
                 showLocationPicker = false
                 viewModel.clearLocationSuggestions()
@@ -349,6 +385,8 @@ private fun LocationDetectPrompt(
 @Composable
 private fun LocationSearchDialog(
     currentCity: String?,
+    isDetecting: Boolean,
+    onDetect: () -> Unit,
     onDismiss: () -> Unit,
     onSearch: (String) -> Unit,
     suggestions: List<com.parachord.shared.api.GeoLocation>,
@@ -361,6 +399,38 @@ private fun LocationSearchDialog(
         title = { Text("Search Location") },
         text = {
             Column {
+                // Detect via GPS (commits) → geoIP (surfaces below as a suggestion).
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .clip(RoundedCornerShape(6.dp))
+                        .clickable(enabled = !isDetecting) { onDetect() }
+                        .padding(horizontal = 12.dp, vertical = 10.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    Icon(
+                        Icons.Default.MyLocation,
+                        contentDescription = null,
+                        modifier = Modifier.size(16.dp),
+                        tint = ConcertTeal,
+                    )
+                    Spacer(modifier = Modifier.width(8.dp))
+                    Text(
+                        text = "Detect my location",
+                        style = MaterialTheme.typography.bodyMedium,
+                        color = ConcertTeal,
+                        modifier = Modifier.weight(1f),
+                    )
+                    if (isDetecting) {
+                        CircularProgressIndicator(
+                            modifier = Modifier.size(14.dp),
+                            strokeWidth = 2.dp,
+                            color = ConcertTeal,
+                        )
+                    }
+                }
+                Spacer(modifier = Modifier.height(4.dp))
+
                 // Search input with Nominatim
                 BasicTextField(
                     value = searchQuery,
