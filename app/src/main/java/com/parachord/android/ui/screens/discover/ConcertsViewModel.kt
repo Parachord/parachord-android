@@ -18,7 +18,10 @@ import com.parachord.android.data.repository.ConcertsRepository
 import com.parachord.shared.model.Resource
 import com.parachord.android.data.store.SettingsStore
 import kotlinx.coroutines.Job
+import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.SharedFlow
+import kotlinx.coroutines.flow.asSharedFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.first
@@ -69,6 +72,13 @@ class ConcertsViewModel constructor(
     // suggestion to confirm. Mirrors iOS #199's geoIP-confirm UX.
     private val _showGeoIpConfirm = MutableStateFlow(false)
     val showGeoIpConfirm: StateFlow<Boolean> = _showGeoIpConfirm.asStateFlow()
+
+    // One-shot signal that a location was just COMMITTED (GPS detect, manual pick,
+    // or a confirmed geoIP suggestion). The screen observes this to close the
+    // location picker — otherwise a GPS-commit-via-Detect updates the bar behind
+    // an open modal that never closes.
+    private val _locationCommitted = MutableSharedFlow<Unit>(extraBufferCapacity = 1)
+    val locationCommitted: SharedFlow<Unit> = _locationCommitted.asSharedFlow()
 
     private var loadJob: Job? = null
     private var searchJob: Job? = null
@@ -185,6 +195,7 @@ class ConcertsViewModel constructor(
             settingsStore.setConcertLocation(lat, lon, city, radius)
             _locationCity.value = city
             _hasLocation.value = true
+            _locationCommitted.tryEmit(Unit)   // close the picker on any commit
             loadEvents(forceRefresh = true)
         }
     }
