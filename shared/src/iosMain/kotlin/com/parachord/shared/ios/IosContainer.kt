@@ -319,6 +319,23 @@ class IosContainer private constructor() {
     suspend fun getArtistAlbums(artistName: String): List<AlbumSearchResult> =
         metadataService.getArtistAlbums(artistName, 50)
 
+    /** Artist's upcoming tour dates (unfiltered) for the On Tour tab (#201). Collects
+     *  the cached-first Resource flow to its terminal list. */
+    suspend fun getArtistEvents(artistName: String): List<ConcertEvent> {
+        var result = emptyList<ConcertEvent>()
+        concertsRepository.getArtistEvents(artistName).collect { res ->
+            if (res is Resource.Success) result = res.data
+        }
+        return result
+    }
+
+    /** Whether the artist has upcoming shows near the user's saved concert location
+     *  (#201 Now Playing dot). null location → any upcoming show counts. */
+    suspend fun checkOnTour(artistName: String): Boolean {
+        val loc = settingsStore.getConcertLocation()
+        return concertsRepository.checkOnTour(artistName, loc.latitude, loc.longitude, loc.radiusMiles)
+    }
+
     // ── Recommendations ("For You") ────────────────────────────────────
     // The other curated repos (Critical Darlings, Fresh Drops) need the iOS DB
     // (ImageEnrichmentService's DAOs / TrackDao) and stay blocked until it
